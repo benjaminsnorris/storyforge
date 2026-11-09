@@ -1472,6 +1472,14 @@ FIDELITY_ELEMENTS = [
 ]
 
 
+def has_brief_facts(brief: dict) -> bool:
+    """Whether a brief row has anything to hold prose to: a brief fact
+    (`elaborate.BRIEF_FACT_COLUMNS`) or a goal. goal is an optional note
+    since #644, so a fact-only brief without one is still a brief."""
+    from .elaborate import BRIEF_FACT_COLUMNS
+    return any((brief.get(c) or '').strip() for c in BRIEF_FACT_COLUMNS + ('goal',))
+
+
 def build_fidelity_prompt(scene_id: str, project_dir: str,
                           plugin_dir: str) -> str:
     """Build a brief fidelity evaluation prompt for a single scene.
@@ -1479,17 +1487,14 @@ def build_fidelity_prompt(scene_id: str, project_dir: str,
     Reads the scene's brief data and prose, formats them into the
     brief-fidelity prompt template.
 
-    Returns empty string if the scene has no brief or no prose.
+    Returns empty string if the scene has no brief (`has_brief_facts`) or no
+    prose of at least 100 characters.
     """
     from .elaborate import get_scene
 
     ref_dir = os.path.join(project_dir, 'reference')
     scene = get_scene(scene_id, ref_dir)
-    if not scene:
-        return ''
-
-    # Check that brief data exists
-    if not scene.get('goal', '').strip():
+    if not scene or not has_brief_facts(scene):
         return ''
 
     # Read prose

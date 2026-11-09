@@ -369,7 +369,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
         alias_maps = load_registry_alias_maps(project_dir)
 
         # Build shared context once for all gap-fill API calls (prompt caching)
-        system = build_shared_context(project_dir, model=gap_model)
+        # no craft rules (#644's review CR-1): gap-fill writes notes
+        system = build_shared_context(project_dir, model=gap_model, craft_rules=False)
 
         # Parallel gap groups: build single batch
         parallel_groups = {k: v for k, v in groups.items() if v['batch_type'] == 'parallel'}
@@ -526,14 +527,14 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log('Running validation...')
     report = validate_structure(ref_dir)
     validate_passed = report['passed']
-    validate_failures = len(report['failures'])
+    validate_failures = _failure_counts(report['failures'])
     initial_gaps = total_gaps
 
     if validate_passed:
         log('Validation passed: no blocking gaps.')
         _log_advisory_count(report['failures'])
     else:
-        log(f'Validation: {validate_failures} issue(s) remaining (started with {initial_gaps} field gaps)')
+        log(f'Validation: {validate_failures} remaining (started with {initial_gaps} field gaps)')
         _log_failures(report['failures'])
         log('')
         log('Run gap-fill again to continue filling remaining gaps.')
@@ -563,7 +564,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     if validate_passed:
         log('Validation: PASSED')
     else:
-        log(f'Validation: {validate_failures} issue(s) remaining — run again to continue')
+        log(f'Validation: {validate_failures} remaining — run again to continue')
     log('============================================')
 
     print_summary(project_dir, 'elaborate-gap-fill', session_start=session_start)
@@ -596,6 +597,14 @@ def _log_failures(failures: list[dict]) -> None:
             log(f'    {_failure_line(fail)}')
             if finding_scene_list(fail):
                 log(f'      {finding_scene_list(fail)}')
+
+
+def _failure_counts(failures: list[dict]) -> str:
+    """`N blocking, M advisory` for a stage's validation failures (#643's
+    review SF-5): a bare total counted advisory findings as things to fix."""
+    from storyforge.elaborate import split_failures
+    blocking, advisory = split_failures(failures)
+    return f'{len(blocking)} blocking, {len(advisory)} advisory'
 
 
 def _log_advisory_count(failures: list[dict]) -> None:
@@ -1832,21 +1841,51 @@ def _mark_artifacts(project_dir: str, written: list[str]) -> None:
                                   updated=date.today().isoformat())
 
 
-def _drop_author_notes(rows: list[dict]) -> list[str]:
-    """Take the author's note columns (`elaborate.AUTHOR_NOTE_COLUMNS`:
-    key_dialogue, subtext, emotions, motifs) out of the briefs stage's
-    reply rows, in place, and return the ones a row had filled (#644: the
-    stage writes facts; those are the author's, by hand). The prompt
-    doesn't ask for them; this holds when a reply gives them anyway, so an
-    author's own note, or a `must:` line in key_dialogue, is never
-    written over."""
+#: The stages whose prompts carry `prompts_elaborate.NOTES_RULE` and get no
+#: craft engine or scoring rubrics in their shared context (#644)
+ELABORATION_NOTE_STAGES = ('spine', 'architecture', 'map', 'briefs')
+
+
+def _drop_unasked_columns(rows: list[dict]) -> tuple[list[str], list[str]]:
+    """Keep only the columns the briefs prompt asks for
+    (`prompts_elaborate.BRIEFS_OUTPUT_HEADER`) in the briefs stage's reply
+    rows, in place. Returns (the author's note columns a row had filled,
+    other filled columns dropped), each in a stable order (#644: the stage
+    writes facts; `elaborate.AUTHOR_NOTE_COLUMNS` are the author's, by hand).
+    An allowlist, so an old-format or drifting reply can't write
+    `motif_details` or a graphic novel's columns either, and an author's own
+    note, or a `must:` line in key_dialogue, is never written over."""
     from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
-    filled = []
+    from storyforge.prompts_elaborate import BRIEFS_OUTPUT_HEADER
+    asked = set(BRIEFS_OUTPUT_HEADER.split('|'))
+    notes: list[str] = []
+    other: list[str] = []
     for row in rows:
-        for col in AUTHOR_NOTE_COLUMNS:
-            if (row.pop(col, None) or '').strip() and col not in filled:
-                filled.append(col)
-    return [c for c in AUTHOR_NOTE_COLUMNS if c in filled]
+        for col in [c for c in row if c not in asked]:
+            if (row.pop(col) or '').strip():
+                into = notes if col in AUTHOR_NOTE_COLUMNS else other
+                if col not in into:
+                    into.append(col)
+    return ([c for c in AUTHOR_NOTE_COLUMNS if c in notes], sorted(other))
+
+
+def _kept_notes(existing: dict, row: dict, sid: str) -> None:
+    """Log what a regenerated brief keeps that the reply didn't write (#644):
+    the author's note columns already filled (an earlier briefs stage wrote
+    them before #644, so they may be model staging the drafter now reads as
+    the author's; nothing can tell which), and craft notes the reply left
+    empty over an earlier value (an empty cell never clears one)."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    filled = [c for c in AUTHOR_NOTE_COLUMNS if (existing.get(c) or '').strip()]
+    if filled:
+        log(f'  WARNING: {sid}: kept its {", ".join(filled)} as the author\'s notes; if an '
+            f'earlier briefs stage wrote them, they are model staging that drafting reads '
+            f'as yours: clear them or keep them (#644)')
+    kept = [c for c in ('goal', 'conflict', 'crisis', 'decision')
+            if c in row and not (row.get(c) or '').strip() and (existing.get(c) or '').strip()]
+    if kept:
+        log(f'  NOTE: {sid}: the reply left {", ".join(kept)} empty; the brief\'s earlier '
+            f'value is kept (clear it by hand if the scene has none)')
 
 
 def _keep_must(existing: dict, row: dict, sid: str) -> dict:
@@ -1943,7 +1982,12 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
     # Build shared context once for all stage API calls (prompt caching)
     stage_model = select_model('drafting')  # Opus for creative work
-    system = build_shared_context(project_dir, model=stage_model)
+    # The craft engine's and the rubrics' scene rules ("every scene must
+    # turn") are the drafter's and the scorer's: the stages that write plans
+    # and briefs as terse facts don't get them (#644, its review CR-1); the
+    # voice stage keeps them
+    system = build_shared_context(project_dir, model=stage_model,
+                                  craft_rules=stage not in ELABORATION_NOTE_STAGES)
 
     has_system = bool(system)
 
@@ -2201,21 +2245,26 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 if rows:
                     path = os.path.join(ref_dir, 'scene-briefs.csv')
                     existing = _read_csv_as_map(path)
-                    staged = _drop_author_notes(rows)
+                    staged, unasked = _drop_unasked_columns(rows)
                     if staged:
                         log(f'  NOTE: left out the reply\'s {", ".join(staged)}: the '
                             f'author\'s notes, never generated (#644); any the author '
                             f'wrote are kept')
+                    if unasked:
+                        log(f'  NOTE: left out the reply\'s {", ".join(unasked)}: not '
+                            f'columns the briefs stage writes')
                     for row in rows:
                         normalize_fields(row, alias_maps)
                         sid = row.get('id', '')
                         if not sid:
                             continue
                         if sid in existing:
+                            _kept_notes(existing[sid], row, sid)
                             existing[sid].update(_keep_must(existing[sid], row, sid))
                         else:
+                            # a must: item the model added is dropped here too
                             new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
-                            new.update(row)
+                            new.update(_keep_must({}, row, sid))
                             existing[sid] = new
                     ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
                     _write_csv(path, ordered, _FILE_MAP['scene-briefs.csv'])
@@ -2359,13 +2408,13 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         if any(f.get('severity', 'blocking') == 'blocking' for f in report['failures']):
             report['passed'] = False
     validate_passed = report['passed']
-    validate_failures = len(report['failures'])
+    validate_failures = _failure_counts(report['failures'])
 
     if validate_passed:
         log('Validation passed')
         _log_advisory_count(report['failures'])
     else:
-        log(f'Validation found {validate_failures} issue(s):')
+        log(f'Validation found {validate_failures}:')
         _log_failures(report['failures'])
 
     # Save validation report
@@ -2438,7 +2487,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     if validate_passed:
         log('Validation: PASSED')
     else:
-        log(f'Validation: {validate_failures} issue(s) — review before advancing')
+        log(f'Validation: {validate_failures} — review before advancing')
     log('============================================')
 
     print_summary(project_dir, f'elaborate-{stage}', session_start=session_start)

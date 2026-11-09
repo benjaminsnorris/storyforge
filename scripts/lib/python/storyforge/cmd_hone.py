@@ -454,8 +454,8 @@ def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
 def _advisory_tag(issue_type: str) -> str:
     """' (craft framework, advisory)' for a detector issue hone reports but
     never rewrites (#643), else ''."""
-    from storyforge.hone import CRAFT_ADVISORY_ISSUES
-    return ' (craft framework, advisory)' if issue_type in CRAFT_ADVISORY_ISSUES else ''
+    from storyforge.hone import craft_advisory_tag
+    return craft_advisory_tag(issue_type)
 
 
 def _log_brief_counts(counts: dict, prefix: str = '') -> None:

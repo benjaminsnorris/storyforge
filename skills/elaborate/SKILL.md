@@ -21,7 +21,7 @@ Read the following files to understand where the project stands:
 
 1. `storyforge.yaml` — check the `phase` field to determine current stage
 2. `reference/scenes.csv` — check if it exists and how many rows (0 = no spine yet)
-3. `reference/scene-intent.csv` — check column depth (function only = spine; has value_shift = architecture; has characters = mapped)
+3. `reference/scene-intent.csv` — check column depth (function only = spine; `reference/architecture.csv` has rows, or value_shift is filled = architecture: value_shift is a craft-framework column and may be empty on purpose, #643; has characters = mapped)
 4. `reference/scene-briefs.csv` — check if it exists and has non-empty rows
 5. `reference/story-architecture.md` — does it exist?
 6. `reference/character-bible.md` — does it exist?
@@ -84,10 +84,10 @@ Based on the project state, identify where the author is:
 | any | 0 | — | — | `storyforge status` next.stage ∈ {logline, synopsis, act-shape} (story-summary.md missing or thin) | Needs prose tier / Start at Stage 0 |
 | spine | 0 | — | — | — | Needs spine |
 | spine | 5-10 | function only | — | — | Spine done, ready for architecture |
-| architecture | 15-25 | has value_shift | — | — | Architecture done, ready for map |
+| architecture | 15-25 | architecture.csv has rows (value_shift and the other craft columns are optional, #643) | — | — | Architecture done, ready for map |
 | scene-map | target_words/2000 to target_words/1500 | has characters, on_stage | — | — | Map done, ready for briefs |
-| briefs | same as map | full | has outcome and key_actions | — | Briefs done, ready for drafting |
-| drafting+ | status=drafted | populated but gaps | populated | failures > 0 | **Gap-fill mode** |
+| briefs | same as map | full | has outcome and key_actions (goal/conflict optional notes, #643/#644) | — | Briefs done, ready for drafting |
+| drafting+ | status=drafted | populated but gaps | populated | blocking failures > 0 (`passed` False) | **Gap-fill mode** |
 | drafting+ | — | — | — | passes | Past elaboration — redirect to forge |
 
 ## Step 3: Determine Mode
@@ -116,11 +116,11 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 | `storyforge status` next.stage ∈ {logline, synopsis, act-shape} (story-summary.md missing or thin) | Needs prose tier / Start at Stage 0 |
 | No scenes.csv (or 0 rows) | Start spine |
 | Spine done (5-10 rows, function only) | Run architecture |
-| Architecture done (has value_shift) | Run scene map |
+| Architecture done (architecture.csv has rows; value_shift is optional, #643) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
 | Briefs done, `storyforge status` has a `voice` blocker (next.stage `voice`, or then.stage `voice` behind a gate `check`: the voice guide is missing, init's template, empty, unreadable, or only persistent-prompt.md) | Run the Voice Stage |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
-| Drafted with validation failures > 0 | Run gap-fill |
+| Drafted with blocking validation failures (`passed` False; advisory findings alone never count, #643) | Run gap-fill |
 | Everything passes | Redirect to forge |
 
 **Coaching level determines posture:**
@@ -265,13 +265,15 @@ In graphic-novel mode, the scene-map stage asks for `target_pages` per scene ins
 
 1. Read full scene map and all reference materials
 2. For each scene, write its **facts**: outcome, key_actions (the events in order, the turn included when the scene has one), knowledge_in, knowledge_out, physical_state_in, physical_state_out, continuity_deps. goal, conflict, crisis and decision are optional notes: fill one only when the scene plainly has it.
-   - **Facts, not staging (#644).** A brief says what happens, not how it's played, what's said or what it means. Never write `key_dialogue`, `subtext`, `emotions` or `motifs`: they're the author's optional notes, filled by hand, and the author's own are left as they are. Don't place motifs: a motif is noticed in the draft and recorded after.
-   - **Terse notes, no interpretation.** "Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud", not a paragraph about what the moment means. No polished or quotable sentences: the drafter reads the brief and writes more like it. The same goes for every stage's fields.
+   - **Facts, not staging (#644).** A brief says what happens, not how it's played, what's said or what it means. Never write `key_dialogue`, `subtext`, `emotions`, `motifs` or `motif_details` (prose books; in graphic-novel mode `key_dialogue` is the balloon text, see below): they're the author's optional notes, filled by hand, and the author's own are left as they are. Don't place motifs: a motif is noticed in the draft and recorded after.
+   - **Terse notes, no interpretation.** "Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud", not a paragraph about what the moment means. No polished or quotable sentences: the drafter reads the brief and writes more like it. The same goes for every stage's scene rows; the story architecture and the bibles are where a theme, a need or a lie belongs, still as short notes.
+   - **outcome and key_actions are required** (the brief's facts; validate blocks a briefed scene without them). For a scene with no goal, judge the outcome against what the POV character is trying to do; don't fill `goal` just to judge it.
    - **Use canonical IDs from registries** for knowledge_in, knowledge_out (the ledger's knowledge facts in commitments.csv). Add new registry entries for any new knowledge facts introduced at this stage: a new fact is a row of `reference/commitments.csv`, the commitments ledger, with `type` `knowledge`: `id`, the `scene_id` that establishes it (blank for backstory), the fact as one sentence in `statement`, `origin` `author` (or `plan` for a brief), `status` `binding`, `mutable` `state`; leave the other columns empty.
    - **Label every scripted line's speaker (prose books only)** in a line the author writes or one already there: `Name: "line"` in `key_dialogue` (and on a quoted line in `key_actions`), the label starting with the character's name, id or an alias exactly as characters.csv writes it (nothing added before it, no possessive), one character per label, repeated after each `;`. The gate checks a speech tag that splits a labelled line against that speaker (see `references/scene-column-guide.md`). Not in a graphic novel: its `key_dialogue` must appear verbatim in the panel script, and a label would fail that check.
    - **`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`.
 3. **Knowledge wording must be exact** — knowledge_out from scene N becomes knowledge_in for later scenes, matched literally. Use registry IDs rather than free-text to ensure exact matching.
 4. Maximize scenes with no continuity_deps (these can be drafted in parallel)
+   - **These columns also decide what drafting holds back.** When a scene fails the gate, `write` still drafts the later scenes that don't depend on it, and holds back those that do. For a scene not drafted yet, its brief is how it knows: `continuity_deps` naming the failed scene, or `knowledge_in`/`physical_state_in` naming a fact the failed scene's brief adds. A scene whose `continuity_deps`, `knowledge_in` and `physical_state_in` are all blank can't be told apart, so it waits behind every earlier failure. Fill them, and drafting can go on past a failure.
 5. Write updates
 6. Run validation — knowledge flow, completeness, DAG check
 7. Commit: `git add -A -- . && git commit -m "Elaborate: briefs" && git push`
@@ -402,7 +404,7 @@ This mode activates when post-extraction data has validation gaps. Run `analyze_
    - List each gap group with count of scenes and missing fields
    - Note any structural issues (MICE nesting, timeline order, knowledge wording)
 2. Adapt to coaching level:
-   - **Full:** "I found N gap types across M scenes. I'll fill them all — starting with the parallel batches."
+   - **Full:** "I found N gap types across M scenes. I'll fill the required ones — starting with the parallel batches." Present the craft-framework groups (`elaborate.CRAFT_FRAMEWORK_COLUMNS`: value_shift, turning_point, goal, …) as optional and ask before filling them, even at full (#643: a scene needn't fit a framework).
    - **Coach:** "Here are the gaps I found. Which would you like me to work on?" (present each group as a choice)
    - **Strict:** "Validation report: X scenes missing `type`, Y missing `timeline_day`..." (data only)
 3. Offer the standard two execution options:

@@ -670,8 +670,12 @@ class TestGate:
         return result, calls
 
     def test_the_questions_replace_the_open_checker(self, project_dir, tmp_path, monkeypatch):
+        # the brief's promises delivered: a fact the ledger sets up here and
+        # not delivered would block too (see below)
         result, calls = self._gate(project_dir, tmp_path, monkeypatch,
-                                   lambda n: [ans(1, 'yes', 'Tessa mocked Dorren', 'Cruel.')])
+                                   lambda n: [ans(1, 'yes', 'Tessa mocked Dorren', 'Cruel.')],
+                                   promised=lambda n: [ans(i, 'yes', 'Tessa mocked Dorren')
+                                                       for i in range(1, n + 1)])
         assert calls == ['questions', 'questions', 'promises', 'promises']
         assert not result.passed and [f.code for f in result.findings] == ['TRT']
         report = '\n'.join(gate.report_lines(result))
@@ -684,6 +688,7 @@ class TestGate:
 
     def test_a_clean_scene_passes_and_says_what_wasnt_checked(self, project_dir, tmp_path,
                                                               monkeypatch):
+        self._brief(project_dir)  # no promised fact the ledger sets up here (see below)
         result, _ = self._gate(project_dir, tmp_path, monkeypatch,
                                lambda n: [ans(i, 'no') for i in range(1, n + 1)])
         assert result.passed and result.committed
@@ -719,6 +724,20 @@ class TestGate:
                                promised=lambda n: [ans(1, next(flip), 'Tessa mocked Dorren')])
         assert not result.passed
         assert [f.problem for f in result.unverified] == ['split answers']
+
+    def test_a_fact_set_up_here_and_not_delivered_stops_the_scene(self, project_dir, tmp_path,
+                                                                  monkeypatch):
+        # #642 review CR-1 under --questions: a registry fact the ledger sets
+        # up in this scene has the prose as its only evidence, so a promise
+        # question answered "not delivered" blocks like a must: beat
+        result, _ = self._gate(project_dir, tmp_path, monkeypatch,
+                               lambda n: [ans(i, 'no') for i in range(1, n + 1)])
+        assert not result.passed and not result.committed
+        blocking = [f for f in result.findings if f.kind == 'broken-promise']
+        why = dict((id(f), w) for f, w in result.promise_why)
+        assert blocking and all(
+            why[id(f)] == gate.SET_UP_HERE.format(id=f.fact_id) for f in blocking)
+        assert gate.blocking_lines(gate.report_lines(result))
 
     def test_a_promised_fact_delivered_gets_its_quote(self, project_dir, tmp_path,
                                                       monkeypatch):

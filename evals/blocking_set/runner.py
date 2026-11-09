@@ -45,12 +45,21 @@ def _check_one(method: str, project: str, scene: dict):
     return blocking.check_blocking(project, scene['scene'], prose=scene['text'])
 
 
+def _result_type(method: str) -> type:
+    """What `method` returns for a scene it finished."""
+    if method == 'stage-sheet':
+        from storyforge import stage_sheet
+        return stage_sheet.StageResult
+    from storyforge import blocking
+    return blocking.BlockingResult
+
+
 def check_all(scenes: list[dict], work_dir: str, method: str = 'read'
               ) -> tuple[dict[tuple[str, str], list[dict]], dict[tuple[str, str], object]]:
     """Run `method` on every scene: its findings as ``{"quotes", "verified",
     "explanation"}`` per (book, scene), and each scene's result. A scene the
-    check couldn't finish raises, naming how many: a scene left out would
-    read as one with no flags."""
+    check couldn't finish raises, naming how many and which: a scene left
+    out would read as one with no flags."""
     from storyforge.runner import run_parallel
     projects = {book: make_project(work_dir, book, [s for s in scenes if s['book'] == book])
                 for book in sorted({s['book'] for s in scenes})}
@@ -61,15 +70,18 @@ def check_all(scenes: list[dict], work_dir: str, method: str = 'read'
         return _check_one(method, projects[s['book']], s)
 
     results = run_parallel(sorted(by_label), check, label='scene')
-    failed = sorted(k for k in by_label
-                    if results.get(k) is None or isinstance(results.get(k), BaseException))
+    done = _result_type(method)
+    failed = sorted(k for k in by_label if not isinstance(results.get(k), done))
     if failed:
-        # The exception's type only: its message can carry the reply, which
-        # quotes the private prose, and this message reaches the report
+        # The scenes by slug and the exception's type only: its message can
+        # carry the reply, which quotes the private prose, and this message
+        # reaches the report. (run_parallel has already logged each failure
+        # in full to the terminal: a local run's screen, not a report.)
         first = results.get(failed[0])
         what = 'blocking read' if method == 'read' else 'stage sheet'
-        raise RuntimeError(f'the {what} did not finish on {len(failed)} scene(s); '
-                           f'first: {type(first).__name__ if first is not None else "no result"}')
+        raise RuntimeError(f'the {what} did not finish on {len(failed)} scene(s): '
+                           f'{", ".join(failed)}; first: '
+                           f'{type(first).__name__ if first is not None else "no result"}')
     flags, by_key = {}, {}
     for label, result in results.items():
         s = by_label[label]
@@ -83,20 +95,29 @@ def check_all(scenes: list[dict], work_dir: str, method: str = 'read'
 
 
 def floor_gates(metrics: dict, floors: dict) -> tuple[list[Gate], list[str]]:
+    """A gate per floor, holding the metric to it exactly (#488). For recall
+    a rise is a gain, for false alarms, left_flagged and flags a fall is; a
+    gain moves the floor in the same commit, a loss is a decision. A floor
+    the run has no metric for fails, set or not (a category or book gone
+    from the set)."""
     gates, notes = [], []
     for name, floor in floors.items():
         value = metrics.get(name)
-        gates.append(Gate(name, -1 if value is None else value, '==',
-                          -1 if floor is None else floor))
         if value is None:
-            notes.append(f'{name}: FLOORS has {floor} but the run has no such metric')
-        elif floor is None:
+            # Fails whatever the floor: -1 never equals -2
+            gates.append(Gate(name, -1, '==', -2 if floor is None else floor))
+            notes.append(f'{name}: the run has no such metric (no in-scene fixed case of it '
+                         f'in the set?); FLOORS has {floor}')
+            continue
+        gates.append(Gate(name, value, '==', -1 if floor is None else floor))
+        if floor is None:
             notes.append(f'{name} {value}: no floor recorded; set FLOORS[{name!r}] = {value} '
                          f'with the baseline')
         elif value != floor:
+            gain = (value > floor) == name.startswith('recall')
             notes.append(f'{name} {value}, FLOORS {floor}: '
-                         + ('raise its floor in the same commit' if value > floor and name.startswith('recall')
-                            else 'a change; moving the floor is a decision (see FLOORS)'))
+                         + ('a gain: move FLOORS to it in the same commit' if gain
+                            else 'a loss; moving the floor is a decision (see FLOORS)'))
     return gates, notes
 
 

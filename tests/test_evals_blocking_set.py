@@ -15,6 +15,7 @@ sys.path.insert(0, str(PLUGIN_DIR / 'evals'))
 
 import blocking_set  # noqa: E402
 import harness  # noqa: E402
+from blocking_set import runner  # noqa: E402
 
 SUITE_FILE = PLUGIN_DIR / 'evals' / 'suites' / 'blocking_set.py'
 
@@ -96,7 +97,9 @@ class TestWhereTheSetLives:
         assert suite.cassettes is not None
         _write_set(tmp_path)
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
-        assert suite.cassettes().startswith(str(tmp_path))
+        assert suite.cassettes('').startswith(str(tmp_path))
+        assert suite.cassettes('run2') == os.path.join(
+            str(tmp_path), 'blocking-set', 'cassettes', 'run2', 'blocking-set')
         assert not (PLUGIN_DIR / 'evals' / 'fixtures' / 'cassettes' / 'blocking-set').exists()
 
 
@@ -120,16 +123,63 @@ class TestValidate:
         ('scope', 'series', 'scope must be one of'),
         ('scene', 'nowhere', 'its scene is not in scenes.json'),
         ('quotes', [], 'no quotes'),
+        ('fix_quotes', 'a string', 'fix_quotes must be a list'),
+        ('kind', 'odd', 'kind must be one of'),
+        ('found_by', 'Readers', 'found_by must open with one of'),
+        ('found_by', 'readership', 'found_by must open with one of'),
+        ('id', '', 'case 1: no id'),
     ])
     def test_malformed_case(self, tmp_path, field, value, expected):
         case = _case('tale-001')
         case[field] = value
+        # a second case keeps the harbour scene from being a case scene with none
+        other = _case('tale-002', quotes=(SAT_AGAIN,))
+        problems = blocking_set.validate(*_loaded(tmp_path, cases=[case, other]))
+        assert len(problems) == 1 and expected in problems[0], problems
+
+    def test_a_case_with_no_id_is_named_not_a_crash(self, tmp_path):
+        case = _case('x')
+        del case['id']
         problems = blocking_set.validate(*_loaded(tmp_path, cases=[case]))
-        assert len(problems) == 1 and expected in problems[0]
+        assert problems == ['case 1: no id']
+
+    @pytest.mark.parametrize('found_by,subset', [
+        ('readers', 'readers'), ('readers (open question)', 'readers'),
+        ("author (Ben's note)", 'readers'), ('storyforge gate, blocking read', 'tool'),
+        ('storyforge check --blocking (abc)', 'tool'), ('Readers', None), ('reader', None)])
+    def test_who_found_a_case_is_an_explicit_subset(self, found_by, subset):
+        assert blocking_set.finder({'found_by': found_by}) == subset
 
     def test_a_fixed_slip_in_a_clean_scene_is_a_problem(self, tmp_path):
         bad = [_case('tale-001', scene='rain', quotes=(COAT,))]
-        assert 'role is not case' in blocking_set.validate(*_loaded(tmp_path, cases=bad))[0]
+        problems = blocking_set.validate(*_loaded(tmp_path, cases=bad))
+        assert any('role is not case' in p for p in problems)
+
+    def test_a_case_scene_with_no_case_is_a_problem(self, tmp_path):
+        problems = blocking_set.validate(*_loaded(tmp_path, cases=[CASES[3]]))
+        assert problems == ['scene tale/harbour: role case, but no case is in it']
+
+    def test_an_empty_set_is_a_problem_not_a_measurement(self, tmp_path):
+        problems = blocking_set.validate(*_loaded(tmp_path, cases=[]))
+        assert 'the set has no cases' in problems
+
+    def test_a_quote_at_two_places_is_a_problem(self, tmp_path):
+        """A quote that falls twice would let a finding at either place
+        catch the case (#670 review: a 6-character fix quote fell at 9)."""
+        bad = [_case('tale-001', quotes=('Ann sat',))]
+        problems = blocking_set.validate(*_loaded(tmp_path, cases=bad))
+        assert problems == ['tale-001: quote 1 falls at 2 places in its scene; '
+                            'quote enough to name one']
+
+    @pytest.mark.parametrize('scene,expected', [
+        ({'book': 'Tale', 'scene': 'harbour', 'role': 'case'}, 'book and scene must be slugs'),
+        ({'book': 'tale', 'scene': 'harbour', 'role': 'case'}, 'listed twice'),
+        ({'book': 'tale', 'scene': 'harbour', 'role': 'draft'}, 'role must be one of'),
+    ])
+    def test_malformed_scene(self, tmp_path, scene, expected):
+        scenes = SCENES + [scene] if expected != 'role must be one of' else [scene, SCENES[1]]
+        problems = blocking_set.validate(*_loaded(tmp_path, scenes=scenes))
+        assert any(expected in p for p in problems), problems
 
     def test_duplicate_ids_and_missing_prose(self, tmp_path):
         cases, scenes = _loaded(tmp_path, cases=[_case('tale-001'), _case('tale-001')],
@@ -164,6 +214,69 @@ class TestMatching:
         from storyforge.quotes import normalize
         assert blocking_set.spans(normalize(SLIPS), 'the moon rose') == []
 
+    def test_a_part_inside_a_longer_word_is_no_place(self):
+        """Whole words, as quote_in matches: 'he' is not inside 'the' or
+        'held' (#670 review: a short part fell at every 'he')."""
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS)
+        places = blocking_set.places(prose, 'he')
+        assert len(places) == 2                     # 'He waved', 'he read'
+        assert not blocking_set.overlaps(blocking_set.spans(prose, 'he'),
+                                         blocking_set.spans(prose, HOLDS_BOTH))
+
+    def test_an_elided_quote_needs_its_parts_in_order(self):
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS)
+        assert blocking_set.spans(prose, 'with his free hand ... Tom held the lamp') == []
+
+    def test_an_elided_quotes_parts_are_one_place_not_every_occurrence(self):
+        """'Ann sat ... him' is the run that quote_in accepts, not every
+        'him' or 'Ann sat' anywhere in the scene."""
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS + ' Later Ann sat alone.')
+        places = blocking_set.places(prose, 'Ann sat ... him')
+        assert len(places) == 2                     # each 'Ann sat' with the next 'him'
+        assert all(len(p) == 2 for p in places)
+        assert not blocking_set.overlaps(blocking_set.spans(prose, 'Ann sat ... him'),
+                                         blocking_set.spans(prose, 'Later Ann sat alone'))
+
+
+class TestMatch:
+    """Each finding catches at most one case; each case is caught once."""
+
+    def test_one_finding_on_a_shared_line_catches_one_case(self):
+        """Two slips set against the same line: one finding set against it
+        is one catch, not two (#670 review)."""
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS)
+        cases = [{'quotes': [FREE_HAND, HOLDS_BOTH]}, {'quotes': [SAT_AGAIN, HOLDS_BOTH]}]
+        caught_by, landed = blocking_set.match(prose, [_flag(FREE_HAND, HOLDS_BOTH)], cases)
+        assert caught_by == {0: 0} and landed == {0}
+
+    def test_the_findings_own_slip_quote_wins_over_its_reference_line(self):
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS)
+        cases = [{'quotes': [HOLDS_BOTH]}, {'quotes': [SAT_AGAIN]}]
+        caught_by, _ = blocking_set.match(prose, [_flag(SAT_AGAIN, HOLDS_BOTH)], cases)
+        assert caught_by == {1: 0}
+
+    def test_as_many_cases_as_the_findings_allow(self):
+        """A greedy pick would give finding 0 case 0 and leave finding 1
+        nothing; the matching moves finding 0 to case 1."""
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS)
+        cases = [{'quotes': [FREE_HAND]}, {'quotes': [SAT_AGAIN]}]
+        findings = [_flag(FREE_HAND, SAT_AGAIN), _flag(FREE_HAND)]
+        caught_by, landed = blocking_set.match(prose, findings, cases)
+        assert caught_by == {0: 1, 1: 0} and landed == {0, 1}
+
+    def test_a_second_reading_of_a_caught_slip_still_landed(self):
+        from storyforge.quotes import normalize
+        prose = normalize(SLIPS)
+        caught_by, landed = blocking_set.match(prose, [_flag(FREE_HAND), _flag(FREE_HAND)],
+                                               [{'quotes': [FREE_HAND]}])
+        assert caught_by == {0: 0} and landed == {0, 1}
+
 
 class TestScore:
     def _score(self, tmp_path, flags):
@@ -186,10 +299,23 @@ class TestScore:
         assert {o['id']: o['caught'] for o in outcomes}['tale-003'] is False
 
     def test_book_scope_cases_are_reported_apart(self, tmp_path):
-        metrics, _ = self._score(tmp_path, {('tale', 'harbour'): [_flag(HOLDS_BOTH)],
+        # Two readings of the line both cases quote: one catch each
+        metrics, _ = self._score(tmp_path, {('tale', 'harbour'): [_flag(HOLDS_BOTH), _flag(HOLDS_BOTH)],
                                             ('tale', 'rain'): []})
         assert metrics['book_scope_cases'] == 1 and metrics['book_scope_caught'] == 1
         assert metrics['cases'] == 3
+
+    def test_one_finding_is_one_catch(self, tmp_path):
+        metrics, outcomes = self._score(tmp_path, {('tale', 'harbour'): [_flag(HOLDS_BOTH)],
+                                                   ('tale', 'rain'): []})
+        assert metrics['caught'] + metrics['book_scope_caught'] == 1
+        assert sum(o['caught'] for o in outcomes) == 1
+
+    def test_an_outcome_names_its_finding_by_its_place_in_flags(self, tmp_path):
+        _, outcomes = self._score(tmp_path, {
+            ('tale', 'harbour'): [_flag('not in it', verified=False), _flag(SAT_AGAIN)],
+            ('tale', 'rain'): []})
+        assert {o['id']: o['findings'] for o in outcomes}['tale-002'] == [1]
 
     def test_false_alarms_per_10k_words_of_clean_prose(self, tmp_path):
         metrics, _ = self._score(tmp_path, {
@@ -262,13 +388,19 @@ def _with_floors(monkeypatch, suite, **floors):
     monkeypatch.setitem(suite.run.__globals__, 'FLOORS', dict(floors))
 
 
+def _record(suite, root):
+    """The suite is frozen: record it as run.py does for --suite NAME --runs 3."""
+    return harness.run_suite(suite, 'record', root, record_frozen=True)
+
+
 class TestSuite:
     def test_records_beside_the_set_then_replays_free(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         calls = []
         monkeypatch.setattr(api, '_live_request', _fake_api(calls))
         suite = _suite()
-        result = harness.run_suite(suite, 'record', str(tmp_path / 'public-cassettes'))
+        assert suite.frozen
+        result = _record(suite, str(tmp_path / 'public-cassettes'))
         assert len(calls) == 4                          # two scenes, two readings each
         assert result['metrics']['caught'] == 1 and result['metrics']['left_flagged'] == 1
         assert os.path.isdir(os.path.join(private_set, 'cassettes', 'blocking-set'))
@@ -286,7 +418,7 @@ class TestSuite:
         quote, finding or explanation may be in them (#646)."""
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', _fake_api([]))
-        result = harness.run_suite(_suite(), 'record', str(tmp_path / 'c'))
+        result = _record(_suite(), str(tmp_path / 'c'))
         text = json.dumps({k: result[k] for k in ('metrics', 'gates', 'notes', 'error')})
         for words in (FREE_HAND, HOLDS_BOTH, COAT, 'both hands full', 'harbour', 'rain'):
             assert words.lower() not in text.lower(), words
@@ -295,7 +427,7 @@ class TestSuite:
     def test_outcomes_and_findings_go_to_the_private_set(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', _fake_api([]))
-        harness.run_suite(_suite(), 'record', str(tmp_path / 'c'))
+        _record(_suite(), str(tmp_path / 'c'))
         with open(os.path.join(private_set, 'results', 'latest.json')) as f:
             data = json.load(f)
         by_id = {c['id']: c for c in data['cases']}
@@ -310,7 +442,7 @@ class TestSuite:
                      recall_light=0.0, false_alarms_per_10k=round(10000 / len(CLEAN.split()), 2),
                      left_flagged=1, flags=2)
         monkeypatch.setitem(suite.run.__globals__, 'MIN_CASES', 3)
-        result = harness.run_suite(suite, 'record', str(tmp_path / 'c'))
+        result = _record(suite, str(tmp_path / 'c'))
         assert result['status'] == 'pass', result['gates']
 
     def test_a_drop_below_a_floor_fails(self, private_set, tmp_path, monkeypatch):
@@ -318,17 +450,31 @@ class TestSuite:
         monkeypatch.setattr(api, '_live_request', _fake_api([]))
         suite = _suite()
         _with_floors(monkeypatch, suite, recall=0.6667)
-        result = harness.run_suite(suite, 'record', str(tmp_path / 'c'))
+        result = _record(suite, str(tmp_path / 'c'))
         assert result['status'] == 'fail'
         assert any('moving the floor is a decision' in n for n in result['notes'])
 
-    def test_replay_with_no_recording_errors_and_never_goes_live(self, private_set, tmp_path,
-                                                                 monkeypatch):
+    @pytest.mark.parametrize('mode', ['replay', 'auto', 'record'])
+    def test_no_recording_is_stale_and_never_goes_live(self, private_set, tmp_path,
+                                                       monkeypatch, mode):
+        """Frozen (#645): a miss is stale, in any mode not asked by name."""
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
-        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
-        assert result['status'] == 'error'
+        result = harness.run_suite(_suite(), mode, str(tmp_path / 'c'))
+        assert result['status'] == 'stale', result.get('error')
         assert all(f.startswith('CassetteMiss') for f in result['cassette_failures'])
+
+    def test_a_miss_carries_no_prose(self, private_set, tmp_path, monkeypatch):
+        """A miss names the prompt's opening, which for a private suite could be
+        the prose: it is withheld (#670 review)."""
+        from storyforge import blocking
+        monkeypatch.setattr(blocking, 'PROMPT', '{prose}' + blocking.PROMPT)
+        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
+        text = json.dumps(result)
+        assert 'withheld' in text
+        for words in (SLIPS[:40], CLEAN[:40], 'Tom held the lamp', 'looked out at the rain'):
+            assert words.lower() not in text.lower(), words
+        assert 'STORYFORGE_CASSETTE_PRIVATE' not in os.environ
 
     def test_a_malformed_set_errors_without_quoting_it(self, tmp_path, monkeypatch):
         root = tmp_path / 'private'
@@ -339,12 +485,35 @@ class TestSuite:
         assert 'tale-001: quote 1 is not in its scene' in result['error']
         assert 'not in the scene at all' not in result['error']
 
-    def test_no_private_set_is_an_error_naming_where_it_goes(self, tmp_path, monkeypatch):
+    def test_no_private_set_is_unavailable_naming_where_it_goes(self, tmp_path, monkeypatch):
+        """A clone without storyforge-evals (CI, every public one) isn't turned
+        red: the suite is stale, unavailable, with where to put the set."""
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path / 'nowhere'))
         monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
-        assert result['status'] == 'error' and 'SetMissing' in result['error']
+        assert result['status'] == 'stale' and result['unavailable'] is True
+        assert result['error'] is None
+        assert 'storyforge-evals' in result['stale'] and blocking_set.PRIVATE_ENV in result['stale']
         assert 'STORYFORGE_CASSETTE' not in os.environ
+
+    def test_a_set_with_no_scenes_json_is_missing(self, tmp_path, monkeypatch):
+        root = tmp_path / 'private'
+        path = _write_set(root)
+        os.remove(os.path.join(path, 'scenes.json'))
+        with pytest.raises(blocking_set.SetMissing, match='scenes.json'):
+            blocking_set.set_dir(str(root))
+
+    @pytest.mark.parametrize('cases_json,scenes_json', [
+        ({'case': []}, SCENES), ([], SCENES), ({'cases': {}}, SCENES),
+        ({'cases': CASES}, {'scenes': SCENES})])
+    def test_a_misshapen_file_raises_not_an_empty_set(self, tmp_path, cases_json, scenes_json):
+        path = _write_set(tmp_path)
+        with open(os.path.join(path, 'cases.json'), 'w') as f:
+            json.dump(cases_json, f)
+        with open(os.path.join(path, 'scenes.json'), 'w') as f:
+            json.dump(scenes_json, f)
+        with pytest.raises(ValueError):
+            blocking_set.load(path)
 
     def test_a_scene_the_read_cannot_finish_errors_the_suite(self, private_set, tmp_path,
                                                              monkeypatch):
@@ -356,14 +525,67 @@ class TestSuite:
         monkeypatch.setattr(blocking, 'check_blocking', check)
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'error'
-        assert 'did not finish on 1 scene' in result['error']
+        assert 'did not finish on 1 scene(s): tale/rain' in result['error']
+        # the exception's message can carry the reply's quotes: type only
+        assert 'refused' not in result['error']
+        assert 'refused' not in result.get('traceback', '')
 
     def test_the_pov_reaches_the_prompt(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         calls = []
         monkeypatch.setattr(api, '_live_request', _fake_api(calls))
-        harness.run_suite(_suite(), 'record', str(tmp_path / 'c'))
+        _record(_suite(), str(tmp_path / 'c'))
         assert any('Point of view: Tom' in c for c in calls)
+
+
+def _floor_gates(suite, metrics):
+    """The suite's gates on `metrics` against its FLOORS (as its run sets them)."""
+    return runner.floor_gates(metrics, suite.run.__globals__['FLOORS'])
+
+
+class TestFloorGates:
+    """The shipped FLOORS keys, on the path before the baseline (all None)
+    and after (#670 review: an absent metric passed as -1 == -1)."""
+
+    def _metrics(self, suite):
+        return {name: 0.5 for name in suite.run.__globals__['FLOORS']}
+
+    def test_every_shipped_floor_unset_fails_and_says_what_to_write(self):
+        suite = _suite()
+        gates, notes = _floor_gates(suite, self._metrics(suite))
+        assert gates and not any(g.passed for g in gates)
+        assert all('no floor recorded' in n for n in notes)
+
+    @pytest.mark.parametrize('floor', [None, 0.5])
+    def test_an_absent_metric_fails_with_or_without_a_floor(self, monkeypatch, floor):
+        suite = _suite()
+        floors = {k: 0.5 for k in suite.run.__globals__['FLOORS']}
+        floors['recall_other'] = floor
+        _with_floors(monkeypatch, suite, **floors)
+        metrics = self._metrics(suite)
+        del metrics['recall_other']
+        gates, notes = _floor_gates(suite, metrics)
+        by_name = {g.name: g for g in gates}
+        assert not by_name['recall_other'].passed
+        assert all(g.passed for n, g in by_name.items() if n != 'recall_other')
+        assert notes == [f'recall_other: the run has no such metric (no in-scene fixed case of '
+                         f'it in the set?); FLOORS has {floor}']
+
+    @pytest.mark.parametrize('name,value,word', [
+        ('recall', 0.6, 'a gain'), ('recall', 0.4, 'a loss'),
+        ('false_alarms_per_10k', 0.4, 'a gain'), ('false_alarms_per_10k', 0.6, 'a loss')])
+    def test_a_gain_is_a_rise_for_recall_and_a_fall_for_false_alarms(self, monkeypatch, name,
+                                                                     value, word):
+        suite = _suite()
+        _with_floors(monkeypatch, suite, **{name: 0.5})
+        _, notes = _floor_gates(suite, {name: value})
+        assert notes[0].startswith(f'{name} {value}, FLOORS 0.5: {word}')
+
+    def test_the_independent_and_per_book_numbers_are_gated(self):
+        floors = _suite().run.__globals__['FLOORS']
+        for name in ('recall_found_by_readers', 'recall_found_by_tool',
+                     'recall_book_gawain', 'recall_book_wrath'):
+            assert name in floors
 
 
 # ----------------------------------------------------------------------------
@@ -411,7 +633,7 @@ class TestSheetSuite:
         calls = []
         monkeypatch.setattr(api, '_live_request', _fake_sheet_api(calls))
         suite = _sheet_suite()
-        result = harness.run_suite(suite, 'record', str(tmp_path / 'public-cassettes'))
+        result = _record(suite, str(tmp_path / 'public-cassettes'))
         assert len(calls) == 2                          # one extraction a scene, no questions
         m = result['metrics']
         assert m['caught'] == 2 and m['recall_hands'] == 1.0 and m['recall_posture'] == 1.0
@@ -428,7 +650,7 @@ class TestSheetSuite:
     def test_the_report_carries_no_prose(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
-        result = harness.run_suite(_sheet_suite(), 'record', str(tmp_path / 'c'))
+        result = _record(_sheet_suite(), str(tmp_path / 'c'))
         text = json.dumps({k: result[k] for k in ('metrics', 'gates', 'notes', 'error')})
         for words in (FREE_HAND, HOLDS_BOTH, COAT, SAT_AGAIN, 'harbour', 'rain', 'lamp'):
             assert words.lower() not in text.lower(), words
@@ -436,25 +658,27 @@ class TestSheetSuite:
     def test_outcomes_go_to_their_own_private_file(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
-        harness.run_suite(_sheet_suite(), 'record', str(tmp_path / 'c'))
+        _record(_sheet_suite(), str(tmp_path / 'c'))
         assert not os.path.exists(os.path.join(private_set, 'results', 'latest.json'))
         with open(os.path.join(private_set, 'results', 'latest-stage-sheet.json')) as f:
             data = json.load(f)
-        assert {c['id'] for c in data['cases'] if c['caught']} == {'tale-001', 'tale-002', 'tale-005'}
+        # tale-005 shares tale-001's line: the one hands finding catches only
+        # one of them (#670's matching)
+        assert {c['id'] for c in data['cases'] if c['caught']} == {'tale-001', 'tale-002'}
 
     def test_without_a_read_run_the_comparison_says_so(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
-        result = harness.run_suite(_sheet_suite(), 'record', str(tmp_path / 'c'))
+        result = _record(_sheet_suite(), str(tmp_path / 'c'))
         assert any(n.startswith('side by side: no read run to compare with')
                    for n in result['notes'])
 
     def test_side_by_side_with_the_read(self, private_set, tmp_path, monkeypatch):
         from storyforge import api
         monkeypatch.setattr(api, '_live_request', _fake_api([]))
-        harness.run_suite(_suite(), 'record', str(tmp_path / 'c'))
+        _record(_suite(), str(tmp_path / 'c'))
         monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
-        result = harness.run_suite(_sheet_suite(), 'record', str(tmp_path / 'c'))
+        result = _record(_sheet_suite(), str(tmp_path / 'c'))
         notes = result['notes']
         assert ('side by side with the read (its last run): caught by both 1, only here 1, '
                 'only by the read 0, of 3') in notes
@@ -470,5 +694,36 @@ class TestSheetSuite:
         monkeypatch.setattr(stage_sheet, 'check_stage_sheet', check)
         result = harness.run_suite(_sheet_suite(), 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'error'
-        assert 'stage sheet did not finish on 2 scene' in result['error']
+        assert 'stage sheet did not finish on 2 scene(s): tale/harbour, tale/rain' in result['error']
         assert 'secret words' not in result['error']
+
+    def test_frozen_a_miss_is_stale_and_never_goes_live(self, private_set, tmp_path,
+                                                        monkeypatch):
+        """Frozen like the read (#645, ported from #670): auto replays it."""
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        suite = _sheet_suite()
+        assert suite.frozen
+        result = harness.run_suite(suite, 'auto', str(tmp_path / 'c'))
+        assert result['status'] == 'stale', result.get('error')
+
+    def test_no_private_set_is_unavailable(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path / 'nowhere'))
+        result = harness.run_suite(_sheet_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'stale' and result['unavailable'] is True
+        assert result['error'] is None
+        assert 'storyforge-evals' in result['stale']
+
+    def test_each_run_of_runs_n_records_on_its_own(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+        _write_set(tmp_path)
+        suite = _sheet_suite()
+        assert suite.cassettes('') == os.path.join(str(tmp_path), 'blocking-set', 'cassettes',
+                                                   'blocking-set-sheet')
+        assert suite.cassettes('run2') == os.path.join(str(tmp_path), 'blocking-set',
+                                                       'cassettes', 'run2', 'blocking-set-sheet')
+
+    def test_it_gates_the_same_metrics_as_the_read(self):
+        """The per-book and per-finder numbers are gated on the sheet too."""
+        assert (set(_sheet_suite().run.__globals__['FLOORS'])
+                == set(_suite().run.__globals__['FLOORS']))

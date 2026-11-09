@@ -448,10 +448,16 @@ class TestKeepGoing:
         out = capsys.readouterr().out
         assert 'new-x1 (re-checked after act1-sc01 passed): a contradiction' in out
 
-    def test_keep_going_and_stop_at_first_together_are_an_error(self, project):
+    @pytest.mark.parametrize('argv', [
+        ['--pending', '--keep-going', '--stop-at-first'],
+        ['--accept', 'act1-sc01', '--stop-at-first'],     # #641's review, T-8
+        ['--blocking', '--stop-at-first'],
+    ])
+    def test_keep_going_and_stop_at_first_together_are_an_error(self, project, argv, capsys):
         with pytest.raises(SystemExit) as e:
-            cmd_check.main(['--pending', '--keep-going', '--stop-at-first'])
+            cmd_check.main(argv)
         assert e.value.code == 1
+        assert 'ERROR' in capsys.readouterr().out
 
     def test_keep_going_alone_still_needs_scenes(self, project):
         with pytest.raises(SystemExit) as e:
