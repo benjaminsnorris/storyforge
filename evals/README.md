@@ -53,6 +53,7 @@ The Batch API is refused under a cassette; run commands in direct mode.
 In `record` mode a request already recorded earlier in the same run replays
 that recording rather than going live again, so two cases that send the same
 request (two facts from one scene) see the same reply and stay replayable.
+A test can read a committed recording directly too: the Austen voice description (#651) is frozen in `tests/fixtures/voiceprint/cassette/`, and `tests/test_voiceprint_description.py` parses its replies against the recorded sample rather than replaying the request (see `references/voiceprints/README.md`).
 Under a cassette the refusal fallback (`fallbacks`) is stripped from every
 request, recording and replay alike, so a recording is always the requested
 model's reply or its refusal: evals measure the requested model.

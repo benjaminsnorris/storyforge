@@ -298,7 +298,7 @@ def test_typical_range_tells_austen_from_others(voice):
             with open(os.path.join(d, name), encoding='utf-8') as f:
                 texts.append(f.read())
     others = share('\n\n'.join(texts))
-    # measured 2026-11-08: Emma 0.880, the others 0.156
+    # measured 2026-11-08: Emma 0.888, the others 0.143
     assert emma >= 0.8 and others <= 0.3, (emma, others)
 
 
