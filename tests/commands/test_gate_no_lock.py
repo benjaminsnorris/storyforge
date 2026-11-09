@@ -9,10 +9,12 @@ rule). Now
   waiting on the gate isn't drafted, the others are (with a WARNING naming
   what they were drafted past), and a scene that fails in the run holds
   back only its dependents;
-- a scene with no commitments in the ledger (not drafted yet, or its first
-  gate failed) is judged by its brief: `continuity_deps`, a fact its
-  `*_in` columns need that the earlier brief's `*_out` sets up, or those
-  brief facts depending on each other by the same rule;
+- the later brief is read first: `continuity_deps`, or a fact its `*_in`
+  columns need that the earlier brief sets up (in its `*_out` and not its
+  `*_in`: `*_out` is cumulative); a scene with no commitments in the
+  ledger (not drafted yet, or its first gate failed) is then judged by
+  those brief facts depending on each other by the same rule, less its
+  type guess;
 - `check` keeps going by default (`--stop-at-first` for the old stop;
   `--keep-going` is still taken) and labels provisional only the results
   that depend on an earlier failure;
@@ -406,6 +408,17 @@ class TestWrite:
 
 
 class TestCheck:
+    def test_a_failing_scene_s_pending_row_carries_its_findings(self, project, monkeypatch):
+        """SF-2: write names them when it drafts past the scene; the next
+        check overwrites the report."""
+        project_dir, _ = project
+        _fake_gate(monkeypatch, {'act1-sc01': _finding()})
+        with pytest.raises(SystemExit):
+            cmd_check.main(['act1-sc01'])
+        reason = gate.pending(project_dir)['act1-sc01']['reason']
+        assert reason.startswith('1 problem(s): ')
+        assert 'why' in reason and reason.endswith('; see working/check-report.md')
+
     def test_named_scenes_are_all_checked_by_default(self, project, monkeypatch, capsys):
         seen = _fake_gate(monkeypatch, {'act1-sc01': _finding()})
         with pytest.raises(SystemExit) as e:
@@ -446,7 +459,7 @@ class TestCheck:
 
 class TestRevise:
     def test_a_pass_gates_the_scenes_after_a_failure_that_do_not_depend_on_it(
-            self, project_dir, monkeypatch):
+            self, project_dir, monkeypatch, capsys):
         from .test_revise_pass_gate import _gate_pass, _scenes, _stub_gate
         monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         _scenes(project_dir, 'act1-sc01', 'act1-sc02', INDEPENDENT)
@@ -456,9 +469,12 @@ class TestRevise:
         assert [s for s, _ in gated] == ['act1-sc01', 'act1-sc02', INDEPENDENT]
         assert out == ['act1-sc02 (the gate did not pass it: a contradiction)']
         assert set(gate.pending(project_dir)) == {'act1-sc02'}
+        # SF-1: named, as write names what it drafts past
+        assert f'WARNING: gating {INDEPENDENT} past 1 earlier scene(s) waiting on the gate' \
+            in capsys.readouterr().out
 
     def test_redrafts_go_on_past_a_failure_to_the_scenes_not_depending_on_it(
-            self, project_dir, monkeypatch):
+            self, project_dir, monkeypatch, capsys):
         from .test_write_gate import TestReviseRedraftsAreGated
         _independent(project_dir)
         helper = TestReviseRedraftsAreGated()
@@ -470,6 +486,9 @@ class TestRevise:
         assert 'act1-sc01 (redrafted, but the gate did not pass it' in error
         assert 'act1-sc02 (not redrafted: it waits on earlier scene(s)' in error
         assert INDEPENDENT not in error
+        out = capsys.readouterr().out   # SF-1
+        assert f'WARNING: redrafting {INDEPENDENT} past 1 earlier scene(s) waiting on the gate' \
+            in out
 
     def test_the_hone_fix_redraft_goes_on_too(self, project_dir, monkeypatch):
         _independent(project_dir)

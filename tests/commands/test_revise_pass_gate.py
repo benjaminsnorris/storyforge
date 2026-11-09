@@ -257,9 +257,9 @@ class TestGatePassScenes:
         _scenes(project_dir, 'act1-sc01', 'act1-sc02')
         gated, _ = _stub_gate(monkeypatch)
 
-        def bad(pd, sid, **kw):
+        def bad(*a, **kw):
             raise gate.GateError('bad header')
-        monkeypatch.setattr(cmd_write, '_gate_blockers', bad)
+        monkeypatch.setattr(cmd_write, 'GateBlockers', bad)
         out = _gate_pass(project_dir, ['act1-sc01', 'act1-sc02'])
         assert gated == []
         assert out == ['act1-sc01, act1-sc02 (revised, not gated: bad header)']
@@ -851,7 +851,8 @@ class TestDeferRechecksToLaterPasses:
     def test_a_deferred_recheck_does_not_block(self, project_dir, monkeypatch):
         gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
         gate.mark_pending(project_dir, 'new-x1', gate.RECHECK_FAILED, 'y')
-        lines = ['act1-sc02: x', 'new-x1: y']
+        lines = [cmd_write.Blocker('act1-sc02', 'act1-sc02: x'),
+                 cmd_write.Blocker('new-x1', 'new-x1: y')]
         assert cmd_revise._not_deferred(project_dir, lines, frozenset()) == lines
         # a failed re-check still blocks: the author acts on it
         assert cmd_revise._not_deferred(project_dir, lines,
