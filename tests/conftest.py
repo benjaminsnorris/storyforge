@@ -33,6 +33,17 @@ STUB_MODEL_CATALOG = [
 
 
 @pytest.fixture(autouse=True)
+def _eval_spend_ledger_off_home(tmp_path_factory, monkeypatch):
+    """`evals/run.py` appends live eval calls to the eval spend ledger, by
+    default in the home directory; a test's never reach Ben's real one, and
+    no test inherits a budget or an override from the shell."""
+    monkeypatch.setenv('STORYFORGE_EVAL_SPEND_LOG',
+                       str(tmp_path_factory.getbasetemp() / 'eval-spend.jsonl'))
+    monkeypatch.delenv('STORYFORGE_EVAL_BUDGET_USD', raising=False)
+    monkeypatch.delenv('STORYFORGE_EVAL_OVER_BUDGET', raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _gate_blocking_off(request, monkeypatch):
     """The gate's blocking read (`gate.GATE_BLOCKING`, #626) is one more API
     call per gated scene, which the gate tests' API fakes don't answer. It is
