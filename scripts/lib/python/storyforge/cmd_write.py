@@ -4,10 +4,13 @@ Drafts scenes one at a time in reading order (rethink plan §3.3), each
 from its brief and the ledger as of that scene, and gates each before the
 next (plan §3.2, `storyforge.gate`): its facts are extracted and checked
 against the book and its brief, fixed if needed (up to `gate.FIX_ROUNDS`
-times), and committed to the ledger only when clean. A scene that still fails is kept, listed in
-`working/gate-pending.csv`, and stops the run; with `--keep-going` (#556)
-one stopped only by the check's findings is committed provisionally
-(`gate.commit_provisional`) and the run goes on. A redraft that passes
+times), and committed to the ledger only when clean. A scene that still fails is kept and listed in
+`working/gate-pending.csv`; it stops only itself (#641): a later scene
+that depends on it (its facts, or its brief's, `GateBlockers`) waits, and
+the others are drafted, each with a WARNING naming the earlier scenes it
+was drafted past. With `--keep-going` (#556) a scene stopped only by the
+check's findings is committed provisionally (`gate.commit_provisional`),
+so the scenes that depend on it are drafted too. A redraft that passes
 re-checks the later scenes depending on what it changed (Phase 4,
 `gate.recheck_pending`). Coaching levels coach and
 strict write briefs or constraints, not prose, and are not gated; only they
@@ -22,7 +25,7 @@ Usage:
     storyforge write act1-sc01 act1-sc15    # Draft a range (by position)
     storyforge write --act 2                # Draft all scenes in act 2
     storyforge write --dry-run act1-sc01    # Build prompt and forecast, no API call
-    storyforge write --keep-going           # Don't stop at a gate failure: commit it provisionally
+    storyforge write --keep-going           # Commit a gate failure provisionally, so its dependents draft too
     storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
 
@@ -96,9 +99,12 @@ def parse_args(argv):
     parser.add_argument('--keep-going', action='store_true',
                         help='Full coaching: a scene the gate still stops on only for the '
                              'check\'s findings is committed provisionally (its facts less '
-                             'those stating the findings), listed for the author, and the run '
-                             'goes on; provisional scenes don\'t stop it either. Halts, '
-                             'extraction problems and bad replies still stop it')
+                             'those stating the findings) and listed for the author, so the '
+                             'later scenes that depend on it are drafted too; provisional '
+                             'scenes hold nothing back. Without it a failing scene still '
+                             'stops only itself and the scenes that depend on it. Halts, '
+                             'extraction problems and bad replies are never committed '
+                             'provisionally: they hold back the scenes that depend on them')
     return parser.parse_args(argv)
 
 
@@ -173,10 +179,15 @@ def main(argv=None):
             f'already drafted ({skipped} skipped).')
         return
 
-    # A scene that didn't pass the gate has no facts in the ledger: drafting
-    # after it would draft from an incomplete ledger
+    # A scene that didn't pass the gate has no facts in the ledger: a scene
+    # that depends on it would be drafted from an incomplete ledger, so it
+    # waits; the others are drafted (#641)
+    held: dict[str, list[str]] = {}
     if coaching == 'full' and not args.dry_run:
-        _exit_if_gate_pending(project_dir, pending_ids, keep_going=args.keep_going)
+        held = _held_up_front(project_dir, pending_ids, keep_going=args.keep_going)
+        for sid, lines in held.items():
+            _log_held(sid, lines)
+        pending_ids = [s for s in pending_ids if s not in held]
     # Cost forecasting
     # Earlier prose needs a valid mode and every scene's place in the book:
     # checked before anything is spent or set up
@@ -293,7 +304,7 @@ def main(argv=None):
                 coaching, use_briefs, args.force, filter_mode, write_mode,
                 args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
                 scene_forecast=scene_forecast, draft_forecast=draft_forecast,
-                keep_going=args.keep_going,
+                keep_going=args.keep_going, held=held,
             )
 
     drafted_count, total_words = outcome.drafted, outcome.words
@@ -306,7 +317,9 @@ def main(argv=None):
 
     log('============================================')
     log('Drafting session complete!')
-    log(f'Scenes drafted: {drafted_count}/{len(pending_ids)}')
+    # out of every scene asked for: those held up front included (SF-6)
+    log(f'Scenes drafted: {drafted_count}/{len(pending_ids) + len(held)}'
+        + (f' ({len(held)} held back before drafting)' if held else ''))
     log(f'Total words: {total_words}')
     log(f'Total time: {mins}m{secs}s')
     log('============================================')
@@ -450,17 +463,19 @@ def _resolve_filter(args) -> tuple:
 
 
 def _gate_blockers(project_dir: str, scene_id: str, keep_going: bool = False,
-                   narrow: bool = False) -> list[str]:
+                   narrow: bool = False, held: dict[str, str] | None = None) -> list['Blocker']:
     """Scenes waiting on the gate (`gate.pending`) that come before
-    `scene_id` in reading order, as `id: reason`. A pending id that is no
-    longer a scene can't block; it is named in a WARNING instead. With
-    `keep_going`, a scene committed provisionally (`gate.PROVISIONAL`: its
-    facts are in the ledger) doesn't block either. `narrow` (revise, #633)
-    keeps only the scenes `scene_id` waits on (`GateBlockers`).
+    `scene_id` in reading order, as `id: reason` (`Blocker`). A pending id
+    that is no longer a scene can't block; it is named in a WARNING instead.
+    With `keep_going`, a scene committed provisionally (`gate.PROVISIONAL`:
+    its facts are in the ledger) doesn't block either. `narrow` (write and
+    revise, #633, #641) keeps only the scenes `scene_id` waits on
+    (`GateBlockers`, which takes `held` too).
 
     Raises:
         gate.GateError: `gate.PENDING_PATH` is malformed."""
-    return GateBlockers(project_dir, keep_going=keep_going, narrow=narrow).of(scene_id)
+    return GateBlockers(project_dir, keep_going=keep_going, narrow=narrow,
+                        held=held).of(scene_id)
 
 
 #: The pending commands whose scene's facts may still be what its prose
@@ -468,26 +483,83 @@ def _gate_blockers(project_dir: str, scene_id: str, keep_going: bool = False,
 #: removes a fact (#633)
 _REREAD_COMMANDS = ('recheck-failed', 'advisor')
 
+#: The command of a scene this run held back because it waits on another
+#: (`GateBlockers(held=)`, `GateBlockers.hold`; #641): never written to
+#: `gate.PENDING_PATH`, only in memory. `passed_over` doesn't name these:
+#: the run names them already
+HELD = 'held'
+
+#: The command of a scene this run did not draft (or redraft) for its own
+#: failure (a bad reply, no prompt) or whose failure could not be listed in
+#: `gate.PENDING_PATH` (`GateBlockers(failed=)`, `GateBlockers.hold`;
+#: #641's review, SF-4): in memory only; `passed_over` names it
+FAILED = 'failed'
+
+#: #641: the brief columns naming the registry facts a scene needs and those
+#: it leaves with (`cmd_elaborate._BRIEF_LEDGER_COLUMNS`' pairs). An `_out`
+#: column is cumulative (references/scene-schema.md: `knowledge_out` holds
+#: `knowledge_in` plus what is learned), so what a scene sets up is its
+#: `_out` facts less its `_in` ones (#641's review, C3)
+_BRIEF_IN = ('knowledge_in', 'physical_state_in')
+_BRIEF_OUT = ('knowledge_out', 'physical_state_out')
+
+_BRIEFS_PATH = os.path.join('reference', 'scene-briefs.csv')
+
+
+def _brief_ids(brief: dict[str, str], columns) -> set[str]:
+    return {x.strip() for c in columns for x in (brief.get(c) or '').split(';') if x.strip()}
+
+
+class Blocker(str):
+    """A line of `GateBlockers.of` / `passed_over` (`id: reason`, narrowed
+    with why it waits), carrying the waiting scene's id as `.scene_id`, so
+    callers don't parse it back out of the text (#641's review, TD-4)."""
+    scene_id: str
+
+    def __new__(cls, scene_id: str, text: str):
+        line = super().__new__(cls, text)
+        line.scene_id = scene_id
+        return line
+
 
 class GateBlockers:
     """Which earlier scenes waiting on the gate stop a scene from being
     drafted or gated (`of`), read once for several scenes.
 
-    By default (`write`) every earlier pending scene does: the ledger lacks
-    what it says. With `narrow` (revise, #633) an earlier pending scene
-    stops a scene only when
+    Unnarrowed, every earlier pending scene does: the ledger lacks what it
+    says. With `narrow` (write, revise and check's provisional label; #633,
+    #641) an earlier pending scene stops a scene only when
     - it isn't a re-check or check that failed (`recheck-failed`,
       `advisor`) on prose unchanged since its facts were read
       (`gate.gated_prose`) with those facts still in the ledger: a failed
       re-reading of the same prose doesn't make the ledger wrong; and
+    - the later scene's brief says it depends on it (#641's review, CR-1:
+      whatever the ledger holds): it lists the earlier one in
+      `continuity_deps`, or names in `knowledge_in` / `physical_state_in`
+      a fact the earlier one's brief sets up (in its `knowledge_out` /
+      `physical_state_out` and not its `_in` columns: the `_out` columns
+      carry earlier facts forward); or
     - one of the scene's binding facts depends on one of its commitments
       (`ledger.dependents`, run from the waiting scene's facts), named in
-      the line ("waits on it: fact F ... depends on its fact G ..."). When
-      either scene has no commitments in the ledger, what depends on what
-      can't be told, and it stops the scene as before.
-    A ledger or registry that can't be read narrows nothing (WARNING)."""
+      the line ("waits on it: fact F ... depends on its fact G ...").
+      When either scene has no commitments in the ledger (a scene not
+      drafted yet, or one whose first gate failed), the registry facts its
+      brief names stand in (#641: the later scene's needs, the earlier
+      scene's set-ups), by the same rule less its type guess (#641's
+      review, TD-2: a knowledge fact has no subject, so the guess would
+      tie every knowledge fact to every other) and with a stand-in's
+      `depends_on` / `supersedes` naming another's registry id counted
+      (TD-1). With neither commitments nor brief facts, what depends on
+      what can't be told, and it stops the scene, the line saying why.
+    `held` (#641): scene id → why, the scenes this run did not draft
+    because they wait; `failed`: those it did not draft for their own
+    failure. Both hold the scenes after them by the same rule, as does a
+    scene added with `hold` as the run goes. A ledger or registry that
+    can't be read narrows nothing (WARNING); briefs that can't be read only
+    lose the brief's stand-in (WARNING)."""
 
-    def __init__(self, project_dir: str, keep_going: bool = False, narrow: bool = False):
+    def __init__(self, project_dir: str, keep_going: bool = False, narrow: bool = False,
+                 held: dict[str, str] | None = None, failed: dict[str, str] | None = None):
         from storyforge import gate, ledger
         self.project_dir = project_dir
         self.keep_going = keep_going
@@ -497,9 +569,32 @@ class GateBlockers:
         if gone:
             log(f'WARNING: {gate.PENDING_PATH} lists id(s) that are no longer scenes: '
                 f'{", ".join(gone)}. Delete those rows.')
-        self.narrow = narrow and bool(self.waiting) and self._load()
+        self._narrow_asked = narrow
+        self._loaded: bool | None = None
+        self.narrow = False
         self._through: dict[str, bool] = {}
         self._depending: dict[str, list[str]] = {}
+        for sid, why in (held or {}).items():
+            self.hold(sid, why)
+        for sid, why in (failed or {}).items():
+            self.hold(sid, why, failed=True)
+        self._narrow_if_asked()
+
+    def hold(self, scene_id: str, why: str, failed: bool = False) -> None:
+        """#641's review (TD-3): `scene_id` was not drafted this run, so the
+        later scenes that depend on it wait on it as on a pending scene:
+        because it waits on another (`HELD`), or, with `failed`, for its own
+        failure (`FAILED`). A scene listed in `gate.PENDING_PATH` keeps that
+        row."""
+        self.waiting.setdefault(scene_id, {'scene_id': scene_id,
+                                           'command': FAILED if failed else HELD,
+                                           'reason': why})
+        self._narrow_if_asked()
+
+    def _narrow_if_asked(self) -> None:
+        if self._narrow_asked and self.waiting and self._loaded is None:
+            self._loaded = self._load()
+            self.narrow = self._loaded
 
     def _load(self) -> bool:
         from storyforge import ledger
@@ -516,30 +611,65 @@ class GateBlockers:
         for r in rows:
             if ledger.is_commitment(r) and r.get('status') != 'planned':
                 self.facts.setdefault((r.get('scene_id') or '').strip(), []).append(r)
+        self.registry = {r['id']: r for r in rows
+                         if r.get('id') and not ledger.is_commitment(r)}
+        from storyforge.elaborate import _read_csv
+        path = os.path.join(self.project_dir, _BRIEFS_PATH)
+        #: why there are no briefs to read ('' when there are)
+        self.no_briefs = ''
+        if not os.path.isfile(path):
+            self.no_briefs = f'there is no {_BRIEFS_PATH}'
+            self.briefs: dict[str, dict[str, str]] = {}
+            return True
+        try:
+            self.briefs = {(r.get('id') or '').strip(): r for r in _read_csv(path)}
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            log(f'WARNING: {_BRIEFS_PATH} could not be read ({e}): a scene '
+                f'without facts in the ledger holds back every later one.')
+            self.no_briefs = f'{_BRIEFS_PATH} could not be read'
+            self.briefs = {}
         return True
 
-    def of(self, scene_id: str) -> list[str]:
-        """The earlier pending scenes that stop `scene_id`, in reading order,
-        as `id: reason` (narrowed: with why it waits on each)."""
+    def _earlier(self, scene_id: str, exempt: bool = True) -> list[str]:
+        """The pending scenes before `scene_id`, in reading order (with
+        `exempt`, not those `keep_going` lets through)."""
         from storyforge import gate
         at = self.order.get(scene_id, 0)
-        earlier = sorted(
+        return sorted(
             (s for s, row in self.waiting.items()
              if s in self.order and s != scene_id and self.order[s] < at
-             and not (self.keep_going and row['command'] == gate.PROVISIONAL)),
+             and not (exempt and self.keep_going and row['command'] == gate.PROVISIONAL)),
             key=self.order.get)
+
+    def of(self, scene_id: str) -> list[Blocker]:
+        """The earlier pending scenes that stop `scene_id`, in reading order,
+        as `id: reason` (narrowed: with why it waits on each)."""
         out = []
-        for s in earlier:
+        for s in self._earlier(scene_id):
             line = f'{s}: {self.waiting[s]["reason"]}'
             if not self.narrow:
-                out.append(line)
+                out.append(Blocker(s, line))
                 continue
             if self._let_through(s):
                 continue
             why = self._waits(scene_id, s)
             if why:
-                out.append(f'{line} ({scene_id} waits on it: {why})')
+                out.append(Blocker(s, f'{line} ({scene_id} waits on it: {why})'))
         return out
+
+    def passed_over(self, scene_id: str,
+                    holding: list[Blocker] | None = None) -> list[Blocker]:
+        """The earlier scenes waiting on the gate that don't stop `scene_id`
+        (`holding`: `of(scene_id)`, when the caller has it), as `id:
+        reason`: `write` and `revise` go on past them and name them (#641).
+        A scene held this run because it waits (`HELD`) isn't one: the run
+        names it already."""
+        if holding is None:
+            holding = self.of(scene_id)
+        stopping = {b.scene_id for b in holding}
+        return [Blocker(s, f'{s}: {self.waiting[s]["reason"]}')
+                for s in self._earlier(scene_id, False)
+                if s not in stopping and self.waiting[s]['command'] != HELD]
 
     def _let_through(self, sid: str) -> bool:
         """Whether `sid`'s failed re-reading leaves its facts as its prose says."""
@@ -557,31 +687,98 @@ class GateBlockers:
             self._through[sid] = ok
         return self._through[sid]
 
+    def _sets_up(self, sid: str) -> set[str]:
+        """The registry facts `sid`'s brief sets up: its `_out` columns less
+        its `_in` ones (#641's review, C3)."""
+        brief = self.briefs.get(sid, {})
+        return _brief_ids(brief, _BRIEF_OUT) - _brief_ids(brief, _BRIEF_IN)
+
     def _waits(self, scene_id: str, sid: str) -> str:
         """Why `scene_id` waits on the earlier `sid` ('' when it doesn't)."""
         from storyforge import ledger
+        said = self._brief_says_it_waits(scene_id, sid)
+        if said:
+            return said
         theirs = self.facts.get(sid, [])
-        if not theirs:
-            return (f'{sid}\'s facts are not in the ledger, so what depends on it '
-                    f'can\'t be told')
         mine = [r for r in self.facts.get(scene_id, []) if r.get('status') == 'binding']
-        if not mine:
-            return (f'{scene_id} has no binding facts in the ledger to tell whether any '
-                    f'depends on {sid}')
+        if not (theirs and mine):
+            return self._stand_ins_wait(scene_id, sid, theirs, mine)
         if sid not in self._depending:
             self._depending[sid] = ledger.dependents(
                 self.rows, [r['id'] for r in theirs], self.order, names=self.names).scenes
         if scene_id not in self._depending[sid]:
             return ''
+        return self._pair(scene_id, theirs, mine) or f'a fact of {scene_id} depends on its facts'
+
+    def _brief_says_it_waits(self, scene_id: str, sid: str) -> str:
+        """Why `scene_id`'s brief says it depends on `sid` ('' when it
+        doesn't): checked first, whatever the ledger holds (CR-1)."""
+        brief = self.briefs.get(scene_id, {})
+        if sid in _brief_ids(brief, ('continuity_deps',)):
+            return f'its brief lists {sid} in continuity_deps'
+        shared = sorted(_brief_ids(brief, _BRIEF_IN) & self._sets_up(sid))
+        if shared:
+            return f'its brief needs {shared[0]}, which {sid}\'s brief sets up'
+        return ''
+
+    def _pair(self, scene_id: str, theirs: list[dict[str, str]],
+              mine: list[dict[str, str]], guess: bool = True) -> str:
+        """The first of `mine` that depends on one of `theirs`, said ('' if
+        none); `guess` as `ledger.dependents`'."""
+        from storyforge import ledger
         for f in theirs:
             if (f.get('resolves') or '').strip() == scene_id:
-                return f'its fact {f["id"]} ({_said(f)}) ends in {scene_id}'
+                return f'its {_label(f)} ({_said(f)}) ends in {scene_id}'
             for r in mine:
+                # a stand-in's links name registry ids, not `id@scene` (TD-1)
+                if f.get('_brief') and f['_brief'] in _brief_ids(r, ('depends_on', 'supersedes')):
+                    return f'{_label(r)} ({_said(r)}) links to its {_label(f)} ({_said(f)})'
                 if scene_id in ledger.dependents([f, r], [f['id']], self.order,
-                                                 names=self.names).scenes:
-                    return (f'fact {r["id"]} ({_said(r)}) depends on its fact '
-                            f'{f["id"]} ({_said(f)})')
-        return f'a fact of {scene_id} depends on its facts'
+                                                 names=self.names, guess=guess).scenes:
+                    return (f'{_label(r)} ({_said(r)}) depends on its {_label(f)} '
+                            f'({_said(f)})')
+        return ''
+
+    def _stand_ins_wait(self, scene_id: str, sid: str, theirs: list[dict[str, str]],
+                        mine: list[dict[str, str]]) -> str:
+        """#641: why `scene_id` waits on `sid` with their briefs' facts
+        standing in for the side with no commitments ('' when it doesn't;
+        when the briefs can't tell either, it waits, and the line says why)."""
+        needs = _brief_ids(self.briefs.get(scene_id, {}), _BRIEF_IN)
+        sets_up = self._sets_up(sid)
+        theirs = theirs or self._stand_ins(sid, sets_up)
+        if not theirs:
+            return (f'{sid}\'s facts are not in the ledger and '
+                    f'{self._brief_has(sid, sets_up, "sets up no new fact")}, so what '
+                    f'depends on it can\'t be told')
+        mine = mine or self._stand_ins(scene_id, needs)
+        if not mine:
+            return (f'{scene_id} has no binding facts in the ledger and '
+                    f'{self._brief_has(scene_id, needs, "names none it needs")}, to tell '
+                    f'whether any depends on {sid}')
+        return self._pair(scene_id, theirs, mine, guess=False)
+
+    def _brief_has(self, scene_id: str, ids: set[str], none: str) -> str:
+        """Why `scene_id`'s brief gives no facts to stand in (SF-5, T-7)."""
+        if self.no_briefs:
+            return self.no_briefs
+        if scene_id not in self.briefs:
+            return f'it has no row in {_BRIEFS_PATH}'
+        if not ids:
+            return f'its brief {none}'
+        return (f'its brief\'s {", ".join(sorted(ids))} '
+                f'{"is" if len(ids) == 1 else "are"} not in reference/commitments.csv')
+
+    def _stand_ins(self, scene_id: str, ids: set[str]) -> list[dict[str, str]]:
+        """The registry facts `ids` (a brief's), as facts of `scene_id`."""
+        return [dict(self.registry[i], id=f'{i}@{scene_id}', scene_id=scene_id,
+                     status='binding', resolves='', _brief=i)
+                for i in sorted(ids) if i in self.registry]
+
+
+def _label(row: dict[str, str]) -> str:
+    """How `GateBlockers` names a fact: its id, or a brief's (#641)."""
+    return f'brief fact {row["_brief"]}' if row.get('_brief') else f'fact {row["id"]}'
 
 
 def _said(row: dict[str, str], width: int = 60) -> str:
@@ -590,23 +787,71 @@ def _said(row: dict[str, str], width: int = 60) -> str:
     return '"' + (text if len(text) <= width else text[:width - 3] + '...') + '"'
 
 
-def _exit_if_gate_pending(project_dir: str, to_draft: list[str],
-                          keep_going: bool = False) -> None:
-    """Exit 1, before anything is spent, when a scene waiting on the gate
-    comes before the first scene to draft. One between scenes to draft
-    stops the run when drafting reaches it (`_run_direct_mode`). Drafting
-    the waiting scene itself is allowed: that is how it gets through."""
-    from storyforge import gate, ledger
-    order = ledger.scene_order(project_dir)
+def held_scenes(project_dir: str, to_draft: list[str],
+                keep_going: bool = False) -> dict[str, list[Blocker]]:
+    """The scenes of `to_draft` (in reading order) that wait on an earlier
+    scene waiting on the gate and not drafted in this run, or on one of
+    them held before it (#641: `GateBlockers` narrowed): scene id → the
+    lines saying why. A pending scene the run drafts doesn't hold anything
+    here: drafting it is how it gets through, and the run decides after it.
+    Read once (`GateBlockers.hold`). `status` asks it too.
+
+    Raises:
+        gate.GateError: `gate.PENDING_PATH` is malformed."""
+    blockers = GateBlockers(project_dir, keep_going=keep_going, narrow=True)
+    held: dict[str, list[Blocker]] = {}
+    drafting = set(to_draft)
+    for sid in to_draft:
+        lines = [b for b in blockers.of(sid) if b.scene_id not in drafting or b.scene_id in held]
+        if lines:
+            held[sid] = lines
+            blockers.hold(sid, _held_reason(lines))
+    return held
+
+
+def _held_up_front(project_dir: str, to_draft: list[str],
+                   keep_going: bool = False) -> dict[str, list[Blocker]]:
+    """`held_scenes`, before anything is spent. Exit 1 when every scene is
+    held, or `gate.PENDING_PATH` can't be read (ERROR)."""
+    from storyforge import gate
     try:
-        blocking = _gate_blockers(project_dir, min(to_draft, key=lambda s: order.get(s, 0)),
-                                  keep_going=keep_going)
+        held = held_scenes(project_dir, to_draft, keep_going=keep_going)
     except gate.GateError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
-    if blocking:
-        _log_blockers(blocking)
+    if held and len(held) == len(to_draft):
+        for sid, lines in held.items():
+            _log_held(sid, lines, 'ERROR')
+        log('Nothing to draft: every scene asked for waits on an earlier scene that did not '
+            'pass the gate. Fix its prose and run `storyforge check --pending` (or '
+            '`storyforge check <id>`), or redraft it with '
+            '`storyforge write --scenes <id> --force`.')
         sys.exit(1)
+    return held
+
+
+def _held_reason(lines: list[Blocker]) -> str:
+    """The reason a held scene carries in `GateBlockers` (#641)."""
+    return 'not drafted: it waits on ' + ', '.join(b.scene_id for b in lines)
+
+
+def _log_held(scene_id: str, lines: list[str], level: str = 'WARNING') -> None:
+    log(f'{level}: not drafting {scene_id}: it waits on {len(lines)} earlier scene(s) '
+        f'that did not pass the gate, so the ledger does not hold what it depends on:')
+    for line in lines:
+        log(f'  {line}')
+
+
+def log_passed_over(scene_id: str, past: list[str], doing: str = 'drafting') -> None:
+    """Name the earlier scenes waiting on the gate that `scene_id` goes on
+    past, with their findings (#641; `GateBlockers.passed_over`)."""
+    if not past:
+        return
+    from storyforge.gate import PENDING_PATH
+    log(f'WARNING: {doing} {scene_id} past {len(past)} earlier scene(s) waiting on the gate '
+        f'that it does not depend on (their findings are the author\'s; {PENDING_PATH}):')
+    for line in past:
+        log(f'  {line}')
 
 
 def _log_blockers(blocking: list[str]) -> None:
@@ -788,8 +1033,8 @@ def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] 
     """Re-gate the scenes pending a re-check (`gate.recheck_pending`: reading
     order, report and stop, under the cost threshold counting `spent_before`)
     and log the outcome. Returns the `gate.Recheck`, or None when nothing was
-    pending. A scene that fails stays listed, and `write`/`revise` won't
-    draft past it."""
+    pending. A scene that fails stays listed, and `write`/`revise` hold back
+    the later scenes that depend on it (`GateBlockers`, #641)."""
     from storyforge import gate
     if not gate.recheck_queue(project_dir, skip):
         return None
@@ -1417,7 +1662,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
                      write_mode, dry_run, prior_prose='none', budget=None,
                      scene_forecast: float = 0.0, draft_forecast: float = 0.0,
-                     keep_going: bool = False):
+                     keep_going: bool = False, held: dict[str, list[str]] | None = None):
     """Run direct/interactive mode. Returns a `DraftOutcome`: ``failed``
     names each scene not drafted and why, ``recheck_open`` each re-check
     that didn't pass or wasn't run (over the cost threshold) and is still in
@@ -1429,13 +1674,15 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
     At coaching ``full`` the run is gated (plan §3.2-3.3; Ben, 2026-10-30):
     each scene is gated after it is written (fix and re-check, up to
-    `gate.FIX_ROUNDS` times), and the loop stops, listing the rest as not
-    attempted, at anything that would
-    leave a later scene drafted from a ledger missing an earlier one's facts:
-    a bad reply (refused, cut off, unsafe, too short), a scene that doesn't
-    pass the gate (committed for the author and listed in ``gate.pending``),
-    or an earlier scene still in ``gate.pending`` (a failed re-check
-    included). After a scene passes and is committed, the later scenes that
+    `gate.FIX_ROUNDS` times). A failing scene stops only itself (#641): a
+    bad reply (refused, cut off, unsafe, too short) or a scene that doesn't
+    pass the gate (committed for the author and listed in ``gate.pending``)
+    goes into ``failed`` and the run goes on; a later scene that waits on
+    an earlier one in ``gate.pending`` (a failed re-check included) or on
+    one this run didn't draft (`GateBlockers` narrowed, with ``held``, the
+    scenes held up front, `_held_up_front`) isn't drafted and goes into
+    ``failed`` too; one that doesn't is drafted, with a WARNING naming the
+    earlier scenes it was drafted past and their findings. After a scene passes and is committed, the later scenes that
     depend on what it changed are re-checked (``budgeted_recheck``; Phase
     4), not those this run redrafts anyway, under the run's one cost budget:
     ``budget`` (``costs.RunBudget``) is what the run has spent, and each
@@ -1451,10 +1698,16 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     With `keep_going` (#556), a scene the gate still stops on only for the
     check's findings is committed provisionally (`_gate_drafted_scene`),
     listed in ``provisional``, and the run goes on (its re-checks too); an
-    earlier provisional scene doesn't stop it."""
+    earlier provisional scene doesn't hold a scene back."""
     drafted_count = 0
     total_words = 0
-    failed: list[str] = []
+    # the scenes held back, and why: they hold the scenes after them (#641)
+    held_why = {sid: _held_reason(lines) for sid, lines in (held or {}).items()}
+    # the scenes not drafted for their own failure: they hold them too, and
+    # are named as passed over when a scene doesn't depend on them (SF-4)
+    failed_why: dict[str, str] = {}
+    failed: list[str] = [f'{sid} ({why}; draft it once that passes the gate)'
+                         for sid, why in held_why.items()]
     uncommitted: list[str] = []
     provisional: list[str] = []
     recheck_failed: list[str] = []   # each re-check that didn't pass
@@ -1507,12 +1760,23 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 break
 
         if gated:
-            blocking = _gate_blockers(project_dir, scene_id, keep_going=keep_going)
-            if blocking:
-                _log_blockers(blocking)
-                stop(i, scene_id, f'{scene_id} (not attempted: an earlier scene did not '
-                                  f'pass the gate)')
+            try:
+                blockers = GateBlockers(project_dir, keep_going=keep_going, narrow=True,
+                                        held=held_why, failed=failed_why)
+                blocking = blockers.of(scene_id)
+                past = [] if blocking else blockers.passed_over(scene_id, blocking)
+            except gate.GateError as e:
+                log(f'ERROR: {e}')
+                stop(i, scene_id, f'{scene_id} (not attempted: {e})')
                 break
+            if blocking:
+                # #641: it waits; the scenes after it that don't are drafted
+                _log_held(scene_id, blocking)
+                held_why[scene_id] = _held_reason(blocking)
+                failed.append(f'{scene_id} ({held_why[scene_id]}; draft it once that passes '
+                              f'the gate)')
+                continue
+            log_passed_over(scene_id, past)
 
         # Any prose already on disk (`--force`, a scene named alone, or a
         # stub of 200 words or fewer) makes this a rewrite, that prose its
@@ -1614,11 +1878,11 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         if reason:
             log(f'ERROR: Not writing scene {scene_id}: {reason.rstrip(".")}.')
             log(f'See full output: {scene_log}')
-            if gated:
-                log('Stopping: later scenes would be drafted without its facts in the ledger.')
-                stop(i, scene_id, f'{scene_id} ({reason.rstrip(".")})')
-                break
             failed.append(f'{scene_id} ({reason.rstrip(".")})')
+            if gated:
+                # #641: it stops only itself; the scenes depending on it wait
+                failed_why[scene_id] = f'not drafted: {reason.rstrip(".")}'
+                log('Going on: the later scenes that depend on it are held back.')
             continue
 
         gate_problem = ''
@@ -1653,11 +1917,15 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             provisional.append(f'{scene_id} ({gate_problem})')
             gate_problem = ''
         if gate_problem:
+            # #641: it stops only itself; it is listed in gate.pending, so
+            # the later scenes depending on it wait (`GateBlockers`)
             log(f'ERROR: Scene {scene_id} did not pass the gate: {gate_problem}')
-            log('Stopping: later scenes would be drafted without its facts in the ledger.')
-            stop(i, scene_id, f'{scene_id} (did not pass the gate; its prose is kept and '
-                              f'listed in {gate_pending_path()})')
-            break
+            log('Going on: the later scenes that depend on it are held back.')
+            failed.append(f'{scene_id} (did not pass the gate; its prose is kept and '
+                          f'listed in {gate_pending_path()})')
+            # in gate.pending already, unless listing it failed (ERROR above)
+            failed_why[scene_id] = f'did not pass the gate: {gate_problem}'
+            continue
         if ok:
             drafted_count += 1
             total_words += wc

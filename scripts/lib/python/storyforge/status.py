@@ -48,7 +48,8 @@ ELABORATE_STAGE = {
 #: what status recommends for drafting (Storyforge's unattended drafting
 #: passes --keep-going, Ben 2026-11-04)
 WRITE_COMMAND = 'storyforge write --keep-going'
-#: what clears scenes waiting on the gate; `next.stage` 'check' while any wait
+#: what clears scenes waiting on the gate; `next.stage` 'check' while any
+#: wait, unless write can still draft a scene past them (#641)
 CHECK_COMMAND = 'storyforge check --pending'
 
 # Which reference CSV backs each structural rung.
@@ -263,6 +264,34 @@ def gate_waiting(project_dir: str) -> list[dict[str, str]]:
     return out
 
 
+def free_to_draft(project_dir: str) -> tuple[int, int, list[str]]:
+    """#641's review (CR-2, SF-3, T-1): (the scenes `write --keep-going`
+    would draft, how many of them no scene waiting on the gate holds back,
+    what couldn't be read), by write's own rule (`cmd_write.held_scenes`).
+    What those read logs is caught, not printed (`--json` is the output),
+    and returned for the verdict; anything that stops the reading is
+    returned too, with (0, 0)."""
+    import contextlib
+    import io
+    from storyforge import cmd_write
+    from storyforge.prompts import get_scene_status
+    from storyforge.scene_filter import build_scene_list
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(said):
+            to_draft = [s for s in build_scene_list(
+                os.path.join(project_dir, 'reference', 'scenes.csv'))
+                if get_scene_status(s, project_dir) not in
+                ('drafted', 'revised', 'final', 'unreadable')]
+            held = cmd_write.held_scenes(project_dir, to_draft, keep_going=True)
+    except (Exception, SystemExit) as e:   # status never fails on what it can't read
+        return 0, 0, [line.split('] ', 1)[-1] for line in said.getvalue().splitlines()] \
+            + [f'could not tell which scenes write can draft: {e or type(e).__name__}']
+    notes = [line.split('] ', 1)[-1] for line in said.getvalue().splitlines()
+             if 'WARNING' in line or 'ERROR' in line]
+    return len(to_draft), len(to_draft) - len(held), notes
+
+
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
     """Compose the full next-step verdict. Deterministic, read-only."""
     ladder = ladder_states(project_dir, medium)
@@ -328,21 +357,45 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
 
     nxt, then = _recommend(phase)
     # #556's review: scenes waiting on the gate (a provisional commit from
-    # `write --keep-going` among them) come before the next rung
+    # `write --keep-going` among them) are blockers, and come before the
+    # next rung, except while write can draft a scene (#641): it drafts past
+    # them, holding back only the scenes that depend on one, so drafting
+    # stays next and the check comes after it. When every scene left to
+    # draft is held, write would draft nothing: the check comes first
+    # (#641's review, CR-2)
     waiting = gate_waiting(project_dir)
     for row in waiting:
         blockers.append({'source': 'gate', 'level': -1,
                          'detail': f"{row['scene_id']} ({row['command']}): {row['reason']}"})
     if waiting:
         provisional = sum(r['command'] == 'provisional' for r in waiting)
-        then = nxt
-        # its own stage (TD-6): forge routes on next.stage, and the phase's
-        # stage (voice, draft) would send it to that work instead
-        nxt = {'stage': 'check', 'action': 'Clear the scenes waiting on the gate',
-               'command': CHECK_COMMAND,
-               'reason': (f'{len(waiting)} scene(s) in working/gate-pending.csv'
-                          + (f', {provisional} committed provisionally' if provisional else '')
-                          + ': fix them (or `storyforge check --accept`), then check')}
+        listed = (f'{len(waiting)} scene(s) in working/gate-pending.csv'
+                  + (f', {provisional} committed provisionally' if provisional else ''))
+        # its own stage (TD-6): forge routes on next.stage, and any other
+        # next stage (voice, evaluate, ...) would send it to that work
+        # instead; only draft keeps `next`, while write can draft (#641)
+        check = {'stage': 'check', 'action': 'Clear the scenes waiting on the gate',
+                 'command': CHECK_COMMAND,
+                 'reason': f'{listed}: fix them (or `storyforge check --accept`), then check'}
+        left, free, notes = (free_to_draft(project_dir) if nxt['stage'] == 'draft'
+                             else (0, 0, []))
+        for note in notes:   # what couldn't be read is said, not passed over
+            blockers.append({'source': 'gate', 'level': -1, 'detail': note})
+        if nxt['stage'] == 'draft' and (free or not left):
+            nxt = dict(nxt, reason=(f'{nxt["reason"]}; {listed} (the gate blockers): write '
+                                    f'drafts past them, holding back only the scenes that '
+                                    f'depend on one'
+                                    + (f' ({free} of {left} left to draft can be drafted '
+                                       f'now)' if left else
+                                       ' (could not tell which scenes it can draft'
+                                       + ('; see the blockers)' if notes else ')'))))
+            then = check
+        else:
+            if nxt['stage'] == 'draft':
+                check = dict(check, reason=(f'{check["reason"]}: every one of the {left} '
+                                            f'scene(s) left to draft waits on one of them, '
+                                            f'so write would draft nothing'))
+            then, nxt = nxt, check
     return {
         'phase': phase,
         'phase_declared': declared,

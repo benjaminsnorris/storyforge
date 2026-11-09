@@ -122,7 +122,10 @@ class TestNarrowed:
         assert line.startswith(f'{EARLIER}: staging ({TARGET} waits on it: fact kael-lamp-out')
 
     def test_one_whose_facts_are_not_in_the_ledger_holds_every_later_scene(self, git_book):
-        """Nothing to tell what depends on it; its prose's facts are unknown."""
+        """Nothing to tell what depends on it; its prose's facts are unknown,
+        and its brief sets up none (#641: with one, the brief's stand in)."""
+        from .test_gate_no_lock import set_brief
+        set_brief(git_book, EARLIER, knowledge_out='')
         _ledger(git_book, PELL)
         _record_earlier_prose(git_book)
         gate.mark_pending(git_book, EARLIER, gate.RECHECK_FAILED, 'staging')
@@ -191,5 +194,5 @@ class TestRedraft:
     def test_one_it_depends_on_holds_it(self, project_dir):
         _ledger(project_dir, KAEL, KAEL_LATER)
         gate.mark_pending(project_dir, EARLIER, 'redraft', 'a contradiction')
-        assert 'earlier scene(s) wait on the gate: act1-sc01' in \
-            cmd_revise._leaning(project_dir, TARGET)
+        assert 'earlier scene(s) that did not pass the gate or were not redrafted: ' \
+            'act1-sc01' in cmd_revise._leaning(project_dir, TARGET)
