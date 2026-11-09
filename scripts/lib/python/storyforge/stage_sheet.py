@@ -661,8 +661,9 @@ def parse(text: str) -> tuple[list[str], list[dict], list[dict]]:
 
 
 def max_tokens(prose: str) -> int:
-    """Room for a dense scene's events: about one per 15 words, 60 tokens each."""
-    return min(32000, 4000 + len(prose.split()) * 4)
+    """Room for a dense scene's events (about one per ten words, 60 tokens
+    each; `api` adds its thinking allowance on top)."""
+    return min(32000, 6000 + len(prose.split()) * 6)
 
 
 def resolve_model(model: str | None = None) -> str:
@@ -918,6 +919,13 @@ def _scene_meta(project_dir: str, scene_id: str) -> tuple[str, str]:
     return (row.get('pov') or '').strip(), (row.get('time_of_day') or '').strip()
 
 
+def _overlap(a: str, b: str) -> bool:
+    """Whether two quotes are on the same words (one inside the other)."""
+    from storyforge.quotes import normalize
+    x, y = normalize(a), normalize(b)
+    return bool(x and y and (x in y or y in x))
+
+
 def check_stage_sheet(project_dir: str, scene_id: str, *, prose: str | None = None,
                       model: str | None = None, log_file: str = '',
                       carry: bool = True, save: bool = False) -> StageResult:
@@ -980,6 +988,8 @@ def check_stage_sheet(project_dir: str, scene_id: str, *, prose: str | None = No
     if split:
         result.notes.append(f'{split} question(s) got split answers: not findings')
     for q, why in no:
+        if any(_overlap(q.quote, f.scene_quote) for f in result.findings):
+            continue   # the code already found this slip, in these words
         result.findings.append(Finding(
             kind='contradiction', code=BLOCKING_CODE, scene_quote=q.quote,
             established_scene=scene_id, established_quote=q.quote, fact_id='',

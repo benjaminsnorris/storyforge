@@ -473,6 +473,16 @@ class TestQuestions:
         assert '- Priam: posture: sitting' in asked[0]
         assert 'independent asking 2' in asked[1] and 'independent asking' not in asked[0]
 
+    def test_a_question_on_a_slip_the_code_found_is_not_a_second_finding(self, project_dir):
+        events = HARBOUR_EVENTS[:3]
+        q = {'quote': 'He waved with his free hand', 'question': 'Can Tom wave with a free hand?'}
+        fake = _fake([{'cast': [], 'events': events, 'questions': [q]}],
+                     answers=lambda a, n: [{'n': 1, 'answer': 'no', 'why': 'hands full'}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=HARBOUR, model='m', carry=False)
+        assert [f.scene_quote for f in r.findings] == ['He waved with his free hand']
+        assert '(contradiction, stage sheet)' in r.findings[0].explanation
+
     def test_answers_must_cover_every_question_once(self):
         with pytest.raises(ValueError, match='exactly'):
             stage_sheet.parse_answers(json.dumps({'answers': [
