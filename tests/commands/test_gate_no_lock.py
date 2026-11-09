@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from storyforge import cmd_check, cmd_revise, cmd_write, gate
+from storyforge import cmd_check, cmd_revise, cmd_write, gate, status
 
 from .test_cmd_check import _fake_gate, _finding
 from .test_cmd_check import project  # noqa: F401  (fixture)
@@ -287,6 +287,59 @@ class TestHeldState:
         assert held['act2-sc03'][0].scene_id == 'act1-sc02'   # behind a held scene
 
 
+def _left_to_draft(project_dir: str, *scenes: str) -> None:
+    """Mark every scene drafted in scenes.csv but `scenes`."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    at = lines[0].split('|').index('status')
+    for n, line in enumerate(lines[1:], 1):
+        cells = line.split('|')
+        cells[at] = 'briefed' if cells[0] in scenes else 'drafted'
+        lines[n] = '|'.join(cells)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
+class TestStatus:
+    """CR-2, SF-3, T-1, C5: status routes to the check when write would
+    draft nothing, instead of looping on write."""
+
+    @pytest.fixture(autouse=True)
+    def _solid(self, monkeypatch):
+        monkeypatch.setattr(status, 'ladder_states', lambda pd, medium='novel': [
+            {'level': lvl, 'name': name, 'state': 'solid', 'detail': ''}
+            for lvl, name in status.LEVEL_NAMES.items()])
+
+    def test_every_scene_left_to_draft_held_puts_the_check_first(self, project_dir):
+        _left_to_draft(project_dir, 'act1-sc02')
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        v = status.build_status(project_dir)
+        assert (v['next']['stage'], v['next']['command']) == ('check', status.CHECK_COMMAND)
+        assert 'every one of the 1 scene(s) left to draft waits on one of them' \
+            in v['next']['reason']
+        assert v['then']['stage'] == 'draft'
+
+    def test_a_scene_free_to_draft_keeps_drafting_next(self, project_dir):
+        _left_to_draft(project_dir, 'act1-sc02', INDEPENDENT)
+        _independent(project_dir)
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        v = status.build_status(project_dir)
+        assert (v['next']['stage'], v['next']['command']) == ('draft', status.WRITE_COMMAND)
+        assert '(1 of 2 left to draft can be drafted now)' in v['next']['reason']
+        assert v['then']['stage'] == 'check'
+
+    def test_what_it_reads_is_not_printed(self, project_dir, capsys):
+        """`status --json` prints the verdict alone: GateBlockers' WARNINGs
+        become blockers."""
+        _left_to_draft(project_dir, 'act1-sc02')
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        gate.mark_pending(project_dir, 'gone-scene', 'draft', 'old')
+        v = status.build_status(project_dir)
+        assert capsys.readouterr().out == ''
+        assert any('no longer scenes: gone-scene' in b['detail'] for b in v['blockers'])
+
+
 @pytest.mark.real_gate
 class TestWrite:
     """The issue's acceptance test: a book with one failing early scene can
@@ -349,6 +402,7 @@ class TestWrite:
         assert e.value.code == 1
         out = capsys.readouterr().out
         assert 'ERROR: not drafting act1-sc02' in out and 'Nothing to draft' in out
+        assert 'run `storyforge check --pending`' in out   # C5: what clears it
 
 
 class TestCheck:
