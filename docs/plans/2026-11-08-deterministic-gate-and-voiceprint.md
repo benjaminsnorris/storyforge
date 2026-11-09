@@ -715,11 +715,18 @@ at a fraction of the cost.
    promises become advisory (A3, last bullet). Blocking still blocks,
    through today's `blocking.py` for now. These are mostly flags and gate
    rules.
-2. **The stage sheet (A4):** the writer keeps it in sessions, extraction
-   labels transitions, code checks them. Measure on the blocking set
-   (Part E) before retiring the whole-scene read.
+2. **The stage sheet (A4):** extraction labels transitions and code checks
+   them (#647), measured on the blocking set (#646) before the whole-scene
+   read is retired. #647 also fixes the sheet's file format. The writer
+   keeping the sheet while drafting (prevention) needs sessions, so it lands
+   with them in phase 6 (#655), and code compares the writer's sheet with
+   the extracted one.
 3. **Typed state and A2 checks:** knowledge and life-and-death first, then
-   possession, place, time and injury. Measure on E4 and E8.
+   possession, place, time, injury, names, and geography and sky. Two
+   prerequisites: a `scenes.csv` column marking memory, dream, vision and
+   ghost scenes, and a world table (directions, light, distances) shared
+   with the stage sheet. Measure on E4 and E8 under #645's frozen-suite
+   rules.
 4. **The A3 question layer** replaces the open checker for the facts A2
    can't cover. The open checker stays behind a flag until the evals say
    it can go.
@@ -754,7 +761,7 @@ at a fraction of the cost.
 | 5 | #652 | the author voice repo (B0, B1) |
 | 5 | #653 | `score --voice` (B6) |
 | 6 | #654 | fiction calibration rounds (B5) |
-| 6 | #655 | long writing sessions (C, D7) |
+| 6 | #655 | long writing sessions (C, D7), and the writer's stage sheet (A4 prevention) |
 | 7 | #656 | voice stage after the synopsis (D5) |
 | 7 | #658 | adaptations enter at the scene map (D8) |
 | — | #659 | the voice suite (Part E) |
