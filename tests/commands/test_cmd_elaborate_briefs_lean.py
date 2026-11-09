@@ -48,12 +48,14 @@ def novel(project_dir, monkeypatch, mock_git, mock_costs):
 
 
 def _run(mock_api, reply, *extra):
+    """Run the briefs stage on `reply`; its exit code (0 when it returns)."""
     mock_api.set_response_fn(lambda prompt: _hone_reply(prompt)
                              if 'match no registry id' in prompt else reply)
     try:
         main(['--stage', 'briefs', *extra])
-    except SystemExit:
-        pass
+    except SystemExit as e:
+        return e.code or 0
+    return 0
 
 
 def _brief(proj, sid=SCENE):
@@ -194,3 +196,122 @@ class TestMustBeatsEndToEnd:
         [line] = gate._brief_lines(novel, SCENE)
         assert line.text == 'The village was never on any map I drew'
         assert gate._must_beats(_brief(novel))['key_dialogue'][0].raw == self.MUST_LINE
+
+
+def _drop_brief_row(proj, sid=SCENE):
+    path = os.path.join(proj, 'reference', 'scene-briefs.csv')
+    with open(path, encoding='utf-8') as f:
+        lines = [ln for ln in f.read().split('\n') if not ln.startswith(sid + '|')]
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+
+class TestWhatTheWriterKeeps:
+    """#644's review: the writer keeps only the columns the prompt asks for,
+    a new row is guarded like an existing one, and what a regeneration keeps
+    that the reply didn't write is said."""
+
+    def test_a_fact_only_run_exits_cleanly(self, novel, mock_api, capsys):
+        """T5: the run itself succeeds, apart from what the fixture already
+        fails validation on."""
+        code = _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
+        out = capsys.readouterr().out
+        assert 'Traceback' not in out
+        assert code in (0, 1)
+        blocking = [ln for ln in out.splitlines() if '[blocking]' in ln]
+        # the fixture's own malformed value_shift, nothing the new brief added
+        assert blocking and all('act2-sc01 | value_shift' in ln for ln in blocking)
+        assert 'Validation found 1 blocking' in out
+
+    def test_a_must_the_model_adds_to_a_new_row_is_dropped(self, novel, mock_api, capsys):
+        """T2: a mapped scene with no brief row yet takes the new-row branch;
+        a `must:` item the model invents there is not the author's."""
+        _drop_brief_row(novel)
+        assert SCENE not in _read_csv_as_map(
+            os.path.join(novel, 'reference', 'scene-briefs.csv'))
+        _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS.replace(
+            'Kael pockets the stub', 'must: Kael pockets the stub')))
+        row = _brief(novel)
+        assert 'must:' not in row['key_actions']
+        assert row['key_actions'].startswith('Kael opens the sealed drawer')
+        out = capsys.readouterr().out
+        assert 'left out must: item(s) the author did not write: must: Kael pockets' in out
+
+    def test_columns_the_prompt_does_not_ask_for_are_not_written(self, novel, mock_api,
+                                                                  capsys):
+        """TD-3: an allowlist, so motif_details (staging prose) and a graphic
+        novel's columns in a drifting reply are dropped too."""
+        header = BRIEFS_OUTPUT_HEADER + '|motif_details|page_layout'
+        _run(mock_api, _reply(header, FACTS + '|ink stains the map|splash'))
+        row = _brief(novel)
+        assert row.get('motif_details', '') == '' and row.get('page_layout', '') == ''
+        out = capsys.readouterr().out
+        assert "left out the reply's motif_details: the author's notes" in out
+        assert "left out the reply's page_layout: not columns the briefs stage writes" in out
+
+    def test_an_old_header_reply_with_empty_notes_says_nothing(self, novel, mock_api,
+                                                                capsys):
+        """T7: silence means there was nothing to drop."""
+        cells = dict(zip(BRIEFS_OUTPUT_HEADER.split('|'), FACTS.split('|')))
+        _run(mock_api, _reply(OLD_HEADER, '|'.join(cells.get(c, '')
+                                                    for c in OLD_HEADER.split('|'))))
+        assert "left out the reply's" not in capsys.readouterr().out
+
+    def test_filled_author_notes_kept_by_a_regeneration_are_named(self, novel, mock_api,
+                                                                  capsys):
+        """SF-1, CR-4: an existing book's notes may be model staging from the
+        old stage; a regeneration keeps them and says so, per scene."""
+        path = os.path.join(novel, 'reference', 'scene-briefs.csv')
+        _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
+        assert 'kept its' not in capsys.readouterr().out
+        update_csv_field(path, SCENE, 'subtext', 'let the list grow, and never call it pride')
+        update_csv_field(path, SCENE, 'emotions', 'calm;fear')
+        _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
+        out = capsys.readouterr().out
+        assert (f'WARNING: {SCENE}: kept its subtext, emotions as the author\'s notes; if an '
+                f'earlier briefs stage wrote them') in out
+        assert _brief(novel)['subtext'] == 'let the list grow, and never call it pride'
+
+    def test_a_craft_note_the_reply_leaves_empty_is_kept_and_said(self, novel, mock_api,
+                                                                  capsys):
+        """SF-6: an empty cell never clears an earlier value; the run says
+        which it kept."""
+        path = os.path.join(novel, 'reference', 'scene-briefs.csv')
+        _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
+        update_csv_field(path, SCENE, 'crisis', 'Burn it or keep it')
+        capsys.readouterr()
+        _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
+        out = capsys.readouterr().out
+        assert (f'NOTE: {SCENE}: the reply left crisis empty; the brief\'s earlier value '
+                f'is kept') in out
+        assert _brief(novel)['crisis'] == 'Burn it or keep it'
+
+
+class TestTheSystemPrompt:
+    """#644's review CR-1: live runs always carry the shared context, whose
+    craft engine and scoring rubrics say "every scene must turn"; the note
+    stages leave both out."""
+
+    def test_the_briefs_stage_gets_no_craft_engine(self, novel, mock_api):
+        from storyforge import common
+        common.clear_shared_context_cache()
+        _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
+        call = next(c for c in mock_api.calls if 'briefs-csv' in (c.get('prompt') or ''))
+        system = ''.join(b['text'] for b in call.get('system') or [])
+        assert system, 'the stage call carries a shared context'
+        assert '=== Craft Engine ===' not in system
+        assert '=== Scoring Rubrics ===' not in system
+        assert 'Every Scene Must Turn' not in system
+        assert '=== Character Bible ===' in system or '=== Character Registry ===' in system
+
+    def test_the_shared_context_keeps_it_by_default(self, project_dir):
+        from storyforge import common
+        common.clear_shared_context_cache()
+        labels = [b['text'].split('\n', 1)[0]
+                  for b in common.build_shared_context(project_dir, 'm')]
+        assert '=== Craft Engine ===' in labels and '=== Scoring Rubrics ===' in labels
+        without = [b['text'].split('\n', 1)[0]
+                   for b in common.build_shared_context(project_dir, 'm', craft_rules=False)]
+        assert '=== Craft Engine ===' not in without
+        assert '=== Scoring Rubrics ===' not in without
+        assert '=== AI-Tell Vocabulary ===' in without

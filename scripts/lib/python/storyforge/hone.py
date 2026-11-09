@@ -2133,11 +2133,11 @@ def hone_briefs(
 _GAPS_REQUIRED = {
     'briefed': [
         'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-        'goal', 'conflict', 'outcome', 'crisis', 'decision',
+        'goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions',
     ],
     'drafted': [
         'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-        'goal', 'conflict', 'outcome', 'crisis', 'decision',
+        'goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions',
     ],
 }
 
@@ -2529,7 +2529,8 @@ def craft_advisory_tag(issue_type: str) -> str:
 
 def _report_craft(issues: list[dict]) -> list[dict]:
     """Log the craft-framework issues among `issues` as reported, not
-    rewritten, and return the rest: what hone may rewrite. Both rewriting
+    rewritten, and the issues on the author's notes (`_report_author_notes`),
+    and return the rest: what hone may rewrite. Both rewriting
     paths (``hone_briefs``, ``hone_intent``) go through it, so a detector
     added to `CRAFT_ADVISORY_ISSUES` is never rewritten (#643's review
     TD-5). An evaluation finding the author sends is issue `evaluation`,
@@ -2540,7 +2541,23 @@ def _report_craft(issues: list[dict]) -> list[dict]:
             f'(advisory): ' + ', '.join(f"{i['scene_id']}.{i['field']} ({i['issue']})"
                                        for i in craft[:10])
             + (' ...' if len(craft) > 10 else ''))
-    return [i for i in issues if i['issue'] not in CRAFT_ADVISORY_ISSUES]
+    return _report_author_notes([i for i in issues if i['issue'] not in CRAFT_ADVISORY_ISSUES])
+
+
+def _report_author_notes(issues: list[dict]) -> list[dict]:
+    """Log the issues on the author's note columns (`elaborate.AUTHOR_NOTE_COLUMNS`:
+    emotions, subtext, key_dialogue...) as reported, not rewritten, and
+    return the rest (#644's review TD-2: those columns are filled by hand,
+    so a detector may say an emotions list is long, but no model rewrites
+    it). An evaluation finding the author sends is still rewritten."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    notes = [i for i in issues
+             if i.get('field') in AUTHOR_NOTE_COLUMNS and i['issue'] != 'evaluation']
+    if notes:
+        log(f"  {len(notes)} finding(s) on the author's notes reported, not rewritten (#644): "
+            + ', '.join(f"{i['scene_id']}.{i['field']} ({i['issue']})" for i in notes[:10])
+            + (' ...' if len(notes) > 10 else ''))
+    return [i for i in issues if i not in notes]
 
 
 def detect_intent_issues(

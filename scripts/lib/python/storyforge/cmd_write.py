@@ -179,6 +179,9 @@ def main(argv=None):
             f'already drafted ({skipped} skipped).')
         return
 
+    if use_briefs:
+        _note_unmarked_dialogue(project_dir, pending_ids)
+
     # A scene that didn't pass the gate has no facts in the ledger: a scene
     # that depends on it would be drafted from an incomplete ledger, so it
     # waits; the others are drafted (#641)
@@ -405,6 +408,27 @@ class DraftOutcome(NamedTuple):
     uncommitted: list = []
     #: each scene `--keep-going` committed provisionally, and why (#556)
     provisional: list = []
+
+def _note_unmarked_dialogue(project_dir: str, scene_ids: list[str]) -> None:
+    """One NOTE naming the scenes to draft whose key_dialogue has lines not
+    marked `must:` (#644's review SF-4): drafting used to require every
+    line; since #644 only a `must:` line is, and the others are notes the
+    draft may leave out."""
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.must import items
+    path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    if not os.path.isfile(path):
+        return
+    briefs = _read_csv_as_map(path)
+    unmarked = [sid for sid in scene_ids
+                if any(i.text and not i.must
+                       for i in items(briefs.get(sid, {}).get('key_dialogue') or ''))]
+    if unmarked:
+        log(f'NOTE: key_dialogue lines not marked must: are notes, not required (#644), in '
+            f'{len(unmarked)} scene(s): {", ".join(unmarked[:10])}'
+            + (' ...' if len(unmarked) > 10 else '')
+            + '. Start a line with must: to require it word for word.')
+
 
 def _check_reference_docs(project_dir: str, use_briefs: bool, coaching: str,
                           dry_run: bool) -> None:

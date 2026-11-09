@@ -197,6 +197,7 @@ GRAPHIC_NOVEL = {   # key_dialogue is matched verbatim in the panel script
 }
 NO_PROMPT_WRITES = {   # data, checks, scoring, or source text shown as context
     'checker.py', 'brief_names.py', 'cmd_check.py', 'cmd_elaborate.py', 'cmd_enrich.py',
+    'cmd_score.py', 'cmd_write.py',
     'elaborate.py', 'gate.py',
     'must.py',
     'prompts_source.py', 'schema.py', 'scoring_boundary.py', 'scoring.py',
@@ -272,6 +273,9 @@ def test_no_label_no_note(project_dir):
 
 def test_the_revision_prompt_says_what_a_label_means(project_dir):
     from storyforge.revision import build_revision_prompt
+    # #644: only a must: line is protected, so the labelled line is marked
+    _set_dialogue(project_dir, 'act1-sc01',
+                  'must: Dorren privately: "Acceptable is not the same as explained"')
     p = build_revision_prompt('prose-tightening', 'Tighten prose', 'act1-sc01', project_dir)
     section = p.split('## Intent-Beat Protection', 1)[1]
     assert LABEL_READING in section.split('**act1-sc01:**', 1)[0]

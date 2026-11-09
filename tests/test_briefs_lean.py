@@ -26,7 +26,8 @@ def _set_cols(project_dir, filename, scene_id, **cols):
         cells = line.split('|')
         if cells[0] == scene_id:
             for col, value in cols.items():
-                cells[header.index(col)] = value
+                if col in header:     # motif_details isn't in the fixture's header
+                    cells[header.index(col)] = value
             lines[i] = '|'.join(cells)
     with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
@@ -72,7 +73,8 @@ def test_value_shifts_and_turns_are_notes_not_rules(project_dir, build):
 
 def test_the_briefs_prompt_names_the_authors_notes_as_not_its_own(project_dir):
     prompt = pe.build_briefs_prompt(project_dir, PLUGIN)
-    assert ('Not yours to write: key_dialogue, subtext, emotions, motifs. They are the '
+    assert ('Not yours to write: key_dialogue, subtext, emotions, motifs, motif_details. '
+            'They are the '
             "author's optional notes") in prompt
     assert 'A motif is noticed in the draft and recorded after' in prompt
     assert 'optional notes. Fill one only when the scene plainly has it' in prompt
@@ -102,7 +104,8 @@ class TestDraftingAFactOnlyBrief:
         _set_cols(project_dir, 'scene-briefs.csv', 'act1-sc02', outcome='', key_actions='',
                   knowledge_out='')
         p = build_scene_prompt_from_briefs('act1-sc02', project_dir, PLUGIN, 'full')
-        assert 'The brief is a plan of what happens.\nIts other fields' in p
+        assert ('The brief is a plan of what happens. It lists no events (key_actions is '
+                'empty)') in p
         assert 'Hold to its facts' not in p
 
     def test_scene_endings_are_not_a_template(self, project_dir):
@@ -144,9 +147,121 @@ class TestDraftingAFactOnlyBrief:
         assert '  - "It was there forty years ago"' in notes
 
 
-def test_a_brief_without_author_notes_is_complete(project_dir):
-    """Structural completeness doesn't count the author's optional notes."""
+def test_a_fact_only_brief_is_complete(project_dir):
+    """#644's review T1, CR-5, TD-5, C3: structural completeness counts the
+    brief's facts. A brief the briefs stage writes (no author notes, no craft
+    notes) has no "Missing required fields" finding; its empty craft notes
+    are one advisory finding that carries no weight."""
     from storyforge import structural
+    from storyforge.elaborate import BRIEF_FACT_COLUMNS, _read_csv_as_map
+    _fact_only(project_dir)
+    ref = os.path.join(project_dir, 'reference')
+    maps = [_read_csv_as_map(os.path.join(ref, f))
+            for f in ('scenes.csv', 'scene-intent.csv', 'scene-briefs.csv')]
+    result = structural.score_completeness(*maps)
+    mine = [f for f in result['findings'] if f['scene_id'] == 'act1-sc02']
+    assert not [f for f in mine if f['message'].startswith('Missing required fields')]
+    [craft] = [f for f in mine if f.get('advisory')]
+    assert craft['severity'] == 'minor'
+    assert set(craft['fields']) >= {'goal', 'conflict', 'crisis', 'decision', 'value_shift'}
     for col in AUTHOR_NOTE_COLUMNS:
-        assert col not in structural.ENRICHMENT_FIELDS
-        assert col not in structural.REQUIRED_FIELDS
+        assert col not in structural.ENRICHMENT_FIELDS + structural.REQUIRED_FIELDS
+    assert set(BRIEF_FACT_COLUMNS) <= set(structural.REQUIRED_FIELDS)
+    # an empty key_actions is a missing required field
+    _set_cols(project_dir, 'scene-briefs.csv', 'act1-sc02', key_actions='')
+    maps[2] = _read_csv_as_map(os.path.join(ref, 'scene-briefs.csv'))
+    missing = [f for f in structural.score_completeness(*maps)['findings']
+               if f['scene_id'] == 'act1-sc02' and f['message'].startswith('Missing required')]
+    assert missing[0]['fields'] == ['key_actions']
+
+
+def test_the_outcome_is_worded_for_a_scene_without_a_goal(project_dir):
+    """#644's review CR-6 (and #643's CR-3): outcome stays required, and its
+    values are defined against a goal; a scene with none is judged by what
+    the POV character is trying to do."""
+    prompt = pe.build_briefs_prompt(project_dir, PLUGIN)
+    assert ('in a scene with no goal, against what the POV character is trying to do or '
+            'hoping for, and never fill goal just to judge the outcome by it') in prompt
+
+
+def test_gap_fill_may_leave_a_craft_note_empty(project_dir):
+    """#644's review CR-5: gap-fill no longer forces a value into a craft
+    note the scene doesn't have; a fact field gets no such allowance."""
+    p = pe.build_gap_fill_prompt('act1-sc01', 'g', ['value_shift', 'crisis', 'location'],
+                                 project_dir, os.path.join(project_dir, 'scenes'))
+    assert ('value_shift, crisis: craft-framework notes, not requirements. Fill one only '
+            'when the scene plainly has it; otherwise leave its cell empty') in p
+    p = pe.build_gap_fill_prompt('act1-sc01', 'g', ['location'], project_dir,
+                                 os.path.join(project_dir, 'scenes'))
+    assert 'craft-framework notes' not in p
+
+
+def test_brief_fidelity_scores_a_brief_without_a_goal(project_dir):
+    """#644's review TD-6: goal is optional, so a fact-only brief is still
+    scored; only a brief with no fact and no goal is skipped."""
+    from storyforge.scoring import build_fidelity_prompt, has_brief_facts
+    _fact_only(project_dir)
+    assert build_fidelity_prompt('act1-sc02', project_dir, PLUGIN)
+    assert has_brief_facts({'key_actions': 'x'}) and has_brief_facts({'goal': 'g'})
+    assert not has_brief_facts({'subtext': 's', 'emotions': 'e'})
+
+
+# -- no model rewrites the author's notes (#644's review TD-2, CR-3, SF-3/4) ---
+
+def test_hone_reports_an_authors_emotions_without_rewriting_them(project_dir, monkeypatch,
+                                                                 capsys):
+    """act1-sc02's four emotion beats are over hone's limit; they are the
+    author's, so hone says so and no model call rewrites them."""
+    from storyforge import api
+    from storyforge.hone import hone_briefs
+    calls = []
+    monkeypatch.setattr(api, 'invoke_to_file', lambda prompt, *a, **kw: calls.append(prompt))
+    ref = os.path.join(project_dir, 'reference')
+    path = os.path.join(ref, 'scene-briefs.csv')
+    hone_briefs(ref, project_dir, scene_ids=['act1-sc02'], model='m',
+                log_dir=os.path.join(project_dir, 'working', 'logs'), coaching_level='full')
+    out = capsys.readouterr().out
+    assert "finding(s) on the author's notes reported, not rewritten (#644)" in out
+    assert 'act1-sc02.emotions (overspecified)' in out
+    from storyforge.elaborate import _read_csv_as_map
+    assert (_read_csv_as_map(path)['act1-sc02']['emotions']
+            == _read_csv_as_map(os.path.join(PLUGIN, 'tests', 'fixtures', 'test-project',
+                                             'reference', 'scene-briefs.csv'))
+            ['act1-sc02']['emotions'])
+    assert not any('**emotions**' in c for c in calls)     # no fix block for it
+
+
+def test_report_author_notes_keeps_an_evaluation_finding():
+    from storyforge.hone import _report_author_notes
+    issues = [{'scene_id': 's', 'field': 'subtext', 'issue': 'verbose'},
+              {'scene_id': 's', 'field': 'subtext', 'issue': 'evaluation'},
+              {'scene_id': 's', 'field': 'key_actions', 'issue': 'verbose'}]
+    assert [i['issue'] for i in _report_author_notes(issues)] == ['evaluation', 'verbose']
+
+
+def test_revision_protects_only_a_must_line(project_dir):
+    """SF-4: revision agrees with drafting: an unmarked key_dialogue line
+    is a note, not a beat that MUST survive."""
+    from storyforge.revision import build_revision_prompt
+    p = build_revision_prompt('prose-tightening', 'Tighten prose', 'act1-sc02', project_dir)
+    section = p.split('## Intent-Beat Protection', 1)[1].split('\n## ', 1)[0]
+    assert 'forty years ago' not in section
+    assert '**key_actions:** Cross-references maps' in section
+    _set_cols(project_dir, 'scene-briefs.csv', 'act1-sc02',
+              key_dialogue='must: "There is no note";"It was there forty years ago"')
+    p = build_revision_prompt('prose-tightening', 'Tighten prose', 'act1-sc02', project_dir)
+    section = p.split('## Intent-Beat Protection', 1)[1].split('\n## ', 1)[0]
+    assert ('**key_dialogue (marked must:, word for word):** must: "There is no note"'
+            in section)
+    assert 'forty years ago' not in section
+
+
+def test_write_notes_unmarked_dialogue_once(project_dir, capsys):
+    from storyforge.cmd_write import _note_unmarked_dialogue
+    _note_unmarked_dialogue(project_dir, ['act1-sc01', 'act1-sc02', 'new-x1'])
+    out = capsys.readouterr().out
+    assert out.count('NOTE: key_dialogue lines not marked must:') == 1
+    assert 'in 2 scene(s): act1-sc01, act1-sc02.' in out
+    _set_cols(project_dir, 'scene-briefs.csv', 'act1-sc02', key_dialogue='must: "No note"')
+    _note_unmarked_dialogue(project_dir, ['act1-sc02'])
+    assert capsys.readouterr().out == ''

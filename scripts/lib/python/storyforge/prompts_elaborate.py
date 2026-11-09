@@ -527,7 +527,7 @@ A brief is a plan of events, not a script. It keeps every fact the scene must ho
 
 For each scene that needs a brief, write its facts:
 
-- **outcome**: How the scene ends — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
+- **outcome**: How the scene ends for the POV character — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles). Judge it against the goal when the scene has one; in a scene with no goal, against what the POV character is trying to do or hoping for, and never fill goal just to judge the outcome by it
 - **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning.
 - **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
@@ -924,6 +924,14 @@ def build_gap_fill_prompt(
     for field in missing_fields:
         instruction = _FIELD_INSTRUCTIONS.get(field, f'Provide a value for {field}.')
         field_instructions.append(f'- **{field}**: {instruction}')
+    from .elaborate import CRAFT_FRAMEWORK_COLUMNS
+    craft = [f for f in missing_fields if f in CRAFT_FRAMEWORK_COLUMNS]
+    if craft:
+        # Craft-framework notes advise (#643, #644): an empty answer is allowed
+        field_instructions.append(
+            f'\n{", ".join(craft)}: craft-framework notes, not requirements. Fill one only '
+            f'when the scene plainly has it; otherwise leave its cell empty (nothing between '
+            f'the pipes).')
 
     # Build existing data summary
     existing_data = []
