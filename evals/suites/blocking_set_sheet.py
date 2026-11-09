@@ -46,8 +46,11 @@ FLOORS: dict[str, float | None] = {
     'recall_hands': 0.4412, 'recall_posture': 0.2727, 'recall_sightline': 0.0,
     'recall_worn': 0.2727, 'recall_position': 0.129, 'recall_light': 0.0,
     'recall_other': 0.0833,
-    'recall_book_gawain': None, 'recall_book_wrath': None,
-    'recall_found_by_readers': None, 'recall_found_by_tool': None,
+    # read from a free replay after porting #670's matching (each finding
+    # catches at most one case, whole-word places), which left the values
+    # above unchanged
+    'recall_book_gawain': 0.2273, 'recall_book_wrath': 0.2192,
+    'recall_found_by_readers': 0.2353, 'recall_found_by_tool': 0.2169,
     'false_alarms_per_10k': 15.65,
     'left_flagged': 2,
     'flags': 288,
