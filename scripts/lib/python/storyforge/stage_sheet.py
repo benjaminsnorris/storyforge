@@ -61,6 +61,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from storyforge import yes_no
 from storyforge.blocking import BLOCKING_CODE
 from storyforge.checker import Finding
 from storyforge.quotes import quote_in
@@ -71,8 +72,9 @@ SHEETS_DIR = os.path.join('working', 'stage-sheets')
 #: Overrides the model for extraction and the yes/no questions
 MODEL_ENV = 'STORYFORGE_STAGE_SHEET_MODEL'
 #: How many times each yes/no question is asked; a finding needs every
-#: answer to say the action can't happen
-ASKINGS = 2
+#: answer to say the action can't happen (`yes_no`, shared with the gate's
+#: question layer, #649)
+ASKINGS = yes_no.ASKINGS
 #: The most questions asked per scene (the rest are counted in the notes)
 MAX_QUESTIONS = 20
 
@@ -674,25 +676,10 @@ def resolve_model(model: str | None = None) -> str:
 def _call(prompt: str, model: str, log_file: str, tokens: int, schema: dict, label: str,
           check, what: str):
     """One structured call, retried once on an unusable reply. Raises
-    StageSheetError on a refusal, an API failure, or a second bad reply."""
-    from storyforge import api
-    for attempt in (1, 2):
-        try:
-            if log_file:
-                response = api.invoke_to_file(prompt, model, log_file, tokens,
-                                              output_schema=schema, label=label)
-            else:
-                response = api.invoke(prompt, model, tokens, output_schema=schema, label=label)
-            if api.is_truncated(response):
-                raise ValueError('the reply hit its token limit')
-            return check(api.extract_text(response))
-        except ValueError as e:
-            if attempt == 2:
-                raise StageSheetError(f'{what} failed twice: {e}') from e
-            prompt = prompt + f'\n\nYour last answer was not usable: {e}. Answer in the schema.'
-        except RuntimeError as e:   # RefusalError, an API failure
-            raise StageSheetError(f'{what} failed: {e}') from e
-    raise AssertionError('unreachable')
+    StageSheetError on a refusal, an API failure, or a second bad reply
+    (`yes_no.structured_call`)."""
+    return yes_no.structured_call(prompt, model, log_file, tokens, schema, label, check, what,
+                                  StageSheetError)
 
 
 def extract(scene_id: str, prose: str, *, pov: str = '', model: str,
@@ -740,53 +727,23 @@ def build_ask_prompt(scene_id: str, prose: str, questions: list[Question],
 
 def parse_answers(text: str, count: int) -> dict[int, tuple[str, str]]:
     """n → (answer, why) for questions 1..count, each answered exactly once.
-    Raises ValueError otherwise."""
-    try:
-        items = json.loads(text)['answers']
-    except (TypeError, ValueError, KeyError) as e:
-        raise ValueError(f'reply is not the schema ({e})') from e
-    out: dict[int, tuple[str, str]] = {}
-    for it in items if isinstance(items, list) else []:
-        if not (isinstance(it, dict) and isinstance(it.get('n'), int)
-                and it.get('answer') in ('yes', 'no') and isinstance(it.get('why'), str)):
-            raise ValueError(f'an answer is not the schema: {it!r}'[:200])
-        if it['n'] in out:
-            raise ValueError(f'question {it["n"]} is answered twice')
-        out[it['n']] = (it['answer'], it['why'].strip())
-    missing = [n for n in range(1, count + 1) if n not in out]
-    extra = [n for n in out if not 1 <= n <= count]
-    if missing or extra:
-        raise ValueError(f'answers must cover questions 1 to {count} exactly '
-                         f'(missing {missing}, extra {extra})')
-    return out
+    Raises ValueError otherwise (`yes_no.parse_answers`)."""
+    return {n: (a['answer'], a['why']) for n, a in yes_no.parse_answers(text, count).items()}
 
 
 def ask(scene_id: str, prose: str, questions: list[Question], *, model: str,
         log_file: str = '', askings: int = ASKINGS) -> tuple[list[tuple[Question, str]], int]:
-    """Ask every question `askings` times. Returns the questions every
-    asking answered `no` (with the first asking's reason), and how many got
-    split answers (not findings; counted in the notes)."""
-    if not questions:
-        return [], 0
-    answers = []
-    for n in range(1, askings + 1):
-        log = log_file
-        if n > 1 and log_file:
-            stem, ext = os.path.splitext(log_file)
-            log = f'{stem}.a{n}{ext}'
-        answers.append(_call(build_ask_prompt(scene_id, prose, questions, n), model, log,
-                             600 + 120 * len(questions), ASK_SCHEMA,
-                             f'stage questions {scene_id}',
-                             lambda t: parse_answers(t, len(questions)),
-                             f'{scene_id}: the stage sheet questions'))
-    no, split = [], 0
-    for i, q in enumerate(questions, start=1):
-        said = [a[i][0] for a in answers]
-        if all(s == 'no' for s in said):
-            no.append((q, answers[0][i][1]))
-        elif 'no' in said:
-            split += 1
-    return no, split
+    """Ask every question `askings` times (`yes_no.ask`). Returns the
+    questions every asking answered `no` (with the first asking's reason),
+    and how many got split answers (not findings; counted in the notes)."""
+    answers = yes_no.ask(lambda n: build_ask_prompt(scene_id, prose, questions, n),
+                         len(questions), model=model, log_file=log_file,
+                         tokens=600 + 120 * len(questions), schema=ASK_SCHEMA,
+                         label=f'stage questions {scene_id}',
+                         what=f'{scene_id}: the stage sheet questions', error=StageSheetError,
+                         askings=askings)
+    no, split = yes_no.agreed(answers, len(questions), 'no')
+    return [(questions[n - 1], answers[0][n]['why']) for n in no], split
 
 
 # ============================================================================
