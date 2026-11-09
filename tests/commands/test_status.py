@@ -478,8 +478,11 @@ def test_gate_waiting_keeps_voice_as_then(tmp_path, monkeypatch):
     assert v['then']['stage'] == 'voice'
 
 
-def test_gate_waiting_while_drafting_routes_to_the_check(tmp_path, monkeypatch):
-    # TD-6, the same before #596: next.stage was 'draft' with check's command
+def test_gate_waiting_while_drafting_keeps_drafting_next(tmp_path, monkeypatch):
+    # #641: write drafts past a scene waiting on the gate (holding only the
+    # scenes that depend on it), so drafting stays next and the check is
+    # then; the waiting scene is a gate blocker. (TD-6: next.stage and
+    # next.command still agree.)
     pd = str(tmp_path)
     _briefed(pd)
     _voice_guide(pd)
@@ -488,8 +491,26 @@ def test_gate_waiting_while_drafting_routes_to_the_check(tmp_path, monkeypatch):
     monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
         {'scene_id': 's1', 'command': 'provisional', 'reason': 'x'}])
     v = status.build_status(pd)
+    assert (v['next']['stage'], v['next']['command']) == ('draft', status.WRITE_COMMAND)
+    assert '1 scene(s) in working/gate-pending.csv, 1 committed provisionally' \
+        in v['next']['reason']
+    assert (v['then']['stage'], v['then']['command']) == ('check', status.CHECK_COMMAND)
+    assert any(b['source'] == 'gate' and b['detail'].startswith('s1 (provisional)')
+               for b in v['blockers'])
+
+
+def test_gate_waiting_once_everything_is_drafted_routes_to_the_check(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    monkeypatch.setattr(status, 'draft_stage', lambda pd_: ('evaluate', 3, 3))
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
+        {'scene_id': 's1', 'command': 'draft', 'reason': 'x'}])
+    v = status.build_status(pd)
     assert (v['next']['stage'], v['next']['command']) == ('check', status.CHECK_COMMAND)
-    assert v['then']['stage'] == 'draft'
+    assert v['then']['stage'] == 'evaluate'
 
 
 def test_a_voice_guide_named_in_yaml_satisfies_status(tmp_path, monkeypatch):
