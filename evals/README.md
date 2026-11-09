@@ -115,6 +115,60 @@ anything. Gate on what the suite records today (E7's `NOISE_CEILING`, E2's
 `e2.FLOORS`: the value must equal it, so a gain moves it in the same commit)
 and give the plan's target as a note (#488).
 
+## Private suites: the blocking set (#646)
+
+Some labelled sets are the author's unpublished prose, and this repo is
+public. Such a set lives in the private storyforge-evals repo
+(benjaminsnorris/storyforge-evals), cloned at `STORYFORGE_PRIVATE_EVALS_DIR`
+(default `~/Developer/evals`), and so do its recordings, since a recording
+holds the request: `Suite(..., cassettes=fn)` names the directory. `fn(run)`
+gets the run's label (`''`, or `run2`, `run3` for `--runs 3`, each recorded
+on its own) and raises `harness.SuiteUnavailable` when the private repo isn't
+on this machine: the suite is then `stale` with the reason (exit code
+unaffected, listed as "unavailable here"), so CI and every public clone stay
+green, and `--baseline` keeps the old baseline's measurement of it (or writes
+it as unavailable when there is none). `--cassettes-dir` doesn't move a
+private suite's recordings, and while it runs a cassette miss withholds the
+prompt's opening. The suite's notes and metrics reach `baseline.json`, so
+they carry counts and case ids, never a quote; per-case outcomes and findings
+go to the private repo (gitignored there).
+
+`blocking-set` measures today's blocking read (`storyforge.blocking`, #626,
+two readings per scene) against 118 known blocking slips (34 that gawain's
+readers and Ben found, 10 from gawain's blocking run, 74 from Wrath's last gate
+run, each with its fix verdict), 13 readings people judged plausible and left
+alone, and 14 clean scenes (`evals/blocking_set`; how each case was found:
+`blocking-set/README.md` in storyforge-evals). It reports recall overall, per
+category (`recall_hands`, `_posture`, `_sightline`, `_worn`, `_position`,
+`_light`, `_other`), per book (`recall_book_gawain`, `_wrath`) and per finder
+(`recall_found_by_readers` is the independent measure; the `tool` cases were
+found by the same read), false alarms per 10,000 words of clean prose, and
+`left_flagged` (left readings a verified finding lands on). Each of those is
+gated on its recorded value (`FLOORS` in the suite, #488); `unlabelled_flags`
+and the counts are reported, not gated. A finding catches at most one case,
+matched by place (whole words, a `...` quote's parts in order), so a short or
+shared line can't inflate recall. The clean scenes are all gawain's (no Wrath
+scene has had a human read), so the false-alarm rate is one book's. The #647
+stage sheet is measured on the same set before the whole-scene read is
+retired (plan A4).
+
+The suite is **frozen** (#645): `auto` and `record` replay it, and a miss is
+`stale`. **Not recorded yet** (forecast about $6.60 a run; needs Ben's
+approval). To record:
+
+1. Check out the evals PR's branch (`blocking-set-646`) at `~/Developer/evals`,
+   or point `STORYFORGE_PRIVATE_EVALS_DIR` at a checkout of it.
+2. `python3 evals/run.py --mode record --suite blocking-set --runs 3` (three
+   runs, about $20, so the spread is known: `cassettes/blocking-set/` and
+   `cassettes/run2/`, `run3/` beside the set). Commit the cassettes there.
+3. Replay run 1 (`python3 evals/run.py --suite blocking-set`), copy the
+   private `results/latest.json` to `baseline-cases.json` there and commit it
+   (the frozen per-case outcomes), and set `FLOORS` in
+   `evals/suites/blocking_set.py` from the report.
+4. `python3 evals/run.py --baseline` writes `baseline.json`. It needs a full
+   run with no suite in `error`; on this branch's base E3, E5 and the re-check
+   set error in replay, so that waits for them.
+
 ## Recorded API calls
 
 Every Anthropic call goes through `api._api_request`, which consults
