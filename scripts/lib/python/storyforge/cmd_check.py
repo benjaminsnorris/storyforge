@@ -77,7 +77,8 @@ scene (#642): the brief is a plan and the prose stands. It is reported
 (ADVISORY), kept in `working/gate-advisory.csv`, and listed at the end of
 the run. A `key_actions` or `key_dialogue` item the author starts with
 `must:` still stops the scene when broken, and its quoted words must be in
-the prose word for word.
+the prose word for word; so does a promised registry fact the ledger sets
+up in this scene, which only the prose can establish.
 """
 
 from __future__ import annotations

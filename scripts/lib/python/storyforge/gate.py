@@ -27,12 +27,15 @@ For one scene's prose, `gate_scene` runs:
    A broken promise is `advisory` (#642): reported, kept in
    working/gate-advisory.csv, never fixed or blocking, since a brief is a
    plan and the prose wins. One of a beat the brief marks `must:`
-   (`storyforge.must`) still blocks, and a `must` beat's quoted words are
-   checked word for word by code (`_verbatim_findings`).
+   (`storyforge.must`, `_is_must`) still blocks, as does one of a registry
+   fact the ledger sets up in this scene (`_set_up_here`), and a `must`
+   beat's quoted words are checked word for word by code
+   (`_verbatim_findings`).
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
-   not, other than contradictions already in the book before the pass
+   not, other than advisory broken promises and contradictions already in
+   the book before the pass
    (`gate_scene(before=)`: `inherited`, reported as `ALREADY IN THE SCENE`
    and kept in working/gate-reported.csv; the commitments stating them are
    held back): the
@@ -202,7 +205,8 @@ class GateResult:
     speaker_notes: list[tuple[Finding, str]] = field(default_factory=list)
     #: broken promises that don't stop the scene (#642): every broken
     #: promise, verified or not, except one of a beat the brief marks
-    #: `must:` (`storyforge.must`). A brief is a plan, and the prose wins.
+    #: `must:` (`_is_must`) or of a registry fact the ledger sets up in this
+    #: scene (`_set_up_here`). A brief is a plan, and the prose wins.
     #: Reported (`ADVISORY`), kept in `ADVISORY_PATH`, never sent to the
     #: fix. Set by `_classify`; disjoint from `findings` and `unverified`
     advisory: list[Finding] = field(default_factory=list)
@@ -216,6 +220,9 @@ class GateResult:
     #: scripted words of `must` items too short to find by code
     #: (`field: "words"`, `_verbatim_findings`): left to the check, reported
     short_must: list[str] = field(default_factory=list)
+    #: brief items whose `must:` marks nothing (`field: item`): written
+    #: after other words, or in a field that takes no marker; reported
+    misplaced_must: list[str] = field(default_factory=list)
     #: on commit: (statement, inherited finding) for each extracted
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
@@ -1023,6 +1030,15 @@ def _must_beats(scene: dict[str, str]) -> dict[str, list]:
     return {col: must_items(scene.get(col) or '') for col in MUST_FIELDS}
 
 
+def _misplaced_must(scene: dict[str, str]) -> list[str]:
+    """`GateResult.misplaced_must` for the brief row `scene`: `field: item`
+    for each item whose `must:` marks nothing (`must.misplaced`)."""
+    from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    from storyforge.must import misplaced
+    return [f'{col}: {item}' for col in (*PROMISE_FIELDS, *REGISTRY_PROMISE_FIELDS)
+            for item in misplaced(scene.get(col) or '', col)]
+
+
 def _bare_must(scene: dict[str, str]) -> list[str]:
     """`GateResult.bare_must` for the brief row `scene`."""
     from storyforge.must import MUST_FIELDS, bare_markers
@@ -1215,11 +1231,13 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
     `rows`: the ledger (read when None)."""
     result.inherited, result.plan_conflicts, result.speaker_notes = [], [], []
     result.advisory, result.bare_must, result.promise_why = [], [], []
+    result.misplaced_must = []
     if not result.check:
         return
     scene = _brief_row(project_dir, result.scene_id)
     beats = _must_beats(scene)
     result.bare_must = _bare_must(scene)
+    result.misplaced_must = _misplaced_must(scene)
     here = _set_up_here(project_dir, result.scene_id, rows)
     for f in result.check.findings + result.check.unverified:
         if f.kind != 'broken-promise':
@@ -1671,8 +1689,8 @@ PROVISIONAL = 'provisional'
 
 def can_commit_provisionally(result: GateResult) -> str:
     """Why `result` can't be committed provisionally ('' when it can): only
-    the check's findings stopped it (contradictions, broken promises, plan
-    conflicts, unverified ones). A halt (a fixed fact changed), an
+    the check's findings stopped it (contradictions, broken `must` beats and
+    registry facts set up here, plan conflicts, unverified ones). A halt (a fixed fact changed), an
     extraction problem or an unruled dispute would commit a wrong row."""
     if result.passed or result.committed:
         return 'it was committed'
@@ -3668,6 +3686,10 @@ def report_lines(result: GateResult) -> list[str]:
     if result.bare_must:
         lines.append('NOTE (brief items that are only the must: marker; they mark nothing): '
                      + ', '.join(result.bare_must))
+    if result.misplaced_must:
+        lines.append('NOTE (brief items with a must: that marks nothing: the marker opens a '
+                     'key_actions or key_dialogue item, before any label; these are advisory): '
+                     + _one_line('; '.join(result.misplaced_must)))
     if result.short_must:
         lines.append(f'NOTE (must: lines under {_MIN_BRIEF_WORDS} words; too short to check '
                      f'word for word, left to the check): '

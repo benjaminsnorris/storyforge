@@ -14,13 +14,15 @@ gate checks by code (`gate._verbatim_findings`).
 The marker is `must`, any case, then a colon, with any spacing around it
 (`must:`, `MUST :`, ` Must:x`). It must open the item: `;` separates items,
 and a `must:` anywhere else in an item is just words. An item that is only
-the marker (`must:`) marks nothing; the gate reports it.
+the marker (`must:`) marks nothing, nor does a marker after other words or
+in a field that takes none (`misplaced`); the gate reports both.
 
 This module is the one place that reads the marker. A `must` beat is the
 author's: nothing Storyforge writes may drop or reword one. Each command
 that rewrites a brief's `key_actions` or `key_dialogue` from a model's reply
-(hone's rewrites, revise's brief fixes, elaborate's briefs stage) passes the
-result through `keep_must`, which puts back every `must` item the reply
+(hone's rewrites, revise's brief fixes, elaborate's briefs stage, a forced
+extract or extract-gn merge, enrich re-reads; agent-reference's `must` row
+is the list) passes the result through `keep_must`, which puts back every `must` item the reply
 lost or reworded, word for word, and drops any `must:` item the reply made
 up (only the author marks a beat).
 """
@@ -87,6 +89,26 @@ def unmarked(cell: str) -> str:
 def bare_markers(cell: str) -> int:
     """How many items of the cell are only the marker."""
     return sum(1 for i in items(cell) if i.must and not i.text)
+
+
+_ANY_MARK = re.compile(r'(?<!\w)must\s*:', re.IGNORECASE)
+
+
+def misplaced(cell: str, col: str) -> list[str]:
+    """The items of `col`'s cell that write the marker where it marks
+    nothing (#642's review SF-3): after other words (`Priam: must: "..."`,
+    `**must:** ...`, `"must: ..."`) in `MUST_FIELDS`, or anywhere in a field
+    that takes no marker (`outcome`, the registry fields). Raw, for a NOTE:
+    a beat the author meant to require would otherwise go advisory
+    unsaid."""
+    out = []
+    for item in items(cell):
+        if col in MUST_FIELDS:
+            if not item.must and _ANY_MARK.search(item.raw):
+                out.append(item.raw)
+        elif item.must or _ANY_MARK.search(item.raw):
+            out.append(item.raw)
+    return out
 
 
 #: The fewest words a quote and a beat must share, one inside the other,

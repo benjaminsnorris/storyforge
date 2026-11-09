@@ -118,3 +118,39 @@ class TestKeepMust:
 ])
 def test_names_beat(quote, beat, same):
     assert must.names_beat(quote, beat) is same
+
+
+# #642's review SF-3: a marker that marks nothing is found, for a NOTE
+@pytest.mark.parametrize('col, cell, found', [
+    ('key_dialogue', 'Priam: must: "Pity me, Achilles"', ['Priam: must: "Pity me, Achilles"']),
+    ('key_actions', '**must:** Priam kneels;Hector runs', ['**must:** Priam kneels']),
+    ('key_actions', '"must: Priam kneels"', ['"must: Priam kneels"']),
+    ('key_actions', 'must: Priam kneels;Hector runs', []),
+    ('key_actions', 'mustering: the Myrmidons arm', []),
+    ('outcome', 'must: Achilles relents', ['must: Achilles relents']),
+    ('knowledge_out', 'k-12;must: k-13', ['must: k-13']),
+    ('outcome', 'Achilles relents', []),
+])
+def test_misplaced(col, cell, found):
+    assert must.misplaced(cell, col) == found
+
+
+def test_item_beat():
+    # TD-6
+    assert must.parse_item('must: Priam kneels').beat
+    assert not must.parse_item('must:').beat
+    assert not must.parse_item('Priam kneels').beat
+
+
+# T9: a must beat written twice, and one the rewrite kept in another case
+def test_keep_must_with_a_beat_written_twice():
+    old = 'must: Priam kneels;Hector runs;must: Priam kneels'
+    kept = must.keep_must(old, 'Hector runs')
+    assert kept.value.count('must: Priam kneels') == 2
+
+
+def test_keep_must_puts_back_a_beat_reworded_in_case():
+    kept = must.keep_must('must: Achilles chases Hector', 'must: achilles chases hector')
+    assert kept.value == 'must: Achilles chases Hector'
+    assert kept.restored == ['must: Achilles chases Hector']
+    assert kept.dropped == ['must: achilles chases hector']

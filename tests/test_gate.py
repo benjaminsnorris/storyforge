@@ -3820,6 +3820,17 @@ class TestAdvisoryPromises:
         assert any(line.startswith('NOTE (brief items that are only the must: marker')
                    for line in gate.report_lines(result))
 
+    def test_a_misplaced_marker_is_reported(self, project_dir, tmp_path):
+        # SF-3: the label-first form marks nothing, and says so
+        _set_brief(project_dir, key_dialogue='Dorren: must: "The map has been altered"',
+                   outcome='must: Dorren pursues it')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed
+        assert result.misplaced_must == ['outcome: must: Dorren pursues it',
+                                         'key_dialogue: Dorren: must: "The map has been altered"']
+        assert any(line.startswith('NOTE (brief items with a must: that marks nothing')
+                   for line in gate.report_lines(result))
+
     def test_an_unwritable_list_is_a_warning_not_a_stop(self, project_dir, tmp_path, capsys):
         os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
         with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
