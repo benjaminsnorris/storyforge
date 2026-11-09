@@ -280,7 +280,9 @@ requests and replies. `test_recording_is_the_committed_proposals` parses the
 recorded replies against the recorded sample (found again in the corpus,
 `voiceprint_proposals.recorded_sample`), so a change to the fingerprint or
 the sampling doesn't invalidate the recording. It fails when a prompt, a
-schema or the system block's opening (`SYSTEM_PREAMBLE`) changes: re-record
+schema or the system block's wording changes (`stale`: everything before the
+fingerprint's figures, rebuilt from the recorded sample, byte for byte, and
+the fingerprint section's wording with its figures masked): re-record
 then, on purpose (about $0.65):
 
 ```bash

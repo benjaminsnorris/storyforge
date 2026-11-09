@@ -9,8 +9,9 @@ recording. The recording is frozen in the committed cassette
 (`tests/fixtures/voiceprint/cassette/`, the repo's cassette format): the
 request and reply of each call. `test_recording_is_the_committed_proposals`
 parses the recorded replies against the recorded sample (#645's policy:
-frozen inputs, evaluated free) and fails when the prompts or schemas the
-code would send have changed, which is the time to re-record on purpose
+frozen inputs, evaluated free) and fails when the prompts, schemas or system
+block wording the code would send have changed (`stale`), which is the time
+to re-record on purpose
 (`references/voiceprints/README.md`, "Re-recording"). A change to the
 fingerprint or the sampling doesn't invalidate it: the recording is what
 the model said to the sample it was shown.
@@ -258,9 +259,12 @@ def test_shortlist_sits_inside_the_typical_range(judged, shortlist):
     assert len(typical) / len(judged) >= TYPICAL_FLOOR, [
         (p.id, p.distance, p.limit) for p in judged if not p.typical]
     # the committed figures are today's (after a fingerprint change: `storyforge voice judge`,
-    # then `voice accept --auto-pick`, both free)
-    assert [(p.distance, p.limit, p.typical) for p in judged] == [
-        (p.distance, p.limit, p.typical) for p in shortlist]
+    # then `voice accept --only exemplars --auto-pick --force`, both free); the
+    # 4-decimal figures within a rounding step, across platforms and Pythons
+    assert [p.typical for p in judged] == [p.typical for p in shortlist]
+    for now, committed in zip(judged, shortlist):
+        assert now.distance == pytest.approx(committed.distance, abs=1e-3), now.id
+        assert now.limit == pytest.approx(committed.limit, abs=1e-3), now.id
 
 
 def test_shortlist_spans_the_jobs(shortlist):
@@ -341,24 +345,70 @@ def _recordings():
     return out
 
 
+_NUMBER = re.compile(r'[-+]?\d[\d,.]*')
+
+
+def _fingerprint_shape(section):
+    """The fingerprint section's wording with its figures and contents
+    masked: the header, the headings and each line's form, but not which
+    measures, words or phrases the fingerprint holds (a fingerprint change
+    doesn't invalidate the recording)."""
+    shapes = set()
+    lines = [ln for ln in section.split('\n') if ln.strip()]
+    for i, line in enumerate(lines):
+        masked = _NUMBER.sub('#', line)
+        if i == 0 or line.startswith('### '):
+            shapes.add(masked)
+        elif line.startswith('- '):
+            shapes.add(re.sub(r'^- [^:]+:', '- NAME:', masked))
+        else:
+            shapes.add('<list>')
+    return shapes
+
+
+def stale(recs, voice):
+    """What the code would send differently from the recording, by name
+    ([] when nothing has changed): the prompts, the schemas, and the system
+    block's fixed wording (everything before the fingerprint's figures,
+    rebuilt from the recorded sample, must match it byte for byte; the
+    fingerprint section's wording with its figures masked)."""
+    out = []
+    for kind, prompt, schema in (('description', vpp.description_prompt(), vpp.CLAIMS_SCHEMA),
+                                 ('shortlist', vpp.shortlist_prompt(), vpp.SHORTLIST_SCHEMA)):
+        body = recs[kind][0]
+        if body['messages'][0]['content'] != prompt:
+            out.append(f'the {kind} prompt')
+        if body['output_config']['format']['schema'] != schema:
+            out.append(f'the {kind} schema')
+    if recs['shortlist'][0]['system'] != recs['description'][0]['system']:
+        out.append('the two calls\' system blocks differ')
+    recorded = recs['description'][0]['system'][0]['text']
+    now = vpp.system_blocks(voice, vpp.recorded_sample(recorded, voice.texts))[0]['text']
+    rec_head, _, rec_fp = recorded.partition('# The fingerprint')
+    now_head, _, now_fp = now.partition('# The fingerprint')
+    if rec_head != now_head:
+        out.append('the system block before the fingerprint (SYSTEM_PREAMBLE, the sample\'s '
+                   'instructions, render_sample)')
+    if _fingerprint_shape(rec_fp) != _fingerprint_shape(now_fp):
+        out.append('the fingerprint section\'s wording (render_fingerprint)')
+    return out
+
+
 def test_recording_is_the_committed_proposals(voice):
     """The recorded replies, parsed against the recorded sample, are the
     committed proposals (before the reference's marks, picks and today's
-    judgments). Fails when a prompt, schema or the system block's opening
-    changed since the recording: re-record on purpose
+    judgments). Fails when a prompt, a schema or the system block's wording
+    changed since the recording (`stale`): re-record on purpose
     (references/voiceprints/README.md, "Re-recording")."""
     recs = _recordings()
     assert set(recs) == {'description', 'shortlist'}
-    stale = 'changed since it was recorded: re-record on purpose (references/voiceprints/README.md)'
-    for kind, prompt, schema in (('description', vpp.description_prompt(), vpp.CLAIMS_SCHEMA),
-                                 ('shortlist', vpp.shortlist_prompt(), vpp.SHORTLIST_SCHEMA)):
+    changed = stale(recs, voice)
+    assert changed == [], (f'{", ".join(changed)} changed since the recording: re-record on '
+                           f'purpose (references/voiceprints/README.md)')
+    for kind in recs:
         body, _, response = recs[kind]
-        assert body['messages'][0]['content'] == prompt, f'the {kind} prompt {stale}'
-        assert body['output_config']['format']['schema'] == schema, f'the {kind} schema {stale}'
-        assert body['system'][0]['text'].startswith(vpp.SYSTEM_PREAMBLE), f'the system block {stale}'
         assert body['model'] == RECORDED_MODEL and response.get('stop_reason') == 'end_turn'
     system_text = recs['description'][0]['system'][0]['text']
-    assert recs['shortlist'][0]['system'] == recs['description'][0]['system']
     sample = vpp.recorded_sample(system_text, voice.texts)
     assert sample.windows == vpp.SAMPLE_WINDOWS
 
@@ -373,3 +423,49 @@ def test_recording_is_the_committed_proposals(voice):
     fields = ('id', 'job', 'source', 'paragraphs', 'words', 'text', 'why')
     assert [tuple(getattr(p, f) for f in fields) for p in passages] == [
         tuple(getattr(p, f) for f in fields) for p in vpp.read_shortlist(AUSTEN)]
+
+
+def _reword(fn, old, new):
+    def wrapped(*a, **k):
+        out = fn(*a, **k)
+        assert old in out, old
+        return out.replace(old, new)
+    return wrapped
+
+
+@pytest.mark.parametrize('change,named', [
+    (lambda m: m.setattr(vpp, 'DESCRIPTION_PROMPT', vpp.DESCRIPTION_PROMPT + ' More.'),
+     'the description prompt'),
+    (lambda m: m.setattr(vpp, 'SHORTLIST_ASK', 25), 'the shortlist prompt'),
+    (lambda m: m.setattr(vpp, 'SHORTLIST_SCHEMA', {**vpp.SHORTLIST_SCHEMA, 'title': 'x'}),
+     'the shortlist schema'),
+    (lambda m: m.setattr(vpp, 'SYSTEM_PREAMBLE', 'You help a writer.'),
+     'the system block before the fingerprint'),
+    (lambda m: m.setattr(vpp, 'render_sample',
+                         _reword(vpp.render_sample, ' words] ', ' w] ')),
+     'the system block before the fingerprint'),
+    (lambda m: m.setattr(vpp, 'render_fingerprint',
+                         _reword(vpp.render_fingerprint, 'z is how many', 'z counts')),
+     'the fingerprint section'),
+    (lambda m: m.setattr(vpp, 'render_fingerprint',
+                         _reword(vpp.render_fingerprint, '; z ', '; zscore ')),
+     'the fingerprint section'),
+])
+def test_stale_names_each_change_to_what_would_be_sent(voice, monkeypatch, change, named):
+    """T2: the re-record trigger trips on each part of the request."""
+    recs = _recordings()
+    assert stale(recs, voice) == []
+    change(monkeypatch)
+    changed = stale(recs, voice)
+    assert len(changed) == 1 and changed[0].startswith(named), changed
+
+
+def test_recorded_model_is_todays_synthesis_model():
+    """T9: a note (not a failure) when the synthesis model has moved on
+    since the recording, so the reference's age is visible."""
+    import warnings
+    from storyforge.common import select_model
+    today = select_model(vpp.MODEL_TASK)
+    if today != RECORDED_MODEL:
+        warnings.warn(f'the Austen description was recorded on {RECORDED_MODEL}; the '
+                      f'synthesis model is now {today} (re-record when it matters)')
