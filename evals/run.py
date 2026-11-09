@@ -191,6 +191,13 @@ def _summary(report: dict, deltas: dict | None, notes: bool = False) -> str:
             lines.append(f"      error: {r['error']}")
         if r.get('stale'):
             lines.append(f"      stale: {r['stale']}")
+            first_miss = next((f for f in r.get('cassette_failures', [])
+                               if f.startswith('CassetteMiss')), '')
+            if first_miss:
+                lines.append(f"      first miss: {first_miss}")
+            if r.get('stale_exception'):
+                lines.append(f"      raised after the miss (kept, assumed its consequence): "
+                             f"{r['stale_exception']}")
         for g in r['gates']:
             mark = 'ok  ' if g['passed'] else 'FAIL'
             lines.append(f"      {mark} {g['name']}: {g['actual']} {g['op']} {g['threshold']}")

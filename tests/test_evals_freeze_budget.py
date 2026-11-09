@@ -47,6 +47,20 @@ RAISES = '''
 
     SUITE = Suite('{name}', 'raises', run, frozen=True)
 '''
+# Swallows a miss on its first call (as command code does), then something else
+AFTER_MISS = '''
+    from harness import Gate, Suite, SuiteOutput
+    from storyforge import api, cassette
+
+    def run(ctx):
+        try:
+            api.invoke_api('{prompt}', 'claude-sonnet-4-6', max_tokens=10)
+        except Exception:
+            pass  # a skipped scene
+        {then}
+
+    SUITE = Suite('{name}', 'swallows a miss', run, frozen=True)
+'''
 CALL_USD = 3.0
 
 
@@ -108,6 +122,12 @@ def _record_frozen(tmp_path, name='e4'):
                 '--over-budget', 'test setup') == 0
 
 
+def _record_frozen_any(tmp_path, name='e4'):
+    """Record a frozen suite's three runs whatever their verdict."""
+    assert _run(tmp_path, '--mode', 'record', '--suite', name, '--runs', '3',
+                '--over-budget', 'test setup') in (0, 1, 2)
+
+
 # --- frozen suites -----------------------------------------------------------
 
 def test_the_real_e4_and_e8_are_frozen_and_nothing_else():
@@ -156,6 +176,8 @@ def test_a_frozen_suite_that_fails_without_a_miss_is_an_error(tmp_path, live):
 
 def test_stale_ranks_below_fail_and_error(tmp_path, live):
     _suite(tmp_path, 'e4', frozen=True)
+    _record_frozen(tmp_path)
+    _suite(tmp_path, 'e4', frozen=True, prompt='a changed prompt')
     _suite(tmp_path, 'ok', PASSING)
     assert _run(tmp_path) == 0
     assert _report(tmp_path)['status'] == 'stale'
@@ -174,8 +196,6 @@ def test_a_frozen_suite_is_recorded_only_by_name_and_as_three_runs(tmp_path, liv
     assert 'recorded only as --runs 3' in capsys.readouterr().err
     assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '2', *over) == 2
     assert live == []
-    assert _run(tmp_path, '--mode', 'record', '--runs', '3', *over) == 0  # not named
-    assert live == [] and _result(tmp_path, 'e4')['status'] == 'stale'
 
     assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '3', *over) == 0
     assert len(live) == 6  # two calls, three runs
@@ -184,6 +204,10 @@ def test_a_frozen_suite_is_recorded_only_by_name_and_as_three_runs(tmp_path, liv
     report = _report(tmp_path)
     assert set(report['extra_runs']) == {'run2', 'run3'}
     assert 'evals/consistency.py --suite e4' in capsys.readouterr().out
+
+    _suite(tmp_path, 'e4', frozen=True, prompt='a changed prompt')
+    assert _run(tmp_path, '--mode', 'record', '--runs', '3', *over) == 0  # not named
+    assert len(live) == 6 and _result(tmp_path, 'e4')['status'] == 'stale'
 
 
 def test_runs_needs_record_mode_and_no_baseline(tmp_path, live):
@@ -214,9 +238,63 @@ def test_a_baseline_keeps_a_stale_suites_last_measurement(tmp_path, live):
 
 def test_a_baseline_with_no_measurement_of_a_stale_suite_is_refused(tmp_path, live, capsys):
     _suite(tmp_path, 'e4', frozen=True)
+    _record_frozen(tmp_path)
+    _suite(tmp_path, 'e4', frozen=True, prompt='a changed prompt')
     assert _run(tmp_path, '--baseline') == 2
     assert 'no measurement of it to keep' in capsys.readouterr().err
     assert not (tmp_path / 'baseline.json').exists()
+
+
+def test_a_frozen_suite_with_no_recordings_is_an_error_not_stale(tmp_path, live, capsys):
+    """CR-1 / SF-1: a missing cassette directory is a missing fixture, not
+    a prompt change, and a re-record can't be what fixes it."""
+    _suite(tmp_path, 'e4', frozen=True)
+    assert _run(tmp_path) == 2
+    result = _result(tmp_path, 'e4')
+    assert result['status'] == 'error' and 'has no recordings' in result['error']
+    _record_frozen(tmp_path)
+    assert _run(tmp_path, '--cassettes-dir', str(tmp_path / 'nowhere')) == 2
+    assert _result(tmp_path, 'e4')['status'] == 'error'
+
+
+def test_the_stale_line_names_the_first_miss(tmp_path, live, capsys):
+    _suite(tmp_path, 'e4', frozen=True)
+    _record_frozen(tmp_path)
+    _suite(tmp_path, 'e4', frozen=True, prompt='a changed prompt')
+    capsys.readouterr()
+    assert _run(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert 'first miss: CassetteMiss' in out and 'a changed prompt' in out
+
+
+def test_an_exception_after_a_miss_is_kept_on_the_stale_result(tmp_path, live, capsys):
+    """C1 / CR-2 / SF-2 / TD3: still stale, but the exception isn't lost."""
+    then = "raise KeyError('a metric bug')"
+    _suite(tmp_path, 'e4', AFTER_MISS.replace('{then}', then))
+    _record_frozen_any(tmp_path)  # records the call; the KeyError errors that run
+    _suite(tmp_path, 'e4', AFTER_MISS.replace('{then}', then), prompt='a changed prompt')
+    capsys.readouterr()
+    assert _run(tmp_path) == 0
+    result = _result(tmp_path, 'e4')
+    assert result['status'] == 'stale' and result['error'] is None
+    assert result['stale_exception'] == "KeyError: 'a metric bug'"
+    assert 'a metric bug' in result['stale_traceback']
+    assert 'raised after the miss' in capsys.readouterr().out
+
+
+def test_a_miss_mixed_with_another_cassette_failure_is_an_error(tmp_path, live):
+    """T7: stale only when every logged failure is a miss."""
+    then = ("try:\n"
+            "            cassette.request('POST', 'messages/batches', {}, lambda: {})\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "        return SuiteOutput(gates=[Gate('x', 1, '>=', 0)])")
+    _suite(tmp_path, 'e4', AFTER_MISS.replace('{then}', then))
+    _record_frozen_any(tmp_path)
+    _suite(tmp_path, 'e4', AFTER_MISS.replace('{then}', then), prompt='a changed prompt')
+    assert _run(tmp_path) == 2
+    result = _result(tmp_path, 'e4')
+    assert result['status'] == 'error' and len(result['cassette_failures']) == 2
 
 
 def test_e6_counts_a_stale_run_as_no_spread():
