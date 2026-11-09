@@ -308,19 +308,21 @@ def judge(project_dir: str, scene_ids: list[str], drafts: dict[str, str]) -> dic
 
 def mark_musts(project_dir: str, judged: dict[str, dict]) -> None:
     """Tag each of the judge's broken promises (in place) with ``must``:
-    whether it names a beat the scene's brief marks `must:` (#642,
-    ``must.names_beat`` in the item's field). Post-processing only: the
-    judge's prompt and replies are unchanged, so its recordings hold."""
-    from storyforge.must import MUST_FIELDS, must_items, names_beat
+    whether the gate would hold it to a beat the scene's brief marks
+    `must:` (#642, ``gate._is_must``, the one rule; its review CR-6).
+    Post-processing only: the judge's prompt and replies are unchanged, so
+    its recordings hold."""
+    from storyforge.checker import Finding
+    from storyforge.gate import _is_must, _must_beats
     rows = {r['id']: r for r in _read_rows(os.path.join(project_dir, 'reference',
                                                         'scene-briefs.csv'))}
     for sid, found in judged.items():
         row = rows.get(sid, {})
+        beats = _must_beats(row)
         for p in found['broken_promises']:
-            field = p.get('field')
-            p['must'] = field in MUST_FIELDS and any(
-                names_beat(p.get('promise') or '', b.text)
-                for b in must_items(row.get(field) or ''))
+            f = Finding('broken-promise', '', '', '', p.get('promise') or '',
+                        p.get('field') or '', '')
+            p['must'] = _is_must(f, row, beats)
 
 
 def checker_flags(project_dir: str, scene_ids: list[str]) -> list[dict]:

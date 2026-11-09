@@ -11,18 +11,24 @@ from .illustrations import read_scene_prose
 from .prompts import read_yaml_field
 from .scenes import SCENE_ID_RULE
 
-#: How every elaboration stage writes what it writes (#644, plan D4): terse
-#: notes of what happens and what is true, never interpretation. Every
+#: How every elaboration stage writes its scene rows (#644, plan D4): terse
+#: notes of what happens and what is true, never interpretation. Scoped to
+#: the CSV rows: the architecture and bible documents exist to name a theme,
+#: a need or a lie (its review CR-2), so they are exempt from "no
+#: interpretation", not from terseness. Every
 #: elaborated field is model prose the drafter reads, and the drafter writes
 #: more like what it reads: on *Wrath Like Smoke* a brief's subtext ("let the
 #: list grow, and never call it pride") became the aphoristic closing lines
 #: the author singled out.
-NOTES_RULE = ('Write every field as terse notes of what happens and what is true: who does '
-              'what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; '
-              'Briseis is the sixth stud"), not a paragraph about what the moment means. No '
-              'interpretation: never say what a moment means or reveals, what a character '
-              'feels underneath, or what the reader should take from it, and no polished or '
-              'quotable sentences. The drafter finds the words; these notes give only the facts.')
+NOTES_RULE = ('Write every scene row\'s cells (the CSV blocks) as terse notes of what happens '
+              'and what is true: who does what, to whom, with what ("Agamemnon counts the '
+              'gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about '
+              'what the moment means. No interpretation in a scene row: never say what a '
+              'moment means or reveals, what a character feels underneath, or what the reader '
+              'should take from it, and no polished or quotable sentences. The drafter finds '
+              'the words; these notes give only the facts. The story architecture and the '
+              'character and world bibles are where a theme, a want, a need, a wound or a lie '
+              'belongs: write those plainly, as short notes too.')
 
 #: The craft-framework columns as notes, not requirements (#643, #644): what
 #: the architecture and map prompts say about them
@@ -527,7 +533,7 @@ A brief is a plan of events, not a script. It keeps every fact the scene must ho
 
 For each scene that needs a brief, write its facts:
 
-- **outcome**: How the scene ends — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
+- **outcome**: How the scene ends for the POV character — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles). Judge it against the goal when the scene has one; in a scene with no goal, against what the POV character is trying to do or hoping for, and never fill goal just to judge the outcome by it
 - **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning.
 - **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
@@ -564,7 +570,7 @@ id|status
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have its outcome and key_actions filled
-- Where a key_actions item does quote a line: {LABEL_RULE}
+- Where an existing `must:` key_actions item quotes a line, keep it labelled: {LABEL_RULE}
 - A key_actions item an existing brief starts with `must:` is the author's: copy it word for word, marker and all. Never add `must:` yourself
 - A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
@@ -924,6 +930,14 @@ def build_gap_fill_prompt(
     for field in missing_fields:
         instruction = _FIELD_INSTRUCTIONS.get(field, f'Provide a value for {field}.')
         field_instructions.append(f'- **{field}**: {instruction}')
+    from .elaborate import CRAFT_FRAMEWORK_COLUMNS
+    craft = [f for f in missing_fields if f in CRAFT_FRAMEWORK_COLUMNS]
+    if craft:
+        # Craft-framework notes advise (#643, #644): an empty answer is allowed
+        field_instructions.append(
+            f'\n{", ".join(craft)}: craft-framework notes, not requirements. Fill one only '
+            f'when the scene plainly has it; otherwise leave its cell empty (nothing between '
+            f'the pipes).')
 
     # Build existing data summary
     existing_data = []

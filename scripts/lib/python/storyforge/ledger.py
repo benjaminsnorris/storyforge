@@ -1010,7 +1010,7 @@ def _mentions(statement: str, subject: str, names: dict[str, set[str]],
 
 def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
                order: dict[str, int], *, names: dict[str, set[str]],
-               narrow: bool = False) -> Dependents:
+               narrow: bool = False, guess: bool = True) -> Dependents:
     """The scenes after each of `fact_ids` whose binding facts depend on it,
     in reading order: the re-check set when those facts change (design §1,
     derived from the ledger, decided by Ben 2026-10-31).
@@ -1048,6 +1048,11 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
     fell to 0.897. The eval gates the wide rule, which a rejection (`audit
     --mark rejected`) keeps.
 
+    `guess=False` (#641's review, TD-2: `cmd_write.GateBlockers` weighing
+    a brief's facts, whose knowledge facts have no subject) drops the type
+    guess: a fact with no subject is matched only by its links, its end and
+    its statement naming a later fact's subject.
+
     `.why` names, for each scene, the first fact and rule that listed it."""
     cache: dict[str, re.Pattern | None] = {}
     wanted = set(fact_ids)
@@ -1071,16 +1076,18 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
         if f.get('type') == 'knowledge':
             keys |= {k.casefold() for k in _split(f.get('known_by', ''))}
         if not keys:
-            out.unrelated[f['id']] = (f'no subject: every later scene with a binding '
-                                      f'{f.get("type") or "typeless"} fact is taken '
-                                      f'as depending on it')
+            out.unrelated[f['id']] = (
+                f'no subject: every later scene with a binding '
+                f'{f.get("type") or "typeless"} fact is taken as depending on it'
+                if guess else
+                'no subject: only its links, its end and its statement are matched')
         for r in rows:
             rs = (r.get('scene_id') or '').strip()
             if r is f or r.get('status') != 'binding' or rs not in order or order[rs] <= after:
                 continue
             if rs in scenes:
                 continue
-            rule = _depends(f, r, keys, subject, names, cache, narrow)
+            rule = _depends(f, r, keys, subject, names, cache, narrow, guess)
             if rule:
                 scenes.add(rs)
                 out.why.setdefault(rs, f'{f["id"]} ({rule})')
@@ -1090,7 +1097,7 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
 
 def _depends(f: dict[str, str], r: dict[str, str], keys: set[str], subject: str,
              names: dict[str, set[str]], cache: dict[str, re.Pattern | None],
-             narrow: bool) -> str:
+             narrow: bool, guess: bool = True) -> str:
     """The rule by which later fact `r` depends on `f` ('' when none), for
     `dependents`."""
     if f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', '')):
@@ -1098,7 +1105,7 @@ def _depends(f: dict[str, str], r: dict[str, str], keys: set[str], subject: str,
     rsubject = (r.get('subject') or '').strip().casefold()
     if rsubject in keys and (not narrow or _compatible(f, r)):
         return f'same subject: {rsubject}'
-    if not keys and r.get('type') == f.get('type'):
+    if guess and not keys and r.get('type') == f.get('type'):
         return f'no subject, same type: {r.get("type") or "typeless"}'
     if narrow and r.get('type') not in _MENTIONING_TYPES:
         return ''

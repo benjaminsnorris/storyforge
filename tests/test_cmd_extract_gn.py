@@ -662,3 +662,19 @@ def test_extract_routed_to_gn_module_for_gn_projects():
     assert GN_ROUTED_COMMANDS.get('extract') == 'storyforge.cmd_extract_gn'
     # And extract is no longer in the unsupported set
     assert 'extract' not in GN_UNSUPPORTED_COMMANDS
+
+
+def test_a_forced_merge_keeps_the_authors_must_beats(tmp_path, capsys):
+    """#642's review SF-4: extract-gn --force keeps a `must` beat word for word."""
+    from storyforge.cmd_extract_gn import _merge_rows_into_csv
+    path = tmp_path / 'reference' / 'scene-briefs.csv'
+    path.parent.mkdir()
+    path.write_text('id|key_actions|key_dialogue\n'
+                    'a|Hector runs;must: Priam kisses the hands of Achilles|'
+                    'must: Priam: "I have kissed the hands of the man"\n')
+    _merge_rows_into_csv(str(path), ['id', 'key_actions', 'key_dialogue'], [
+        {'id': 'a', 'key_actions': 'Hector flees;Priam begs', 'key_dialogue': ''}], force=True)
+    row = path.read_text().splitlines()[1].split('|')
+    assert row[1] == 'Hector flees; must: Priam kisses the hands of Achilles; Priam begs'
+    assert row[2] == 'must: Priam: "I have kissed the hands of the man"'
+    assert 'put back the author\'s must item' in capsys.readouterr().out

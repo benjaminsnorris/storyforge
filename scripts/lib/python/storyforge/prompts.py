@@ -1897,6 +1897,11 @@ def _brief_contract(scene: dict) -> str:
         facts.append('- These beats, which the brief marks must: '
                      + '; '.join(beats))
     head = 'The brief is a plan of what happens.'
+    if not (scene.get('key_actions') or '').strip():
+        # validate requires key_actions from `briefed` on (#644); said here
+        # too, so a draft from an eventless brief isn't silent about it
+        head += (' It lists no events (key_actions is empty): take what happens from the '
+                 'scene\'s function and summary.')
     lines = [f'{head} Hold to its facts:'] + facts if facts else [head]
     lines.append('Its other fields (a value shift, an emotional arc, goal, conflict, crisis, '
                  'decision, and any notes the author wrote) are notes, not requirements: let '

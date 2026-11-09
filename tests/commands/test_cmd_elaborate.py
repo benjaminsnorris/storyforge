@@ -531,3 +531,56 @@ class TestGapFillDryRunWithNoGaps:
         assert reviews == []
         assert mock_git.calls_for('commit_and_push') == []
         assert mock_api.call_count == 0
+
+
+class TestStageAdvancesPastAdvisoryFindings:
+    """#643's review T2: the phase advances when validation's only findings
+    are advisory (an empty craft-framework column), and not when one blocks;
+    the log counts each (SF-5)."""
+
+    def _run(self, project_dir, monkeypatch, mock_api, failures, passed):
+        import re
+        from storyforge import elaborate
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr(elaborate, 'validate_structure', lambda ref_dir: {
+            'passed': passed, 'checks': [{}], 'failures': [dict(f) for f in failures]})
+        monkeypatch.setattr('storyforge.schema.validate_schema',
+                            lambda ref_dir, project_dir: {'errors': []})
+        yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+        with open(yaml_path) as f:
+            text = f.read()
+        with open(yaml_path, 'w') as f:
+            f.write(re.sub(r'^phase:.*', 'phase: architecture', text, flags=re.MULTILINE))
+        mock_api.set_response(_STAGE_REPLY)
+        main(['--stage', 'architecture'])
+        with open(yaml_path) as f:
+            phase = re.search(r'^phase:\s*(\S+)', f.read(), re.MULTILINE).group(1)
+        reports = os.listdir(os.path.join(project_dir, 'working', 'validation'))
+        with open(os.path.join(project_dir, 'working', 'validation', sorted(reports)[-1])) as f:
+            return phase, f.read()
+
+    _CRAFT = {'category': 'completeness', 'check': 'craft-columns-act1-sc01', 'passed': False,
+              'severity': 'advisory', 'scene_id': 'act1-sc01',
+              'message': 'craft-framework columns empty: value_shift, turning_point'}
+    _LOCATION = {'category': 'completeness', 'check': 'required-columns-act1-sc01',
+                 'passed': False, 'severity': 'blocking', 'scene_id': 'act1-sc01',
+                 'message': 'missing required columns: location'}
+
+    def test_advisory_only_advances_the_phase(self, mock_api, mock_git, mock_costs,
+                                              project_dir, monkeypatch, capsys):
+        phase, report = self._run(project_dir, monkeypatch, mock_api, [self._CRAFT], True)
+        assert phase == 'scene-map'
+        out = capsys.readouterr().out
+        assert 'Validation passed' in out
+        assert '1 advisory finding(s), not blocking' in out
+        assert '## Advisory' in report and '**Failures:** 0 blocking, 1 advisory' in report
+
+    def test_a_blocking_failure_holds_the_phase(self, mock_api, mock_git, mock_costs,
+                                                project_dir, monkeypatch, capsys):
+        phase, report = self._run(project_dir, monkeypatch, mock_api,
+                                  [self._LOCATION, self._CRAFT], False)
+        assert phase == 'architecture'
+        assert 'Validation found 1 blocking, 1 advisory:' in capsys.readouterr().out
+        assert '## Blocking (errors to fix)' in report
