@@ -25,9 +25,9 @@ suite's, in this order:
 
 | status | meaning | exit code |
 |---|---|---|
-| `error` | no measurement: the suite raised, declared no gates, or the cassette logged a failure (a miss on a suite that isn't frozen, a refused live call, an unreadable recording); also a run refused before it started (bad arguments, the budget) | `2` |
+| `error` | no measurement: the suite raised, declared no gates, or the cassette logged a failure (a miss on a suite that isn't frozen, a refused live call, an unreadable recording, a frozen suite with no recordings at all); also a run refused before it started (bad arguments, the budget) or a `--baseline` that can't be written (an errored suite, `--suite` given, a stale suite with nothing to carry) | `2` |
 | `fail` | the suite measured and a gate didn't hold | `1` |
-| `stale` | a **frozen** suite whose only cassette failures are misses: a request changed since it was recorded. No measurement, nothing spent, by policy | `0` |
+| `stale` | a **frozen** suite whose only cassette failures are misses: a request changed since it was recorded. No measurement, nothing spent, by policy. An exception the suite raised after the miss is kept as `stale_exception` (with `stale_traceback`) and printed, with the first miss | `0` |
 | `pass` | every gate held | `0` |
 
 **Stale is not a failure.** A prompt change is expected to make E4 and E8
@@ -36,7 +36,9 @@ stale reports `status=STALE` and exits `0`. Read the report (or the
 `[STALE]` lines and the `stale (frozen, ...)` total line) to see which. A
 stale suite has no metrics and no gates in the report, no baseline deltas,
 and `--baseline` keeps the old baseline's entry for it (marked
-`carried_over`); with no old entry to keep, `--baseline` is refused.
+`carried_over`); with no old entry to keep, `--baseline` is refused. The
+exit code is still what this run measured: a carried-over `fail` doesn't
+make it `1`.
 
 ## Policy: what to record, and when (#645)
 
@@ -54,7 +56,9 @@ Part E):
   re-recorded only when a decision depends on them, by name and always as
   three runs: `--mode record --suite e4-generation --runs 3` (run 1 to the
   default cassettes, runs 2 and 3 to `fixtures/e6/run2` and `run3`, so
-  `consistency.py` reads the spread). Anything else is refused. At about
+  `consistency.py` reads the spread). Naming one with `--runs` other than 3,
+or with `--mode auto`, is refused; `--mode record` without naming them
+replays them. At about
   $25 (E4) and $55 (E8) a run, that is past the monthly budget, so it needs
   Ben's approval and `--over-budget`.
 - **A new suite that needs live generation for its inputs** (drafted scenes,
@@ -75,12 +79,17 @@ Part E):
   `$STORYFORGE_EVAL_SPEND_LOG`, outside the repo so every worktree shares
   it). The month is the UTC calendar month. `--mode record` is refused when
   this month's spend plus its forecast (each recorded suite's `usd_if_live`
-  in the baseline, times `--runs`) passes the budget; `--mode auto` records
+  in the baseline, times `--runs`) passes the budget. A suite with no
+  baseline figure counts as $0 there (named in a WARNING: the forecast is a
+  lower bound, and the per-call check below is its guard); a frozen suite
+  with no figure, or a baseline that can't be read, refuses `record`
+  without `--over-budget`. `--mode auto` records
   only misses, so it is refused once the budget is spent. During either, the
   cassette refuses each live call once the month reaches the budget (the
   suite errors with `BudgetRefused`; what was recorded replays free on the
   next `auto`), so at most one call per thread goes past it. A ledger line
-  that can't be read refuses too: the month's spend is unknown.
+  that can't be read refuses too (so does a ledger path that exists but
+  isn't a readable file): the month's spend is unknown.
   `--over-budget REASON` is the only override: it is printed as a warning,
   stored in the report's `budget` block, and written on every ledger line the
   run adds. Agents don't pass it without Ben's say-so. Replay never checks
