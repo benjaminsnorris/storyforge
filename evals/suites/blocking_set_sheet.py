@@ -31,16 +31,20 @@ MIN_CASES = 100
 #: The sheet's own recorded values, each held exactly (#488: a gain moves its
 #: floor in the same commit). The plan's target is the read's values
 #: (`blocking-set`'s FLOORS, not recorded yet): recall at least its, false
-#: alarms no higher. The first recording is far below that (recall 16 of 117)
+#: alarms no higher. Recall is still far below the read's three-scene check
+#: (26 of 117), and false alarms rose with it once hands kept their state
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-09 (haiku 5.5, $0.49 for the set)
-    'recall': 0.1368,
-    'recall_hands': 0.2353, 'recall_posture': 0.1818, 'recall_sightline': 0.0833,
-    'recall_worn': 0.0909, 'recall_position': 0.129, 'recall_light': 0.0,
-    'recall_other': 0.0,
-    'false_alarms_per_10k': 2.54,
-    'left_flagged': 0,
-    'flags': 126,
+    # re-recorded 2026-11-09 after #671's review fixes (haiku 5.5, $0.85 for
+    # the set): hands as two slots, a question per reach or sightline, events
+    # in the prose's order. The first recording: recall 0.1368, false alarms
+    # 2.54 per 10k, 126 flags
+    'recall': 0.2222,
+    'recall_hands': 0.4412, 'recall_posture': 0.2727, 'recall_sightline': 0.0,
+    'recall_worn': 0.2727, 'recall_position': 0.129, 'recall_light': 0.0,
+    'recall_other': 0.0833,
+    'false_alarms_per_10k': 15.65,
+    'left_flagged': 2,
+    'flags': 288,
 }
 
 

@@ -1711,7 +1711,10 @@ def scene_when(scene: Mapping[str, str]) -> str:
     mode = (scene.get('time_mode') or '').strip().lower()
     how = {'summary': 'a summary: covers a stretch from that day',
            'frame': "frame narration: not the story's present",
-           'vision': "a vision: not the story's present"}.get(mode, '')
+           'vision': "a vision: not the story's present",
+           'memory': "a memory relived that day: not the present's action",
+           'dream': "a dream that night: not the present's action",
+           'ghost': "a ghost's visit: not the present's action"}.get(mode, '')
     # An embedded tale's day is when its events happened (#548)
     told = (scene.get('told_by') or '').strip()
     told = f'told in {told}' if told else ''

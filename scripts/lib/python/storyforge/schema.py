@@ -7,7 +7,7 @@ and provides a fast validation function that checks all non-empty cells.
 import os
 import re
 
-from .elaborate import _read_csv, _FILE_MAP, FRAMES
+from .elaborate import _read_csv, _FILE_MAP
 from . import mice
 from .enrich import load_alias_map
 from .narrator import NARRATOR_POV
@@ -22,10 +22,10 @@ VALID_TYPES = frozenset({
     'plot', 'revelation', 'transition', 'world',
 })
 
-VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
-
-#: scenes.csv `frame` (#648): `elaborate.FRAMES`, blank for the present
-VALID_FRAMES = frozenset(FRAMES)
+#: memory, dream and ghost (#648) are `elaborate.INNER_MODES`: on the
+#: calendar as a scene, off the present for the continuity checks
+VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision', 'memory', 'dream',
+                              'ghost'})
 
 #: characters.csv `pronouns`: a subject pronoun alone (`she`), or a slash
 #: form of that pronoun's own forms (`she/her`, `they/them/theirs`). The
@@ -207,18 +207,15 @@ COLUMN_SCHEMA = {
                        'timeline_day is where the stretch starts), frame (narration from '
                        'after the story, looking back; never the story\'s present), or '
                        'vision (events that have not happened or may not happen, such as a '
-                       'future a character is shown; never the story\'s present).',
-    },
-    'frame': {
-        'type': 'enum', 'values': VALID_FRAMES,
-        'file': 'scenes.csv', 'stage': 'map',
-        'description': 'Whether what the scene shows is the story\'s present action: blank '
-                       'when it is (the default, and every scene of a book without the '
-                       'column), or memory (a past relived), dream, vision (something a '
-                       'character is shown) or ghost (the dead visit). time_mode places the '
-                       'scene on the calendar; frame says whether its events happen there. '
-                       'The continuity check reads it: a dead character appearing in an '
-                       'unmarked scene is reported, never assumed to be a memory.',
+                       'future a character is shown; timeline_day is the day shown if the text '
+                       'fixes one; never the story\'s present). Three more keep the scene on '
+                       'its day but say its events aren\'t the present\'s action: memory (a '
+                       'past relived on the day of remembering), dream (the night it is '
+                       'dreamt) and ghost (the day the dead visit). A flashback set on its own '
+                       'earlier timeline_day needs none of these. The continuity check reads '
+                       'frame, vision, memory, dream and ghost as off the present, so a dead '
+                       'character may appear there; in any other scene that is reported, '
+                       'never assumed to be a memory.',
     },
     'timeline_date': {
         'type': 'edtf', 'file': 'scenes.csv', 'stage': 'map',

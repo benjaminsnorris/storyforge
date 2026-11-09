@@ -87,9 +87,9 @@ scene, and `--accept` takes them. What it couldn't check is a NOTE.
 Continuity (#648): every gated scene's typed state is read (one call on a
 small model, saved to `working/typed-state/`; none on unchanged prose) and
 checked by code against the book (`storyforge.continuity`): a dead
-character present, an object in two hands, knowledge before it is learned,
-two places at once or travel too fast, an elapsed time against the
-calendar, an injured part at full strength, a name the book rules out, the
+character present, an object in two hands in one scene or used after it
+was given away or destroyed, knowledge before a scene shows it learned,
+travel too fast for world.csv, an elapsed time against the calendar, an injured part at full strength, a name the book rules out, the
 sun against `reference/world.csv`. Its findings stop the scene like any
 contradiction (`--accept` takes them); what it couldn't check is a NOTE.
 
@@ -220,10 +220,24 @@ def main(argv=None):
                 '--pending, --keep-going or --stop-at-first.')
             sys.exit(1)
         sys.exit(_blocking_report(args, project_dir))
+    if not (args.stage_sheet or args.questions):
+        return _check_named(args, project_dir)
+    # this run only: an in-process caller after it keeps its own methods
+    saved = gate.GATE_BLOCKING_METHOD, gate.GATE_CHECK_METHOD
     if args.stage_sheet:
         gate.GATE_BLOCKING_METHOD = 'stage-sheet'
     if args.questions:
         gate.GATE_CHECK_METHOD = 'questions'
+    try:
+        return _check_named(args, project_dir)
+    finally:
+        gate.GATE_BLOCKING_METHOD, gate.GATE_CHECK_METHOD = saved
+
+
+def _check_named(args, project_dir: str):
+    """`check`'s scenes (named, or `--pending`) through the gate."""
+    from storyforge import gate, ledger
+    from storyforge.git import commit_and_push, create_branch
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')

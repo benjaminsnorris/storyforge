@@ -22,7 +22,7 @@ import os
 import re
 
 from .common import log
-from .elaborate import OFF_PRESENT_MODES, time_mode, told_by
+from .elaborate import INNER_MODES, OFF_PRESENT_MODES, time_mode, told_by
 from .enrich import update_csv_field
 from .schema import stated_time
 from .scenes import match_scene_id
@@ -1363,6 +1363,10 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
         for col, new in (('timeline_day', str(day)), ('time_mode', mode)):
             old = (row.get(col) or '').strip()
             if old == new or (col == 'time_mode' and not old and new == 'scene' and not write):
+                continue
+            # A memory, dream or ghost is a scene on the calendar (#648): the
+            # calendar's `scene` never takes away the mark
+            if col == 'time_mode' and new == 'scene' and old.lower() in INNER_MODES:
                 continue
             if write:
                 row[col] = new

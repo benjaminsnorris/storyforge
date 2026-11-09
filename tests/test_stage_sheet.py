@@ -28,12 +28,19 @@ CLEAN = ('Ann stood at the door and looked out at the rain. She put on her coat,
          'took the lantern from its hook and went down the path to the gate.')
 
 
-def E(quote, who, field, to, frm='', item=''):
-    return Event(quote=quote, who=who, field=field, item=item, from_=frm, to=to)
+def E(quote, who, field, to, frm='', item='', verified=True):
+    return Event(quote=quote, who=who, field=field, item=item, from_=frm, to=to,
+                 verified=verified)
 
 
 def _quotes(r):
     return [(s.event.quote, s.against.quote if s.against else None) for s in r.slips]
+
+
+def _hands(entries, who='Ann'):
+    """hand → (value, side_guessed) for `who`'s hands in `entries`."""
+    return {e.field: (e.value, e.side_guessed) for e in entries
+            if e.field in stage_sheet.HANDS and e.who == who}
 
 
 # ============================================================================
@@ -183,13 +190,15 @@ class TestHands:
                     E('she set the bowl down', 'Ann', 'hand_either', 'empty', frm='bowl')])
         assert len(r.slips) == 1 and 'lets go of bowl' in r.slips[0].why
 
-    def test_an_untold_hand_forgets_both(self):
-        """When which hand can't be told, neither is known after."""
+    def test_a_guessed_side_moves_to_the_free_hand(self):
+        """Either hand could have taken the cup: a later jug in the left
+        means the cup is in the right."""
         r = replay([E('her hands were empty', 'Ann', 'hand_left', 'empty'),
                     E('her right was empty', 'Ann', 'hand_right', 'empty'),
                     E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
                     E('she took the jug in her left', 'Ann', 'hand_left', 'jug', frm='empty')])
         assert r.slips == []
+        assert _hands(r.end) == {'hand_left': ('jug', False), 'hand_right': ('cup', False)}
 
 
 class TestWornPresentLightDoor:
@@ -262,10 +271,10 @@ class TestSky:
                     E('his shadow ran out west before him', '', 'shadow', 'west')])
         assert r.slips == []
 
-    def test_an_unknown_landmark_is_not_checked(self):
+    def test_an_unknown_landmark_is_not_checked_and_is_said(self):
         r = replay([E('at dusk', '', 'time', 'dusk'),
                     E('the sun over the hill', '', 'sun', 'the hill')])
-        assert r.slips == []
+        assert r.slips == [] and r.skipped == {stage_sheet.SKY_PLACE: 1}
 
     def test_a_face_seen_too_far_away(self):
         w = World(distances={frozenset(('the wall', 'the ships')): 2000.0})
@@ -276,17 +285,27 @@ class TestSky:
 
 class TestWhatIsNotChecked:
     def test_a_carried_state_makes_no_finding(self):
-        carried = [Entry('Ann', 'posture', '', 'sitting', 'Ann sat', origin='carried')]
+        carried = [Entry('Ann', 'posture', '', 'standing', 'Ann stood', origin='carried')]
         r = replay([E('Ann stood up', 'Ann', 'posture', 'standing', frm='down'),
                     E('Ann stood up again', 'Ann', 'posture', 'standing', frm='down')],
                    opening=carried)
         assert [s.event.quote for s in r.slips] == ['Ann stood up again']
+        # C2: the slip set against the carried state is counted, never silent
+        assert r.carried == 1
+        assert any('carried from the previous scene' in n for n in r.notes(2))
 
-    def test_a_misquoted_event_makes_no_finding_and_is_counted(self):
-        bad = E('Ann sat on a chair', 'Ann', 'posture', 'sitting')
-        bad.verified = False
+    def test_a_misquoted_state_is_not_applied_and_is_counted(self):
+        bad = E('Ann sat on a chair', 'Ann', 'posture', 'sitting', verified=False)
         r = replay([bad, E('Ann sat down', 'Ann', 'posture', 'sitting', frm='standing')])
+        assert r.slips == [] and r.unapplied == 1 and r.unchecked == 0
+        assert r.beats[0]['set'] == []
+
+    def test_a_slip_a_misquoted_event_makes_is_counted(self):
+        r = replay([E('Ann sat', 'Ann', 'posture', 'sitting'),
+                    E('Ann sat down', 'Ann', 'posture', 'sitting', frm='standing',
+                      verified=False)])
         assert r.slips == [] and r.unchecked == 1
+        assert any('made by a misquoted event' in n for n in r.notes(2))
 
 
 # ============================================================================
@@ -433,16 +452,16 @@ class TestCheckStageSheet:
 
 
 class TestQuestions:
-    PROSE = ('Priam sat in the car behind the wagon. He reached back and lifted the box '
-             'from the wagon bed.')
-    EVENTS = [ev('Priam sat in the car behind the wagon', 'Priam', 'posture', 'sitting')]
-    Q = {'quote': 'lifted the box from the wagon bed',
-         'question': 'Can Priam, seated in the car behind the wagon, lift the box from the '
-                     'wagon ahead of him?'}
+    PROSE = ('Ann sat at the rail behind the cart. She reached back and lifted the basket '
+             'from the cart bed.')
+    EVENTS = [ev('Ann sat at the rail behind the cart', 'Ann', 'posture', 'sitting')]
+    Q = {'quote': 'lifted the basket from the cart bed',
+         'question': 'Can Ann, seated at the rail behind the cart, lift the basket from the '
+                     'cart ahead of her?'}
 
     def _run(self, project_dir, answers):
         asked = []
-        fake = _fake([{'cast': ['Priam'], 'events': self.EVENTS, 'questions': [self.Q]}],
+        fake = _fake([{'cast': ['Ann'], 'events': self.EVENTS, 'questions': [self.Q]}],
                      answers=answers, asked=asked)
         with patch('storyforge.api._api_request', side_effect=fake):
             r = check_stage_sheet(project_dir, SCENE, prose=self.PROSE, model='m',
@@ -451,12 +470,12 @@ class TestQuestions:
 
     def test_two_noes_make_a_finding(self, project_dir):
         r, asked = self._run(project_dir, lambda a, n: [
-            {'n': 1, 'answer': 'no', 'why': 'The wagon is ahead and he sits behind it.'}])
+            {'n': 1, 'answer': 'no', 'why': 'The cart is ahead and she sits behind it.'}])
         assert len(asked) == stage_sheet.ASKINGS == 2
         assert len(r.findings) == 1 and r.asked == 1
         f = r.findings[0]
         assert f.scene_quote == self.Q['quote'] and f.code == BLOCKING_CODE
-        assert 'asked 2 times' in f.explanation and 'wagon is ahead' in f.explanation
+        assert 'asked 2 times' in f.explanation and 'cart is ahead' in f.explanation
 
     def test_split_answers_are_noted_not_found(self, project_dir):
         r, _ = self._run(project_dir, lambda a, n: [
@@ -470,7 +489,7 @@ class TestQuestions:
 
     def test_the_question_carries_the_stage_at_its_beat(self, project_dir):
         _, asked = self._run(project_dir, lambda a, n: [{'n': 1, 'answer': 'yes', 'why': 'x'}])
-        assert '- Priam: posture: sitting' in asked[0]
+        assert '- Ann: posture: sitting' in asked[0]
         assert 'independent asking 2' in asked[1] and 'independent asking' not in asked[0]
 
     def test_a_question_on_a_slip_the_code_found_is_not_a_second_finding(self, project_dir):
@@ -501,7 +520,7 @@ class TestQuestions:
 
     def test_questions_past_the_cap_are_noted(self, project_dir, monkeypatch):
         monkeypatch.setattr(stage_sheet, 'MAX_QUESTIONS', 1)
-        q2 = {'quote': 'He reached back', 'question': 'Can he reach back?'}
+        q2 = {'quote': 'She reached back', 'question': 'Can she reach back?'}
         fake = _fake([{'cast': [], 'events': [], 'questions': [self.Q, q2]}],
                      answers=lambda a, n: [{'n': i, 'answer': 'yes', 'why': ''}
                                            for i in range(1, n + 1)])
@@ -565,6 +584,8 @@ class TestSheetFile:
         r = self._check(project_dir, SCENE, 'Ann stood up.',
                         [ev('Ann stood up', 'Ann', 'posture', 'standing', frm='down')])
         assert r.findings == []
+        assert r.notes == ['1 possible slip(s) set against a state carried from the previous '
+                           'scene: not findings (a scene break allows any change)']
 
     def test_a_sheet_of_earlier_prose_is_not_carried(self, project_dir):
         _write_scene(project_dir, PREV, 'Ann sat on the step.')
@@ -698,6 +719,49 @@ class TestCheckCommand:
                           lambda *a, **k: pytest.fail('no call expected'))
         assert code == 7 and seen == ['stage-sheet']
 
+    def test_the_method_is_this_runs_only(self, project_dir, monkeypatch):
+        """CR-9: an in-process caller after `check --stage-sheet` keeps the read."""
+        from storyforge import cmd_check
+        monkeypatch.setattr(cmd_check, '_check_scenes',
+                            lambda *a, **k: (_ for _ in ()).throw(SystemExit(7)))
+        monkeypatch.setattr('storyforge.git.create_branch', lambda *a, **k: True)
+        _write_scene(project_dir, SCENE, HARBOUR)
+        before = gate.GATE_BLOCKING_METHOD
+        assert self._main(project_dir, monkeypatch, ['--stage-sheet', SCENE],
+                          lambda *a, **k: pytest.fail('no call expected')) == 7
+        assert gate.GATE_BLOCKING_METHOD == before == 'read'
+
+    def test_notes_are_listed_exactly_and_nothing_is_carried(self, project_dir, monkeypatch):
+        """T5: --blocking runs each scene alone: no carried state, no carry note."""
+        r = replay([E('Ann sat', 'Ann', 'posture', 'sitting')])
+        _write_scene(project_dir, PREV, 'x')
+        stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(PREV, 'x', r))
+        _write_scene(project_dir, SCENE, HARBOUR)
+        fake = _fake([{'cast': [], 'events': [ev('not in it', 'Ann', 'posture', 'sitting')],
+                       'questions': []}])
+        assert self._main(project_dir, monkeypatch, ['--blocking', '--stage-sheet', SCENE],
+                          fake) == 0
+        with open(os.path.join(project_dir, 'working', 'blocking-report.md')) as f:
+            report = f.read()
+        assert [line for line in report.splitlines() if line.startswith('- ')] == [
+            '- NOT CHECKED: 1 of 1 event(s) quote words not in the scene: their states were '
+            'not applied, so what they touched is unknown from there']
+        sheet = stage_sheet.load_sheet(stage_sheet.sheet_path(project_dir, SCENE))
+        assert sheet['opening'] == []
+
+    @pytest.mark.parametrize('broken', ['reply', 'world'])
+    def test_a_scene_the_sheet_cannot_read_is_not_read(self, project_dir, monkeypatch, broken):
+        _write_scene(project_dir, SCENE, HARBOUR)
+        if broken == 'world':
+            _world_file(project_dir, 'kind|name|value|note\nsun|dawn|up|\n')
+        fake = _fake([{'nope': 1}])
+        assert self._main(project_dir, monkeypatch, ['--blocking', '--stage-sheet', SCENE],
+                          fake) == 1
+        with open(os.path.join(project_dir, 'working', 'blocking-report.md')) as f:
+            report = f.read()
+        assert '- NOT READ: ' in report
+        assert ('world.csv' if broken == 'world' else 'failed twice') in report
+
     def test_accept_takes_no_stage_sheet(self, project_dir, monkeypatch):
         code = self._main(project_dir, monkeypatch, ['--accept', SCENE, '--stage-sheet'],
                           lambda *a, **k: pytest.fail('no call expected'))
@@ -736,3 +800,552 @@ class TestCleanup:
         from storyforge.cmd_cleanup import report_unexpected_files
         os.makedirs(os.path.join(project_dir, 'working', 'stage-sheets'))
         assert 'UNEXPECTED_DIR:working/stage-sheets' not in report_unexpected_files(project_dir)
+
+
+# ============================================================================
+# Review fixes (#671): hands as two slots, misquotes, carried states, what
+# isn't checked, the file's entries, the prose's order
+# ============================================================================
+
+class TestUnnamedHands:
+    """CR-1, SF5: an unnamed hand on unknown hands takes a slot; a known
+    state is never forgotten."""
+
+    def test_an_unnamed_hand_on_an_empty_sheet_is_recorded(self):
+        r = replay([E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty')])
+        assert _hands(r.end) == {'hand_left': ('cup', True)}
+        assert r.beats[0]['set'][0]['side_guessed'] is True
+
+    def test_two_unnamed_hands_then_a_free_hand_is_a_slip(self):
+        """The review's case: cup, then bowl, then a free hand gripping rope."""
+        r = replay([E('she took the cup', 'Ann', 'hand_either', 'cup'),
+                    E('she took the bowl', 'Ann', 'hand_either', 'bowl'),
+                    E('with a free hand she gripped the rope', 'Ann', 'hand_either', 'rope',
+                      frm='empty')])
+        assert len(r.slips) == 1 and 'free hand' in r.slips[0].why
+        assert all(b['set'] for b in r.beats)
+
+    def test_an_unnamed_hand_keeps_the_named_ones(self):
+        r = replay([E('the spear in her left hand', 'Ann', 'hand_left', 'spear'),
+                    E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
+                    E('she gripped the rope', 'Ann', 'hand_either', 'rope', frm='empty')])
+        # the cup went to the only hand not known; the rope finds none free
+        assert _hands(r.end)['hand_left'][0] != 'empty'
+        assert len(r.slips) == 1 and 'spear' in r.slips[0].why
+
+    def test_letting_go_with_an_unnamed_hand_takes_the_hand_holding_it(self):
+        r = replay([E('the cup in her right hand', 'Ann', 'hand_right', 'cup'),
+                    E('she set the cup down', 'Ann', 'hand_either', 'empty', frm='cup')])
+        assert r.slips == [] and _hands(r.end) == {'hand_right': ('empty', False)}
+
+    def test_a_guessed_side_follows_its_object(self):
+        """She took the cup (a hand untold); then her right hand sets the
+        cup down: the cup was in the right, and no slip."""
+        r = replay([E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
+                    E('her right hand set the cup down', 'Ann', 'hand_right', 'empty',
+                      frm='cup')])
+        assert r.slips == []
+        assert _hands(r.end) == {'hand_right': ('empty', False)}
+
+    def test_naming_one_hand_settles_the_other(self):
+        r = replay([E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
+                    E('she took the bowl', 'Ann', 'hand_either', 'bowl', frm='empty'),
+                    E('the bowl in her right hand', 'Ann', 'hand_right', 'bowl')])
+        assert r.slips == []
+        assert _hands(r.end) == {'hand_left': ('cup', False), 'hand_right': ('bowl', False)}
+
+    def test_a_named_hand_still_slips_when_neither_side_fits(self):
+        r = replay([E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
+                    E('she took the bowl', 'Ann', 'hand_either', 'bowl', frm='empty'),
+                    E('her left hand let go of the spear', 'Ann', 'hand_left', 'empty',
+                      frm='spear')])
+        assert len(r.slips) == 1 and 'lets go of spear' in r.slips[0].why
+
+    def test_a_guessed_side_is_shown_to_the_asker(self):
+        r = replay([E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
+                    E('Ann sat', 'Ann', 'posture', 'sitting')])
+        assert 'left hand (or the other): cup' in r.stage_at[1]
+
+
+class TestMisquotesAreNotApplied:
+    """SF1: a misquoted event's state can't cancel a real slip unseen."""
+
+    def test_a_misquoted_posture_makes_the_posture_unknown(self):
+        r = replay([E('Ann stood', 'Ann', 'posture', 'standing'),
+                    E('Ann sat down', 'Ann', 'posture', 'sitting', frm='standing',
+                      verified=False),
+                    E('Ann stood up', 'Ann', 'posture', 'standing', frm='down')])
+        assert r.slips == [] and r.unapplied == 1
+        assert r.beats[1]['set'] == []
+        assert r.beats[1]['unknown'] == [{'who': 'Ann', 'field': 'posture', 'item': ''}]
+        assert any('not applied' in n for n in r.notes(3))
+
+    def test_a_misquoted_drop_makes_the_hand_unknown(self):
+        r = replay([E('the spear in his right hand', 'Tom', 'hand_right', 'spear'),
+                    E('he dropped it', 'Tom', 'hand_right', 'empty', frm='spear',
+                      verified=False),
+                    E('his right hand gripped the cup', 'Tom', 'hand_right', 'cup',
+                      frm='empty')])
+        assert r.unapplied == 1
+        assert r.beats[1]['unknown'] == [{'who': 'Tom', 'field': 'hand_right', 'item': ''}]
+
+    def test_a_misquoted_break_clears_nothing_it_does_not_say(self):
+        r = replay([E('Ann sat', 'Ann', 'posture', 'sitting'),
+                    E('* * *', '', 'break', '', verified=False)])
+        assert 'cleared' not in r.beats[1] and r.unapplied == 1
+        assert r.end == []
+
+    def test_the_file_replays_to_the_same_end(self, project_dir):
+        events = [E('Ann stood', 'Ann', 'posture', 'standing'),
+                  E('Ann sat down', 'Ann', 'posture', 'sitting', frm='standing',
+                    verified=False),
+                  E('she took the cup', 'Ann', 'hand_either', 'cup', frm='empty'),
+                  E('the jug in her left hand', 'Ann', 'hand_left', 'jug', frm='empty')]
+        r = replay(events)
+        sheet = stage_sheet.build_sheet(SCENE, 'x', r)
+        path = stage_sheet.write_sheet(project_dir, sheet)
+        last = stage_sheet.states(stage_sheet.load_sheet(path))[-1]
+        assert sorted(e.to_json().items().__repr__() for e in last) == \
+            sorted(e.to_json().items().__repr__() for e in r.end)
+
+
+class TestCarriedStates:
+    """CR-3, C2, T1, T4: a carried state is shown, counted, never a finding."""
+
+    def _carried(self, field, value, who='', item=''):
+        return [Entry(who, field, item, value, 'before', origin='carried')]
+
+    def test_a_carried_time_never_overrides_the_scene_time(self):
+        r = replay([E('the sun sank in the west', '', 'sun', 'west')],
+                   opening=self._carried('time', 'morning'), time_of_day='evening')
+        assert r.slips == [] and r.carried == 0
+
+    def test_a_carried_time_alone_makes_no_finding_and_is_counted(self):
+        r = replay([E('the sun sank in the west', '', 'sun', 'west')],
+                   opening=self._carried('time', 'morning'))
+        assert r.slips == [] and r.carried == 1
+
+    def test_a_carried_sun_makes_no_shadow_finding(self):
+        r = replay([E('his shadow ran east', '', 'shadow', 'east')],
+                   opening=self._carried('sun', 'east'))
+        assert r.slips == [] and r.carried == 1
+
+    def test_the_scenes_own_time_still_binds(self):
+        r = replay([E('at dusk', '', 'time', 'dusk'),
+                    E('the sun climbed in the east', '', 'sun', 'east')],
+                   opening=self._carried('time', 'morning'))
+        assert len(r.slips) == 1
+
+    @pytest.mark.parametrize('opening,event', [
+        (('hand_right', 'spear', 'Tom'),
+         E('his right hand closed on the rope', 'Tom', 'hand_right', 'rope', frm='empty')),
+        (('worn', 'off', 'Tom', 'cloak'),
+         E('he took off his cloak', 'Tom', 'worn', 'off', frm='on', item='cloak')),
+        (('light', 'out', '', 'candle'),
+         E('she blew out the candle', '', 'light', 'out', frm='lit', item='candle')),
+        (('present', 'here', 'Tom'),
+         E('Tom came in', 'Tom', 'present', 'here', frm='gone')),
+    ])
+    def test_carried_hands_worn_light_and_presence_make_no_finding(self, opening, event):
+        r = replay([event], opening=self._carried(*opening))
+        assert r.slips == [] and r.carried == 1
+
+    def test_someone_who_left_last_scene_is_counted_once(self):
+        r = replay([E('Tom sat', 'Tom', 'posture', 'sitting'),
+                    E('Tom stood', 'Tom', 'posture', 'standing', frm='down'),
+                    E('Tom waved', 'Tom', 'hand_right', 'empty')],
+                   opening=self._carried('present', 'gone', 'Tom'))
+        assert r.slips == [] and r.carried == 1
+
+
+class TestWhatIsSaid:
+    """SF3, SF4, CR-6, T6: every event the code can't read or check is counted."""
+
+    def test_a_sun_with_no_time(self):
+        r = replay([E('the sun in the west', '', 'sun', 'west')])
+        assert r.slips == [] and r.skipped == {stage_sheet.SKY_NO_TIME: 1}
+
+    def test_a_sun_at_night(self):
+        r = replay([E('the sun in the west', '', 'sun', 'west')], time_of_day='night')
+        assert r.slips == [] and r.skipped == {stage_sheet.SKY_NIGHT: 1}
+
+    def test_a_time_the_table_does_not_know(self):
+        r = replay([E('in the third watch', '', 'time', 'the third watch'),
+                    E('the sun in the west', '', 'sun', 'west')])
+        assert r.skipped == {stage_sheet.SKY_ODD_TIME: 1}
+
+    def test_a_shadow_from_the_time_alone(self):
+        r = replay([E('at dawn', '', 'time', 'dawn'),
+                    E('his shadow ran east before him', '', 'shadow', 'east')])
+        assert len(r.slips) == 1 and 'with the sun in the east' in r.slips[0].why
+
+    def test_a_sighting_within_range(self):
+        w = World(distances={frozenset(('the gate', 'the well')): 20.0})
+        r = replay([Event('she saw his face', 'Ann', 'sees', 'face', 'the gate', 'the well')],
+                   world=w)
+        assert r.slips == [] and r.skipped == {}
+
+    def test_a_figure_too_far_away(self):
+        w = World(distances={frozenset(('the wall', 'the ships')): 2000.0})
+        r = replay([Event('she knew him', 'Ann', 'sees', 'figure', 'the wall', 'the ships')],
+                   world=w)
+        assert len(r.slips) == 1 and 'figure' in r.slips[0].why
+
+    def test_a_sighting_with_no_distance(self):
+        r = replay([Event('she saw his face', 'Ann', 'sees', 'face', 'the gate', 'the well')])
+        assert r.skipped == {stage_sheet.SIGHT_FAR: 1}
+
+    def test_a_detail_with_no_range(self):
+        r = replay([Event('she saw his limp', 'Ann', 'sees', 'gait', 'the gate', 'the well')])
+        assert r.skipped == {stage_sheet.SIGHT_DETAIL: 1}
+
+    def test_places_are_matched_inside_longer_phrases(self):
+        w = World(distances={frozenset(('the wall', 'the ships')): 2000.0})
+        assert w.distance('on the wall', 'down by the ships') == 2000.0
+        assert w.distance('the ships', 'the wall') == 2000.0
+        assert w.distance('the tower', 'the ships') is None
+        r = replay([Event('she saw his face', 'Ann', 'sees', 'face', 'up on the wall',
+                          'among the ships')], world=w)
+        assert len(r.slips) == 1
+
+    def test_synonyms_for_closed_values(self):
+        r = replay([E('the door was closed', '', 'door', 'closed', item='door'),
+                    E('she opened the door', '', 'door', 'opened', frm='closed', item='door'),
+                    E('she opened the door again', '', 'door', 'open', frm='closed',
+                      item='door')])
+        assert len(r.slips) == 1
+        r = replay([E('Tom left', 'Tom', 'present', 'left', frm='here'),
+                    E('Tom sat', 'Tom', 'posture', 'sitting')])
+        assert len(r.slips) == 1 and 'after leaving' in r.slips[0].why
+
+    def test_a_value_the_sheet_cannot_read(self):
+        r = replay([E('the door hung crooked', '', 'door', 'crooked', item='door')])
+        assert r.skipped == {stage_sheet.UNREADABLE: 1} and r.end == []
+
+    def test_no_one_and_no_item(self):
+        r = replay([E('someone sat', '', 'posture', 'sitting'),
+                    E('he took it off', 'Tom', 'worn', 'off', frm='on')])
+        assert r.skipped == {stage_sheet.NO_ONE: 1, stage_sheet.NO_ITEM: 1}
+
+    def test_position_and_facing_reach_the_asker(self):
+        r = replay([E('Ann stood at the rail', 'Ann', 'position', 'at the rail'),
+                    E('she faced the sea', 'Ann', 'facing', 'the sea'),
+                    E('Ann sat', 'Ann', 'posture', 'sitting')])
+        assert 'position: at the rail' in r.stage_at[2] and 'facing: the sea' in r.stage_at[2]
+
+
+class TestUnstatedTime:
+    def test_unstated_in_scenes_csv_is_no_time(self, project_dir):
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace('|1|evening|1 hour|', '|1|unstated|1 hour|', 1))
+        fake = _fake([{'cast': [], 'events': [ev('The sun rose over the eastern hills', '',
+                                                'sun', 'east')], 'questions': []}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose='The sun rose over the eastern hills.',
+                                  model='m', carry=False)
+        assert r.findings == [] and r.notes == [f'1 {stage_sheet.SKY_NO_TIME}']
+
+
+class TestEntryFromJson:
+    """TD-3: a sheet file holds only states a replay could have written."""
+
+    def test_values_are_normalized(self):
+        e = Entry.from_json({'who': 'Ann', 'field': 'posture', 'value': 'seated'})
+        assert e.value == 'sitting'
+        e = Entry.from_json({'field': 'door', 'item': 'gate', 'value': 'closed'})
+        assert e.value == 'shut'
+
+    @pytest.mark.parametrize('it,why', [
+        ({'who': 'Ann', 'field': 'worn', 'item': 'cloak', 'value': 'yes'}, 'value'),
+        ({'who': 'Ann', 'field': 'hand_left', 'item': 'cup', 'value': 'cup'}, 'names an item'),
+        ({'who': 'Ann', 'field': 'hand_either', 'value': 'cup'}, 'not one of'),
+        ({'who': 'Ann', 'field': 'sees', 'value': 'x'}, 'not one of'),
+        ({'who': 'Ann', 'field': 'posture', 'value': 'sitting', 'origin': 'x'}, 'origin'),
+        ({'field': 'posture', 'value': 'sitting'}, 'names no one'),
+        ({'who': 'Ann', 'field': 'light', 'item': 'lamp', 'value': 'lit'}, 'names someone'),
+        ({'field': 'door', 'value': 'open'}, 'names no item'),
+        ({'who': 'Ann', 'field': 'posture', 'value': 'sitting', 'side_guessed': True},
+         'side_guessed'),
+    ])
+    def test_what_a_replay_cannot_write_is_refused(self, it, why):
+        with pytest.raises(ValueError, match=why):
+            Entry.from_json(it)
+
+    def test_a_sheet_with_another_source_is_refused(self, tmp_path):
+        path = tmp_path / 's.json'
+        path.write_text(json.dumps({'format': 1, 'scene_id': SCENE, 'source': 'guess'}))
+        with pytest.raises(ValueError, match='source'):
+            stage_sheet.load_sheet(str(path))
+
+
+class TestSources:
+    """TD-4: a writer's sheet and the extractor's never overwrite each other."""
+
+    def test_each_source_has_its_own_file(self, project_dir):
+        r = replay([E('Ann sat', 'Ann', 'posture', 'sitting')])
+        a = stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(SCENE, 'x', r))
+        b = stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(SCENE, 'x', r,
+                                                                         source='writer'))
+        assert a != b and a.endswith(f'{SCENE}.json') and b.endswith(f'{SCENE}.writer.json')
+        assert os.path.isfile(a) and os.path.isfile(b)
+        with pytest.raises(ValueError):
+            stage_sheet.sheet_path(project_dir, SCENE, 'other')
+
+
+class TestProseOrder:
+    """CR-7, CR-5, SF6: events replay in the prose's order, and a question
+    sees the stage where its words are, not the scene's end."""
+
+    PROSE = ('Ann sat on the step. She leaned over and lifted the basket from the cart. '
+             'At last Ann stood up and went in.')
+
+    def test_events_are_sorted_by_their_quotes(self):
+        events = [E('Ann stood up', 'Ann', 'posture', 'standing', frm='down'),
+                  E('Ann sat on the step', 'Ann', 'posture', 'sitting')]
+        ordered, pos = stage_sheet.in_prose_order(self.PROSE, events)
+        assert [e.quote for e in ordered] == ['Ann sat on the step', 'Ann stood up']
+        assert pos == sorted(pos)
+        assert replay(ordered).slips == []
+
+    def test_a_misquoted_event_stays_after_the_one_before_it(self):
+        events = [E('Ann sat on the step', 'Ann', 'posture', 'sitting'),
+                  E('not in it', 'Ann', 'facing', 'the cart', verified=False),
+                  E('lifted the basket', 'Ann', 'hand_either', 'basket')]
+        ordered, _ = stage_sheet.in_prose_order(self.PROSE, events)
+        assert [e.quote for e in ordered] == [e.quote for e in events]
+
+    def test_a_question_sees_the_stage_at_its_words(self, project_dir):
+        events = [ev('At last Ann stood up', 'Ann', 'posture', 'standing', frm='down'),
+                  ev('Ann sat on the step', 'Ann', 'posture', 'sitting')]
+        q = {'quote': 'lifted the basket from the cart', 'question': 'Can Ann reach the cart?'}
+        asked = []
+        fake = _fake([{'cast': ['Ann'], 'events': events, 'questions': [q]}],
+                     answers=lambda a, n: [{'n': 1, 'answer': 'yes', 'why': ''}], asked=asked)
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=self.PROSE, model='m', carry=False)
+        assert r.findings == []
+        assert '- Ann: posture: sitting' in asked[0] and 'standing' not in asked[0]
+
+
+class TestExtractionGaps:
+    """SF2, SF9, SF10: an empty reply, an empty question and a name not in
+    the cast are said."""
+
+    LONG = ' '.join(['Ann walked along the harbour wall and watched the boats.'] * 10)
+
+    def test_an_empty_reply_on_a_long_scene_is_asked_again(self, project_dir):
+        replies = [{'cast': [], 'events': [], 'questions': []},
+                   {'cast': ['Ann'], 'events': [ev('Ann walked along the harbour wall', 'Ann',
+                                                   'position', 'the harbour wall')],
+                    'questions': []}]
+        prompts = []
+
+        def fake(path, body, **k):
+            prompts.append(body['messages'][0]['content'])
+            return _text(replies[len(prompts) - 1])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=self.LONG, model='m', carry=False)
+        assert len(prompts) == 2 and 'recorded no events' in prompts[1]
+        assert r.events == 1 and r.notes == []
+
+    def test_two_empty_replies_are_noted(self, project_dir):
+        fake = _fake([{'cast': [], 'events': [], 'questions': []}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=self.LONG, model='m', carry=False)
+        assert r.notes == ['the extraction recorded no physical event in 100 words (asked '
+                           'twice): nothing was checked']
+
+    def test_a_short_scene_is_not_asked_again(self, project_dir):
+        calls = []
+
+        def fake(path, body, **k):
+            calls.append(1)
+            return _text({'cast': [], 'events': [], 'questions': []})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose='Ann waited.', model='m',
+                                  carry=False)
+        assert calls == [1] and r.notes == []
+
+    def test_empty_and_misquoted_questions_are_counted_apart(self, project_dir):
+        qs = [{'quote': 'He waved with his free hand', 'question': ' '},
+              {'quote': 'not in the scene', 'question': 'Can he?'}]
+        fake = _fake([{'cast': [], 'events': [], 'questions': qs}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=HARBOUR, model='m', carry=False)
+        assert '1 question(s) with no question: not asked' in r.notes
+        assert '1 question(s) quote words not in the scene: not asked' in r.notes
+
+    def test_a_name_not_in_the_cast_is_noted(self, project_dir):
+        events = [ev('Ann sat on the step', 'Ann', 'posture', 'sitting'),
+                  ev('Later Ann sat down beside him', 'the girl', 'posture', 'sitting')]
+        fake = _fake([{'cast': ['Ann', 'Tom'], 'events': events, 'questions': []}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=HARBOUR, model='m', carry=False)
+        assert any(n.startswith('1 name(s) in the events not in the cast (the girl)')
+                   for n in r.notes)
+
+
+class TestQuestionAgreement:
+    """T3: answers are matched by number, whatever order an asking lists them."""
+
+    def test_three_questions(self, project_dir):
+        prose = 'Ann reached the lamp. Ann passed the cup. Ann saw the boat.'
+        qs = [{'quote': 'Ann reached the lamp', 'question': 'Can Ann reach the lamp?'},
+              {'quote': 'Ann passed the cup', 'question': 'Can Ann pass the cup?'},
+              {'quote': 'Ann saw the boat', 'question': 'Can Ann see the boat?'}]
+        said = {1: ('yes', 'yes'), 2: ('no', 'no'), 3: ('no', 'yes')}
+        fake = _fake([{'cast': ['Ann'], 'events': [], 'questions': qs}],
+                     answers=lambda a, n: [{'n': i, 'answer': said[i][a - 1], 'why': f'q{i}'}
+                                           for i in (range(n, 0, -1) if a == 2
+                                                     else range(1, n + 1))])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose=prose, model='m', carry=False)
+        assert [f.scene_quote for f in r.findings] == ['Ann passed the cup']
+        assert 'No: q2' in r.findings[0].explanation
+        assert '1 question(s) got split answers: not findings' in r.notes
+
+
+class TestCarryNotes:
+    """T4, SF8: each way carrying can fail is said; a bug isn't swallowed."""
+
+    def test_an_unreadable_order_is_said(self, project_dir, monkeypatch):
+        from storyforge import ledger
+        monkeypatch.setattr(ledger, 'scene_order',
+                            lambda p: (_ for _ in ()).throw(ValueError('no seq')))
+        assert stage_sheet.carried_opening(project_dir, SCENE) == (
+            [], 'no state carried over (the reading order could not be read: no seq)')
+
+    def test_a_bug_in_the_order_is_not_swallowed(self, project_dir, monkeypatch):
+        from storyforge import ledger
+        monkeypatch.setattr(ledger, 'scene_order',
+                            lambda p: (_ for _ in ()).throw(KeyError('bug')))
+        with pytest.raises(KeyError):
+            stage_sheet.carried_opening(project_dir, SCENE)
+
+    def test_a_malformed_previous_sheet_is_said(self, project_dir):
+        path = stage_sheet.sheet_path(project_dir, PREV)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write('{"format": 1, "scene_id": "x", "end": [{"field": "sees"}]}')
+        opening, note = stage_sheet.carried_opening(project_dir, SCENE)
+        assert opening == [] and 'stage sheet could not be used' in note
+
+    def test_a_previous_scene_with_no_prose_is_said(self, project_dir):
+        r = replay([E('Ann sat', 'Ann', 'posture', 'sitting')])
+        stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(PREV, 'x', r))
+        os.remove(os.path.join(project_dir, 'scenes', f'{PREV}.md'))
+        assert stage_sheet.carried_opening(project_dir, SCENE) == (
+            [], f'no state carried over: {PREV} has no prose')
+
+
+@pytest.mark.blocking_read
+class TestGateRecordsTheMethod:
+    """CR-2, T2: gate-prose.csv records how the blocking was checked, and a
+    re-check skips only when it was checked the same way."""
+
+    _run = TestGateUsesTheStageSheet._run
+
+    def _gated(self, project_dir, tmp_path, monkeypatch, method):
+        import subprocess
+        subprocess.run(['git', 'init', '-q', project_dir], check=True)
+        events = [ev('Ann sat on the step', 'Ann', 'posture', 'sitting')]
+        result, calls = self._run(project_dir, tmp_path, monkeypatch,
+                                  {'cast': [], 'events': events, 'questions': []}, method=method)
+        assert result.committed
+        return calls
+
+    def _recheck(self, project_dir, tmp_path, monkeypatch, method):
+        monkeypatch.setattr(gate, 'GATE_BLOCKING_METHOD', method)
+        calls = []
+
+        def fake(path, body, **k):
+            schema = (body.get('output_config') or {}).get('format', {}).get('schema', {})
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            if 'verdicts' in schema.get('properties', {}):
+                return _text({'verdicts': []})
+            kind = _kind(body)
+            calls.append(kind)
+            if kind == 'extract':
+                return _text({'cast': [], 'events': [], 'questions': []})
+            if 'other_quote' in json.dumps(schema):
+                calls[-1] = 'read'
+                return _text({'findings': []})
+            return _text({'commitments': []})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            result = gate.gate_scene(project_dir, SCENE, command='recheck',
+                                     log_dir=str(tmp_path / 'logs2'), extract_model='m',
+                                     check_model='m')
+        return result, calls
+
+    def test_the_stage_sheet_is_recorded_as_such(self, project_dir, tmp_path, monkeypatch):
+        self._gated(project_dir, tmp_path, monkeypatch, 'stage-sheet')
+        assert gate._prose_table(project_dir)[SCENE]['blocking'] == 'stage-sheet'
+
+    def test_a_sheet_gated_scene_still_gets_the_read(self, project_dir, tmp_path, monkeypatch):
+        self._gated(project_dir, tmp_path, monkeypatch, 'stage-sheet')
+        result, calls = self._recheck(project_dir, tmp_path, monkeypatch, 'read')
+        assert 'read' in calls and not result.blocking_skipped
+        assert result.blocking_note == ('blocking read run: its last gate checked its blocking '
+                                        'by stage-sheet, not read')
+
+    def test_a_read_gated_scene_still_gets_the_sheet(self, project_dir, tmp_path, monkeypatch):
+        self._gated(project_dir, tmp_path, monkeypatch, 'read')
+        assert gate._prose_table(project_dir)[SCENE]['blocking'] == 'read'
+        result, calls = self._recheck(project_dir, tmp_path, monkeypatch, 'stage-sheet')
+        assert 'extract' in calls and not result.blocking_skipped
+        assert os.path.isfile(stage_sheet.sheet_path(project_dir, SCENE))
+
+    def test_the_same_method_is_skipped(self, project_dir, tmp_path, monkeypatch):
+        self._gated(project_dir, tmp_path, monkeypatch, 'stage-sheet')
+        result, calls = self._recheck(project_dir, tmp_path, monkeypatch, 'stage-sheet')
+        assert 'extract' not in calls and result.blocking_skipped
+        assert result.blocking_note.startswith('stage sheet skipped')
+
+    def test_record_prose_takes_a_method(self, project_dir):
+        with pytest.raises(ValueError, match='blocking must be one of'):
+            gate.record_prose(project_dir, SCENE, 'x', blocking='yes')
+
+    def test_an_ask_failure_is_a_gate_error(self, project_dir, tmp_path, monkeypatch):
+        """T7: the questions failing loses the scene's check, loudly."""
+        q = {'quote': 'He waved with his free hand', 'question': 'Can he wave?'}
+        with pytest.raises(gate.GateError, match='stage sheet questions failed twice'):
+            self._run(project_dir, tmp_path, monkeypatch,
+                      {'cast': [], 'events': [], 'questions': [q]})
+
+
+class TestAcceptedSheetFindings:
+    """T8: an accepted stage-sheet finding covers a new wording of it on the
+    same unchanged paragraphs, as the read's do."""
+
+    def _row(self, f, prose):
+        keys = gate._quote_paragraphs(f.scene_quote, prose) | gate._quote_paragraphs(
+            f.established_quote, prose)
+        return {'command': gate.ACCEPTED, 'paragraphs': ';'.join(sorted(keys)),
+                'source': SCENE, 'finding': f'{BLOCKING_CODE} x'}
+
+    def test_a_one_sided_finding(self):
+        r = replay([E('the sun in the west', '', 'sun', 'west')], time_of_day='morning')
+        f = stage_sheet.to_finding(SCENE, r.slips[0])
+        prose = 'Morning.\n\nThe sun in the west lit the rail.'
+        assert f.established_quote == f.scene_quote
+        assert gate._accepted_blocking_covers(self._row(f, prose), f, SCENE, prose)
+
+    def test_a_yes_no_finding(self):
+        from storyforge.checker import Finding
+        prose = 'Ann sat.\n\nShe lifted the basket from the cart.'
+        f = Finding(kind='contradiction', code=BLOCKING_CODE,
+                    scene_quote='lifted the basket from the cart', established_scene=SCENE,
+                    established_quote='lifted the basket from the cart', fact_id='',
+                    explanation='(impossible, stage sheet: asked 2 times) x')
+        row = self._row(f, prose)
+        again = Finding(kind='contradiction', code=BLOCKING_CODE,
+                        scene_quote='She lifted the basket', established_scene=SCENE,
+                        established_quote='She lifted the basket', fact_id='',
+                        explanation='(impossible, stage sheet: asked 2 times) other words')
+        assert gate._accepted_blocking_covers(row, again, SCENE, prose)
+        moved = prose.replace('She lifted', 'Then she lifted')
+        assert not gate._accepted_blocking_covers(row, f, SCENE, moved)
