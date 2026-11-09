@@ -152,7 +152,10 @@ approval). To record:
 2. `python3 evals/run.py --mode record --suite blocking-set --runs 3` (three
    runs, about $20, so the spread is known: `cassettes/blocking-set/` and
    `cassettes/run2/`, `run3/` beside the set). Commit the cassettes there.
-3. Set `FLOORS` in `evals/suites/blocking_set.py` from run 1's report.
+3. Replay run 1 (`python3 evals/run.py --suite blocking-set`), copy the
+   private `results/latest.json` to `baseline-cases.json` there and commit it
+   (the frozen per-case outcomes), and set `FLOORS` in
+   `evals/suites/blocking_set.py` from the report.
 4. `python3 evals/run.py --baseline` writes `baseline.json`. It needs a full
    run with no suite in `error`; on this branch's base E3, E5 and the re-check
    set error in replay, so that waits for them.
