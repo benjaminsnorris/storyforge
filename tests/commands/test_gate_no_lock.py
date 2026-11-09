@@ -99,8 +99,30 @@ class TestBriefsStandIn:
     def test_no_brief_and_no_facts_still_holds_it_and_says_why(self, project_dir):
         gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
         [line] = _of(project_dir, 'act2-sc02')
-        assert ('act2-sc02 has no binding facts in the ledger and its brief names none it '
-                'needs, to tell whether any depends on act1-sc01') in line
+        assert ('act2-sc02 has no binding facts in the ledger and it has no row in '
+                'reference/scene-briefs.csv, to tell whether any depends on act1-sc01') in line
+
+    def test_a_brief_that_needs_nothing_says_so(self, project_dir):
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        set_brief(project_dir, 'act2-sc02', goal='a goal')
+        [line] = _of(project_dir, 'act2-sc02')
+        assert 'act2-sc02 has no binding facts in the ledger and its brief names none it ' \
+            'needs' in line
+
+    def test_brief_ids_not_in_the_registry_are_named(self, project_dir):
+        """#641's review, T-7: not "its brief names none"."""
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        set_brief(project_dir, INDEPENDENT, physical_state_in='no-such-fact')
+        [line] = _of(project_dir, INDEPENDENT)
+        assert "its brief's no-such-fact is not in reference/commitments.csv" in line
+
+    def test_no_briefs_file_is_said(self, project_dir):
+        """#641's review, SF-5: not "its brief sets up none"."""
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        os.remove(os.path.join(project_dir, 'reference', 'scene-briefs.csv'))
+        [line] = _of(project_dir, INDEPENDENT)
+        assert "act1-sc01's facts are not in the ledger and there is no " \
+            "reference/scene-briefs.csv" in line
 
     def test_briefs_that_cannot_be_read_hold_it_and_warn(self, project_dir, capsys):
         gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
@@ -108,7 +130,8 @@ class TestBriefsStandIn:
         with open(os.path.join(project_dir, 'reference', 'scene-briefs.csv'), 'ab') as f:
             f.write(b'\xff\xfe broken\n')
         [line] = _of(project_dir, INDEPENDENT)
-        assert "act1-sc01's facts are not in the ledger and its brief sets up none" in line
+        assert ("act1-sc01's facts are not in the ledger and reference/scene-briefs.csv "
+                "could not be read") in line
         assert 'scene-briefs.csv could not be read' in capsys.readouterr().out
 
     def test_a_scene_held_in_the_run_holds_its_dependents(self, project_dir):
@@ -121,6 +144,147 @@ class TestBriefsStandIn:
         blockers = cmd_write.GateBlockers(project_dir, narrow=True)
         assert blockers.passed_over(INDEPENDENT) == ['act1-sc01: two problems']
         assert blockers.passed_over('act1-sc02') == []
+
+
+def _registry_link(project_dir: str, fact: str, column: str, value: str) -> None:
+    """Set `column` on registry fact `fact` in reference/commitments.csv."""
+    path = os.path.join(project_dir, 'reference', 'commitments.csv')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    header = lines[0].split('|')
+    at = header.index(column)
+    for n, line in enumerate(lines):
+        cells = line.split('|')
+        if cells[0] == fact:
+            cells[at] = value
+            lines[n] = '|'.join(cells)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
+class TestReviewJudgement:
+    """#641's review: what `GateBlockers` narrowed holds, by brief and ledger."""
+
+    def test_a_fact_the_earlier_brief_only_carries_forward_does_not_hold_it(self, project_dir):
+        """C3: `knowledge_out` is cumulative. act1-sc02 enters knowing
+        map-anomaly-exists (act1-sc01 set it up) and lists it again on the way
+        out; act2-sc01 needing it doesn't wait on act1-sc02."""
+        gate.mark_pending(project_dir, 'act1-sc02', 'draft', 'two problems')
+        set_brief(project_dir, 'act1-sc02',
+                  knowledge_out='map-anomaly-exists;village-vanished;archive-erasure')
+        set_brief(project_dir, INDEPENDENT, knowledge_in='map-anomaly-exists')
+        assert _of(project_dir, INDEPENDENT) == []
+
+    def test_a_fact_the_earlier_brief_adds_still_holds_it(self, project_dir):
+        gate.mark_pending(project_dir, 'act1-sc02', 'draft', 'two problems')
+        set_brief(project_dir, 'act1-sc02',
+                  knowledge_out='map-anomaly-exists;village-vanished;archive-erasure')
+        set_brief(project_dir, INDEPENDENT, knowledge_in='village-vanished')
+        [line] = _of(project_dir, INDEPENDENT)
+        assert "its brief needs village-vanished, which act1-sc02's brief sets up" in line
+
+    def test_knowledge_facts_are_not_tied_by_type_alone(self, project_dir):
+        """TD-2: knowledge registry facts have no subject; the type guess would
+        tie any knowledge fact act2-sc01 needs to any act1-sc01 sets up."""
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        set_brief(project_dir, INDEPENDENT, knowledge_in='council-dismisses-evidence')
+        assert _of(project_dir, INDEPENDENT) == []
+        blockers = cmd_write.GateBlockers(project_dir, narrow=True)
+        assert blockers.passed_over(INDEPENDENT) == ['act1-sc01: two problems']
+
+    def test_a_registry_link_between_brief_facts_holds_it(self, project_dir):
+        """TD-1: scar-left-hand-kael depends_on exhaustion-tessa (act1-sc02's
+        set-up); the stand-ins' ids differ, the link is still seen."""
+        gate.mark_pending(project_dir, 'act1-sc02', 'draft', 'two problems')
+        _registry_link(project_dir, 'scar-left-hand-kael', 'depends_on', 'exhaustion-tessa')
+        _independent(project_dir)
+        [line] = _of(project_dir, INDEPENDENT)
+        assert ('brief fact scar-left-hand-kael ("old scar across left palm from archive '
+                'incident") links to its brief fact exhaustion-tessa') in line
+
+    def test_continuity_deps_holds_it_when_both_have_ledger_facts(self, project_dir):
+        """CR-1: the brief is read first, whatever the ledger holds."""
+        from .test_revise_blockers import KAEL, PELL, _ledger
+        _ledger(project_dir, KAEL, PELL)
+        gate.mark_pending(project_dir, 'act1-sc01', 'redraft', 'a contradiction')
+        assert _of(project_dir, INDEPENDENT) == []   # unrelated facts, no brief tie
+        set_brief(project_dir, INDEPENDENT, continuity_deps='act1-sc01')
+        [line] = _of(project_dir, INDEPENDENT)
+        assert 'its brief lists act1-sc01 in continuity_deps' in line
+
+
+class TestMixedStandIns:
+    """T-2: one side's facts from the ledger, the other's from its brief."""
+
+    def test_earlier_brief_later_ledger_dependent_is_held(self, project_dir):
+        from .test_revise_blockers import _fact, _ledger
+        _ledger(project_dir, _fact('tessa-limps', INDEPENDENT, 'tessa-merrin', 'Tessa limps'))
+        gate.mark_pending(project_dir, 'act1-sc02', 'draft', 'two problems')
+        [line] = _of(project_dir, INDEPENDENT)
+        assert ('fact tessa-limps ("Tessa limps") depends on its brief fact '
+                'exhaustion-tessa') in line
+
+    def test_earlier_brief_later_ledger_independent_is_let_through(self, project_dir):
+        from .test_revise_blockers import PELL, _ledger
+        _ledger(project_dir, PELL)
+        gate.mark_pending(project_dir, 'act1-sc02', 'draft', 'two problems')
+        assert _of(project_dir, INDEPENDENT) == []
+
+    def test_earlier_ledger_later_brief_dependent_is_held(self, project_dir):
+        from .test_revise_blockers import KAEL, _ledger
+        _ledger(project_dir, KAEL)
+        gate.mark_pending(project_dir, 'act1-sc01', 'redraft', 'a contradiction')
+        _independent(project_dir)   # needs Kael's scar: Kael is KAEL's subject
+        [line] = _of(project_dir, INDEPENDENT)
+        assert ('brief fact scar-left-hand-kael ("old scar across left palm from archive '
+                'incident") depends on its fact kael-lamp') in line
+
+    def test_earlier_ledger_later_brief_independent_is_let_through(self, project_dir):
+        from .test_revise_blockers import KAEL, _ledger
+        _ledger(project_dir, KAEL)
+        gate.mark_pending(project_dir, 'act1-sc01', 'redraft', 'a contradiction')
+        set_brief(project_dir, INDEPENDENT, physical_state_in='sprained-ankle-tessa')
+        assert _of(project_dir, INDEPENDENT) == []
+
+
+class TestHeldState:
+    """TD-3, TD-4, SF-4: the run's holds, kept by `GateBlockers`."""
+
+    def test_hold_narrows_a_set_read_with_nothing_pending(self, project_dir):
+        blockers = cmd_write.GateBlockers(project_dir, narrow=True)
+        assert blockers.of('act1-sc02') == []
+        blockers.hold('act1-sc01', 'not drafted: x')
+        [line] = blockers.of('act1-sc02')
+        assert line.scene_id == 'act1-sc01'
+        assert line.endswith('(act1-sc02 waits on it: its brief lists act1-sc01 in '
+                             'continuity_deps)')
+
+    def test_a_scene_failed_this_run_is_named_as_passed_over(self, project_dir):
+        _independent(project_dir)
+        failed = cmd_write.GateBlockers(project_dir, narrow=True,
+                                        failed={'act1-sc01': 'not drafted: cut off'})
+        assert failed.passed_over(INDEPENDENT) == ['act1-sc01: not drafted: cut off']
+        held = cmd_write.GateBlockers(project_dir, narrow=True,
+                                      held={'act1-sc01': 'not drafted: it waits on x'})
+        assert held.passed_over(INDEPENDENT) == []
+
+    def test_a_pending_row_is_kept_over_a_hold(self, project_dir):
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        blockers = cmd_write.GateBlockers(project_dir, narrow=True,
+                                          failed={'act1-sc01': 'did not pass'})
+        assert blockers.waiting['act1-sc01']['command'] == 'draft'
+
+    def test_held_scenes_reads_the_book_once(self, project_dir, monkeypatch):
+        """TD-5: one ledger read however many scenes are asked about."""
+        from storyforge import ledger
+        gate.mark_pending(project_dir, 'act1-sc01', 'draft', 'two problems')
+        loads = []
+        real = ledger.load
+        monkeypatch.setattr(ledger, 'load', lambda *a, **k: loads.append(1) or real(*a, **k))
+        held = cmd_write.held_scenes(project_dir, ['act1-sc02', 'new-x1', 'act2-sc03'])
+        assert len(loads) == 1
+        assert set(held) == {'act1-sc02', 'new-x1', 'act2-sc03'}
+        assert held['act2-sc03'][0].scene_id == 'act1-sc02'   # behind a held scene
 
 
 @pytest.mark.real_gate
@@ -147,6 +311,8 @@ class TestWrite:
             in out
         assert '  act1-sc01: two problems' in out
         assert 'act1-sc02 (not drafted: it waits on act1-sc01; draft it once that passes' in out
+        # SF-6: counted against every scene asked for, the held one too
+        assert 'Scenes drafted: 1/2 (1 held back before drafting)' in out
 
     def test_a_scene_failing_in_the_run_stops_only_itself(self, setup, monkeypatch, capsys):
         _pending(setup, INDEPENDENT)
