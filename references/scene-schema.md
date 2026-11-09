@@ -66,10 +66,10 @@ print(dump_schema_markdown())
 
 | kind | name | value | example |
 |------|------|-------|---------|
-| `direction` | a landmark | the compass direction it lies in from the book's usual standpoint | `direction\|Ida\|east\|seen from Troy` |
-| `sun` | a time of day | where the sun is then: a compass direction, or `none` when it's down (replaces the default: dawn and morning east, noon south, afternoon southwest, evening and dusk west, night none) | `sun\|noon\|north\|southern hemisphere` |
+| `direction` | a landmark | the compass direction it lies in from the book's usual standpoint | `direction\|the Tor\|west\|seen from the village` |
+| `sun` | a time of day | where the sun is then: a compass direction, or `none` when it's down. A row replaces the default **for that time only** (defaults: dawn, sunrise and morning east; noon and midday south; afternoon southwest; evening, sunset and dusk west; night and midnight none), so a book under another sky gives every time it uses | `sun\|noon\|north\|southern hemisphere` |
 | `sight` | `face` or `figure` | the farthest, in metres, that detail can be made out (defaults: face 30, figure 300) | `sight\|face\|20\|` |
-| `distance` | two places, `A > B` (either order) | metres between them | `distance\|the wall > the ships\|2000\|` |
+| `distance` | two places, `A > B` (either order; each also matches as whole words inside a longer place, so "up on the wall" is `the wall`) | metres between them | `distance\|the wall > the ships\|2000\|` |
 
 Compass directions: north, northeast, east, southeast, south, southwest, west, northwest (or N, NE, ...).
 
@@ -78,11 +78,12 @@ Compass directions: north, northeast, east, southeast, south, southwest, west, n
 The stage sheet (`storyforge.stage_sheet`, #647; plan A4) is each scene's blocking as state: who is present, posture, what each hand holds, what is worn, position, facing, lights, doors, the time and the sun. `storyforge check --stage-sheet` (and `--blocking --stage-sheet`) writes one per scene from the prose; a writer will write the same format while drafting (#655). JSON, format 1:
 
 - `format` (1), `scene_id`, `source` (`extracted` or `writer`), `model`, `prose_sha256` (the prose it describes), `cast`.
-- `opening`: the state before the first beat, as entries `{"who", "field", "item", "value", "quote"}` (`who` empty for the scene's own fields; `item` names the garment, light or door). An entry carried from the previous scene's sheet has `"origin": "carried"`.
-- `beats`: in the scene's order, each `{"quote", "event": {"who", "field", "item", "from", "to"}, "set": [entries], "cleared"?}`: the event, the entries it set, and `cleared: true` at a break in time (every state ends there but what is worn).
+- `source` sets the file: the extractor's is `<scene>.json`, a writer's `<scene>.writer.json`, so the two never overwrite each other (#655 compares them). The next scene carries over the extractor's for now.
+- `opening`: the state before the first beat, as entries `{"who", "field", "item", "value", "quote"}` (`who` names the person for a person's field and is empty for the scene's own; `item` names the garment, light or door, and is empty on every other field). An entry carried from the previous scene's sheet has `"origin": "carried"`. A hand placed by an event that didn't say which hand, when either could have been it, has `"side_guessed": true` (a later event naming a side settles it).
+- `beats`: in the prose's order, each `{"quote", "event": {"who", "field", "item", "from", "to", "verified"?}, "set": [entries], "unknown"?: [{"who", "field", "item"}], "cleared"?}`: the event (`"verified": false` when its quote isn't in the scene), the entries it set, the states it made unknown, and `cleared: true` at a break in time (every state ends there but what is worn). A misquoted event sets nothing: the states it would have changed are listed in `unknown`, so every entry on a sheet comes from a verified quote or is carried.
 - `end`: the state after the last beat, which the next scene carries over.
 
-Fields: `posture` (standing, sitting, kneeling, lying, crouching, mounted, other), `hand_left`, `hand_right` (what the hand holds, or `empty`), `worn` (`on`/`off`), `present` (`here`/`gone`), `position`, `facing`, `light` (`lit`/`out`), `door` (`open`/`shut`), `time`, `sun` (a compass direction). Events also use `hand_either`, `sees`, `shadow` and `break`.
+Fields of a state: `posture` (standing, sitting, kneeling, lying, crouching, mounted, other; an event's `from` may also be `down`, any posture but standing), `hand_left`, `hand_right` (what the hand holds, or `empty`), `worn` (`on`/`off`), `present` (`here`/`gone`), `position`, `facing`, `light` (`lit`/`out`), `door` (`open`/`shut`), `time`, `sun` (a compass direction). Events also use `hand_either`, `sees`, `shadow` and `break`, which change or check states but are never one. A loaded entry is checked and normalized (`Entry.from_json`: "seated" is sitting, "closed" is shut); anything a replay couldn't have written (a hand with an item, an event-only field, a value off its list) makes the file unusable, and the next scene says so.
 
 ### scenes.csv — structural identity
 
