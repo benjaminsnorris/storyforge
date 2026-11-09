@@ -1,6 +1,6 @@
-"""The world table: directions, light and distances, for checks that need
-the book's geography and sky (#647; shared with #648's geography and sky
-check).
+"""The world table: directions, light, distances and speeds, for checks that need
+the book's geography and sky (#647; shared with #648's continuity checks:
+geography and sky, and travel).
 
 `reference/world.csv`, pipe-delimited, one fact a row::
 
@@ -9,6 +9,7 @@ check).
     sun|dawn|east|
     sight|face|30|metres at which a face can be made out
     distance|the wall > the ships|2000|metres
+    speed|on foot|40000|metres a day
 
 Kinds (`KINDS`):
 
@@ -24,6 +25,10 @@ Kinds (`KINDS`):
   `figure` (who someone is by build and bearing). Replaces `DEFAULT_SIGHT`.
 - `distance`: two places, `A > B` (either order matches), and the metres
   between them.
+- `speed` (#648): a way of travelling (`on foot`, `horse`, `ship`) and the
+  farthest it goes in a day, in metres. The travel check holds a journey
+  to the fastest the table gives (`fastest`); with no `speed` row it
+  doesn't check travel, and says so.
 
 The file is optional: without it the defaults apply. `load(project_dir)`
 raises `WorldTableError` on a file it can't use (a bad header or row),
@@ -39,7 +44,7 @@ from dataclasses import dataclass, field
 
 WORLD_FILE = 'world.csv'
 COLUMNS = ('kind', 'name', 'value', 'note')
-KINDS = ('direction', 'sun', 'sight', 'distance')
+KINDS = ('direction', 'sun', 'sight', 'distance', 'speed')
 
 #: Compass words and their bearings in degrees
 COMPASS = {
@@ -107,6 +112,7 @@ class World:
     sun_at: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_SUN))
     sight_m: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_SIGHT))
     distances: dict[frozenset, float] = field(default_factory=dict)
+    speeds: dict[str, float] = field(default_factory=dict)
 
     def direction(self, where: str) -> str | None:
         """A compass word for `where`: a compass word itself, or a landmark
@@ -161,6 +167,10 @@ class World:
                     best = (size, metres)
         return best[1] if best else None
 
+    def fastest(self) -> float | None:
+        """The most metres a day any `speed` row allows, or None without one."""
+        return max(self.speeds.values()) if self.speeds else None
+
 
 def path_for(project_dir: str) -> str:
     return os.path.join(project_dir, 'reference', WORLD_FILE)
@@ -208,6 +218,8 @@ def problems(path: str) -> list[str]:
             out.append(f'row {n}: sun "{value}" is not a compass direction or "{SUN_DOWN}"')
         elif kind in ('sight', 'distance') and _number(value) is None:
             out.append(f'row {n}: {kind} "{value}" is not a positive number of metres')
+        elif kind == 'speed' and _number(value) is None:
+            out.append(f'row {n}: speed "{value}" is not a positive number of metres a day')
         if kind == 'distance':
             pair = _pair(name)
             if pair is None:
@@ -243,4 +255,6 @@ def load(project_dir: str) -> World:
             world.sight_m[_key(name)] = _number(value)
         elif kind == 'distance':
             world.distances[frozenset(_pair(name))] = _number(value)
+        elif kind == 'speed':
+            world.speeds[_key(name)] = _number(value)
     return world

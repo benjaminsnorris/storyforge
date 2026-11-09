@@ -83,6 +83,15 @@ scene's sheet to `working/stage-sheets/` for the next scene to carry over.
 Its findings are blocking findings like the read's: they stop only their
 scene, and `--accept` takes them. What it couldn't check is a NOTE.
 
+Continuity (#648): every gated scene's typed state is read (one call on a
+small model, saved to `working/typed-state/`; none on unchanged prose) and
+checked by code against the book (`storyforge.continuity`): a dead
+character present, an object in two hands in one scene or used after it
+was given away or destroyed, knowledge before a scene shows it learned,
+travel too fast for world.csv, an elapsed time against the calendar, an injured part at full strength, a name the book rules out, the
+sun against `reference/world.csv`. Its findings stop the scene like any
+contradiction (`--accept` takes them); what it couldn't check is a NOTE.
+
 A broken promise (a brief item the prose doesn't deliver) doesn't stop a
 scene (#642): the brief is a plan and the prose stands. It is reported
 (ADVISORY), kept in `working/gate-advisory.csv`, and listed at the end of
