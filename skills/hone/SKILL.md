@@ -122,6 +122,8 @@ flagged = detect_abstract_fields(briefs_map)
 
 **Prescriptive dialogue** — exact quotes in `key_dialogue` make surrounding prose contort to deliver specific lines. Better to use dialogue direction ("Dorren rationalizes the anomaly using institutional language") than exact lines ("The eastern readings are within acceptable variance"). Flag scenes where `key_dialogue` contains quoted strings. When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
 
+**`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. Trimming an over-specified brief keeps every `must:` beat (and counts it).
+
 **Procedural goals** — goals framed as tasks ("Complete the quarterly audit") instead of dramatic questions ("Prove the maps are accurate before the review deadline"). The goal shapes how the drafter opens the scene — procedural goals produce bureaucratic openings.
 
 **Emotional arc granularity** — 4+ beat emotional arcs (e.g., "competence;unease;self-doubt;resolve") force artificial escalation-and-recovery. 2-beat arcs (start state → end state) let the drafter find the middle ground organically. Flag scenes where `len(emotions.split(';')) > 3`.

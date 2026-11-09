@@ -109,12 +109,24 @@ print(dump_schema_markdown())
 | `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
 | `knowledge_in` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows entering. Normalized against the knowledge facts in reference/commitments.csv (the commitments ledger). See knowledge-guidelines.md for fact selection criteria. |
 | `knowledge_out` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene. See knowledge-guidelines.md. |
-| `key_actions` | free_text | brief | Concrete things that happen in this scene. |
-| `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. Label each quoted line's speaker (`Name: "line"`); see scene-column-guide.md. |
+| `key_actions` | free_text | brief | Concrete things that happen in this scene. An item starting `must:` is a beat the author requires (see below). |
+| `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. Label each quoted line's speaker (`Name: "line"`); see scene-column-guide.md. An item starting `must:` is required word for word (see below). |
 | `emotions` | free_text | brief | Emotional beats in sequence as they occur through the scene. |
 | `motifs` | registry: motif-taxonomy.csv (array) | brief | Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv. |
 | `continuity_deps` | scene_ids | brief | Scene IDs this scene depends on (for parallel drafting). Each entry must exist in scenes.csv. |
 | `has_overflow` | boolean | brief | Whether briefs/{id}.md exists for extended detail. |
+
+**Required beats: the `must:` marker** (#642). A brief is a plan, and the prose wins: the gate reports a brief item the prose doesn't deliver (a broken promise) as `ADVISORY`, lists it in `working/gate-advisory.csv`, `storyforge status` and at the end of `write`, `revise` and `check`, and doesn't stop the scene for it. To require a beat, start its `key_actions` or `key_dialogue` item with `must:`:
+
+```
+key_actions: Achilles drags Hector's body;must: Priam kisses Achilles' hands
+key_dialogue: must: Priam: "I have kissed the hands of the man who killed my son"
+```
+
+- The marker is `must`, any case, then a colon, any spacing (`must:`, `MUST :`), at the start of the item (items are `;`-separated). `must:` anywhere else in an item is just words. An item that is only `must:` marks nothing, and the gate reports it.
+- A broken `must` beat stops the scene, like a contradiction. The quoted words in a `must` item (or a `key_dialogue` line with no quotes) must be in the prose word for word, or split only by speech tags (`"Sing," he said, "goddess"`); code checks this, so a paraphrase doesn't keep a `must` line. A faithful adaptation marks the source lines it keeps verbatim this way.
+- A `must` beat is the author's. Nothing Storyforge writes drops or rewords one: elaborate's briefs stage, hone's rewrites, revise's source-drift fix and a forced extract or enrich re-read put back any `must` item their reply lost or reworded, word for word, and leave out a `must:` item the reply made up (only the author marks a beat). Each such change is logged.
+- Other promise fields (`outcome`, `knowledge_out`, `physical_state_out`) take no marker: a broken one is always advisory.
 
 ## Elaboration Stages
 
