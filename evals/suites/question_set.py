@@ -4,7 +4,7 @@ labelled question set: an E2-style set whose answers are known.
 The cases are *A Christmas Carol* (public domain), the E2 book
 (`fixtures/e2-carol`), and the facts are ones Dickens establishes, written as
 ledger facts of the types the question layer asks about (trait,
-relationship, physical outside injury and equipment, world). Each scene is
+relationship, physical, world). Each scene is
 asked about the same facts (`scenes` in `fixtures/question-set/cases.json`)
 in every variant of it:
 

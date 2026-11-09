@@ -183,12 +183,22 @@ in as Dickens wrote them, and E2's 8 benign rewordings, so 38 scene variants
 and 96 questions with known answers (17 `yes`). Each scene is asked about
 the same facts in every variant, so a fact that is true of the scene is
 asked beside the one an injection breaks. It reports `recall` (a finding
-on the injected words), `recall_any` (a finding anywhere in the scene),
-`false_alarms` (split into controls, benign edits and the other facts of an
-error variant), `split` and `misquoted`, by code, and gates each of
-`FLOORS` on its recorded value. It measures the questions, the prompt and
-the model; which facts are asked, for whom, is code, tested in
-`tests/test_questions.py`.
+on the injected words), `recall_any` (a finding on the broken fact, quoting
+anywhere in the scene), `false_alarms` (broken down into controls, benign
+edits and the other facts of an error variant), `split` and `misquoted`, by
+code (3 to 6 cases a code: too few to compare codes), and gates each of
+`FLOORS` on its recorded value.
+
+`recall` asks every labelled fact, so it measures the questions, the prompt
+and the model. The gate asks only what its selection picks, so the suite
+also runs that selection on each variant, free (#673's review): each
+scene's labelled `cast` (who a perfect typed state would put there) as `at`
+records, its scenes.csv locations and the registry names in its prose,
+through `questions.present_subjects` and `facts_to_ask`.
+`selection_lost` counts the `yes` facts the gate would not ask (1:
+qs-018, Belle's scene never names Marley) and `recall_selected` the
+recall the gate would get (caught and selected). The brief's promise
+questions and disputes have no cases yet.
 
 The model is the layer's default (the extraction tier).
 `STORYFORGE_QUESTIONS_MODEL` (or `STORYFORGE_MODEL`) runs another, a
@@ -204,8 +214,12 @@ evals/fixtures/tier-comparison/claude-sonnet-5-5`, $0.54) caught one more
 (0.53), with no false alarms and no splits, at 13 times the price, so haiku
 stays the default. The misses are mostly the prompt's caution (an injected
 wrong name read as "a character's mistake", a denial of kinship read as
-"self-deprecating") and split answers, not the model. Its `baseline.json`
-entry was added by hand from the replay (`--baseline` is refused while E3,
+"self-deprecating") and split answers, not the model. The open checker's
+"about 12 of 17" (`e2-carol-checker`) is scored by scene, any code, any
+words, from one opus reading per edited scene (the gate makes two); the
+layer's 8 count only a finding on the injected words. Two cases only the
+layer caught (qs-017, qs-021), so the two together caught 14. Its
+`baseline.json` entry was added by hand from the replay (`--baseline` is refused while E3,
 E5 and recheck-set error on this base); the next full `--baseline` rewrites
 it the same.
 
