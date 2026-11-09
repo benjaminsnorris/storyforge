@@ -10,14 +10,18 @@ Sources (`read_sources`), any mix of them:
 - a `.txt` file listing URLs, one a line (`#` comments);
 - a URL: a page, or a feed (told by its content type or its first tag).
 
-Each piece keeps its title, date (`YYYY-MM-DD`, or blank when none is
-given: never guessed), kind (`voice_repo.KINDS`) and source. The kind comes
-from what the piece says about itself: front matter (`kind`, `type`,
-`layout`, `categories`, `tags`; a `link`, `link_url` or `external_url` key
-makes it a link post), a feed item's categories, or a feed item that links
-off the feed's own site (a link post). `--kind` sets one kind for the whole
-import. With no sign, a piece is filed as an essay and the summary counts
-how many were, so the author can correct `corpus/index.csv`.
+Each piece keeps its title, date (`YYYY-MM-DD`, `YYYY-MM` or `YYYY` as
+given by its front matter, feed, page metadata or a dated file name, a real
+date (`voice_repo.valid_date`), else blank: never guessed, and never an
+Atom `<updated>`, which is when it was changed), kind (`voice_repo.KINDS`)
+and source. The kind comes from what the piece says about itself: front
+matter (YAML `---` or Hugo's TOML `+++`: `kind`, `type`, `layout`,
+`categories`, `tags`; a `link`, `link_url` or `external_url` key makes it a
+link post), a feed item's categories, or a feed item that links off the
+feed's own site (a link post, recorded as `KIND_OFF_SITE` and named, since
+a moved blog does this too). `--kind` sets one kind for the whole import.
+With no sign, a piece is filed as an essay and the summary counts how many
+were, so the author can correct `corpus/index.csv`.
 
 Boilerplate goes: HTML is parsed with the standard library's `html.parser`,
 the page's `<article>` (or `<main>`, or the body) kept and its scripts,
@@ -27,16 +31,28 @@ block quotes, tables, images, HTML and link syntax. Block quotes go because
 they are someone else's words, and the fingerprint measures the author's.
 What's kept is stored as Markdown: `# title`, then one paragraph a block.
 
+A feed item with only a cut summary (it ends in "…" or "read more") isn't
+imported unless `--follow-links` fetches its page, and only a page on the
+feed's own site is fetched: a cut link post's page is someone else's
+writing. An item with only a summary and no cut marker is imported and
+named (it may be an excerpt); `--follow-links` fetches its page too. A
+folder's files that aren't Markdown, HTML or a feed are named.
+
 Fetched content is untrusted data: only text is taken from it, never run;
 a page or feed over `MAX_BYTES` is refused; only http and https URLs are
-fetched; a feed declaring a DOCTYPE or an entity is refused before it is
-parsed (no entity expansion). Fetching goes through one injectable function
+fetched; a feed declaring a DOCTYPE or an entity anywhere is refused before
+it is parsed (no entity expansion); text is decoded in the header's
+charset, else the one the document declares, else UTF-8, and is an ERROR
+when none decodes it. Fetching goes through one injectable function
 (`fetch(url) -> Fetched`), so the tests use none; the real one sends a
 generic User-Agent and nothing about the user.
 
-Nothing is replaced: a piece whose source is already in the index is
-skipped and counted. A source that can't be read or fetched is an ERROR,
-and the command exits 1 after importing the rest.
+Nothing is replaced: a piece whose source is already in the index
+(`source_key`), or that is already there under another source (the same
+words, or the same title and date: a folder, then the blog's feed), is
+skipped and named. A source that can't be read or fetched is an ERROR, and
+the command exits 1 after importing the rest; a write that fails removes
+what it wrote.
 """
 
 from __future__ import annotations

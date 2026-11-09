@@ -17,6 +17,7 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `parts` | Optional book parts (physical divisions with title pages) for multi-part books. Structural acts live in `scenes.csv` `act`, not here |
 | `source` | Optional. The Storyforge project(s) this one adapts: a retelling, an expansion, a rewrite of an earlier draft |
 | `series` | Optional. A canon shared with the other books of a series, read in place from outside the project |
+| `voice` | Optional. The author voice repo the book is drafted in, read in place from outside the project (#652) |
 
 ---
 
@@ -309,6 +310,29 @@ Hone, illustrate and the graphic-novel commands don't read it.
 **Read-only.** Storyforge never writes to the canon. The book's own `reference/` bibles hold what is particular to that book, and the stages that rewrite a bible rewrite the book's. Don't symlink the canon into `reference/`: a stage that rewrites that bible would rewrite the shared file for every book.
 
 **Errors.** A canon that can't be used is never skipped. These are errors: a `series:` block that names no canon; a value that isn't a path (`~`, `null`, a flow list like `[a.md, b.md]`); `series:` given twice, indented under another block, or `canon:` at the top level; a key other than `canon`; a path that isn't there; a directory that can't be listed or holds no `.md` file; a file that is empty or not UTF-8. `write`, `revise`, `score`, `evaluate`, `elaborate` and `extract` check the canon first, before a forecast, a branch or a call, and stop with `ERROR: storyforge.yaml: ...` (the block) or `ERROR: series.canon: ...` (a path or file). `validate` makes it a blocking finding, and otherwise prints `Series canon: N file(s), W words, read in place and never written` and the files. Without a `series:` block nothing changes. `project.series_name` and `project.series_position` are the book's metadata and are separate from this block.
+
+---
+
+## `voice`
+
+Optional. The book is drafted in its author's own voice, kept in an author voice repo outside the book (`storyforge voice init`; `references/voiceprints/README.md`):
+
+```yaml
+voice:
+  author: ../ben-voice           # the author voice repo
+  narrator: fiction/close-third  # optional: the fiction anchor, in the repo
+```
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `author` | required | The author voice repo: a path relative to the project (or absolute, or `~/...`). It must have `voice.yaml`, a `description.md` and an exemplar bank (`voice propose`, then `voice accept`), and not be inside a book. |
+| `narrator` | optional | The fiction anchor for this book's narrator: a folder of `.md` files, or one file, under the repo's `fiction/`. |
+
+**What reads it.** At full coaching, `write`'s drafting prompt carries the author's voice (`voice_repo.author_voice_section`): the description, the exemplars by job, the fiction anchor, and the book's own `reference/voice/book.md` when it has one. A book without the block gets exactly the prompt it got before. `score --voice` with neither `--fingerprint` nor `--voice-repo` measures against the repo's fingerprint. The voice guide is still required beside it. The corpus never goes in a prompt.
+
+**Read-only.** Storyforge never writes to the voice repo from a book.
+
+**Errors.** `write` checks the block before anything is spent (`require_voice`), and `score --voice` when it reads it; `validate` doesn't check it yet. These are errors: `voice:` given twice, indented under another block, or a one-line value; a key other than `author` and `narrator`, or one given twice; no `author`; a value that isn't a path (`~`, `null`, a flow list or map); an author repo that isn't there, has no `voice.yaml` (or one that can't be used), or is inside a book; no `description.md`, an empty one, or no exemplars; a narrator outside the repo's `fiction/`, missing, empty or unreadable; a `reference/voice/book.md` that can't be read.
 
 ---
 

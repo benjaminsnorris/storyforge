@@ -9,7 +9,7 @@ measure and the API).
 | Path | What |
 |---|---|
 | `baseline.json` | The general baseline: each measure's mean and standard deviation over a population of writers (the distance's scale) and the population's n-gram rates (what a writer says more often than writers do). Built by `voiceprint.build_baseline` |
-| `austen/` | The reference voiceprint, in the author voice repo layout (B0): `voice.yaml`, `corpus/` (with its `index.csv`), `fingerprint.json`, `description.md`, `exemplars/`, and `proposals/` (the model's draft claims and shortlist they came from). Storyforge's worked example and the fixture of `tests/test_voiceprint_reference.py` and `tests/test_voiceprint_description.py` |
+| `austen/` | The reference voiceprint, in the author voice repo layout (B0): `voice.yaml`, `corpus/` (with its `index.csv`), `fingerprint.json`, `description.md`, `exemplars/`, and `proposals/` (the model's draft claims and shortlist they came from). Storyforge's worked example and the fixture of `tests/test_voiceprint_reference.py`, `tests/test_voiceprint_description.py` and `tests/test_voice_repo.py` |
 
 The tests' other texts are in `tests/fixtures/voiceprint/`: `verne/` (two
 translations) and `others/` (excerpts from seven other authors).
@@ -19,12 +19,10 @@ translations) and `others/` (excerpts from seven other authors).
 `fingerprint.json` is the fingerprint of *Pride and Prejudice* alone; *Emma*
 and *Persuasion* are held out, the tests' unseen Austen.
 `test_reference_fingerprint_is_current` fails when the code would compute a
-different one. To recompute it:
+different one. To recompute it from the pieces `corpus/index.csv` counts:
 
-```python
-from storyforge import voiceprint as vp
-text = open('references/voiceprints/austen/corpus/pride-and-prejudice.md', encoding='utf-8').read()
-vp.fingerprint({'corpus/pride-and-prejudice.md': text}).save('references/voiceprints/austen/fingerprint.json')
+```
+storyforge voice fingerprint --dir references/voiceprints/austen
 ```
 
 The corpus texts are Project Gutenberg's, normalized by `storyforge.gutenberg`
@@ -172,7 +170,10 @@ storyforge voice init --dir ../ben-voice --author "Ben Norris"
 cd ../ben-voice
 storyforge voice import ~/blog/_posts            # or a feed, a URL, a .txt list of URLs
 storyforge voice fingerprint
-storyforge voice propose && storyforge voice accept   # B3, B4 (below)
+storyforge voice propose        # B3, B4 (below): the claims and the shortlist
+# mark each claim yes or no in proposals/description-claims.csv, and write
+# yes in proposals/shortlist.csv's pick column for each passage to keep
+storyforge voice accept         # description.md and exemplars/
 ```
 
 `voice init` makes `voice.yaml`, `corpus/index.csv`, `exemplars/` and
@@ -207,12 +208,24 @@ captions and **block quotes**, which hold someone else's words. The kind comes
 from the piece itself (front matter, a feed's categories, a feed item that
 links off the site is a link post); with no sign it's filed as an essay and
 counted in the summary, so the author can correct the index (`--kind` sets
-one kind for a whole import). A feed item that carries only a cut summary
-isn't imported unless `--follow-links` fetches its page. A source already in
-the index is skipped. It ends with what the corpus holds and what counts,
-and warns when what counts is under `MIN_CORPUS_WORDS` (75,000 words).
-Fetched pages are data only: http(s) only, a size cap, a generic
-User-Agent, and a feed with a DOCTYPE or entity refused unparsed.
+one kind for a whole import); items filed as link posts only because they
+link off the feed's site are named on their own line. A feed item that
+carries only a cut summary isn't imported unless `--follow-links` fetches
+its page, and that fetches only pages on the feed's own site (a cut link
+post's page is someone else's article). An item with only a summary and no
+cut marker is imported and named, since it may be an excerpt. A folder's
+files that aren't Markdown, HTML or a feed are named, not skipped in
+silence. A source already in the index is skipped, and so is the same piece
+reached another way (a folder, then the blog's feed: the same words, or the
+same title and date). It ends with what the corpus holds and what counts
+(on `--dry-run` too, with the planned pieces), and warns when what counts
+is under `MIN_CORPUS_WORDS` (75,000 words), and about corpus files the index
+doesn't name. Fetched pages are data only: http(s) only, a size cap, a
+generic User-Agent, a feed with a DOCTYPE or entity refused unparsed, and
+text no declared charset decodes refused rather than garbled.
+`voice fingerprint` is run again after the index or voice.yaml changes:
+`voice propose` and `score --voice` refuse a fingerprint made from another
+set of pieces.
 
 **A book** names the repo in its `storyforge.yaml`, read in place, never
 copied:
@@ -220,7 +233,8 @@ copied:
 ```yaml
 voice:
   author: ../ben-voice           # relative to the book
-  narrator: fiction/close-third  # optional: the fiction anchor (#654)
+  narrator: fiction/close-third  # optional: the fiction anchor, a folder of
+                                 # .md files or one file under fiction/ (#654)
 ```
 
 Its drafting prompt (full coaching) then carries the author's voice:
@@ -229,8 +243,9 @@ book's own `reference/voice/book.md` (the narrator's stance and period
 register particular to this book) when it has one. A book without the block
 gets exactly the prompt it got before. `score --voice` with neither
 `--fingerprint` nor `--voice-repo` measures against the block's repo. A block
-that can't be used (the repo isn't there or isn't a voice repo, it has no
-description or exemplars yet, the narrator folder is missing or empty) stops
+that can't be used (the repo isn't there, isn't a voice repo or is inside a
+book, it has no description or exemplars yet, the narrator isn't under
+`fiction/` or is missing or empty) stops
 `write` before anything is spent. The corpus never goes in a drafting
 prompt: only the description and the passages the author chose.
 

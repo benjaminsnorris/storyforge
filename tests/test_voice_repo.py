@@ -385,17 +385,18 @@ def _briefs_prompt(project_dir, **kw):
 
 @pytest.mark.parametrize('coaching', ['full', 'coach', 'strict'])
 def test_drafting_prompts_without_a_block_are_unchanged(project_dir, monkeypatch, coaching):
-    """A book without `voice:` gets the prompt it always got: the section is
-    never even asked to render into it (so the recorded evals can't miss)."""
+    """A book without `voice:` renders no section: whenever the builders ask
+    for it, it is '', and no heading reaches either prompt. That the prompt
+    is byte for byte what it was before #652 isn't shown here (both sides
+    would be built by this branch's code): the eval replay shows it, since
+    a recording's key hashes the whole prompt and a changed drafting prompt
+    would miss its cassette (CR-8/T8)."""
     from storyforge import prompts
-    plain = _briefs_prompt(project_dir, coaching_level=coaching)
-    old = prompts.build_scene_prompt('act1-sc01', project_dir, coaching, api_mode=True)
     calls = []
     real = vr.author_voice_section
     monkeypatch.setattr(vr, 'author_voice_section', lambda d: calls.append(d) or real(d))
-    assert _briefs_prompt(project_dir, coaching_level=coaching) == plain
-    assert prompts.build_scene_prompt('act1-sc01', project_dir, coaching,
-                                      api_mode=True) == old
+    plain = _briefs_prompt(project_dir, coaching_level=coaching)
+    old = prompts.build_scene_prompt('act1-sc01', project_dir, coaching, api_mode=True)
     assert "Author's Voice" not in plain and "Author's Voice" not in old
     assert all(real(d) == '' for d in calls)
 
@@ -422,9 +423,13 @@ def test_book_exemplars_follow_the_authors_voice(project_dir, voice):
 
 
 def test_coach_and_strict_prompts_leave_the_voice_out(project_dir, voice):
+    from storyforge.prompts import build_scene_prompt
     _yaml(project_dir, f'voice:\n  author: {voice}\n')
     for level in ('coach', 'strict'):
         assert "Author's Voice" not in _briefs_prompt(project_dir, coaching_level=level)
+        # T8: the older builder too
+        assert "Author's Voice" not in build_scene_prompt('act1-sc01', project_dir, level,
+                                                          api_mode=True)
 
 
 def test_older_drafting_prompt_carries_the_voice(project_dir, voice):

@@ -15,12 +15,16 @@ Making the repo and its fingerprint (#652, plan B0, B1, B2; free):
   RSS or Atom feed (a blog's export too). Boilerplate is stripped; each
   piece keeps its title, date, kind and source in `corpus/index.csv`.
   voice.yaml says which kinds count and the least words a piece needs;
-  link posts, notes and short pieces are out by default. It prints what
-  the corpus holds and warns when what counts is under
+  link posts, notes and short pieces are out by default. A piece already
+  in the corpus (by source, or the same piece under another source) is
+  skipped and named. It prints what the corpus holds (on `--dry-run`, with
+  the planned pieces) and warns when what counts is under
   `voiceprint.MIN_CORPUS_WORDS`. Exit 1 when a source can't be read or
-  fetched (after importing the rest).
+  fetched (after importing the rest), or the import can't be written.
 - `voice fingerprint` computes `fingerprint.json` from the pieces that
-  count, in index order.
+  count, in index order. Run it again after the index or voice.yaml
+  changes: `voice propose` and `score --voice` refuse a fingerprint made
+  from another set of pieces.
 
 The described voice and the exemplar bank (#651, B3, B4;
 `storyforge.voiceprint_proposals`):

@@ -109,12 +109,12 @@ def test_reference_fingerprint_is_current():
     fp = vp.fingerprint({'corpus/pride-and-prejudice.md': _novel('pride-and-prejudice')})
     assert fp.to_json() == stored, (
         'references/voiceprints/austen/fingerprint.json is stale: recompute it with '
-        'voiceprint.fingerprint({"corpus/pride-and-prejudice.md": text}).save(path)')
+        '`storyforge voice fingerprint --dir references/voiceprints/austen`')
 
 
 def test_corpus_index_names_the_corpus_the_tests_and_fingerprint_use():
     """corpus/index.csv can't drift from fingerprint.json and the tests' split
-    (#662 review TD-8; the index is voice.yaml's corpus list since #652)."""
+    (#662 review TD-8; the index replaced voice.yaml's corpus list in #652)."""
     from storyforge import voice_repo as vr
     fp = vp.Fingerprint.load(os.path.join(AUSTEN, 'fingerprint.json'))
     pieces, _ = vr.corpus(AUSTEN)
