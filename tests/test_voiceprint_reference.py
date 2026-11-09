@@ -196,8 +196,8 @@ def test_stability_sets_the_minimum_corpus(chunk_values):
     three novels, so drift between books counts), paired with disjoint
     samples of the same size: the smallest size at which every pair shares a
     voice is `MIN_CORPUS_WORDS`, `voice import`'s minimum-corpus warning.
-    Measured: 10k pairs up to 0.352 apart (median 0.274), 25k up to 0.222
-    (0.166), 50k up to 0.121 (0.090), against SAME_VOICE_MAX 0.30."""
+    Measured: 10k pairs up to 0.351 apart (median 0.274), 25k up to 0.221
+    (0.165), 50k up to 0.121 (0.090), against SAME_VOICE_MAX 0.30."""
     pool = (chunk_values['pride-and-prejudice'] + chunk_values['emma']
             + chunk_values['persuasion'])
     worst, medians, enough = {}, {}, None
@@ -221,7 +221,7 @@ def test_mixed_voices_verne_translations_dont_share_a_voice(chunk_values):
     """Around the World in Eighty Days (George M. Towle's translation, 1873)
     and Five Weeks in a Balloon ("William Lackland"'s, 1869) are both Verne,
     but what the fingerprint reads is the English: it reports two voices
-    (0.385 apart), while Austen's three novels pair as one (0.21-0.23) and
+    (0.382 apart), while Austen's three novels pair as one (0.21-0.23) and
     each translation's halves agree (0.16, 0.19)."""
     fps = {s: vp.profile(chunk_values[s]) for s in
            ('pride-and-prejudice', 'emma', 'persuasion', 'around-the-world',

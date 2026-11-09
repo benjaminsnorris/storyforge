@@ -98,17 +98,17 @@ Z_CAP = 6.0
 MATTR_WINDOW = 500
 
 #: two fingerprints further apart than this don't share a voice. Measured:
-#: Austen's three novels 0.21-0.23 apart, the two Verne translations 0.385,
+#: Austen's three novels 0.21-0.23 apart, the two Verne translations 0.382,
 #: Austen and her nearest other author (Middlemarch) 0.61
 SAME_VOICE_MAX = 0.30
 #: in `consistency`, a minority of pieces is in another voice when its typical
 #: piece sits further than this from the rest's. Measured: pure Austen
-#: corpora 0.60-0.63; Austen seeded with 20% of another author 0.78-1.50
+#: corpora 0.60-0.63; Austen seeded with 20% of another author 0.77-1.50
 #: (18 of 21 above it)
 OUTLIER_SEPARATION = 0.85
 #: the least corpus whose fingerprint is stable: two disjoint samples of
 #: this size from the same writer always share a voice (Austen: 10k words
-#: up to 0.352 apart, 25k up to 0.222). `voice import`'s minimum-corpus
+#: up to 0.351 apart, 25k up to 0.221). `voice import`'s minimum-corpus
 #: warning (#652)
 MIN_CORPUS_WORDS = 25000
 
@@ -199,10 +199,18 @@ _WORD_RE = re.compile(r"[^\W\d_]+(?:['\-][^\W\d_]+)*")
 #: a candidate sentence end: . ! ? (any closing quotes or brackets), then
 #: space and an opening quote, bracket, capital or digit
 _BOUNDARY_RE = re.compile(r'[.!?]+["\')\]]*(?=\s+["\'(\[]*[^\W_a-z])')
-#: a markdown heading, a scene break, a bare chapter heading
+#: a chapter's number: roman, arabic, or spelled ("the Third", "FORTY-FOURTH")
+_NUMBER = (r'(?:[ivxlcdm]+|\d+|(?:the\s+)?(?:(?:twenty|thirty|forty|fifty|sixty|seventy|'
+           r'eighty|ninety)-?)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|'
+           r'twelve|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|'
+           r'eleventh|twelfth|[a-z]+teen(?:th)?|twenty|thirty|forty|fifty|[a-z]+ieth))')
+#: a markdown heading, a scene break, a bare chapter heading ("CHAPTER IV.",
+#: "Part Two: The Return", "XIV.") but not prose that opens on such a word
+#: ("Part of me wanted to go.")
 _NON_PROSE_RE = re.compile(
     r'^\s*(?:#.*|[*\-_=~](?:\s*[*\-_=~]){2,}'
-    r'|(?:chapter|book|volume|vol\.|part|stave|canto|letter|section)\b[\w .:,\-]{0,60}'
+    r'|(?:chapter|book|volume|vol\.|part|stave|canto|letter|section)\s+' + _NUMBER
+    + r'\b[.:]?(?:\s*[.:\-—]?\s+[^.!?]{0,60}[.]?)?'
     r'|[ivxlcdm]+\.?|\d+\.?|the end\.?|finis\.?)\s*$',
     re.IGNORECASE)
 _ILLUSTRATION_RE = re.compile(r'\[Illustration[^\]]*\]', re.IGNORECASE | re.DOTALL)

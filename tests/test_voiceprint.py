@@ -45,6 +45,20 @@ def test_paragraphs_drop_headings_breaks_and_markers():
     ]
 
 
+@pytest.mark.parametrize('heading', [
+    'CHAPTER IV.', 'Chapter the Third', 'CHAPTER FORTY-FOURTH.', 'Part Two: The Return',
+    'PART II', 'XIV.', "STAVE I: MARLEY'S GHOST", 'Letter 12', 'THE END.'])
+def test_paragraphs_drop_bare_headings(heading):
+    assert vp.paragraphs(f'{heading}\n\nShe went home.') == ['She went home.']
+
+
+@pytest.mark.parametrize('prose', [
+    'Part of me wanted to go.', 'Book in hand, she left.', 'Chapter and verse, he said.',
+    'Volume after volume fell.', 'Letter by letter it came.'])
+def test_paragraphs_keep_prose_that_opens_on_a_heading_word(prose):
+    assert vp.paragraphs(prose) == [prose]
+
+
 def test_split_sentences_titles_initials_and_run_ons():
     assert vp.split_sentences('Mr. Darcy bowed. Mrs. Bennet did not. J. Smith came.') == [
         'Mr. Darcy bowed.', 'Mrs. Bennet did not.', 'J. Smith came.']
