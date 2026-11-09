@@ -1,0 +1,1938 @@
+{
+ "version": 1,
+ "chunk_words": 2000,
+ "words": 122169,
+ "sentences": 5639,
+ "paragraphs": 2052,
+ "chunks": 59,
+ "stat_fields": [
+  "value",
+  "center",
+  "spread",
+  "p10",
+  "p90"
+ ],
+ "measures": {
+  "sentence_mean": {
+   "group": "sentences",
+   "stat": [
+    21.665,
+    21.8478,
+    5.007,
+    16.7111,
+    30.357
+   ]
+  },
+  "sentence_sd": {
+   "group": "sentences",
+   "stat": [
+    17.4425,
+    15.5973,
+    3.57264,
+    12.257,
+    21.3876
+   ]
+  },
+  "sentence_cv": {
+   "group": "sentences",
+   "stat": [
+    0.805101,
+    0.715863,
+    0.080829,
+    0.627262,
+    0.858975
+   ]
+  },
+  "sentence_median": {
+   "group": "sentences",
+   "stat": [
+    17.0,
+    17.5,
+    4.4478,
+    13.8,
+    25.4
+   ]
+  },
+  "sentence_p90": {
+   "group": "sentences",
+   "stat": [
+    43.0,
+    41.6,
+    10.3782,
+    32.88,
+    56.58
+   ]
+  },
+  "short_sentence_share": {
+   "group": "sentences",
+   "stat": [
+    0.209434,
+    0.206186,
+    0.068074,
+    0.0932118,
+    0.283333
+   ]
+  },
+  "long_sentence_share": {
+   "group": "sentences",
+   "stat": [
+    0.241355,
+    0.266667,
+    0.110894,
+    0.12427,
+    0.407788
+   ]
+  },
+  "clause_mean": {
+   "group": "sentences",
+   "stat": [
+    8.9207,
+    8.96429,
+    0.911045,
+    7.84171,
+    9.94083
+   ]
+  },
+  "paragraph_mean": {
+   "group": "paragraphs",
+   "stat": [
+    59.5365,
+    60.6667,
+    24.4768,
+    39.5724,
+    102.046
+   ]
+  },
+  "paragraph_sd": {
+   "group": "paragraphs",
+   "stat": [
+    89.4388,
+    53.7405,
+    47.2232,
+    33.7466,
+    102.57
+   ]
+  },
+  "paragraph_median": {
+   "group": "paragraphs",
+   "stat": [
+    38.0,
+    40.0,
+    13.3434,
+    26.6,
+    74.6
+   ]
+  },
+  "sentences_per_paragraph": {
+   "group": "paragraphs",
+   "stat": [
+    2.74805,
+    2.86957,
+    1.01078,
+    2.15918,
+    3.84762
+   ]
+  },
+  "one_sentence_paragraph_share": {
+   "group": "paragraphs",
+   "stat": [
+    0.391326,
+    0.37931,
+    0.129941,
+    0.208421,
+    0.534775
+   ]
+  },
+  "fw_the": {
+   "group": "function_words",
+   "stat": [
+    35.4836,
+    35.3288,
+    6.22238,
+    25.9107,
+    44.4687
+   ]
+  },
+  "fw_and": {
+   "group": "function_words",
+   "stat": [
+    29.32,
+    28.6654,
+    4.1559,
+    23.7615,
+    35.6523
+   ]
+  },
+  "fw_of": {
+   "group": "function_words",
+   "stat": [
+    29.6802,
+    29.7767,
+    6.8767,
+    21.7412,
+    36.4778
+   ]
+  },
+  "fw_to": {
+   "group": "function_words",
+   "stat": [
+    33.8629,
+    33.8814,
+    4.97447,
+    28.2532,
+    39.4271
+   ]
+  },
+  "fw_a": {
+   "group": "function_words",
+   "stat": [
+    15.8387,
+    15.6632,
+    3.65722,
+    11.4383,
+    20.4254
+   ]
+  },
+  "fw_in": {
+   "group": "function_words",
+   "stat": [
+    15.2903,
+    15.2745,
+    3.36547,
+    11.3706,
+    18.853
+   ]
+  },
+  "fw_that": {
+   "group": "function_words",
+   "stat": [
+    13.0148,
+    13.3399,
+    3.07037,
+    8.79027,
+    17.0551
+   ]
+  },
+  "fw_it": {
+   "group": "function_words",
+   "stat": [
+    12.5564,
+    12.4378,
+    3.62171,
+    7.90177,
+    16.8252
+   ]
+  },
+  "fw_was": {
+   "group": "function_words",
+   "stat": [
+    15.1184,
+    14.3778,
+    5.36028,
+    8.79486,
+    21.116
+   ]
+  },
+  "fw_he": {
+   "group": "function_words",
+   "stat": [
+    10.9439,
+    10.4895,
+    5.98659,
+    5.20739,
+    18.7805
+   ]
+  },
+  "fw_she": {
+   "group": "function_words",
+   "stat": [
+    13.9888,
+    13.7441,
+    4.81464,
+    7.85437,
+    20.5445
+   ]
+  },
+  "fw_i": {
+   "group": "function_words",
+   "stat": [
+    16.9437,
+    16.5209,
+    8.46954,
+    4.38031,
+    27.5064
+   ]
+  },
+  "fw_her": {
+   "group": "function_words",
+   "stat": [
+    18.2043,
+    18.4263,
+    6.62806,
+    11.3726,
+    25.0485
+   ]
+  },
+  "fw_his": {
+   "group": "function_words",
+   "stat": [
+    10.4036,
+    9.89609,
+    3.06604,
+    4.91989,
+    16.9877
+   ]
+  },
+  "fw_you": {
+   "group": "function_words",
+   "stat": [
+    11.1239,
+    9.55566,
+    6.77008,
+    2.7539,
+    21.1184
+   ]
+  },
+  "fw_not": {
+   "group": "function_words",
+   "stat": [
+    11.6969,
+    11.9522,
+    2.91229,
+    7.7663,
+    15.0024
+   ]
+  },
+  "fw_be": {
+   "group": "function_words",
+   "stat": [
+    10.1253,
+    9.87167,
+    2.83394,
+    6.34531,
+    13.5374
+   ]
+  },
+  "fw_as": {
+   "group": "function_words",
+   "stat": [
+    9.72423,
+    9.41993,
+    2.17025,
+    7.274,
+    14.0306
+   ]
+  },
+  "fw_with": {
+   "group": "function_words",
+   "stat": [
+    8.61102,
+    8.81921,
+    2.43765,
+    5.48095,
+    11.4981
+   ]
+  },
+  "fw_had": {
+   "group": "function_words",
+   "stat": [
+    9.61782,
+    8.97756,
+    3.05499,
+    5.5991,
+    13.8944
+   ]
+  },
+  "fw_for": {
+   "group": "function_words",
+   "stat": [
+    8.66832,
+    8.5531,
+    2.80692,
+    5.46507,
+    11.6712
+   ]
+  },
+  "fw_is": {
+   "group": "function_words",
+   "stat": [
+    7.01487,
+    7.4001,
+    4.31632,
+    1.71545,
+    12.423
+   ]
+  },
+  "fw_but": {
+   "group": "function_words",
+   "stat": [
+    8.21812,
+    7.59734,
+    1.96712,
+    5.84872,
+    10.8717
+   ]
+  },
+  "fw_at": {
+   "group": "function_words",
+   "stat": [
+    6.40097,
+    6.48448,
+    2.64143,
+    3.46299,
+    9.33965
+   ]
+  },
+  "fw_on": {
+   "group": "function_words",
+   "stat": [
+    5.90166,
+    5.32688,
+    1.97019,
+    3.49023,
+    8.85307
+   ]
+  },
+  "fw_have": {
+   "group": "function_words",
+   "stat": [
+    6.92483,
+    6.7243,
+    2.67832,
+    3.89944,
+    10.3704
+   ]
+  },
+  "fw_by": {
+   "group": "function_words",
+   "stat": [
+    5.18135,
+    4.85909,
+    1.66933,
+    3.33943,
+    7.8395
+   ]
+  },
+  "fw_which": {
+   "group": "function_words",
+   "stat": [
+    4.44466,
+    4.0,
+    1.67593,
+    1.96325,
+    7.03832
+   ]
+  },
+  "fw_so": {
+   "group": "function_words",
+   "stat": [
+    4.85393,
+    4.94071,
+    2.24024,
+    2.47875,
+    7.41235
+   ]
+  },
+  "fw_all": {
+   "group": "function_words",
+   "stat": [
+    5.14042,
+    5.42674,
+    1.64723,
+    2.47212,
+    6.94447
+   ]
+  },
+  "fw_my": {
+   "group": "function_words",
+   "stat": [
+    5.90985,
+    4.98008,
+    3.70821,
+    1.81842,
+    10.4813
+   ]
+  },
+  "fw_this": {
+   "group": "function_words",
+   "stat": [
+    3.67524,
+    3.4705,
+    1.94163,
+    1.43069,
+    5.94308
+   ]
+  },
+  "fw_were": {
+   "group": "function_words",
+   "stat": [
+    4.63293,
+    4.48654,
+    1.49848,
+    2.34147,
+    6.46129
+   ]
+  },
+  "fw_from": {
+   "group": "function_words",
+   "stat": [
+    4.05176,
+    3.58744,
+    1.80547,
+    1.97531,
+    6.49664
+   ]
+  },
+  "fw_they": {
+   "group": "function_words",
+   "stat": [
+    4.91941,
+    4.44225,
+    2.25646,
+    1.73319,
+    8.51026
+   ]
+  },
+  "fw_would": {
+   "group": "function_words",
+   "stat": [
+    3.84713,
+    3.48953,
+    1.53976,
+    1.94647,
+    6.0819
+   ]
+  },
+  "fw_no": {
+   "group": "function_words",
+   "stat": [
+    4.01902,
+    3.95844,
+    1.54052,
+    2.36445,
+    5.9761
+   ]
+  },
+  "fw_or": {
+   "group": "function_words",
+   "stat": [
+    2.43106,
+    2.47036,
+    1.29125,
+    0.976197,
+    4.02415
+   ]
+  },
+  "fw_could": {
+   "group": "function_words",
+   "stat": [
+    4.28096,
+    3.98406,
+    1.49882,
+    2.46476,
+    6.43003
+   ]
+  },
+  "fw_been": {
+   "group": "function_words",
+   "stat": [
+    4.21547,
+    3.91965,
+    1.5247,
+    1.87698,
+    6.88531
+   ]
+  },
+  "fw_me": {
+   "group": "function_words",
+   "stat": [
+    3.68342,
+    2.98507,
+    2.21945,
+    0.49613,
+    7.60807
+   ]
+  },
+  "fw_him": {
+   "group": "function_words",
+   "stat": [
+    6.26182,
+    5.96421,
+    2.97377,
+    2.48633,
+    10.0122
+   ]
+  },
+  "fw_there": {
+   "group": "function_words",
+   "stat": [
+    2.88944,
+    2.90557,
+    1.36028,
+    1.22608,
+    4.5732
+   ]
+  },
+  "fw_an": {
+   "group": "function_words",
+   "stat": [
+    3.02041,
+    2.98507,
+    1.43441,
+    1.66781,
+    4.41004
+   ]
+  },
+  "fw_very": {
+   "group": "function_words",
+   "stat": [
+    3.98628,
+    3.49127,
+    1.74263,
+    1.85174,
+    6.73508
+   ]
+  },
+  "fw_what": {
+   "group": "function_words",
+   "stat": [
+    3.93717,
+    3.91581,
+    2.12119,
+    1.86711,
+    6.16357
+   ]
+  },
+  "fw_them": {
+   "group": "function_words",
+   "stat": [
+    3.56064,
+    3.39476,
+    2.09287,
+    1.78187,
+    6.41408
+   ]
+  },
+  "fw_if": {
+   "group": "function_words",
+   "stat": [
+    2.86488,
+    2.49875,
+    1.41533,
+    0.992713,
+    4.82176
+   ]
+  },
+  "fw_one": {
+   "group": "function_words",
+   "stat": [
+    2.41469,
+    2.4777,
+    1.45176,
+    0.985904,
+    3.92946
+   ]
+  },
+  "fw_their": {
+   "group": "function_words",
+   "stat": [
+    3.61794,
+    3.5,
+    2.20541,
+    1.46443,
+    5.9383
+   ]
+  },
+  "fw_much": {
+   "group": "function_words",
+   "stat": [
+    2.68481,
+    2.49004,
+    1.46783,
+    0.988943,
+    4.57811
+   ]
+  },
+  "fw_will": {
+   "group": "function_words",
+   "stat": [
+    3.39693,
+    2.96004,
+    2.17572,
+    0.495443,
+    7.39232
+   ]
+  },
+  "fw_more": {
+   "group": "function_words",
+   "stat": [
+    2.62751,
+    2.4728,
+    1.41869,
+    1.48618,
+    4.25513
+   ]
+  },
+  "fw_when": {
+   "group": "function_words",
+   "stat": [
+    3.03678,
+    2.96443,
+    1.41621,
+    1.48018,
+    4.94622
+   ]
+  },
+  "fw_we": {
+   "group": "function_words",
+   "stat": [
+    2.07909,
+    1.47493,
+    0.972105,
+    0.492858,
+    5.08028
+   ]
+  },
+  "fw_do": {
+   "group": "function_words",
+   "stat": [
+    2.82396,
+    2.47893,
+    2.17038,
+    0.971587,
+    5.09453
+   ]
+  },
+  "fw_such": {
+   "group": "function_words",
+   "stat": [
+    3.18411,
+    2.97324,
+    1.21927,
+    1.89954,
+    5.40055
+   ]
+  },
+  "fw_must": {
+   "group": "function_words",
+   "stat": [
+    2.5211,
+    2.49128,
+    1.47078,
+    0.982512,
+    4.09021
+   ]
+  },
+  "fw_any": {
+   "group": "function_words",
+   "stat": [
+    3.17593,
+    2.98507,
+    1.39415,
+    1.49584,
+    4.46789
+   ]
+  },
+  "fw_should": {
+   "group": "function_words",
+   "stat": [
+    2.06272,
+    1.92493,
+    1.3713,
+    0.497367,
+    3.93012
+   ]
+  },
+  "fw_might": {
+   "group": "function_words",
+   "stat": [
+    1.63708,
+    1.46987,
+    0.857283,
+    0.492418,
+    3.32534
+   ]
+  },
+  "fw_than": {
+   "group": "function_words",
+   "stat": [
+    2.30828,
+    1.99501,
+    0.998752,
+    0.989336,
+    3.88979
+   ]
+  },
+  "fw_only": {
+   "group": "function_words",
+   "stat": [
+    1.76804,
+    1.91205,
+    0.977764,
+    0.954538,
+    2.96622
+   ]
+  },
+  "fw_then": {
+   "group": "function_words",
+   "stat": [
+    1.43244,
+    0.997009,
+    0.744568,
+    0.47289,
+    3.07895
+   ]
+  },
+  "fw_now": {
+   "group": "function_words",
+   "stat": [
+    1.71893,
+    1.85271,
+    0.962473,
+    0.499551,
+    2.85282
+   ]
+  },
+  "fw_its": {
+   "group": "function_words",
+   "stat": [
+    0.85128,
+    0.498008,
+    0.738347,
+    0.0,
+    2.02686
+   ]
+  },
+  "fw_our": {
+   "group": "function_words",
+   "stat": [
+    0.605718,
+    0.494071,
+    0.703422,
+    0.0,
+    1.08428
+   ]
+  },
+  "fw_your": {
+   "group": "function_words",
+   "stat": [
+    3.72435,
+    2.98211,
+    2.75839,
+    0.489833,
+    8.25858
+   ]
+  },
+  "fw_who": {
+   "group": "function_words",
+   "stat": [
+    2.32465,
+    1.999,
+    1.31713,
+    0.949038,
+    3.94019
+   ]
+  },
+  "fw_some": {
+   "group": "function_words",
+   "stat": [
+    1.71074,
+    1.47856,
+    0.859814,
+    0.491898,
+    3.56613
+   ]
+  },
+  "fw_can": {
+   "group": "function_words",
+   "stat": [
+    1.72712,
+    1.49402,
+    1.47374,
+    0.0,
+    3.42875
+   ]
+  },
+  "fw_upon": {
+   "group": "function_words",
+   "stat": [
+    0.572977,
+    0.489956,
+    0.726409,
+    0.0,
+    1.47817
+   ]
+  },
+  "fw_into": {
+   "group": "function_words",
+   "stat": [
+    1.17051,
+    0.99108,
+    0.736866,
+    0.0,
+    2.4755
+   ]
+  },
+  "fw_out": {
+   "group": "function_words",
+   "stat": [
+    1.09684,
+    0.947867,
+    0.718601,
+    0.0,
+    2.59055
+   ]
+  },
+  "fw_up": {
+   "group": "function_words",
+   "stat": [
+    0.990431,
+    0.980392,
+    0.747262,
+    0.0,
+    1.99561
+   ]
+  },
+  "fw_though": {
+   "group": "function_words",
+   "stat": [
+    1.8499,
+    1.71569,
+    1.07357,
+    0.484034,
+    3.84619
+   ]
+  },
+  "fw_yet": {
+   "group": "function_words",
+   "stat": [
+    0.597533,
+    0.489956,
+    0.726409,
+    0.0,
+    1.57171
+   ]
+  },
+  "fw_every": {
+   "group": "function_words",
+   "stat": [
+    2.33283,
+    1.99005,
+    1.46859,
+    0.987069,
+    3.89812
+   ]
+  },
+  "fw_nothing": {
+   "group": "function_words",
+   "stat": [
+    1.44881,
+    1.40977,
+    0.999985,
+    0.382226,
+    2.9194
+   ]
+  },
+  "fw_even": {
+   "group": "function_words",
+   "stat": [
+    0.671201,
+    0.498008,
+    0.726673,
+    0.0,
+    1.43541
+   ]
+  },
+  "fw_too": {
+   "group": "function_words",
+   "stat": [
+    1.16232,
+    0.996016,
+    0.740912,
+    0.476394,
+    1.99223
+   ]
+  },
+  "fw_being": {
+   "group": "function_words",
+   "stat": [
+    1.44063,
+    1.47059,
+    0.857493,
+    0.489716,
+    2.56482
+   ]
+  },
+  "fw_own": {
+   "group": "function_words",
+   "stat": [
+    1.53885,
+    1.48075,
+    0.860451,
+    0.484788,
+    2.49501
+   ]
+  },
+  "fw_how": {
+   "group": "function_words",
+   "stat": [
+    1.89901,
+    1.95982,
+    1.42303,
+    0.495786,
+    3.32157
+   ]
+  },
+  "fw_where": {
+   "group": "function_words",
+   "stat": [
+    0.761241,
+    0.969932,
+    0.741205,
+    0.0,
+    1.48751
+   ]
+  },
+  "fw_before": {
+   "group": "function_words",
+   "stat": [
+    1.85808,
+    1.49925,
+    1.42175,
+    0.496771,
+    3.42215
+   ]
+  },
+  "fw_after": {
+   "group": "function_words",
+   "stat": [
+    1.63708,
+    1.5,
+    0.866025,
+    0.492109,
+    2.48312
+   ]
+  },
+  "fw_am": {
+   "group": "function_words",
+   "stat": [
+    2.60295,
+    2.34962,
+    1.64402,
+    0.0,
+    4.96944
+   ]
+  },
+  "fw_are": {
+   "group": "function_words",
+   "stat": [
+    2.79122,
+    2.4777,
+    1.53713,
+    0.499602,
+    5.50958
+   ]
+  },
+  "fw_shall": {
+   "group": "function_words",
+   "stat": [
+    1.33422,
+    0.996016,
+    1.39935,
+    0.0,
+    2.49476
+   ]
+  },
+  "fw_did": {
+   "group": "function_words",
+   "stat": [
+    2.22642,
+    1.94363,
+    1.4457,
+    0.493009,
+    4.81321
+   ]
+  },
+  "fw_may": {
+   "group": "function_words",
+   "stat": [
+    1.58796,
+    1.42552,
+    1.37512,
+    0.0,
+    2.997
+   ]
+  },
+  "fw_never": {
+   "group": "function_words",
+   "stat": [
+    1.80897,
+    1.97141,
+    0.992828,
+    0.844136,
+    2.97154
+   ]
+  },
+  "fw_most": {
+   "group": "function_words",
+   "stat": [
+    1.5143,
+    1.39535,
+    0.881704,
+    0.493925,
+    2.99133
+   ]
+  },
+  "fw_little": {
+   "group": "function_words",
+   "stat": [
+    1.54704,
+    1.48221,
+    1.3923,
+    0.490148,
+    2.84941
+   ]
+  },
+  "fw_well": {
+   "group": "function_words",
+   "stat": [
+    1.7926,
+    1.49105,
+    0.942915,
+    0.487827,
+    3.36371
+   ]
+  },
+  "fw_about": {
+   "group": "function_words",
+   "stat": [
+    1.0068,
+    0.98912,
+    0.732872,
+    0.0,
+    1.8963
+   ]
+  },
+  "fw_other": {
+   "group": "function_words",
+   "stat": [
+    1.71893,
+    1.86047,
+    0.964486,
+    0.497167,
+    2.88295
+   ]
+  },
+  "fw_over": {
+   "group": "function_words",
+   "stat": [
+    0.736684,
+    0.498008,
+    0.738347,
+    0.0,
+    1.49611
+   ]
+  },
+  "fw_again": {
+   "group": "function_words",
+   "stat": [
+    1.44881,
+    1.47059,
+    0.857493,
+    0.0,
+    2.87063
+   ]
+  },
+  "fw_still": {
+   "group": "function_words",
+   "stat": [
+    0.605718,
+    0.495786,
+    0.718477,
+    0.0,
+    1.31098
+   ]
+  },
+  "fw_ever": {
+   "group": "function_words",
+   "stat": [
+    1.10503,
+    0.982801,
+    0.743691,
+    0.0,
+    2.36396
+   ]
+  },
+  "fw_indeed": {
+   "group": "function_words",
+   "stat": [
+    0.785797,
+    0.49975,
+    0.72409,
+    0.0,
+    1.91169
+   ]
+  },
+  "fw_quite": {
+   "group": "function_words",
+   "stat": [
+    0.777611,
+    0.498256,
+    0.738714,
+    0.0,
+    1.59224
+   ]
+  },
+  "fw_rather": {
+   "group": "function_words",
+   "stat": [
+    0.450196,
+    0.477327,
+    0.707685,
+    0.0,
+    1.0
+   ]
+  },
+  "fw_perhaps": {
+   "group": "function_words",
+   "stat": [
+    0.630274,
+    0.4995,
+    0.733198,
+    0.0,
+    1.43774
+   ]
+  },
+  "fw_however": {
+   "group": "function_words",
+   "stat": [
+    1.09684,
+    0.994036,
+    0.73907,
+    0.370542,
+    1.99045
+   ]
+  },
+  "comma_rate": {
+   "group": "punctuation",
+   "stat": [
+    79.1035,
+    79.8279,
+    9.49824,
+    68.0732,
+    87.7272
+   ]
+  },
+  "semicolon_rate": {
+   "group": "punctuation",
+   "stat": [
+    12.3681,
+    12.3518,
+    3.0731,
+    8.75882,
+    16.027
+   ]
+  },
+  "colon_rate": {
+   "group": "punctuation",
+   "stat": [
+    0.327415,
+    0.0,
+    0.5,
+    0.0,
+    0.981814
+   ]
+  },
+  "dash_rate": {
+   "group": "punctuation",
+   "stat": [
+    5.32868,
+    3.998,
+    3.7124,
+    0.876366,
+    10.431
+   ]
+  },
+  "parenthesis_rate": {
+   "group": "punctuation",
+   "stat": [
+    0.147337,
+    0.0,
+    0.5,
+    0.0,
+    0.495099
+   ]
+  },
+  "question_rate": {
+   "group": "punctuation",
+   "stat": [
+    3.62612,
+    3.44149,
+    2.16361,
+    0.480588,
+    6.44266
+   ]
+  },
+  "exclamation_rate": {
+   "group": "punctuation",
+   "stat": [
+    4.04358,
+    2.9985,
+    2.2513,
+    0.974247,
+    8.55618
+   ]
+  },
+  "double_quote_rate": {
+   "group": "punctuation",
+   "stat": [
+    28.8289,
+    29.4264,
+    13.5026,
+    6.96624,
+    47.4356
+   ]
+  },
+  "ellipsis_rate": {
+   "group": "punctuation",
+   "stat": [
+    0.0,
+    0.0,
+    0.5,
+    0.0,
+    0.0
+   ]
+  },
+  "contraction_rate": {
+   "group": "punctuation",
+   "stat": [
+    0.155522,
+    0.0,
+    0.5,
+    0.0,
+    0.498157
+   ]
+  },
+  "fk_grade": {
+   "group": "readability",
+   "stat": [
+    9.93226,
+    9.91196,
+    2.10631,
+    7.16852,
+    14.0371
+   ]
+  },
+  "syllables_per_word": {
+   "group": "readability",
+   "stat": [
+    1.44686,
+    1.44837,
+    0.0724187,
+    1.3989,
+    1.50929
+   ]
+  },
+  "long_word_share": {
+   "group": "readability",
+   "stat": [
+    0.110707,
+    0.113767,
+    0.0143096,
+    0.0925913,
+    0.132219
+   ]
+  },
+  "letters_per_word": {
+   "group": "readability",
+   "stat": [
+    4.39085,
+    4.376,
+    0.2188,
+    4.23341,
+    4.55976
+   ]
+  },
+  "latinate_rate": {
+   "group": "vocabulary",
+   "stat": [
+    39.1752,
+    39.4803,
+    7.95087,
+    26.8785,
+    49.8432
+   ]
+  },
+  "monosyllable_content_share": {
+   "group": "vocabulary",
+   "stat": [
+    0.381568,
+    0.383871,
+    0.0380465,
+    0.329051,
+    0.42188
+   ]
+  },
+  "mattr": {
+   "group": "vocabulary",
+   "stat": [
+    0.50182,
+    0.503014,
+    0.0251507,
+    0.485569,
+    0.517335
+   ]
+  },
+  "adverb_rate": {
+   "group": "vocabulary",
+   "stat": [
+    14.0707,
+    13.9303,
+    3.11622,
+    10.4176,
+    17.4303
+   ]
+  },
+  "adjective_rate": {
+   "group": "vocabulary",
+   "stat": [
+    40.7468,
+    39.9436,
+    5.09489,
+    34.2525,
+    49.6671
+   ]
+  },
+  "opening_sentence_mean": {
+   "group": "openings",
+   "stat": [
+    20.6998,
+    21.1379,
+    4.97,
+    14.8739,
+    31.2375
+   ]
+  },
+  "closing_sentence_mean": {
+   "group": "openings",
+   "stat": [
+    23.3122,
+    22.9,
+    6.00453,
+    17.0727,
+    32.0938
+   ]
+  },
+  "opening_dialogue_share": {
+   "group": "openings",
+   "stat": [
+    0.599903,
+    0.590909,
+    0.157245,
+    0.189881,
+    0.773284
+   ]
+  },
+  "opening_pronoun_share": {
+   "group": "openings",
+   "stat": [
+    0.292234,
+    0.272727,
+    0.0898545,
+    0.148571,
+    0.417544
+   ]
+  },
+  "opening_article_share": {
+   "group": "openings",
+   "stat": [
+    0.0616493,
+    0.05,
+    0.07413,
+    0.0,
+    0.158371
+   ]
+  },
+  "opening_conjunction_share": {
+   "group": "openings",
+   "stat": [
+    0.0544436,
+    0.0454545,
+    0.0252716,
+    0.0,
+    0.1133
+   ]
+  },
+  "closing_question_share": {
+   "group": "openings",
+   "stat": [
+    0.0840673,
+    0.0740741,
+    0.0646013,
+    0.0,
+    0.153846
+   ]
+  },
+  "closing_exclamation_share": {
+   "group": "openings",
+   "stat": [
+    0.031225,
+    0.0,
+    0.0200512,
+    0.0,
+    0.0869565
+   ]
+  },
+  "closing_quote_share": {
+   "group": "openings",
+   "stat": [
+    0.583667,
+    0.55,
+    0.195434,
+    0.2,
+    0.78323
+   ]
+  }
+ },
+ "sentence_lengths": {
+  "1-5": 0.0840575,
+  "6-10": 0.201809,
+  "11-15": 0.172194,
+  "16-20": 0.134066,
+  "21-30": 0.180351,
+  "31-40": 0.10516,
+  "41-60": 0.0899096,
+  "61+": 0.0324526
+ },
+ "first_words": {
+  "i": 0.102827,
+  "elizabeth": 0.0550682,
+  "the": 0.0419103,
+  "you": 0.0360624,
+  "she": 0.0346004,
+  "mr": 0.0331384,
+  "but": 0.0326511,
+  "and": 0.0297271,
+  "oh": 0.0277778,
+  "it": 0.0272904,
+  "yes": 0.0238791,
+  "my": 0.0224172,
+  "when": 0.0214425,
+  "he": 0.0204678,
+  "mrs": 0.0199805
+ },
+ "pieces": [
+  {
+   "name": "corpus/pride-and-prejudice.md",
+   "words": 122169,
+   "first_sentence": "It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.",
+   "last_sentence": "Darcy, as well as Elizabeth, really loved them; and they were both ever sensible of the warmest gratitude towards the persons who, by bringing her into Derbyshire, had been the means of uniting them."
+  }
+ ],
+ "ngrams": {
+  "2": [
+   [
+    "any thing",
+    76,
+    16.2517
+   ],
+   [
+    "her sister",
+    72,
+    15.4198
+   ],
+   [
+    "every thing",
+    59,
+    12.7161
+   ],
+   [
+    "my dear",
+    121,
+    5.59795
+   ],
+   [
+    "i am",
+    305,
+    2.9786
+   ],
+   [
+    "do not",
+    125,
+    4.30035
+   ],
+   [
+    "she could",
+    133,
+    3.94157
+   ],
+   [
+    "am sure",
+    62,
+    5.73375
+   ],
+   [
+    "every body",
+    34,
+    7.51665
+   ],
+   [
+    "of her",
+    266,
+    2.5288
+   ],
+   [
+    "to be",
+    438,
+    1.95939
+   ],
+   [
+    "the subject",
+    52,
+    5.35759
+   ],
+   [
+    "her family",
+    29,
+    6.47676
+   ],
+   [
+    "could not",
+    168,
+    2.49487
+   ],
+   [
+    "dare say",
+    31,
+    5.73266
+   ],
+   [
+    "not be",
+    91,
+    3.25757
+   ],
+   [
+    "such a",
+    144,
+    2.48122
+   ],
+   [
+    "a most",
+    49,
+    4.24356
+   ],
+   [
+    "i do",
+    92,
+    3.00128
+   ],
+   [
+    "she is",
+    67,
+    3.45437
+   ],
+   [
+    "uncle and",
+    25,
+    5.64484
+   ],
+   [
+    "her mother",
+    59,
+    3.61431
+   ],
+   [
+    "will not",
+    71,
+    3.24522
+   ],
+   [
+    "i dare",
+    34,
+    4.6772
+   ],
+   [
+    "to her",
+    180,
+    2.0287
+   ],
+   [
+    "as soon",
+    60,
+    3.50898
+   ],
+   [
+    "the evening",
+    47,
+    3.92503
+   ],
+   [
+    "as to",
+    104,
+    2.61712
+   ],
+   [
+    "her daughter",
+    24,
+    5.43686
+   ],
+   [
+    "wish of",
+    24,
+    5.43686
+   ],
+   [
+    "in town",
+    31,
+    4.682
+   ],
+   [
+    "of what",
+    59,
+    3.30458
+   ],
+   [
+    "she had",
+    205,
+    1.7695
+   ],
+   [
+    "in general",
+    24,
+    5.16585
+   ],
+   [
+    "and her",
+    89,
+    2.67796
+   ],
+   [
+    "soon as",
+    58,
+    3.29546
+   ],
+   [
+    "and aunt",
+    23,
+    5.22889
+   ],
+   [
+    "her ladyship",
+    23,
+    5.22889
+   ],
+   [
+    "she was",
+    210,
+    1.72867
+   ],
+   [
+    "for her",
+    87,
+    2.68458
+   ]
+  ],
+  "3": [
+   [
+    "i am sure",
+    62,
+    5.82834
+   ],
+   [
+    "i do not",
+    62,
+    5.29235
+   ],
+   [
+    "uncle and aunt",
+    22,
+    8.14407
+   ],
+   [
+    "on the subject",
+    26,
+    6.66238
+   ],
+   [
+    "i dare say",
+    31,
+    5.92902
+   ],
+   [
+    "she could not",
+    51,
+    3.88662
+   ],
+   [
+    "as soon as",
+    57,
+    3.6217
+   ],
+   [
+    "made no answer",
+    17,
+    6.44567
+   ],
+   [
+    "do not know",
+    22,
+    5.06141
+   ],
+   [
+    "could not be",
+    30,
+    4.20413
+   ],
+   [
+    "the whole party",
+    15,
+    5.76631
+   ],
+   [
+    "to make her",
+    18,
+    4.79817
+   ],
+   [
+    "her uncle and",
+    14,
+    5.42663
+   ],
+   [
+    "the honour of",
+    18,
+    4.38289
+   ],
+   [
+    "by no means",
+    26,
+    3.64385
+   ],
+   [
+    "her sister and",
+    13,
+    5.08695
+   ],
+   [
+    "and she was",
+    25,
+    3.66778
+   ],
+   [
+    "am sure i",
+    14,
+    4.83738
+   ],
+   [
+    "that she could",
+    19,
+    3.97653
+   ],
+   [
+    "will not be",
+    17,
+    4.1965
+   ],
+   [
+    "i assure you",
+    19,
+    3.89706
+   ],
+   [
+    "you do not",
+    17,
+    4.06746
+   ],
+   [
+    "soon as they",
+    13,
+    4.58436
+   ],
+   [
+    "could not have",
+    20,
+    3.68954
+   ],
+   [
+    "prevailed on to",
+    12,
+    4.74727
+   ],
+   [
+    "the chief of",
+    12,
+    4.74727
+   ],
+   [
+    "to her sister",
+    12,
+    4.74727
+   ],
+   [
+    "i have not",
+    22,
+    3.49871
+   ],
+   [
+    "i am not",
+    32,
+    2.89655
+   ],
+   [
+    "a young man",
+    16,
+    4.03941
+   ],
+   [
+    "could not help",
+    20,
+    3.4999
+   ],
+   [
+    "you will not",
+    16,
+    3.88296
+   ],
+   [
+    "as they were",
+    17,
+    3.72396
+   ],
+   [
+    "you will be",
+    15,
+    3.84569
+   ],
+   [
+    "his behaviour to",
+    11,
+    4.40759
+   ],
+   [
+    "it is very",
+    13,
+    4.01185
+   ],
+   [
+    "i am afraid",
+    17,
+    3.47912
+   ],
+   [
+    "the pleasure of",
+    15,
+    3.69557
+   ],
+   [
+    "the next morning",
+    17,
+    3.4564
+   ],
+   [
+    "the whole of",
+    15,
+    3.66695
+   ]
+  ]
+ }
+}

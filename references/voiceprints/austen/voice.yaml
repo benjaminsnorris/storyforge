@@ -1,0 +1,21 @@
+# The Austen reference voiceprint (plan B7, #650), in the author voice repo
+# layout (plan B0). Storyforge's worked example and the fixture of
+# tests/test_voiceprint_reference.py. The voice.yaml format is provisional
+# until `storyforge voice init` defines it (#652).
+author: Jane Austen
+corpus:
+  - file: corpus/pride-and-prejudice.md
+    title: Pride and Prejudice
+    year: 1813
+    source: Project Gutenberg 42671, R. W. Chapman's text of the 1813 first edition
+    use: fingerprint
+  - file: corpus/emma.md
+    title: Emma
+    year: 1815
+    source: Project Gutenberg 158
+    use: held-out
+  - file: corpus/persuasion.md
+    title: Persuasion
+    year: 1818   # dated 1818 on its title page; published December 1817
+    source: Project Gutenberg 105
+    use: held-out
