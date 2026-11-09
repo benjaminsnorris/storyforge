@@ -455,14 +455,28 @@ class TestSuite:
         assert any('moving the floor is a decision' in n for n in result['notes'])
 
     @pytest.mark.parametrize('mode', ['replay', 'auto', 'record'])
-    def test_no_recording_is_stale_and_never_goes_live(self, private_set, tmp_path,
-                                                       monkeypatch, mode):
+    def test_a_changed_request_is_stale_and_never_goes_live(self, private_set, tmp_path,
+                                                            monkeypatch, mode):
         """Frozen (#645): a miss is stale, in any mode not asked by name."""
-        from storyforge import api
+        from storyforge import api, blocking
+        monkeypatch.setattr(api, '_live_request', _fake_api([]))
+        _record(_suite(), str(tmp_path / 'r'))
+        monkeypatch.setattr(blocking, 'PROMPT', 'A changed prompt. ' + blocking.PROMPT)
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         result = harness.run_suite(_suite(), mode, str(tmp_path / 'c'))
         assert result['status'] == 'stale', result.get('error')
         assert all(f.startswith('CassetteMiss') for f in result['cassette_failures'])
+
+    @pytest.mark.parametrize('mode', ['replay', 'auto', 'record'])
+    def test_a_set_never_recorded_is_an_error_and_never_goes_live(self, private_set, tmp_path,
+                                                                  monkeypatch, mode):
+        """No recordings at all is a missing fixture, not a changed request
+        (#661 review), for a private suite as for any frozen one."""
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        result = harness.run_suite(_suite(), mode, str(tmp_path / 'c'))
+        assert result['status'] == 'error'
+        assert 'has no recordings' in result['error']
 
     def test_a_miss_carries_no_prose(self, private_set, tmp_path, monkeypatch):
         """A miss names the prompt's opening, which for a private suite could be
