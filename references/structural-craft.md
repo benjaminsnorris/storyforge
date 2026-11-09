@@ -303,7 +303,7 @@ Scores persist to `working/scores/structural-latest.csv` (each row stamped with 
 
 ### Post-Draft Fidelity Scoring
 
-After drafting, fidelity scoring checks whether the prose delivered what the brief promised. Nine elements are scored: goal, conflict, outcome, crisis, decision, key_actions, key_dialogue, emotions, knowledge.
+After drafting, fidelity scoring checks whether the prose delivered what the brief promised. Up to nine elements are scored: goal, conflict, outcome, crisis, decision, key_actions, key_dialogue, emotions, knowledge. An element the brief leaves empty (goal through decision, key_dialogue and emotions are optional notes) is left unscored.
 
 A fidelity score of 4 means the prose clearly delivers the brief element. A score of 5 means the prose found something better than what the brief specified — the writer discovered a superior approach during drafting. A score of 1-2 means the brief element is missing or barely present in the prose.
 

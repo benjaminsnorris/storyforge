@@ -121,7 +121,7 @@ Categorize each finding by where the fix belongs:
 |-------------|-------------|---------------|
 | `structural` | scenes.csv | POV, timeline, part structure, scene additions/removals |
 | `intent` | scene-intent.csv | Value shifts, scene type, character presence |
-| `brief` | scene-briefs.csv | Knowledge chain, outcome, key actions (goal, conflict, crisis and decision are the author's notes: suggest, don't rewrite) |
+| `brief` | scene-briefs.csv | Knowledge chain, outcome, key actions (goal, conflict, crisis and decision are the author's notes: suggest, don't rewrite; a plan's CSV blocks can still write them, so leave them out of a plan unless the author asks) |
 | `craft` | Prose directly | Voice, rhythm, dialogue, naturalness |
 
 ### Registry-Backed Fields

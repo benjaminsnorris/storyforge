@@ -141,7 +141,7 @@ Present all findings together — abstract detection is one signal among several
 
 **Score trends (when history data exists):**
 
-9. **Naturalness stalls detected** → Scenes stuck at low naturalness for 2+ cycles need upstream fixes (brief rewrite), not more prose revision. The `--polish --loop` command now auto-detects this and fixes briefs first.
+9. **Naturalness stalls detected** → Scenes stuck at low naturalness for 2+ cycles need upstream fixes (a brief change), not more prose revision. `--polish --loop` names the scenes whose brief the diagnosis blames in a NOTE; it no longer rewrites goal, conflict, crisis or decision (the author's notes, plan decision 9), so suggest the change to the author, or work the events here.
 
 10. **Regressions detected** → A scene's naturalness score dropped after revision. The brief needs to change so re-draft produces fundamentally different prose.
 

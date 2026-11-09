@@ -534,7 +534,7 @@ Also confirm the pitch tier still holds under the added structure:
 - `storyforge status` — confirm the ladder shows the expected rung as
   `solid` and surfaces no blockers before advancing.
 
-Report results to the author. Validate prints two groups: blocking errors (missing required columns, duplicate seqs or ids, orphaned rows, schema and canon errors, a broken told_by chain, a faithful adaptation's coverage gaps) must be fixed before advancing; advisory diagnostics never hold a stage. **Every craft-framework check is advisory** (#643): an empty value_shift, turning_point, action_sequel, emotional_arc, value_at_stake, goal, conflict, crisis or decision, MICE nesting, flat polarity, scene-type and turning-point runs, the action/sequel balance. Mention them as observations the author can use; never press a scene toward a turn and a landing it doesn't want. Structural scoring findings are advisory too.
+Report results to the author. Validate prints two groups: blocking errors (missing required columns, duplicate seqs or ids, orphaned rows, schema and canon errors, a broken told_by chain, a faithful adaptation's coverage gaps) must be fixed before advancing; advisory diagnostics never hold a stage. **Every craft-framework check is advisory** (#643): an empty value_shift, turning_point, action_sequel, emotional_arc or value_at_stake (a brief's goal, conflict, crisis and decision are the author's notes, never reported), MICE nesting, flat polarity, scene-type and turning-point runs, the action/sequel balance. Mention them as observations the author can use; never press a scene toward a turn and a landing it doesn't want. Structural scoring findings are advisory too.
 
 ## Step 6: Ensure Feature Branch
 

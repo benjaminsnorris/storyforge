@@ -139,7 +139,7 @@ evaluation:
 #   spine         — irreducible story events, protagonist, premise
 #   architecture  — acts, POV, value shifts, threads, supporting characters
 #   scene-map     — full scene count, locations, timeline, MICE threads
-#   briefs        — drafting contracts: goal/conflict/outcome, knowledge states
+#   briefs        — drafting contracts: events, outcome, knowledge states
 #   drafting      — writing prose from validated briefs
 #   evaluation    — multi-perspective review, findings routed upstream
 #   polish        — prose-level craft pass (voice, rhythm, naturalness)
