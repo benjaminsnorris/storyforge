@@ -25,7 +25,7 @@ Read the following files to understand the full context:
 
 - `storyforge.yaml` — project configuration, coaching level
 - `reference/scenes.csv` — scene metadata (status, seq, part, target_words)
-- `reference/scene-briefs.csv` — drafting contracts (key_actions, crisis, decision, knowledge_in/out, key_dialogue, emotions)
+- `reference/scene-briefs.csv` — briefs: the facts (outcome, key_actions, knowledge_in/out), optional craft notes (goal, conflict, crisis, decision) and the author's notes (key_dialogue, subtext, emotions, motifs, motif_details; #644)
 - `reference/scene-intent.csv` — narrative dynamics (function, value_at_stake, value_shift, emotional_arc)
 - `working/scores/latest/scene-scores.csv` — latest scoring (if exists, check prose_naturalness)
 - `working/scores/structural-proposals.csv` — structural proposals (if exists)
@@ -122,13 +122,13 @@ flagged = detect_abstract_fields(briefs_map)
 
 **Over-specified beats** — too many key_actions for the scene's word count. A 2,500-word scene with 5 key_actions forces one mandatory beat every 500 words, leaving no room for atmosphere, interiority, or organic pacing. Rule of thumb: 2-3 key_actions per 2,500 words. Flag scenes where `len(key_actions.split(';')) > target_words / 800`.
 
-**Prescriptive dialogue** — exact quotes in `key_dialogue` make surrounding prose contort to deliver specific lines. Better to use dialogue direction ("Dorren rationalizes the anomaly using institutional language") than exact lines ("The eastern readings are within acceptable variance"). Flag scenes where `key_dialogue` contains quoted strings (not a `must:` line: that one the author keeps word for word on purpose). When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
+**Prescriptive dialogue** — `key_dialogue` is the author's note (#644), filled by hand, so report on it; never rewrite it. Exact quotes make surrounding prose contort to deliver specific lines, so tell the author when a scene's unmarked lines are many or scripted, and leave the choice (cut them, keep them as notes, or mark one `must:`) to them. A quoted line in `key_actions` is the brief's own: there, dialogue direction ("Dorren rationalizes the anomaly using institutional language") beats an exact line. When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
 
 **`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. Trimming an over-specified brief keeps every `must:` beat; it still counts toward the beats-per-words threshold.
 
 **Procedural goals** — goals framed as tasks ("Complete the quarterly audit") instead of dramatic questions ("Prove the maps are accurate before the review deadline"). The goal shapes how the drafter opens the scene — procedural goals produce bureaucratic openings.
 
-**Emotional arc granularity** — 4+ beat emotional arcs (e.g., "competence;unease;self-doubt;resolve") force artificial escalation-and-recovery. 2-beat arcs (start state → end state) let the drafter find the middle ground organically. Flag scenes where `len(emotions.split(';')) > 3`.
+**Emotional arc granularity** — 4+ beat emotional arcs (e.g., "competence;unease;self-doubt;resolve") force artificial escalation-and-recovery. 2-beat arcs (start state → end state) let the drafter find the middle ground organically. Flag scenes where `len(emotions.split(';')) > 3`. `emotions` and `subtext` are the author's notes (#644): `hone --domain briefs` reports these findings and never rewrites them (`hone._report_author_notes`); suggest the trim to the author.
 
 **Conflict-free scenes** — the conflict field describes observation or contemplation rather than genuine opposition:
 - "observes how the landscape has shifted" instead of "the locked door blocks the only exit"
