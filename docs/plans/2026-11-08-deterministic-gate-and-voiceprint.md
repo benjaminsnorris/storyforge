@@ -735,6 +735,30 @@ at a fraction of the cost.
    shortcut (D8) is piloted on Wrath's redraft, which already has its source
    map and its interpretation decisions in `key-decisions.md`.
 
+### Issues
+
+| phase | issue | what |
+|---|---|---|
+| 1 | #641 | a failing scene stops only itself (A5) |
+| 1 | #642 | broken promises advisory unless `must` (A3) |
+| 1 | #643 | craft-framework checks advisory (D6) |
+| 1 | #644 | briefs keep facts, drop staging; terse notes (D3, D4) |
+| — | #645 | eval policy: freeze E4/E8, fixed sets, monthly budget (Part E) |
+| 2 | #646 | the blocking labelled set (Part E) |
+| 2 | #647 | the stage sheet (A4) |
+| 3 | #648 | typed ledger state and deterministic checks (A1, A2) |
+| 3 | #657 | bibles as facts; the two-writers gap list (D2) |
+| 4 | #649 | the yes/no question layer (A3) |
+| 5 | #650 | fingerprint, Austen reference, attribution/stability/Verne tests (B2, B7) |
+| 5 | #651 | described voice and exemplars (B3, B4) |
+| 5 | #652 | the author voice repo (B0, B1) |
+| 5 | #653 | `score --voice` (B6) |
+| 6 | #654 | fiction calibration rounds (B5) |
+| 6 | #655 | long writing sessions (C, D7) |
+| 7 | #656 | voice stage after the synopsis (D5) |
+| 7 | #658 | adaptations enter at the scene map (D8) |
+| — | #659 | the voice suite (Part E) |
+
 ## Decisions (Ben, 2026-11-08)
 
 Ben agreed with the recommendations below, except where a decision is
