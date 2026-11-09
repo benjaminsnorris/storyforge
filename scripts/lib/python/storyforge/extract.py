@@ -928,9 +928,9 @@ Location: {skeleton.get('location', '')}
 {types}
 - subject: the id from the registries above of the character, location or object it is about (blank when it has no single subject; for a promise, the character who makes it)
 - statement: one declarative sentence, specific enough that a later sentence could contradict it
-- quote: the exact words from this scene that establish it, copied verbatim
+- quote: the exact words from this scene that establish it, copied verbatim as one unbroken span of the prose. Never join words from different places into one quote: when the words that establish it are apart, give each part verbatim, in the scene's order, joined with "..."
 - mutable: "state" if it can change later in the story (an injury, who holds the key, where someone is, what they know), "fixed" if it should hold for the whole book (a name, an age, a sister's name, a backstory event)
-- supersedes: the id of the earlier commitment above that this one replaces with a new value (a key changing hands, a new location), or blank
+- supersedes: the id of the earlier commitment above that this one replaces with a new value (a key changing hands, a new location), or blank. Copy each id you name, here and in ends, exactly as it is listed above; never make one up from a scene and words
 - ends: the ids of other earlier commitments above marked "state" that stop being true because of this one (he can grip a rope again once the wound has healed; she has left the house), or an empty list. A "registry" one you name is reported to the author rather than ended
 
 Record each commitment once. Don't restate an earlier or already-recorded commitment the scene only repeats. Answer with a JSON object holding the list `commitments` (an empty list is valid only when the scene truly commits to nothing)."""
@@ -981,21 +981,7 @@ def known_for_scene(rows, scene_id, order, scene_subjects):
     """
     from . import ledger
     at = order[scene_id]
-
-    def pos(r):
-        sid = r.get('scene_id', '').strip()
-        return -1 if not sid else order.get(sid)
-
-    binding = [r for r in rows if r.get('status') == 'binding' and pos(r) is not None]
-    earlier = [r for r in binding if pos(r) < at]
-    superseded = {old for r in earlier for old in ledger._split(r.get('supersedes', ''))}
-
-    def in_force(r):
-        if r['id'] in superseded:
-            return False
-        ends = r.get('resolves', '').strip()
-        return not (r.get('mutable') == 'state' and ends in order and order[ends] < at)
-    known = sorted((r for r in earlier if in_force(r)), key=pos)
+    known = facts_in_force(rows, scene_id, order)
     left_out = max(0, len(known) - MAX_KNOWN_COMMITMENTS)
     if left_out:
         def about_scene(r):
@@ -1006,9 +992,36 @@ def known_for_scene(rows, scene_id, order, scene_subjects):
                                        known[i].get('mutable') != 'fixed', -i))
         keep = set(ranked[:MAX_KNOWN_COMMITMENTS])
         known = [r for i, r in enumerate(known) if i in keep]
-    recorded = [r for r in binding if pos(r) == at
+    recorded = [r for r in rows if r.get('status') == 'binding'
+                and r.get('scene_id', '').strip() == scene_id
                 and r.get('introduced_by') != ledger.COMMITMENTS_PASS]
     return known, recorded, left_out
+
+
+def facts_in_force(rows, scene_id, order):
+    """Every binding fact in force entering `scene_id`, in reading order:
+    what `known_for_scene` offers before its cap (from earlier scenes or
+    with no scene, not superseded by then, no `state` whose `resolves`
+    scene is already past; a fact tied to a scene id not in `order` is left
+    out). `commitment_rows` looks a link up here when it names a fact past
+    the cap (#634)."""
+    from . import ledger
+    at = order[scene_id]
+
+    def pos(r):
+        sid = r.get('scene_id', '').strip()
+        return -1 if not sid else order.get(sid)
+
+    earlier = [r for r in rows if r.get('status') == 'binding'
+               and pos(r) is not None and pos(r) < at]
+    superseded = {old for r in earlier for old in ledger._split(r.get('supersedes', ''))}
+
+    def in_force(r):
+        if r['id'] in superseded:
+            return False
+        ends = r.get('resolves', '').strip()
+        return not (r.get('mutable') == 'state' and ends in order and order[ends] < at)
+    return sorted((r for r in earlier if in_force(r)), key=pos)
 
 
 def unplaced_rows(rows, order):
@@ -1042,10 +1055,20 @@ ENDS_MOVED = 'ends moved'
 #: A `supersedes` or `ends` naming an offered fact's id without its
 #: `<scene>--` prefix, read as that fact (#620)
 ID_PREFIX = 'id prefix'
+#: A `supersedes` or `ends` naming a fact in force that the scene wasn't
+#: offered (past `MAX_KNOWN_COMMITMENTS`), read as that fact: by its id, or
+#: by the one id of the same scene worded nearest (`commitment_rows` with
+#: `order`; #634)
+UNOFFERED = 'unoffered'
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
 COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
                        'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced',
-                       ENDS_MOVED, ID_PREFIX)
+                       ENDS_MOVED, ID_PREFIX, UNOFFERED)
+
+#: How alike (`difflib` ratio) the words of an id that isn't in the ledger
+#: must be to those of one fact of the same scene for `_nearest_id` to
+#: read it as that fact
+NEAREST_ID_CUTOFF = 0.85
 
 
 def _offered_id(ref: str, offered: dict[str, dict[str, str]],
@@ -1065,6 +1088,23 @@ def _offered_id(ref: str, offered: dict[str, dict[str, str]],
         return None, []
     hits = sorted(i for i in offered if i.endswith(f'--{ref}'))
     return (hits[0], []) if len(hits) == 1 else (None, hits)
+
+
+def _nearest_id(ref: str, facts: dict[str, dict[str, str]]) -> tuple[str | None, list[str]]:
+    """The fact of `facts` that `ref`, an id no row has, was meant to be
+    (#634: the extractor rebuilt an id from its `scene--first-words`
+    pattern and got a word wrong): one whose scene prefix is `ref`'s and
+    whose words are at least `NEAREST_ID_CUTOFF` alike. (None, []) for no
+    such fact; (None, the matches) for more than one, never guessed."""
+    import difflib
+    scene, sep, words = ref.partition('--')
+    if not sep or not scene or not words:
+        return None, []
+    same = {i[len(scene) + 2:]: i for i in facts if i.startswith(f'{scene}--')}
+    hits = difflib.get_close_matches(words, list(same), n=2, cutoff=NEAREST_ID_CUTOFF)
+    if len(hits) == 1:
+        return same[hits[0]], []
+    return None, sorted(same[h] for h in hits)
 
 
 def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
@@ -1108,6 +1148,15 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     the book, then stopped on `ends again`). A state ends once, at its
     first end in reading order; the caller re-checks what leaned on the
     later end.
+
+    With `order`, a link naming no offered fact is looked up in every fact
+    in force entering the scene (`facts_in_force`; #634, iliad-teen: a
+    scene is offered `MAX_KNOWN_COMMITMENTS` of ~1,100, and the extractor
+    named one it wasn't shown): by its id, by its id without the scene
+    prefix (as above), or, for an id no row has, by the one id of the same
+    scene worded nearest (`_nearest_id`). One found is linked as an offered
+    fact would be and listed in `UNOFFERED`; one not found is reported as
+    before.
     """
     from .common import csv_safe
     from . import ledger
@@ -1115,15 +1164,30 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     offered = {r['id']: r for r in known}
     here = {r['id']: r for r in recorded}
     known_ids = {r['id'] for r in rows} | set(here)
+    in_force = ({r['id']: r for r in facts_in_force(rows, scene_id, order)}
+                if order is not None and scene_id in order else {})
 
     def _link(ref: str) -> tuple[str, list[str]]:
         """`ref` as the offered id it names (`_offered_id`; a resolved
-        prefix is reported, `ID_PREFIX`), and the ids it could mean."""
+        prefix is reported, `ID_PREFIX`), or the fact in force past the cap
+        it names (`UNOFFERED`, added to `offered`), and the ids it could
+        mean."""
         named, could = _offered_id(ref, offered, known_ids)
         if named is not None and named != ref:
             problems[ID_PREFIX].append(f'{scene_id}: {ref} -> {named}')
             return named, []
-        return ref, could
+        if named is not None or could or ref in here:
+            return ref, could
+        unoffered = {i: r for i, r in in_force.items() if i not in offered}
+        named, could = _offered_id(ref, unoffered, known_ids)
+        if named is None and not could and ref not in known_ids:
+            named, could = _nearest_id(ref, unoffered)
+        if named is None:
+            return ref, could
+        problems[UNOFFERED].append(f'{scene_id}: {ref}' if named == ref
+                                   else f'{scene_id}: {ref} -> {named}')
+        offered[named] = unoffered[named]
+        return named, []
     from .quotes import quote_in
     out = []
     for item in found:

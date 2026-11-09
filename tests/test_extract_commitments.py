@@ -48,6 +48,16 @@ class TestPrompt:
              'introduced_by': writer}])
         assert '- k [world, state] -: S' in prompt
 
+    def test_states_the_one_span_quote_rule_and_copied_ids(self):
+        """#634 (iliad-teen): quotes stitched from two sentences apart, with
+        no ellipsis, and link ids rebuilt from the `scene--words` pattern."""
+        prompt = build_commitments_prompt('sc1', 'x', {})
+        assert 'copied verbatim as one unbroken span of the prose' in prompt
+        assert ('Never join words from different places into one quote: when the words '
+                'that establish it are apart, give each part verbatim, in the scene\'s '
+                'order, joined with "..."') in prompt
+        assert 'exactly as it is listed above; never make one up' in prompt
+
     def test_the_rubric_leaves_out_staging_asides_and_invented_times(self):
         """F-127: on A Christmas Carol 44% of rows were incidental, mostly
         staging at scene end, and the wrong ones read a figure of speech
@@ -704,3 +714,96 @@ class TestLinksToOfferedFacts:
         _, problems = self._rows(self._found(ends=['a--father-dead-2']), [old])
         assert old['resolves'] == 'c' and problems['ends moved'] == []
         assert problems['ends again'] == ['b: a--father-dead-2 (resolves: c)']
+
+
+class TestLinksPastTheOfferCap:
+    """#634 (iliad-teen): with `order`, a link naming no offered fact is
+    looked up among every fact in force entering the scene: the offer holds
+    at most `MAX_KNOWN_COMMITMENTS`."""
+
+    ORDER = {'a': 0, 'b': 1, 'c': 2}
+
+    def _state(self, rid, scene, **over):
+        row = _ledger_row(rid, scene_id=scene, introduced_by='draft', origin='prose')
+        row.update(over)
+        return row
+
+    def _rows(self, found, rows, offered=(), order=ORDER):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        out = commitment_rows(found, 'b', 'q', rows, list(offered), [], {}, 'revise',
+                              problems, own_writers=ledger.COMMITMENT_WRITERS,
+                              registry_is_plan=True, reserved=set(), order=order)
+        return out, problems
+
+    def _found(self, **over):
+        return [dict({'type': 'physical', 'subject': '', 'statement': 'He stands',
+                      'quote': 'q', 'mutable': 'state', 'supersedes': '', 'ends': []},
+                     **over)]
+
+    def test_an_ends_naming_a_fact_in_force_not_offered_ends_it(self):
+        old = self._state('a--hector-decides-to-stand-and-fight', 'a')
+        _, problems = self._rows(self._found(ends=[old['id']]), [old])
+        assert old['resolves'] == 'b' and problems['ends'] == []
+        assert problems['unoffered'] == ['b: a--hector-decides-to-stand-and-fight']
+
+    def test_a_supersedes_naming_a_fact_in_force_not_offered_links_it(self):
+        old = self._state('a--the-key-is-in-the-drawer', 'a')
+        out, problems = self._rows(self._found(supersedes=old['id']), [old])
+        assert out[0]['supersedes'] == old['id'] and problems['supersedes'] == []
+        assert problems['unoffered'] == ['b: a--the-key-is-in-the-drawer']
+
+    def test_without_the_scene_prefix_it_is_found_too(self):
+        old = self._state('a--the-key-is-in-the-drawer', 'a')
+        out, problems = self._rows(self._found(supersedes='the-key-is-in-the-drawer'), [old])
+        assert out[0]['supersedes'] == old['id']
+        assert problems['unoffered'] == ['b: the-key-is-in-the-drawer -> '
+                                         'a--the-key-is-in-the-drawer']
+
+    def test_an_id_no_row_has_is_read_as_the_one_nearest_of_its_scene(self):
+        old = self._state('a--hector-decides-to-stand-and-fight', 'a')
+        _, problems = self._rows(self._found(ends=['a--hector-decided-to-stand-and-fight']),
+                                 [old, self._state('a--the-gates-are-shut', 'a')])
+        assert old['resolves'] == 'b'
+        assert problems['unoffered'] == ['b: a--hector-decided-to-stand-and-fight -> '
+                                         'a--hector-decides-to-stand-and-fight']
+
+    def test_two_near_ids_are_not_guessed(self):
+        rows = [self._state('a--crate-1-is-in-the-hold', 'a'),
+                self._state('a--crate-2-is-in-the-hold', 'a')]
+        _, problems = self._rows(self._found(ends=['a--crate-3-is-in-the-hold']), rows)
+        assert [r['resolves'] for r in rows] == ['', '']
+        assert problems['ends'] == ['b: a--crate-3-is-in-the-hold (matches '
+                                    'a--crate-1-is-in-the-hold, a--crate-2-is-in-the-hold; '
+                                    'not guessed)']
+        assert problems['unoffered'] == []
+
+    def test_a_far_id_or_another_scenes_is_reported(self):
+        old = self._state('a--hector-decides-to-stand-and-fight', 'a')
+        for ref in ('a--achilles-sulks-in-his-tent', 'c--hector-decides-to-stand-and-fight'):
+            _, problems = self._rows(self._found(ends=[ref]), [old])
+            assert problems['ends'] == [f'b: {ref}'] and problems['unoffered'] == []
+        assert old['resolves'] == ''
+
+    def test_a_fact_not_in_force_is_not_linked(self):
+        """Superseded before the scene, from a later scene, or not binding:
+        a real id, but not one the scene can change."""
+        rows = [self._state('a--old-place', 'a'),
+                self._state('a--new-place', 'a', supersedes='a--old-place'),
+                self._state('c--later-place', 'c'),
+                self._state('a--rejected-place', 'a', status='rejected')]
+        for ref in ('a--old-place', 'c--later-place', 'a--rejected-place'):
+            out, problems = self._rows(self._found(supersedes=ref), rows)
+            assert out[0]['supersedes'] == ''
+            assert problems['supersedes'] == [f'b: {ref}'] and problems['unoffered'] == []
+
+    def test_without_order_nothing_past_the_offer_is_looked_up(self):
+        """Phase 4 passes no `order`: as before."""
+        old = self._state('a--hector-decides-to-stand-and-fight', 'a')
+        _, problems = self._rows(self._found(ends=[old['id']]), [old], order=None)
+        assert old['resolves'] == '' and problems['ends'] == [f'b: {old["id"]}']
+
+    def test_an_offered_fact_is_not_reported_as_unoffered(self):
+        old = self._state('a--hector-decides-to-stand-and-fight', 'a')
+        _, problems = self._rows(self._found(ends=[old['id']]), [old], offered=[old])
+        assert old['resolves'] == 'b' and problems['unoffered'] == []

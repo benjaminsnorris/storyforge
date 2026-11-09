@@ -1940,13 +1940,13 @@ class TestReextractAMisquote(_FixRounds):
                                                                          tmp_path):
         """SF-2 (#602's review): only a re-gate for slips is reported as one."""
         first = self._result()
-        first.problems = {'ends': [f'{SCENE}: some-state']}
+        first.problems = {'ends again': [f'{SCENE}: some-state (resolves: act1-sc01)']}
         out, dirs, _ = self._run(monkeypatch, tmp_path, [first, self._misquote()], [])
         assert len(dirs) == 2 and out.reextraction is None   # and no second regate
 
     def test_another_extraction_problem_beside_it_is_not_retried(self, monkeypatch, tmp_path):
         mixed = self._misquote()
-        mixed.problems['supersedes'] = [f'{SCENE}: nothing-offered']
+        mixed.problems['ends again'] = [f'{SCENE}: some-state (resolves: act1-sc01)']
         out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a', 'c'), mixed],
                                  [('v1', [{'find': 'a', 'replace': 'b'}])])
         assert len(dirs) == 2 and out.result is mixed and out.reextraction is None
@@ -2080,9 +2080,49 @@ class TestReextractAMisquote(_FixRounds):
     def test_the_slips_are_extraction_problems_that_block(self):
         """TD-3: one spelling of each kind, shared with extraction."""
         from storyforge import extract
-        assert gate._EXTRACTOR_SLIPS == (extract.MISQUOTE, extract.NO_QUOTE)
+        assert gate._EXTRACTOR_SLIPS == (extract.MISQUOTE, extract.NO_QUOTE, 'supersedes',
+                                         'ends')
         assert set(gate._EXTRACTOR_SLIPS) <= set(gate.UNRESOLVED)
         assert set(gate._EXTRACTOR_SLIPS) <= set(extract.COMMITMENT_PROBLEMS)
+
+    def test_a_misquote_is_extracted_again_once(self, monkeypatch, tmp_path):
+        """#634: a quote stitched from two sentences apart is re-extracted
+        once; a second misquote is the verdict, no third run."""
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._misquote(), self._misquote()],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}])])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract')]
+        assert out.reextraction.outcome == gate.REGATE_FAILED and not out.result.passed
+
+    @pytest.mark.parametrize('kind', ['supersedes', 'ends'])
+    def test_a_link_naming_no_fact_in_force_is_extracted_again(self, monkeypatch, tmp_path,
+                                                               capsys, kind):
+        """#634 (iliad-teen): `ends` named an id the extractor made up from
+        the `scene--first-words` pattern. No prose edit repairs it, so it
+        earns the one re-extraction, not the fix, and is said for what it is."""
+        slip = self._result()
+        slip.problems = {kind: [f'{SCENE}: act1-sc01--a-made-up-id']}
+        assert gate._only_extractor_slips(slip) == [f'{kind}: {SCENE}: act1-sc01--a-made-up-id']
+        assert gate.problems_to_fix(slip) == []
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a'), slip, self._result()],
+                                    [('v1', [{'find': 'a', 'replace': 'b'}])])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract')]
+        assert out.result.passed and len(seen) == 1
+        assert out.reextraction.slips == [f'{kind} act1-sc01--a-made-up-id: names no fact '
+                                          f'in force']
+        said = capsys.readouterr().out
+        assert 'the extractor named a fact not in force (' in said
+        assert out.reextraction.summary().startswith('the extractor named a fact not in force')
+
+    def test_a_misquote_and_a_bad_link_are_both_named(self):
+        r = self._misquote()
+        r.problems['ends'] = [f'{SCENE}: act1-sc01--made-up']
+        slips = gate._describe_slips(r)
+        assert gate._slipped(slips) == 'misquoted the prose or named a fact not in force'
+        assert gate._slipped(slips[:1]) == 'misquoted the prose'
 
     def test_one_regate_per_call(self):
         once = gate._OneRegate()
@@ -3525,3 +3565,65 @@ class TestSteadyParagraphs:
         assert gate.gated_prose(project_dir, SCENE) == (prose, '')
         self._edit(project_dir, 'Blank parchment.', 'Blank vellum.')
         assert gate.gated_prose(project_dir, SCENE) == (prose, '')   # the gated one
+
+
+class TestALinkPastTheOfferCap:
+    """#634 (iliad-teen, 2026-11-08): a scene is offered at most
+    `MAX_KNOWN_COMMITMENTS` of the book's facts in force, and the extractor
+    wrote `ends: hector-outside-the-gate--hector-decides-to-stand-and-fight`
+    for one it wasn't shown. The link names a real fact in force: it is
+    applied, with a NOTE, not blocked as UNRESOLVED."""
+
+    EARLIER = 'act1-sc01'
+    GONE = f'{EARLIER}--hector-decides-to-stand-and-fight'
+
+    def _fill(self, project_dir, n=230):
+        """`GONE` and `n` more states from the earlier scene, `GONE` the
+        oldest: past the cap the oldest are left out of the offer."""
+        from storyforge.extract import MAX_KNOWN_COMMITMENTS
+        assert n > MAX_KNOWN_COMMITMENTS
+        rows = ledger.load(project_dir)
+        base = {k: '' for k in rows[0]}
+        base.update(status='binding', origin='prose', mutable='state', introduced_by='draft',
+                    scene_id=self.EARLIER, type='physical')
+        rows.append(dict(base, id=self.GONE, statement='Hector decides to stand and fight'))
+        rows += [dict(base, id=f'{self.EARLIER}--crate-{i}-is-in-the-hold',
+                      statement=f'Crate {i} is in the hold') for i in range(n)]
+        ledger.save(project_dir, rows, command='test')
+
+    def test_an_ends_naming_a_real_fact_left_out_passes_with_a_note(self, project_dir,
+                                                                    tmp_path):
+        self._fill(project_dir)
+        result = _gate(project_dir, tmp_path, [_commitment(ends=[self.GONE])])
+        assert result.problems['cap'], 'the offer was not capped: the test proves nothing'
+        assert result.passed and result.committed, gate.report_lines(result)
+        assert result.problems['unoffered'] == [f'{SCENE}: {self.GONE}']
+        assert not result.unresolved
+        row = next(r for r in ledger.load(project_dir) if r['id'] == self.GONE)
+        assert row['resolves'] == SCENE
+        notes = [line for line in gate.report_lines(result)
+                 if line.startswith('NOTE') and self.GONE in line]
+        assert len(notes) == 1 and 'not offered' in notes[0]
+        assert any(self.GONE in line for line in gate.applied_lines(result))
+
+    def test_a_supersedes_naming_a_real_fact_left_out_is_linked(self, project_dir, tmp_path):
+        self._fill(project_dir)
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes=self.GONE)])
+        assert result.passed, gate.report_lines(result)
+        assert result.proposed[0]['supersedes'] == self.GONE
+        assert result.problems['unoffered'] == [f'{SCENE}: {self.GONE}']
+
+    def test_a_made_up_id_one_word_off_is_read_as_the_nearest(self, project_dir, tmp_path):
+        self._fill(project_dir)
+        wrong = f'{self.EARLIER}--hector-decided-to-stand-and-fight'
+        result = _gate(project_dir, tmp_path, [_commitment(ends=[wrong])])
+        assert result.passed, gate.report_lines(result)
+        assert result.problems['unoffered'] == [f'{SCENE}: {wrong} -> {self.GONE}']
+
+    def test_an_id_naming_nothing_still_blocks(self, project_dir, tmp_path):
+        self._fill(project_dir)
+        nothing = f'{self.EARLIER}--nothing-like-this-was-said'
+        result = _gate(project_dir, tmp_path, [_commitment(ends=[nothing])])
+        assert not result.passed and not result.committed
+        assert result.problems['ends'] == [f'{SCENE}: {nothing}']
+        assert gate._only_extractor_slips(result)   # so it earns the re-extraction

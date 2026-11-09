@@ -67,7 +67,7 @@ from storyforge import audit, ledger, persistence
 from storyforge.blocking import BLOCKING_CODE, BlockingError, check_blocking
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
                                check_scene)
-from storyforge.extract import ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE
+from storyforge.extract import ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE, UNOFFERED
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
@@ -86,16 +86,18 @@ UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected'
 #: scene id that isn't a scene, an `ends` naming a fixed fact (one can't
 #: end, so the link is never applied and the row is right without it:
 #: G-028, #556, an extraction slip that stopped an unattended run)
-#: `ENDS_MOVED` (#621) and `ID_PREFIX` (#620) are links applied, and
-#: reported as a NOTE
+#: `ENDS_MOVED` (#621), `ID_PREFIX` (#620) and `UNOFFERED` (#634) are
+#: links applied, and reported as a NOTE
 REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced', 'ends fixed',
-            ENDS_MOVED, ID_PREFIX)
+            ENDS_MOVED, ID_PREFIX, UNOFFERED)
 #: What a report line says each `REPORTED` kind means, where its name alone
 #: doesn't (#564: `NOTE (cap): scene (62)` said nothing of what was cut)
 _REPORTED_LABEL = {
     ENDS_MOVED: 'a state a later scene ended is ended here, its first end in reading '
                 'order; the later scene is listed for a re-check',
     ID_PREFIX: 'a link named a fact\'s id without its scene prefix; read as that fact',
+    UNOFFERED: 'a link named a fact in force that extraction was not offered (past the '
+               'cap); read as that fact, by its id or the nearest id of the same scene',
     'cap': 'facts in force left out of what extraction was offered, over the cap '
            '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
 }
@@ -2407,7 +2409,7 @@ class Reextraction:
                    others=not _only_extractor_slips(again))
 
     def summary(self) -> str:
-        said = (f'the extractor misquoted the prose ({_slip_text(self.slips)}), so the same '
+        said = (f'the extractor {_slipped(self.slips)} ({_slip_text(self.slips)}), so the same '
                 f'prose was gated again (extraction and the check)')
         if self.outcome == REGATE_PASSED:
             return f'{said}: it passed'
@@ -2416,7 +2418,7 @@ class Reextraction:
                     f'before it stands')
         parts = []
         if self.again:
-            parts.append(f'it misquoted the prose again ({_slip_text(self.again)}); no quote '
+            parts.append(f'it {_slipped(self.again)} again ({_slip_text(self.again)}); no quote '
                          f'is replaced with the prose\'s words')
         if self.others:
             parts.append('it stopped on other problems (listed)')
@@ -2936,9 +2938,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
 
 #: Extraction problems that are the extractor's own slip, never the prose's:
 #: a quote that isn't in the scene (`extract.commitment_rows` checks it
-#: against the prose), or no quote at all. No prose edit repairs one, so
-#: the fix is never sent them (`problems_to_fix`)
-_EXTRACTOR_SLIPS = (MISQUOTE, NO_QUOTE)
+#: against the prose), no quote at all, or a `supersedes` or `ends` naming
+#: no fact in force (#634: an id it made up, or one it can't tell apart).
+#: No prose edit repairs one, so the fix is never sent them
+#: (`problems_to_fix`), and they earn the one re-extraction
+_EXTRACTOR_SLIPS = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends')
 
 
 class _OneRegate:
@@ -2978,12 +2982,16 @@ _SLIPS_SHOWN = 3
 
 def _describe_slips(result: GateResult) -> list[str]:
     """Each of `result`'s extractor slips as `fact-id: what`: the quote
-    (cut to `_SLIP_QUOTE_CHARS`) that isn't in the scene, or "no quote"."""
+    (cut to `_SLIP_QUOTE_CHARS`) that isn't in the scene, or "no quote";
+    a link's as `supersedes|ends id: names no fact in force` (#634)."""
     proposed = {r['id']: r for r in result.proposed}
     out = []
     for kind in _EXTRACTOR_SLIPS:
         for item in result.problems.get(kind, []):
             rid = item.split(': ', 1)[-1]
+            if kind not in (MISQUOTE, NO_QUOTE):
+                out.append(f'{kind} {_one_line(rid)}: names no fact in force')
+                continue
             if kind == NO_QUOTE:
                 out.append(f'{rid}: no quote')
                 continue
@@ -3001,11 +3009,23 @@ def _slip_text(slips: list[str]) -> str:
                     else '')
 
 
+def _slipped(slips: list[str]) -> str:
+    """What the extractor did, for `slips` (`_describe_slips`): misquoted
+    the prose, named a fact not in force (#634), or both."""
+    links = sum(s.endswith(': names no fact in force') for s in slips)
+    if not links:
+        return 'misquoted the prose'
+    return ('named a fact not in force' if links == len(slips)
+            else 'misquoted the prose or named a fact not in force')
+
+
 def _say_misquoted(scene_id: str, run: GateResult) -> None:
     """The log line for a gate run of the same prose after the extractor
-    misquoted it (#598): which facts, and what it quoted."""
+    misquoted it (#598) or named a fact not in force (#634): which facts,
+    and what it quoted."""
     from storyforge.common import log
-    log(f'  {scene_id}: the extractor misquoted the prose ({_slip_text(_describe_slips(run))}); '
+    slips = _describe_slips(run)
+    log(f'  {scene_id}: the extractor {_slipped(slips)} ({_slip_text(slips)}); '
         f'gating the same prose again (extraction and the check), not sending it to the fix')
 
 
@@ -3121,10 +3141,10 @@ def _from_reading(f: Finding) -> str:
 
 def applied_lines(result: GateResult) -> list[str]:
     """The NOTE lines for the links extraction applied in its own way
-    (`ENDS_MOVED`, `ID_PREFIX`), as `report_lines` words them."""
+    (`ENDS_MOVED`, `ID_PREFIX`, `UNOFFERED`), as `report_lines` words them."""
     return [f'NOTE ({_REPORTED_LABEL[kind]}): '
             + '; '.join(_one_line(i) for i in result.problems.get(kind, []))
-            for kind in (ENDS_MOVED, ID_PREFIX) if result.problems.get(kind)]
+            for kind in (ENDS_MOVED, ID_PREFIX, UNOFFERED) if result.problems.get(kind)]
 
 
 def reread_lines(result: GateResult) -> list[str]:
