@@ -3,8 +3,8 @@
 
     python3 evals/run.py                      # all suites, replay recorded calls (free)
     python3 evals/run.py --suite e2-detection # one suite (repeatable)
-    python3 evals/run.py --mode auto          # replay what exists, record the rest (spends)
-    python3 evals/run.py --mode record        # re-record every call (spends)
+    python3 evals/run.py --mode auto          # replay what exists, record the rest (spends; frozen suites replay)
+    python3 evals/run.py --mode record        # re-record every call (spends; frozen suites replay)
     python3 evals/run.py --mode record --suite e4-generation --runs 3   # a frozen suite
     python3 evals/run.py --baseline           # also write evals/baseline.json
     python3 evals/run.py --list
@@ -13,12 +13,14 @@ Writes the full report to evals/results/latest.json and prints a summary; when
 evals/baseline.json exists the summary includes per-metric deltas against it.
 
 E4 and E8 are frozen (#645): auto and record replay them, and a miss makes
-them stale rather than errored. Live calls count against a monthly eval
+them stale rather than errored (naming one with --mode auto is refused). Live calls count against a monthly eval
 budget (evals/config.json) kept in the eval spend ledger
 (storyforge.eval_spend); --over-budget REASON is the only way past it.
 
 Exit code: 0 pass (stale suites included: stale is not a failure), 1 a gate
-failed, 2 a suite errored (no measurement) or the run was refused.
+failed, 2 a suite errored (no measurement) or the run was refused. With
+--baseline the exit code is what this run measured, never a carried-over
+entry's status.
 """
 
 from __future__ import annotations

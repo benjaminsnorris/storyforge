@@ -31,11 +31,16 @@ The Batch API is refused under a cassette: its ids and polling sequence are
 not reproducible, so a recording of one could never replay.
 
 Every live call is also appended to the eval spend ledger when
-``STORYFORGE_EVAL_SPEND_LOG`` is set, and refused (``BudgetRefused``) once the
+``STORYFORGE_EVAL_SPEND_LOG`` is set (a call with no model, the Models API
+catalog, is free and not logged), and refused (``BudgetRefused``) once the
 month's spend reaches ``STORYFORGE_EVAL_BUDGET_USD``, unless
 ``STORYFORGE_EVAL_OVER_BUDGET`` gives a reason; see ``storyforge.eval_spend``.
-The check comes before each call, so one call (or one per thread) can take
-the month past the budget, never more.
+A ledger that can't be read, or a budget that isn't a finite non-negative
+number, refuses too. The check comes before each call, so one call (or one
+per thread) can take the month past the budget, never more. ``evals/run.py``
+is the only thing that sets these variables: a recording made any other way
+(a hand-set ``STORYFORGE_CASSETTE_MODE=record``) is neither metered nor
+capped.
 """
 
 import gzip

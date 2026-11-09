@@ -33,12 +33,13 @@ STUB_MODEL_CATALOG = [
 
 
 @pytest.fixture(autouse=True)
-def _eval_spend_ledger_off_home(tmp_path_factory, monkeypatch):
+def _eval_spend_ledger_off_home(tmp_path, monkeypatch):
     """`evals/run.py` appends live eval calls to the eval spend ledger, by
-    default in the home directory; a test's never reach Ben's real one, and
-    no test inherits a budget or an override from the shell."""
-    monkeypatch.setenv('STORYFORGE_EVAL_SPEND_LOG',
-                       str(tmp_path_factory.getbasetemp() / 'eval-spend.jsonl'))
+    default in the home directory; a test's never reach Ben's real one, each
+    test starts the month at $0 (its own ledger, so no test's spend pushes
+    another past the budget), and no test inherits a budget or an override
+    from the shell."""
+    monkeypatch.setenv('STORYFORGE_EVAL_SPEND_LOG', str(tmp_path / 'eval-spend.jsonl'))
     monkeypatch.delenv('STORYFORGE_EVAL_BUDGET_USD', raising=False)
     monkeypatch.delenv('STORYFORGE_EVAL_OVER_BUDGET', raising=False)
 

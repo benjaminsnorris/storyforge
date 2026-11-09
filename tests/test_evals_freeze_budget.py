@@ -707,3 +707,8 @@ def test_an_unreadable_ledger_with_over_budget_runs_and_says_so(tmp_path, live, 
     budget = _report(tmp_path)['budget']
     assert budget['spent_before_usd'] is None and budget['spent_after_usd'] is None
     assert len(live) == 2
+
+
+def test_each_test_has_its_own_eval_spend_ledger(tmp_path):
+    """T3: no test's spend counts against another's budget."""
+    assert os.environ[eval_spend.LEDGER_ENV] == str(tmp_path / 'eval-spend.jsonl')
