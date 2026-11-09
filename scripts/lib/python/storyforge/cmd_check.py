@@ -11,6 +11,7 @@ Usage:
     storyforge check --blocking                # only each scene's blocking, reported (#626)
     storyforge check --stage-sheet act1-sc03   # blocking by the stage sheet, not the read (#647)
     storyforge check --blocking --stage-sheet  # ... the stage sheet alone, reported
+    storyforge check --questions act1-sc03     # yes/no questions, not the open checker (#649)
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -36,7 +37,7 @@ itself. `--pending` checks every scene in `working/gate-pending.csv`; one
 listed for a re-check keeps the command that wrote its prose.
 
 Cost: the threshold is one budget for the whole run (`costs.RunBudget`).
-`--pending` forecasts its scenes at `gate.RECHECK_COST_PER_SCENE` before
+`--pending` forecasts its scenes at `gate.recheck_cost_per_scene()` before
 anything is spent and exits 1 when that is over; before each scene, what
 the run has spent (metered) plus the scenes left must still be within it,
 or the run stops there (they stay pending; exit 1). The re-checks after a
@@ -91,6 +92,24 @@ was given away or destroyed, knowledge before a scene shows it learned,
 travel too fast for world.csv, an elapsed time against the calendar, an injured part at full strength, a name the book rules out, the
 sun against `reference/world.csv`. Its findings stop the scene like any
 contradiction (`--accept` takes them); what it couldn't check is a NOTE.
+
+Questions (#649): `--questions` checks each scene against the book with
+narrow yes/no questions instead of the open checker (`storyforge.questions`):
+for each binding ledger fact no typed check compares (every type but
+promise rows; knowledge facts someone knows are the knowledge check's) whose
+subject is in the scene (its typed state's `at` records, its scenes.csv
+locations, or a registry name its prose uses) or is in no registry,
+Storyforge writes a question, a small model answers each twice, and only two
+yeses with a quote in the scene make a finding. The brief's promises are
+asked the same way (does the scene deliver it?): two noes are a broken
+promise (advisory, or blocking for a `must:` beat, which also blocks when
+the answers are in doubt), and a promised registry fact found established
+gets its quote filled. Model: STORYFORGE_QUESTIONS_MODEL (default the
+extraction tier). It doesn't read the book, so contradictions with earlier
+prose no ledger fact records, or with the bibles, aren't looked for (each
+scene's report says so); the cost forecast prices the question layer
+(`gate.recheck_cost_per_scene()`); the open checker stays the default until
+the questions and the typed checks match its recall on E4 and E8.
 
 A broken promise (a brief item the prose doesn't deliver) doesn't stop a
 scene (#642): the brief is a plan and the prose stands. It is reported
@@ -158,6 +177,15 @@ def parse_args(argv):
                              'working/stage-sheets/. With --blocking, the stage sheet alone. '
                              'Model: STORYFORGE_STAGE_SHEET_MODEL (default the extraction '
                              'tier).')
+    parser.add_argument('--questions', action='store_true',
+                        help='Check each scene against the book with yes/no questions from '
+                             'the ledger (facts no typed check compares, about who or where '
+                             'is in the scene; each asked twice, a finding only when both '
+                             'say yes and the quote is in the scene) and the brief\'s promises '
+                             '(does the scene deliver each?) instead of the open checker. '
+                             'Contradictions with prose no ledger fact records are not looked '
+                             'for. Model: STORYFORGE_QUESTIONS_MODEL (default the extraction '
+                             'tier).')
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -183,29 +211,37 @@ def main(argv=None):
     ledger.exit_if_unordered(project_dir)
     if args.accept:
         if (args.positional or args.scenes or args.act or args.from_seq or args.pending
-                or args.keep_going or args.stop_at_first or args.stage_sheet):
+                or args.keep_going or args.stop_at_first or args.stage_sheet
+                or args.questions):
             log('ERROR: --accept takes its own scene list; name no others with it '
-                '(and no --stage-sheet: accepting reads nothing).')
+                '(and no --stage-sheet or --questions: accepting reads nothing).')
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
         return
     from storyforge.costs import exit_if_bad_threshold
     exit_if_bad_threshold()   # the re-checks and --pending's forecast check it
     if args.blocking:
+        if args.questions:
+            log('ERROR: --blocking reads only each scene\'s blocking; --questions checks a scene '
+                'against the book. Use one.')
+            sys.exit(1)
         if args.pending or args.keep_going or args.stop_at_first:
             log('ERROR: --blocking reads the scenes you name (or every scene); it takes no '
                 '--pending, --keep-going or --stop-at-first.')
             sys.exit(1)
         sys.exit(_blocking_report(args, project_dir))
-    if not args.stage_sheet:
+    if not (args.stage_sheet or args.questions):
         return _check_named(args, project_dir)
-    # this run only: an in-process caller after it keeps its own method
-    saved = gate.GATE_BLOCKING_METHOD
-    gate.GATE_BLOCKING_METHOD = 'stage-sheet'
+    # this run only: an in-process caller after it keeps its own methods
+    saved = gate.GATE_BLOCKING_METHOD, gate.GATE_CHECK_METHOD
+    if args.stage_sheet:
+        gate.GATE_BLOCKING_METHOD = 'stage-sheet'
+    if args.questions:
+        gate.GATE_CHECK_METHOD = 'questions'
     try:
         return _check_named(args, project_dir)
     finally:
-        gate.GATE_BLOCKING_METHOD = saved
+        gate.GATE_BLOCKING_METHOD, gate.GATE_CHECK_METHOD = saved
 
 
 def _check_named(args, project_dir: str):
@@ -287,7 +323,7 @@ def _check_named(args, project_dir: str):
     # Every selection is forecast before anything is spent (#503's review:
     # a check by name, act or range skipped the threshold)
     from storyforge.costs import check_threshold, cost_threshold
-    forecast = len(scene_ids) * gate.RECHECK_COST_PER_SCENE
+    forecast = len(scene_ids) * gate.recheck_cost_per_scene()
     log(f'{len(scene_ids)} scene(s) to check, forecast about ${forecast:.2f}')
     if not check_threshold(forecast):
         log(f'ERROR: that is over the cost threshold (${cost_threshold():g}): nothing '
@@ -398,7 +434,7 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
     """Check `scene_ids` (in reading order) through the gate, re-checking
     after each one that passes what it listed, under the run's one cost
     budget (`budget`, a `costs.RunBudget`: the re-checks get what the run's
-    spend and the scenes still to check, at `gate.RECHECK_COST_PER_SCENE`,
+    spend and the scenes still to check, at `gate.recheck_cost_per_scene()`,
     leave). The forecast was checked up front; before each scene, the run's
     spend plus the scenes left must still be within the threshold, or it
     stops there (the rest stay as they were: pending ones pending).
@@ -418,7 +454,7 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
     unsettled: list[str] = []   # scenes that didn't pass (or weren't re-checked)
     for n, scene_id in enumerate(scene_ids):
         rest = scene_ids[n + 1:]
-        due = budget.committed((len(rest) + 1) * gate.RECHECK_COST_PER_SCENE)
+        due = budget.committed((len(rest) + 1) * gate.recheck_cost_per_scene())
         if not check_threshold(due):
             log(f'ERROR: checking {scene_id} and the {len(rest)} scene(s) after it would '
                 f'bring this run to about ${due:.2f}, over the cost threshold '
@@ -451,7 +487,7 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
                 log_dir=logs,
                 introduced_by=gate._writer(project_dir, scene_id) if recheck else None,
                 afford=lambda: check_threshold(
-                    budget.committed((len(rest) + 2) * gate.RECHECK_COST_PER_SCENE)))
+                    budget.committed((len(rest) + 2) * gate.recheck_cost_per_scene())))
             said = reextraction.summary() if reextraction is not None else ''
             if said:
                 log(f'  {scene_id}: {said}')
@@ -634,13 +670,13 @@ def _keep_going_summary(project_dir: str, run: _Run) -> list[str]:
 def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], budget):
     """Re-check the scenes `result` listed (not those later in this run),
     as `write` does, under the run's one budget (`skip`, the scenes still to
-    check, reserved at `gate.RECHECK_COST_PER_SCENE`). Returns the report
+    check, reserved at `gate.recheck_cost_per_scene()`). Returns the report
     lines and the `gate.Recheck` (None when nothing was pending)."""
     from storyforge import gate
     from storyforge.cmd_write import budgeted_recheck, report_changes
     report_changes(result)
     run = budgeted_recheck(project_dir, os.path.join(log_dir, 'check'), skip, budget,
-                           reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
+                           reserved=len(skip) * gate.recheck_cost_per_scene())
     lines = [f'- {result.scene_id} changed {fid}; its dependents can\'t all be found: {why}'
              for fid, why in result.unrelated.items()]
     lines += [f'- depends on {result.scene_id} but can\'t be re-checked now: {x}'
