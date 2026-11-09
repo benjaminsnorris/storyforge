@@ -253,7 +253,7 @@ def test_no_phase_blocker_when_prereqs_met(tmp_path, monkeypatch):
     _write(os.path.join(pd, 'reference', 'scenes.csv'),
            "id|seq|status\ns1|1|drafted\ns2|2|polished\n")
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['phase'] == 'evaluate'
     assert v['next']['command'] == 'storyforge evaluate'
@@ -273,7 +273,7 @@ def test_all_solid_some_drafted_recommends_draft(tmp_path, monkeypatch):
            "id|seq|status\ns1|1|drafted\ns2|2|briefed\n")
     _voice_guide(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['phase'] == 'draft'
     assert v['next']['command'] == 'storyforge write --keep-going'
@@ -291,7 +291,7 @@ def test_phase_blocker_when_prereq_unmet(tmp_path, monkeypatch):
                'detail': ''}
               for lvl, name in status.LEVEL_NAMES.items()]
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': ladder)
+                        lambda pd_, medium='novel', floors=None: ladder)
     v = status.build_status(pd)
     assert v['phase_matches_yaml'] is False
     phase_blockers = [b for b in v['blockers'] if b['source'] == 'phase']
@@ -406,7 +406,7 @@ def test_voice_rung_before_drafting(tmp_path, monkeypatch, setup, problem):
     _briefed(pd)
     setup(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['phase'] == 'voice'
     assert v['next']['stage'] == 'voice'
@@ -426,7 +426,7 @@ def test_filled_voice_guide_is_no_blocker(tmp_path, monkeypatch):
     _briefed(pd)
     _voice_guide(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['next']['stage'] == 'draft'
     assert not any(b['source'] == 'voice' for b in v['blockers'])
@@ -438,7 +438,7 @@ def test_voice_guide_reported_after_drafting(tmp_path, monkeypatch):
     _briefed(pd, ('drafted', 'drafted'))
     _template_voice_guide(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['next']['stage'] == 'evaluate'
     assert [b['source'] for b in v['blockers']][:1] == ['voice']
@@ -456,7 +456,7 @@ def test_graphic_novel_has_no_voice_rung(tmp_path, monkeypatch):
     pd = str(tmp_path)
     _briefed(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd, 'graphic-novel')
     assert v['next']['stage'] == 'draft'
     assert not any(b['source'] == 'voice' for b in v['blockers'])
@@ -466,7 +466,7 @@ def test_gate_waiting_keeps_voice_as_then(tmp_path, monkeypatch):
     pd = str(tmp_path)
     _briefed(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
         {'scene_id': 's1', 'command': 'draft', 'reason': 'x'}])
     v = status.build_status(pd)
@@ -487,7 +487,7 @@ def test_gate_waiting_while_drafting_keeps_drafting_next(tmp_path, monkeypatch):
     _briefed(pd)
     _voice_guide(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
         {'scene_id': 's1', 'command': 'provisional', 'reason': 'x'}])
     v = status.build_status(pd)
@@ -504,7 +504,7 @@ def test_gate_waiting_once_everything_is_drafted_routes_to_the_check(tmp_path, m
     _briefed(pd)
     _voice_guide(pd)
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     monkeypatch.setattr(status, 'draft_stage', lambda pd_: ('evaluate', 3, 3))
     monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
         {'scene_id': 's1', 'command': 'draft', 'reason': 'x'}])
@@ -521,7 +521,7 @@ def test_a_voice_guide_named_in_yaml_satisfies_status(tmp_path, monkeypatch):
     _write(os.path.join(pd, 'storyforge.yaml'),
            'artifacts:\n  voice_guide:\n    path: docs/voice.md\n')
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['next']['stage'] == 'draft'
     assert not any(b['source'] == 'voice' for b in v['blockers'])
@@ -532,7 +532,7 @@ def test_only_persistent_prompt_is_a_voice_blocker(tmp_path, monkeypatch):
     _briefed(pd)
     _write(os.path.join(pd, 'reference', 'persistent-prompt.md'), 'Old voice.\n')
     monkeypatch.setattr(status, 'ladder_states',
-                        lambda pd_, medium='novel': _all_solid_ladder())
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['next']['stage'] == 'voice'
     assert 'only reference/persistent-prompt.md' in v['blockers'][0]['detail']
@@ -555,7 +555,7 @@ def test_every_elaborate_command_status_emits_is_a_valid_stage():
 
 def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
     # end to end on a real project: the ladder solid, the guide the template
-    monkeypatch.setattr(status, 'ladder_states', lambda pd, medium='novel': [
+    monkeypatch.setattr(status, 'ladder_states', lambda pd, medium='novel', floors=None: [
         {'level': lvl, 'name': name, 'state': 'solid', 'detail': ''}
         for lvl, name in status.LEVEL_NAMES.items()])
     monkeypatch.setattr(status, 'gate_waiting', lambda pd: [])
@@ -569,9 +569,9 @@ def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
 
 
 def _gate_advisory(verdict):
-    """The verdict's advisory lines from the gate, not the craft-framework
+    """The verdict's advisory records from the gate, not the craft-framework
     floor checks (#643) the fixture project also has."""
-    return [a for a in verdict['advisory'] if not a.startswith(status.CRAFT_ADVISORY_PREFIX)]
+    return [a for a in verdict['advisory'] if a['source'] != status.CRAFT_ADVISORY_SOURCE]
 
 
 def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
@@ -582,8 +582,11 @@ def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
     gate.record_advisory(project_dir, 'act1-sc02', 'draft', [Finding(
         'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
     verdict = status.build_status(project_dir)
-    assert _gate_advisory(verdict) == [
-        'act1-sc02: PRM the brief\'s key_actions promises "Finds nothing" — not delivered']
+    # TD-3: records, not preformatted lines
+    assert _gate_advisory(verdict) == [{
+        'scene_id': 'act1-sc02', 'command': 'draft', 'source': 'key_actions',
+        'quote': 'Finds nothing', 'stale': '',
+        'finding': 'PRM the brief\'s key_actions promises "Finds nothing" — not delivered'}]
     assert not any(b['source'] == 'gate' for b in verdict['blockers'])
     assert verdict['next']['stage'] != 'check'
     out = cmd_status.render_human(verdict)
@@ -603,5 +606,34 @@ def test_an_unreadable_advisory_list_says_so(project_dir):
     os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
     with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
         f.write('bad header\n')
-    [line] = _gate_advisory(status.build_status(project_dir))
-    assert line.startswith(f'{gate.ADVISORY_PATH} could not be read')
+    # CR-4, SF-5, TD-2: a gate blocker, never listed as a promise
+    verdict = status.build_status(project_dir)
+    assert _gate_advisory(verdict) == []
+    [blocker] = [b for b in verdict['blockers'] if b['source'] == 'gate']
+    assert blocker['detail'].startswith(f'{gate.ADVISORY_PATH} could not be read')
+    out = cmd_status.render_human(verdict)
+    assert 'broken promise' not in out and f'{gate.ADVISORY_PATH} could not be read' in out
+
+
+def test_an_advisory_row_the_scene_moved_past_says_so(project_dir):
+    # SF-7, TD-4: the row was found on other prose, or another brief
+    from storyforge import gate
+    from storyforge.checker import Finding
+    finding = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                      'not delivered')
+    path = os.path.join(project_dir, 'scenes', 'act1-sc02.md')
+    prose = open(path).read()
+    gate.record_advisory(project_dir, 'act1-sc02', 'draft', [finding], prose=prose)
+    assert _gate_advisory(status.build_status(project_dir))[0]['stale'] == ''
+    with open(path, 'a') as f:
+        f.write('\nShe closed the ledger.\n')
+    [row] = _gate_advisory(status.build_status(project_dir))
+    assert row['stale'] == gate.STALE_PROSE
+    assert gate.STALE_PROSE in cmd_status.render_human(status.build_status(project_dir))
+    gate.record_advisory(project_dir, 'act1-sc02', 'draft', [finding],
+                         prose=open(path).read())
+    briefs = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    text = open(briefs).read().replace('Searches removal logs', 'Burns the archive')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    assert _gate_advisory(status.build_status(project_dir))[0]['stale'] == gate.STALE_BRIEF

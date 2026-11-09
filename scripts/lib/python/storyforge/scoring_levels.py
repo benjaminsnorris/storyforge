@@ -73,10 +73,22 @@ class LevelResult(TypedDict):
 # Helpers
 # ============================================================================
 
+def is_advisory_failure(check: CheckResult) -> bool:
+    """A failed craft-framework check (#643) the author hasn't accepted:
+    reported as advisory, never keeps a rung thin. The one statement of the
+    rule (#643's review TD-4); `status` and `score` use it."""
+    return bool(check.get('advisory')) and not check['passed'] and not check.get('accepted')
+
+
+def counts_against_rung(check: CheckResult) -> bool:
+    """A failed check that keeps its rung thin: neither accepted by the
+    author nor advisory."""
+    return not check['passed'] and not check.get('accepted') and not check.get('advisory')
+
+
 def _advisory_failed(checks: list[CheckResult]) -> int:
     """Failed advisory checks the author hasn't accepted."""
-    return sum(1 for c in checks
-               if c.get('advisory') and not c['passed'] and not c.get('accepted'))
+    return sum(1 for c in checks if is_advisory_failure(c))
 
 
 def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
@@ -97,7 +109,7 @@ def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
 def blocking_failed(result: LevelResult) -> int:
     """Failed checks that keep the rung thin: neither accepted by the
     author nor advisory (#643)."""
-    return result['failed'] - result['accepted'] - result.get('advisory', 0)
+    return result['failed'] - result['accepted'] - result['advisory']
 
 
 def _apply_overrides(project_dir: str, result: LevelResult) -> LevelResult:

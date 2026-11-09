@@ -283,17 +283,21 @@ class TestStatus:
     def test_craft_failures_are_advisory_lines_not_blockers(self, project_dir, monkeypatch):
         from storyforge import cmd_status, status
         verdict = status.build_status(project_dir)
-        craft = [a for a in verdict['advisory'] if a.startswith(status.CRAFT_ADVISORY_PREFIX)]
-        assert craft == [
-            'craft framework: L6 briefs: craft-framework fields populated (goal, conflict, '
-            'crisis, decision) (1 brief(s) missing fields; first: new-x1 missing goal, '
-            'conflict, crisis, decision)']
+        craft = [a for a in verdict['advisory'] if a['source'] == status.CRAFT_ADVISORY_SOURCE]
+        # #643's review TD-2: records in gate.read_advisory's shape, not prefixed strings
+        assert craft == [{
+            'scene_id': '', 'command': 'storyforge score --level 6',
+            'source': status.CRAFT_ADVISORY_SOURCE, 'quote': '', 'stale': '',
+            'finding': ('L6 briefs: craft-framework fields populated (goal, conflict, '
+                        'crisis, decision) (1 brief(s) missing fields; first: new-x1 missing '
+                        'goal, conflict, crisis, decision)')}]
         assert not any('craft-framework' in b['detail'] for b in verdict['blockers'])
         l6 = next(r for r in verdict['ladder'] if r['level'] == 6)
         assert 'goal' not in l6['detail']   # the rung's detail is its blocking failure
         out = cmd_status.render_human(verdict)
         assert "ADVISORY: 1 craft-framework check(s) not met" in out
         assert '  L6 briefs: craft-framework fields populated' in out
+        assert '[storyforge score --level 6]' in out
         assert 'broken promise' not in out
 
     def test_an_absent_rungs_craft_checks_are_not_listed(self, tmp_path):

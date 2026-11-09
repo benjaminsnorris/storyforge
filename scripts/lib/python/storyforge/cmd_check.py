@@ -77,7 +77,8 @@ scene (#642): the brief is a plan and the prose stands. It is reported
 (ADVISORY), kept in `working/gate-advisory.csv`, and listed at the end of
 the run. A `key_actions` or `key_dialogue` item the author starts with
 `must:` still stops the scene when broken, and its quoted words must be in
-the prose word for word.
+the prose word for word; so does a promised registry fact the ledger sets
+up in this scene, which only the prose can establish.
 """
 
 from __future__ import annotations
@@ -465,9 +466,16 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
                                         else 'was not re-checked (over the cost threshold)')
             else:
                 problems = gate.blocking_lines(lines)
+                # #641's review (SF-2): the first findings go in the row, as
+                # write's do: write names them when it drafts past this scene,
+                # and the next check overwrites the report
+                count = sum(1 for x in lines if not x.startswith(('NOTE', 'COMMITTED')))
+                first = ' / '.join(gate._one_line(x)[:200] for x in problems[:3])
                 gate.mark_pending(project_dir, scene_id, listed_as,
-                                  f'{sum(1 for x in lines if not x.startswith(("NOTE", "COMMITTED")))} '
-                                  f'problem(s); see {REPORT_PATH}'
+                                  f'{count} problem(s)'
+                                  + (f': {first}' + ('; ...' if len(problems) > 3 else '')
+                                     if first else '')
+                                  + f'; see {REPORT_PATH}'
                                   + (f' ({said})' if said else ''))
                 run.failures[scene_id] = problems or ['did not pass (see the report)']
                 if _contradictions(result):
@@ -498,8 +506,7 @@ def _waits_on(project_dir: str, scene_id: str, unsettled: list[str]) -> list[str
     from storyforge import gate
     from storyforge.cmd_write import GateBlockers
     try:
-        holding = {line.split(':', 1)[0]
-                   for line in GateBlockers(project_dir, narrow=True).of(scene_id)}
+        holding = {b.scene_id for b in GateBlockers(project_dir, narrow=True).of(scene_id)}
     except gate.GateError as e:
         log(f'WARNING: {e}; {scene_id}\'s result is provisional on every earlier scene '
             f'that did not pass.')
@@ -515,7 +522,7 @@ def _contradictions(result) -> bool:
 
 
 def _keep_going_summary(project_dir: str, run: _Run) -> list[str]:
-    """--keep-going's closing lines: every scene that didn't pass with why,
+    """The default (keep-going) run's closing lines: every scene that didn't pass with why,
     the re-checks that failed or didn't run, which results are provisional,
     and the exact `--accept` command for the scenes with contradictions to
     accept."""

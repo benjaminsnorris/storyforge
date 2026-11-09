@@ -270,6 +270,7 @@ In graphic-novel mode, the scene-map stage asks for `target_pages` per scene ins
    - **`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`.
 3. **Knowledge wording must be exact** — knowledge_out from scene N becomes knowledge_in for later scenes, matched literally. Use registry IDs rather than free-text to ensure exact matching.
 4. Maximize scenes with no continuity_deps (these can be drafted in parallel)
+   - **These columns also decide what drafting holds back.** When a scene fails the gate, `write` still drafts the later scenes that don't depend on it, and holds back those that do. For a scene not drafted yet, its brief is how it knows: `continuity_deps` naming the failed scene, or `knowledge_in`/`physical_state_in` naming a fact the failed scene's brief adds. A scene whose `continuity_deps`, `knowledge_in` and `physical_state_in` are all blank can't be told apart, so it waits behind every earlier failure. Fill them, and drafting can go on past a failure.
 5. Write updates
 6. Run validation — knowledge flow, completeness, DAG check
 7. Commit: `git add -A -- . && git commit -m "Elaborate: briefs" && git push`

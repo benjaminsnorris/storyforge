@@ -110,7 +110,7 @@ print(dump_schema_markdown())
 | `knowledge_in` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows entering. Normalized against the knowledge facts in reference/commitments.csv (the commitments ledger). See knowledge-guidelines.md for fact selection criteria. |
 | `knowledge_out` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene. See knowledge-guidelines.md. |
 | `key_actions` | free_text | brief | Concrete things that happen in this scene. An item starting `must:` is a beat the author requires (see below). |
-| `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. Label each quoted line's speaker (`Name: "line"`); see scene-column-guide.md. An item starting `must:` is required word for word (see below). |
+| `key_dialogue` | free_text | brief | Specific lines or exchanges the scene should carry. Label each quoted line's speaker (`Name: "line"`); see scene-column-guide.md. An item starting `must:` is required word for word (see below). |
 | `emotions` | free_text | brief | Emotional beats in sequence as they occur through the scene. |
 | `motifs` | registry: motif-taxonomy.csv (array) | brief | Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv. |
 | `continuity_deps` | scene_ids | brief | Scene IDs this scene depends on (for parallel drafting). Each entry must exist in scenes.csv. |
@@ -123,10 +123,11 @@ key_actions: Achilles drags Hector's body;must: Priam kisses Achilles' hands
 key_dialogue: must: Priam: "I have kissed the hands of the man who killed my son"
 ```
 
-- The marker is `must`, any case, then a colon, any spacing (`must:`, `MUST :`), at the start of the item (items are `;`-separated). `must:` anywhere else in an item is just words. An item that is only `must:` marks nothing, and the gate reports it.
-- A broken `must` beat stops the scene, like a contradiction. The quoted words in a `must` item (or a `key_dialogue` line with no quotes) must be in the prose word for word, or split only by speech tags (`"Sing," he said, "goddess"`); code checks this, so a paraphrase doesn't keep a `must` line. A faithful adaptation marks the source lines it keeps verbatim this way.
+- The marker is `must`, any case, then a colon, any spacing (`must:`, `MUST :`), at the start of the item (items are `;`-separated), before any speaker label: `must: Priam: "..."`, not `Priam: must: "..."`. A `must:` anywhere else in an item, or in a field that takes no marker, marks nothing; the gate reports it, and so it does an item that is only `must:`.
+- A broken `must` beat stops the scene, like a contradiction. When the brief has a `must` beat, a broken promise is advisory only when the check's words for it are plainly an unmarked item (the whole item, or four or more of its words in a row); a paraphrase or a short partial quote of a `must` beat stops the scene. In doubt, `must`.
+- The quoted words in a `must` item (or a `key_dialogue` line with no quotes, with or without its label) must be in the prose word for word, or split across quotations in one paragraph by at most six words of narration outside the quotation marks (a speech tag: `"Sing," he said, "goddess"`). Code checks this, so a paraphrase, or words put inside the quotation, doesn't keep a `must` line. A scripted part under three words is too short to check this way: the gate notes it and leaves it to the check. A faithful adaptation marks the source lines it keeps verbatim this way.
 - A `must` beat is the author's. Nothing Storyforge writes drops or rewords one: elaborate's briefs stage, hone's rewrites, revise's source-drift fix and a forced extract or enrich re-read put back any `must` item their reply lost or reworded, word for word, and leave out a `must:` item the reply made up (only the author marks a beat). Each such change is logged.
-- Other promise fields (`outcome`, `knowledge_out`, `physical_state_out`) take no marker: a broken one is always advisory.
+- Other promise fields (`outcome`, `knowledge_out`, `physical_state_out`) take no marker. A broken `outcome` promise is advisory, even when its words overlap a `must` beat. A broken `knowledge_out` or `physical_state_out` promise is advisory too, except for a binding registry fact the ledger sets up in this very scene (its `scene_id`): the prose is its only evidence and later scenes are read against it, so that one stops the scene until the prose establishes it or the fact is moved or rejected.
 
 ## Elaboration Stages
 
