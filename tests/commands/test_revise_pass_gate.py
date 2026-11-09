@@ -194,18 +194,21 @@ class TestGatePassScenes:
         assert _no_git == [('Revision: polish, before the gate',
                             ['scenes/', 'reference/', 'working/'])]
 
-    def test_the_first_failure_stops_and_lists_the_rest_pending(self, project_dir, monkeypatch):
+    def test_a_failure_holds_the_scenes_depending_on_it_pending(self, project_dir, monkeypatch):
+        """act2-sc01 has no brief and no facts, so it waits on act1-sc02 (#641)."""
         _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
         gated, _ = _stub_gate(monkeypatch, fails={'act1-sc02'})
         out = _gate_pass(project_dir, ['act1-sc01', 'act1-sc02', 'act2-sc01'])
         assert [s for s, _ in gated] == ['act1-sc01', 'act1-sc02']
         assert out[0].startswith('act1-sc02 (the gate did not pass it')
-        assert 'act2-sc01 (revised, not gated: the gate stopped at act1-sc02)' in out[1]
+        assert ('act2-sc01 (revised, not gated: an earlier scene waits on the gate: '
+                'act1-sc02)') in out[1]
         waiting = gate.pending(project_dir)
         assert set(waiting) == {'act1-sc02', 'act2-sc01'}
         assert waiting['act1-sc02']['reason'] == 'a contradiction'
         assert waiting['act2-sc01']['command'] == 'revise'
-        assert 'revised by pass polish but not gated: the gate' in waiting['act2-sc01']['reason']
+        assert 'revised by pass polish but not gated: an earlier' in \
+            waiting['act2-sc01']['reason']
 
     def test_an_earlier_pending_scene_blocks_every_scene(self, project_dir, monkeypatch):
         _scenes(project_dir, 'act1-sc02', 'act2-sc01')
