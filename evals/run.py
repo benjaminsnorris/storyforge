@@ -117,9 +117,13 @@ def _plan_recording(args, suites) -> set[str]:
         raise Refused('--runs records independent runs, so it needs --mode record')
     if args.runs > 1 and args.baseline:
         raise Refused('--baseline takes one run; drop --runs')
+    named = {s.name for s in suites if s.frozen and s.name in args.suite}
+    if named and args.mode == 'auto':
+        raise Refused(f'{", ".join(sorted(named))} is frozen: auto would only replay it. '
+                      f'Replay it with the default mode, or re-record it on purpose with '
+                      f'--mode record --suite NAME --runs {FROZEN_RUNS}.')
     if args.mode != 'record':
         return set()
-    named = {s.name for s in suites if s.frozen and s.name in args.suite}
     if named and args.runs != FROZEN_RUNS:
         raise Refused(f'{", ".join(sorted(named))} is frozen: it is recorded only as '
                       f'--runs {FROZEN_RUNS} (one run can\'t separate a change from noise). '
@@ -282,6 +286,13 @@ def _main(args) -> int:
         report['extra_runs'] = extra
         report['status'] = overall_status([report['status']]
                                           + [r['status'] for r in extra.values()])
+    if record_frozen and report['status'] == 'error':
+        dirs = [os.path.join(args.cassettes_dir, name) for name in sorted(record_frozen)]
+        dirs += [os.path.join(args.runs_dir, f'run{k}', name)
+                 for k in range(2, args.runs + 1) for name in sorted(record_frozen)]
+        print('WARNING: a run of this frozen recording errored, so these cassettes may now '
+              'mix new and old recordings: ' + ', '.join(dirs) + '. Re-record all '
+              f'{args.runs} runs, or restore them with git checkout.', file=sys.stderr)
     if budget:
         try:
             budget['spent_after_usd'] = eval_spend.month_spend(ledger)
@@ -310,6 +321,8 @@ def _main(args) -> int:
               + (f" (over budget: {budget['over_budget']})" if budget['over_budget'] else ''))
     print(f'Report: {args.results_file}')
 
+    #: What this run measured; a carried-over baseline entry never changes it
+    exit_code = EXIT_CODES[report['status']]
     if args.baseline:
         if report['status'] == 'error':
             print('ERROR: not writing a baseline over a suite that errored — '
@@ -325,22 +338,27 @@ def _main(args) -> int:
             return 2
         _write_json(args.baseline_file, report)
         print(f'Baseline: {args.baseline_file}')
-    return EXIT_CODES[report['status']]
+    return exit_code
 
 
 def _carry_stale(report: dict, baseline_file: str) -> str:
     """Put the old baseline's entry in place of each stale suite's result
     (marked ``carried_over``): a frozen suite keeps its last measurement
     until it is re-recorded on purpose. Returns why it can't ('' when it
-    can): a stale suite the old baseline has no measurement of."""
+    can): a stale suite the old baseline has no measurement of, or an old
+    baseline that can't be read. The run's exit code is not recomputed from
+    the carried entries: it reports what this run measured."""
     stale = [r['suite'] for r in report['results'] if r['status'] == 'stale']
     if not stale:
         return ''
     try:
         with open(baseline_file) as f:
             old = {r['suite']: r for r in json.load(f).get('results', [])}
-    except (OSError, ValueError, TypeError, AttributeError):
+    except FileNotFoundError:
         old = {}
+    except (OSError, ValueError, TypeError, AttributeError, KeyError) as e:
+        return (f'{", ".join(stale)} is stale and the old baseline {baseline_file} can\'t be '
+                f'read to keep its measurement ({type(e).__name__}: {e})')
     missing = [s for s in stale if s not in old or old[s].get('status') not in ('pass', 'fail')]
     if missing:
         return (f'{", ".join(missing)} is stale and the old baseline has no measurement '

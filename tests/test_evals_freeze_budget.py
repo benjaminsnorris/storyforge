@@ -446,3 +446,84 @@ def test_month_spend_reads_only_this_month_and_rejects_bad_lines(tmp_path):
         f.write('{"at": "2026-11-01", "usd": "3"}\n')
     with pytest.raises(eval_spend.SpendLedgerError, match='line 3'):
         eval_spend.month_spend(str(path))
+
+
+# --- run.py's exit code and refusals (PR #661 review) ------------------------
+
+def test_a_carried_over_fail_does_not_change_the_exit_code(tmp_path, live):
+    """TD1: --baseline exits on what this run measured, not on an old entry."""
+    _suite(tmp_path, 'e4', frozen=True)
+    _suite(tmp_path, 'ok', PASSING)
+    _record_frozen(tmp_path)
+    _suite(tmp_path, 'e4', frozen=True, prompt='a changed prompt')
+    old_e4 = {'suite': 'e4', 'status': 'fail', 'metrics': {'x': 0.1}, 'by_code': {},
+              'gates': [], 'cost': {'usd_if_live': 6.0}, 'error': None}
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [old_e4]}))
+    assert _run(tmp_path, '--baseline') == 0
+    assert _report(tmp_path)['status'] == 'stale'
+    new = json.loads((tmp_path / 'baseline.json').read_text())
+    assert new['status'] == 'fail'  # the baseline records the carried measurement
+
+
+@pytest.mark.parametrize('old_status', ['error', 'stale'])
+def test_a_baseline_wont_carry_an_old_entry_that_measured_nothing(tmp_path, live, capsys,
+                                                                   old_status):
+    """T9"""
+    _suite(tmp_path, 'e4', frozen=True)
+    _record_frozen(tmp_path)
+    _suite(tmp_path, 'e4', frozen=True, prompt='a changed prompt')
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [
+        {'suite': 'e4', 'status': old_status, 'metrics': {}, 'by_code': {}}]}))
+    assert _run(tmp_path, '--baseline') == 2
+    assert 'no measurement of it to keep' in capsys.readouterr().err
+
+
+def test_an_unreadable_old_baseline_is_named_when_carrying(tmp_path):
+    """SF-8: the read error, not 'no measurement'."""
+    report = {'results': [{'suite': 'e4', 'status': 'stale'}]}
+    baseline = str(tmp_path / 'baseline.json')
+    assert 'has no measurement' in eval_run._carry_stale(report, baseline)  # absent
+    (tmp_path / 'baseline.json').write_text('{not json')
+    refused = eval_run._carry_stale(report, baseline)
+    assert "can't be read" in refused and 'JSONDecodeError' in refused
+
+
+def test_auto_naming_a_frozen_suite_is_refused(tmp_path, live, capsys):
+    """C2: auto would only replay it, which looks like a re-record that wasn't."""
+    _suite(tmp_path, 'e4', frozen=True)
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'x') == 2
+    assert 'auto would only replay it' in capsys.readouterr().err
+    assert live == []
+
+
+COUNTED = '''
+    from harness import Gate, Suite, SuiteOutput
+    from storyforge import api
+
+    def run(ctx):
+        import os
+        counter = {counter!r}
+        n = int(open(counter).read()) + 1 if os.path.exists(counter) else 1
+        open(counter, 'w').write(str(n))
+        if n == 2:
+            raise RuntimeError('run 2 broke')
+        api.invoke_api('hi', 'claude-sonnet-4-6', max_tokens=10)
+        return SuiteOutput(gates=[Gate('x', 1, '>=', 0)])
+
+    SUITE = Suite('{name}', 'breaks on its second run', run, frozen=True)
+'''
+
+
+def test_an_errored_extra_run_errors_the_whole_recording(tmp_path, live, capsys):
+    """T4 / TD4: run 1 passes, run 2 raises: exit 2, and the cassettes it
+    may have left mixed are named."""
+    _suite(tmp_path, 'e4', COUNTED.replace('{counter!r}', repr(str(tmp_path / 'n'))))
+    assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'test') == 2
+    report = _report(tmp_path)
+    assert report['status'] == 'error'
+    assert report['results'][0]['status'] == 'pass'
+    assert report['extra_runs']['run2']['results'][0]['status'] == 'error'
+    assert report['extra_runs']['run3']['results'][0]['status'] == 'pass'
+    err = capsys.readouterr().err
+    assert 'frozen recording errored' in err and str(tmp_path / 'e6' / 'run2' / 'e4') in err
