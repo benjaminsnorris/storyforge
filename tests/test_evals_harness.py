@@ -304,3 +304,41 @@ def test_a_catalog_call_is_free_and_not_unpriced(tmp_path):
     assert failures == []
     assert totals['calls'] == 2 and totals['unpriced_calls'] == 0
     assert totals['usd_spent'] == 0.5  # over 100K prompt tokens: Haiku 5.5's higher rate
+
+
+# A private suite (#646): its recordings live outside this repo
+def _private_suite(cassettes):
+    from storyforge import api
+
+    def run(ctx):
+        text = api.invoke_api('hi', 'claude-sonnet-4-6', max_tokens=10)
+        return harness.SuiteOutput(metrics={'chars': len(text)},
+                                   gates=[harness.Gate('chars', len(text), '>=', 0)])
+    return harness.Suite('private', 'records outside the repo', run, cassettes=cassettes)
+
+
+def test_a_private_suite_records_where_it_says(tmp_path, monkeypatch):
+    from storyforge import api
+    monkeypatch.setattr(api, '_live_request', lambda *a: {
+        'content': [{'type': 'text', 'text': 'hello'}],
+        'usage': {'input_tokens': 10, 'output_tokens': 1}})
+    monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
+    private = tmp_path / 'private' / 'cassettes'
+    suite = _private_suite(lambda: str(private))
+    result = harness.run_suite(suite, 'record', str(tmp_path / 'public'))
+    assert result['status'] == 'pass'
+    assert private.is_dir() and not (tmp_path / 'public').exists()
+    monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+    assert harness.run_suite(suite, 'replay', str(tmp_path / 'public'))['status'] == 'pass'
+    assert 'STORYFORGE_CASSETTE' not in os.environ
+
+
+def test_a_private_suite_whose_recordings_are_missing_errors(tmp_path, monkeypatch):
+    monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
+
+    def nowhere():
+        raise RuntimeError('the private repo is not cloned here')
+    result = harness.run_suite(_private_suite(nowhere), 'replay', str(tmp_path / 'public'))
+    assert result['status'] == 'error'
+    assert 'not cloned here' in result['error']
+    assert 'STORYFORGE_CASSETTE' not in os.environ

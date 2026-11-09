@@ -142,6 +142,13 @@ class Suite:
     run: Callable[[SuiteContext], SuiteOutput]
     #: Recorded only on purpose, three runs at a time; a miss is ``stale`` (#645)
     frozen: bool = False
+    #: Where the suite's recordings live when they can't be in this public
+    #: repo (a recording holds the request, so the inputs): called before
+    #: the run, it returns the directory or raises with why it can't (the
+    #: suite errors). ``None``: ``<cassettes_root>/<name>``. A private
+    #: suite's recordings are its own, so ``--cassettes-dir`` doesn't move
+    #: them (#646)
+    cassettes: Callable[[], str] | None = None
 
 
 def stale_reason(suite_name: str, misses: int) -> str:
@@ -254,7 +261,6 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
 
     A frozen suite runs in ``replay`` whatever ``mode`` asks, unless ``mode`` is
     ``record`` and ``record_frozen`` is set."""
-    cassette_dir = os.path.join(cassettes_root, suite.name)
     requested = mode
     if suite.frozen and mode != 'replay' and not (mode == 'record' and record_frozen):
         mode = 'replay'
@@ -269,10 +275,12 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
     _MIGRATION_NOTES.clear()
     with tempfile.TemporaryDirectory(prefix=f'eval-{suite.name}-') as work_dir:
         log_file = os.path.join(work_dir, '.cassette-log.jsonl')
-        os.environ['STORYFORGE_CASSETTE'] = cassette_dir
-        os.environ['STORYFORGE_CASSETTE_MODE'] = mode
-        os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
         try:
+            cassette_dir = (suite.cassettes() if suite.cassettes is not None
+                            else os.path.join(cassettes_root, suite.name))
+            os.environ['STORYFORGE_CASSETTE'] = cassette_dir
+            os.environ['STORYFORGE_CASSETTE_MODE'] = mode
+            os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
             output = suite.run(SuiteContext(suite.name, mode, cassette_dir, work_dir))
             if not isinstance(output, SuiteOutput):
                 raise TypeError(f'run() returned {type(output).__name__}, not SuiteOutput')
