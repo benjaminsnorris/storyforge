@@ -1034,23 +1034,30 @@ class TestKeepGoing:
         per_scene = due[1] / 2
         assert due[2] == pytest.approx(draft + 3 * one_gate + one_fix + per_scene)
 
-    def test_without_the_flag_the_run_still_stops(self, setup, monkeypatch):
+    def test_without_the_flag_a_scene_depending_on_the_failure_is_held(
+            self, setup, monkeypatch, capsys):
+        """#641's review, T-4: held because act1-sc02's brief lists act1-sc01
+        in continuity_deps (#641: not a stop of the whole run)."""
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         done = self._provisional(monkeypatch)
         with pytest.raises(SystemExit):
             main(['--scenes', 'act1-sc01,act1-sc02'])
         assert calls == [('act1-sc01', 'draft')] and done == []
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in \
+            capsys.readouterr().out
 
-    def test_a_scene_that_cant_be_committed_provisionally_stops_it(self, setup, monkeypatch,
-                                                                   capsys):
+    def test_a_scene_that_cant_be_committed_provisionally_holds_its_dependents(
+            self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         self._provisional(monkeypatch, allowed=False)
         with pytest.raises(SystemExit):
             main(['--keep-going', '--scenes', 'act1-sc01,act1-sc02'])
         assert calls == [('act1-sc01', 'draft')]
-        assert 'Not committed provisionally: it changes a fixed fact' in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert 'Not committed provisionally: it changes a fixed fact' in out
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in out
 
     def test_an_earlier_provisional_scene_blocks_only_without_the_flag(self, setup,
                                                                        monkeypatch):

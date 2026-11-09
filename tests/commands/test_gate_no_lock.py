@@ -396,6 +396,59 @@ class TestWrite:
         held = [line for line in out.splitlines() if 'act2-sc03 (not drafted' in line]
         assert held and 'act1-sc02' in held[0]
 
+    def test_a_bad_reply_holds_only_its_dependents(self, setup, monkeypatch, capsys):
+        """T-3: a refused or cut-off reply has no pending row (FAILED, in
+        memory): a later scene that doesn't depend on it is drafted, and
+        names it as passed over (SF-4)."""
+        _pending(setup, INDEPENDENT)
+        _independent(setup)
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD, 'max_tokens'),
+                                      INDEPENDENT: _reply(GOOD)})
+        calls = _gate(monkeypatch, {INDEPENDENT: True})
+        with pytest.raises(SystemExit) as e:
+            cmd_write.main(['--scenes', f'act1-sc01,{INDEPENDENT}'])
+        assert e.value.code == 1
+        assert calls == [(INDEPENDENT, 'draft')]
+        assert _scene(setup, 'act1-sc01') is None
+        assert _scene(setup, INDEPENDENT) is not None
+        assert gate.pending(setup) == {}
+        out = capsys.readouterr().out
+        assert f'WARNING: drafting {INDEPENDENT} past 1 earlier scene(s)' in out
+        assert '  act1-sc01: not drafted: ' in out
+
+    def test_an_unreadable_pending_list_spends_nothing(self, setup, monkeypatch, capsys):
+        """T-5: a malformed gate-pending.csv is an ERROR before anything is
+        spent, never read as empty."""
+        os.makedirs(os.path.join(setup, 'working'), exist_ok=True)
+        with open(os.path.join(setup, gate.PENDING_PATH), 'w') as f:
+            f.write('nope|wrong\nact1-sc01|x\n')
+        monkeypatch.setattr(cmd_write, '_forecast', lambda *a, **k: pytest.fail('forecast'))
+        with pytest.raises(SystemExit) as e:
+            cmd_write.main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert e.value.code == 1
+        assert _scene(setup, 'act1-sc01') is None
+        assert f'ERROR: {gate.PENDING_PATH}: the header must be' in capsys.readouterr().out
+
+    def test_a_pending_list_unreadable_mid_run_stops_it(self, setup, monkeypatch, capsys):
+        """T-5: the same in the loop stops the run there."""
+        real = cmd_write.GateBlockers
+        made = []
+
+        def flaky(*a, **k):
+            made.append(1)
+            if len(made) > 1:   # the up-front read is fine, the loop's isn't
+                raise gate.GateError('bad header')
+            return real(*a, **k)
+        monkeypatch.setattr(cmd_write, 'GateBlockers', flaky)
+        monkeypatch.setattr(cmd_write, 'invoke_to_file',
+                            lambda *a, **k: pytest.fail('drafted past an unreadable list'))
+        with pytest.raises(SystemExit) as e:
+            cmd_write.main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert 'ERROR: bad header' in out
+        assert 'act1-sc01 (not attempted: bad header)' in out
+
     def test_every_scene_held_spends_nothing(self, setup, monkeypatch, capsys):
         gate.mark_pending(setup, 'act1-sc01', 'draft', 'two problems')
         monkeypatch.setattr(cmd_write, '_forecast', lambda *a, **k: pytest.fail('forecast'))
@@ -441,6 +494,20 @@ class TestCheck:
         assert seen == ['act1-sc01']
         report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
         assert f'Not checked: {INDEPENDENT}' in report
+
+    def test_an_unreadable_pending_list_makes_every_result_provisional(
+            self, project, monkeypatch, capsys):
+        """T-6: `_waits_on` can't narrow, so it says so and labels the
+        result provisional on every earlier failure, never clean."""
+        project_dir, _ = project
+
+        def bad(*a, **k):
+            raise gate.GateError('bad header')
+        monkeypatch.setattr(cmd_write, 'GateBlockers', bad)
+        assert cmd_check._waits_on(project_dir, INDEPENDENT, ['act1-sc01']) == ['act1-sc01']
+        out = capsys.readouterr().out
+        assert 'WARNING: bad header' in out and 'provisional on every earlier scene' in out
+        assert cmd_check._waits_on(project_dir, INDEPENDENT, []) == []
 
     def test_only_a_result_depending_on_the_failure_is_provisional(
             self, project, monkeypatch, capsys):

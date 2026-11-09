@@ -210,7 +210,11 @@ class TestGatePassScenes:
         assert 'revised by pass polish but not gated: an earlier' in \
             waiting['act2-sc01']['reason']
 
-    def test_an_earlier_pending_scene_blocks_every_scene(self, project_dir, monkeypatch):
+    def test_an_earlier_pending_scene_holds_a_dependent_and_one_it_cannot_tell(
+            self, project_dir, monkeypatch, capsys):
+        """#641's review, T-4: act1-sc02's brief lists act1-sc01 in
+        continuity_deps; act2-sc01 has neither facts nor a brief, so what it
+        depends on can't be told."""
         _scenes(project_dir, 'act1-sc02', 'act2-sc01')
         gated, _ = _stub_gate(monkeypatch)
         gate.mark_pending(project_dir, 'act1-sc01', gate.RECHECK_FAILED, 'a contradiction')
@@ -218,6 +222,10 @@ class TestGatePassScenes:
         assert gated == []
         assert 'an earlier scene waits on the gate: act1-sc01' in out[0]
         assert {'act1-sc02', 'act2-sc01'} <= set(gate.pending(project_dir))
+        said = capsys.readouterr().out
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in said
+        assert ('act2-sc01 has no binding facts in the ledger and it has no row in '
+                'reference/scene-briefs.csv') in said
 
     def test_a_recheck_that_fails_mid_pass_blocks_the_scenes_after_it(
             self, project_dir, monkeypatch):
