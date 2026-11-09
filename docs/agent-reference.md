@@ -127,7 +127,7 @@ Left out: scene prose and manuscripts (`assemble` / `produce`) and score history
 
 ## Architecture
 
-- `evals/` — eval harness and suites. E4 and E8 are frozen (a miss is `stale`, exit 0), live eval calls count against a monthly budget (`evals/config.json`, `storyforge.eval_spend`), and `--over-budget` needs Ben's approval: see `evals/README.md` (#645). The `blocking-set` suite (#646) runs on private prose: its set, recordings and per-case results live in the private storyforge-evals repo (`STORYFORGE_PRIVATE_EVALS_DIR`, default `~/Developer/evals`, under `blocking-set/`), never here; keep its quotes and findings out of this repo, its PRs and commit messages
+- `evals/` — eval harness and suites. E4 and E8 are frozen (a miss is `stale`, exit 0), live eval calls count against a monthly budget (`evals/config.json`, `storyforge.eval_spend`), and `--over-budget` needs Ben's approval: see `evals/README.md` (#645). The `blocking-set` suite (#646) runs on private prose: its set, recordings and per-case results live in the private storyforge-evals repo (`STORYFORGE_PRIVATE_EVALS_DIR`, default `~/Developer/evals`, under `blocking-set/`), never here; keep its quotes and findings out of this repo, its PRs and commit messages. Without that checkout the suite is `stale` (unavailable, `harness.SuiteUnavailable`), not an error
 - `scripts/lib/python/storyforge/` — commands (`cmd_*.py`), shared infrastructure, domain modules (scoring, prompts, extraction, illustrations, …)
 - `skills/` — interactive skills; `scripts/prompts/` — prompt templates; `references/` — craft engine, rubrics, schemas; `templates/` — project scaffolding; `docs/` — GitHub Pages + design docs
 
