@@ -11,9 +11,14 @@ files):
 
 - **the distance** (`voiceprint.compare`, Cosine Delta on the chunk scale),
   read against `CLOSE_LIMITS`: the furthest the reference author's own
-  held-out writing reached at that length. Shorter prose is noisier, so the
-  limit loosens as the words fall. Under `voiceprint.MIN_COMPARE_WORDS` the
-  prose is too short to measure, and the meter says so (`TooShort`);
+  held-out writing reached at that length, and the nearest other writers
+  came. Shorter prose is noisier, so the limit loosens as the words fall,
+  and under 2,000 words another writer can come as near as the author's own
+  prose: there the reading is `unclear`, not `close`. The limits were
+  measured on Austen (`Source.calibrated` says whether the fingerprint is
+  hers); for another writer they are a scale, not a verdict. Under
+  `voiceprint.MIN_COMPARE_WORDS` the prose is too short to measure, and the
+  meter says so (`TooShort`);
 - **each measure's distance** (signed z in population standard deviations,
   and whether the prose sits inside the writer's p10..p90), each group's
   mean |z|;
@@ -23,17 +28,22 @@ files):
   improbable each sentence's length and its counts of the punctuation and
   word kinds in `SENTENCE_RATES` are under the writer's own rates (Poisson
   upper tails, a floor for what the writer never does);
-- **constructions the prose uses that the corpus doesn't**
+- **constructions the prose uses far more than the reference**
   (`constructions`): two- to four-word phrases built mostly of function
   words (so a construction, not a topic: "he didn't", "the edge of the",
-  not "the ships"), frequent in the prose and absent or rare in the corpus.
-  With the corpus at hand (`load_source(voice_repo=...)`) its own rates are
-  the reference; with only a fingerprint, the general baseline's, leaving
-  out the writer's own favoured phrases, and the report says which.
+  not "the ships"), used `CONSTRUCTION_MIN_COUNT`+ times in the prose at
+  `CONSTRUCTION_MIN_RATIO`x the reference's rate or more. With the corpus at
+  hand (`load_source(voice_repo=...)`) its own rates are the reference; with
+  only a fingerprint, the general baseline's (2- and 3-word phrases only),
+  leaving out the writer's own favoured phrases, and the report says which.
+  Under 10,000 words of prose only all-closed-class phrases can qualify
+  (see `TOPIC_RATE`).
 
 API: `load_source(fingerprint_path=, voice_repo=)` -> `Source`;
-`meter(source, pieces, top=)` -> `Report` (raises `TooShort`);
-`report_lines(report)`; `close_limit(words)`.
+`meter(source, pieces, top=)` -> `Report` (raises `TooShort` or
+`MeterError`); `report_lines(report)`; `close_limit(words)`,
+`reading(distance, words)`; `sentence_surprise(fp, sentence)`;
+`constructions(source, pieces, keep=)`.
 """
 
 from __future__ import annotations
@@ -42,23 +52,39 @@ import math
 import os
 import re
 from collections import Counter
+from functools import cached_property
 from itertools import zip_longest
 from dataclasses import dataclass, field
-from typing import Mapping
+from types import MappingProxyType
+from typing import Literal, Mapping
 
 from storyforge import voiceprint as vp
 
-#: how far prose of at least this many words can sit from the fingerprint
-#: and still read as the writer: the furthest held-out sample of Austen
-#: (*Emma*, *Persuasion*; contiguous runs of whole paragraphs) measured
-#: against her *Pride and Prejudice* fingerprint, rounded up. Measured
-#: (2026-11-09; `tests/test_voiceprint_meter.py` holds it): 1,000 words
-#: 0.78, 2,000 0.63, 5,000 0.51, 10,000 0.44, 20,000 0.32, 40,000 0.28,
-#: the whole novels 0.21 and 0.23. The other authors' nearest samples sat
-#: at 0.56-0.65 at every length, Wrath's at 1.14 and above. Calibrated on
-#: one writer: for another, read it as a scale, not a verdict
-CLOSE_LIMITS = ((40000, vp.SAME_VOICE_MAX), (20000, 0.33), (10000, 0.45),
-                (5000, 0.52), (2000, 0.65), (vp.MIN_COMPARE_WORDS, 0.80))
+#: for prose of at least `least` words: `limit`, how far it can sit from the
+#: fingerprint and still read as the writer (the furthest held-out sample
+#: of Austen, *Emma* and *Persuasion* in contiguous runs of whole
+#: paragraphs, measured against her *Pride and Prejudice* fingerprint,
+#: rounded up), and `nearest_other`, the nearest the seven other authors'
+#: samples of that length came (rounded down; None when none came inside
+#: the limit). Measured 2026-11-09 (`tests/test_voiceprint_meter.py` holds
+#: every step): Austen's furthest at 1,000 words 0.78, 1,500 0.73, 2,000
+#: 0.63, 5,000 0.51, 10,000 0.44, 20,000 0.32, the whole novels 0.21 and
+#: 0.23; the others' nearest at 1,000 words 0.59, 1,500 0.64, 2,000 0.64,
+#: 5,000 0.61, 10,000 0.59, 20,000 0.56. So from 5,000 words the two never
+#: meet, but under 2,000 the others' nearest sit inside Austen's own spread
+#: (16 of 131 samples of 1,000 words): a distance between `nearest_other`
+#: and `limit` is `unclear`, not `close`. Calibrated on one writer: for
+#: another, read it as a scale, not a verdict (`Source.calibrated`)
+CLOSE_LIMITS = ((40000, vp.SAME_VOICE_MAX, None), (20000, 0.33, None), (10000, 0.45, None),
+                (5000, 0.52, None), (2000, 0.65, 0.63), (vp.MIN_COMPARE_WORDS, 0.80, 0.59))
+
+#: the readings of a distance (`reading`): within the limit and nearer than
+#: any other writer came; within the limit, but where another writer came
+#: too; beyond the limit
+CLOSE, UNCLEAR, FAR = 'close', 'unclear', 'far'
+
+#: the voice `CLOSE_LIMITS` was measured on
+REFERENCE_VOICE = os.path.join('references', 'voiceprints', 'austen')
 
 #: the measures counted per sentence (each a rate per 1000 words in the
 #: fingerprint), with how one is named
@@ -91,7 +117,11 @@ CONSTRUCTION_MIN_RATIO = 8.0
 #: how many constructions are listed
 CONSTRUCTION_KEEP = 12
 #: a content word used this often per 1000 words of the prose is what the
-#: prose is about (a topic: "ships", "spear"), so its phrases are left out
+#: prose is about (a topic: "ships", "spear"), so its phrases are left out.
+#: A phrase needs `CONSTRUCTION_MIN_COUNT` uses, so its open word has at
+#: least 5, which is 0.5 per 1,000 whenever the prose is under 10,000 words:
+#: there every open word in a construction is a topic, and only phrases
+#: built wholly of closed-class words can qualify
 TOPIC_RATE = 0.5
 #: closed-class words outside `voiceprint.FUNCTION_WORDS` that a
 #: construction may be built of (contractions count too)
@@ -105,20 +135,27 @@ CLOSED_EXTRA = frozenset("""
     without yet where while who whom whose
 """.split())
 
-#: shown on every report and in the help: what the number is for
+#: shown on every report (the `--voice` help says the same): what the
+#: number is for
 DRIFT_NOTE = ('This reports drift from the fingerprint. It can\'t tell good prose from bad, '
               'and it is never a target for an automatic rewrite loop.')
 
 
 class MeterError(Exception):
-    """The fingerprint can't be found or read; the message says why."""
+    """The meter can't read against its source: the fingerprint, the corpus
+    or the baseline can't be read, or the corpus isn't what was
+    fingerprinted. The message says why. Fatal for any prose."""
 
 
-class TooShort(MeterError):
-    """The prose in scope is under `voiceprint.MIN_COMPARE_WORDS` words."""
+class TooShort(Exception):
+    """The prose in scope is under `voiceprint.MIN_COMPARE_WORDS` words:
+    expected for one short scene, so not a `MeterError` (a caller metering
+    scene by scene can go on). `words`: the prose counted; `empty`: the
+    pieces with no prose."""
 
-    def __init__(self, words: int):
+    def __init__(self, words: int, empty: tuple[str, ...] = ()):
         self.words = words
+        self.empty = tuple(empty)
         super().__init__(f'too short to measure: {words:,} words of prose; the meter needs at '
                          f'least {vp.MIN_COMPARE_WORDS:,}')
 
@@ -130,11 +167,46 @@ class TooShort(MeterError):
 @dataclass(frozen=True)
 class Source:
     """What prose is measured against: the fingerprint, the fingerprinted
-    corpus by piece name when it's at hand (None with only a
-    fingerprint.json), and a label saying where it came from."""
+    corpus by piece name when it's at hand (read-only; None with only a
+    fingerprint.json), a label saying where it came from, and whether it is
+    the voice `CLOSE_LIMITS` was measured on (`calibrated`; otherwise the
+    limits are a scale for this writer, not a verdict)."""
     fingerprint: vp.Fingerprint
-    corpus: dict[str, str] | None
+    corpus: Mapping[str, str] | None
     label: str
+    calibrated: bool = False
+
+    @cached_property
+    def corpus_counts(self) -> tuple[frozenset[str], dict[int, Counter]] | None:
+        """The corpus's names and its phrase counts by size, names left out
+        (`CONSTRUCTION_SIZES`), parsed once per source; None without the
+        corpus."""
+        if not self.corpus:
+            return None
+        text = '\n\n'.join(self.corpus.values())
+        names = vp.proper_words(text)
+        return names, {n: vp.ngram_counts(text, n, names) for n in CONSTRUCTION_SIZES}
+
+
+def _is_reference(path: str) -> bool:
+    from storyforge.common import get_plugin_dir
+    reference = os.path.join(get_plugin_dir(), REFERENCE_VOICE)
+    return os.path.realpath(path) == os.path.realpath(reference)
+
+
+def _check_corpus(fp: vp.Fingerprint, texts: Mapping[str, str], fp_label: str) -> None:
+    """Raise MeterError unless each corpus piece holds the words the
+    fingerprint recorded for it: an emptied, cut or swapped file would
+    otherwise be the reference for the constructions without a word."""
+    for piece in fp.pieces:
+        name, recorded = piece.get('name', ''), piece.get('words')
+        if name not in texts or not isinstance(recorded, int):
+            continue
+        now = _prose_words(texts[name])
+        if now != recorded:
+            raise MeterError(f'{name} has {now:,} words of prose; {fp_label} was made from '
+                             f'{recorded:,}. The corpus changed since it was fingerprinted: '
+                             f'compute the fingerprint again')
 
 
 def load_source(fingerprint_path: str | None = None,
@@ -155,20 +227,39 @@ def load_source(fingerprint_path: str | None = None,
             voice = vpp.load_voice(path)
         except vpp.ProposalError as e:
             raise MeterError(str(e)) from e
+        _check_corpus(voice.fingerprint, voice.texts, f'{path}/{vpp.FINGERPRINT_FILE}')
         who = f'{voice.author}\'s voice repo' if voice.author else 'the voice repo'
-        return Source(voice.fingerprint, dict(voice.texts), f'{who} ({path})')
+        return Source(voice.fingerprint, MappingProxyType(dict(voice.texts)), f'{who} ({path})',
+                      _is_reference(path))
     path = os.path.abspath(fingerprint_path)
     try:
         fp = vp.Fingerprint.load(path)
     except vp.VoiceprintError as e:
         raise MeterError(str(e)) from e
-    return Source(fp, None, path)
+    return Source(fp, None, path, _is_reference(os.path.dirname(path)))
+
+
+def _step(words: int) -> tuple[int, float, float | None] | None:
+    return next((step for step in CLOSE_LIMITS if words >= step[0]), None)
 
 
 def close_limit(words: int) -> float | None:
     """The `CLOSE_LIMITS` distance for prose of `words` words, or None
     under `voiceprint.MIN_COMPARE_WORDS` (too short to measure)."""
-    return next((limit for least, limit in CLOSE_LIMITS if words >= least), None)
+    step = _step(words)
+    return step[1] if step else None
+
+
+def reading(distance: float, words: int) -> str:
+    """`CLOSE`, `UNCLEAR` or `FAR` for prose of `words` words at `distance`
+    (`CLOSE_LIMITS`). Raises ValueError under `voiceprint.MIN_COMPARE_WORDS`."""
+    step = _step(words)
+    if step is None:
+        raise ValueError(f'{words} words is too short to read')
+    _, limit, nearest_other = step
+    if distance > limit:
+        return FAR
+    return UNCLEAR if nearest_other is not None and distance >= nearest_other else CLOSE
 
 
 # ============================================================================
@@ -195,6 +286,20 @@ def _poisson_surprise(k: int, lam: float) -> float:
 
 
 @dataclass(frozen=True)
+class Reason:
+    """One part of a sentence's surprise: `kind`, what it is about
+    ('length', or a `SENTENCE_RATES` measure such as 'colon_rate'); its
+    surprise; the sentence's count (of words, for 'length'); the writer's
+    rate per 1,000 words (for 'length', the share of the writer's sentences
+    in that length's bucket); and `text`, how it is shown."""
+    kind: str
+    surprise: float
+    count: int
+    writer_rate: float
+    text: str
+
+
+@dataclass(frozen=True)
 class Sentence:
     """One sentence of the prose: the piece it's in, its text as written,
     its surprise under the writer's habits, and the reasons (largest
@@ -202,7 +307,7 @@ class Sentence:
     piece: str
     text: str
     surprise: float
-    reasons: tuple[str, ...]
+    reasons: tuple[Reason, ...]
 
 
 def _rate(fp: vp.Fingerprint, name: str) -> float:
@@ -210,33 +315,35 @@ def _rate(fp: vp.Fingerprint, name: str) -> float:
     return max(st.value, st.center, RATE_FLOOR)
 
 
-def sentence_surprise(fp: vp.Fingerprint, sentence: str) -> tuple[float, list[tuple[float, str]]]:
+def sentence_surprise(fp: vp.Fingerprint, sentence: str) -> tuple[float, list[Reason]]:
     """How improbable `sentence` is under the writer's habits: its length's
     rarity in `Fingerprint.sentence_lengths` (0 for the commonest bucket),
     plus, for each of `SENTENCE_RATES`, the Poisson surprise of its count
     against the writer's rate (the corpus's or its chunks' median, the
     larger, floored at `RATE_FLOOR` per 1000 words) times its length. Returns
-    the total and its parts as (surprise, reason). Raises VoiceprintError
-    for a sentence with no prose (`voiceprint.measure`)."""
+    the total and its parts (largest first). Raises VoiceprintError for a
+    sentence with no prose (`voiceprint.measure`)."""
     values = vp.measure(sentence)
     n = len(vp.words(sentence))
-    parts: list[tuple[float, str]] = []
+    parts: list[Reason] = []
     if fp.sentence_lengths:
         bucket = vp.length_bucket(n)
         share = fp.sentence_lengths.get(bucket, 0.0)
         top = max(fp.sentence_lengths.values())
         s = math.log(top / max(share, LENGTH_SHARE_FLOOR)) if top > 0 else 0.0
         if s > 0:
-            parts.append((s, f'{n} word{"" if n == 1 else "s"} (the writer: {share:.0%} of '
-                             f'sentences are {bucket} words)'))
+            parts.append(Reason('length', s, n, share,
+                                f'{n} word{"" if n == 1 else "s"} (the writer: {share:.0%} of '
+                                f'sentences are {bucket} words)'))
     for name, label in SENTENCE_RATES.items():
         k = round(values[name] * n / 1000)
         rate = _rate(fp, name)
         s = _poisson_surprise(k, rate * n / 1000)
         if s > 0:
-            parts.append((s, f'{label} x{k} (the writer: {rate:.2g} per 1,000 words)'))
-    parts.sort(key=lambda p: -p[0])
-    return sum(p[0] for p in parts), parts
+            parts.append(Reason(name, s, k, rate,
+                                f'{label} x{k} (the writer: {rate:.2g} per 1,000 words)'))
+    parts.sort(key=lambda p: -p.surprise)
+    return sum(p.surprise for p in parts), parts
 
 
 def _sentences(fp: vp.Fingerprint, pieces: Mapping[str, str],
@@ -253,13 +360,13 @@ def _sentences(fp: vp.Fingerprint, pieces: Mapping[str, str],
                     unmeasured += 1
                     continue
                 if total > 0:
-                    scored.append(Sentence(name, sent, total, tuple(r for _, r in parts[:3])))
+                    scored.append(Sentence(name, sent, total, tuple(parts[:3])))
     scored.sort(key=lambda s: -s.surprise)   # stable: ties keep the prose's order
     # no more than `SAME_REASON_MAX` led by the same kind of thing, so one
     # habit (say, contractions) doesn't fill the list
     picked, led = [], Counter()
     for s in scored:
-        lead = _reason_kind(s.reasons[0])
+        lead = s.reasons[0].kind
         if led[lead] >= SAME_REASON_MAX:
             continue
         led[lead] += 1
@@ -269,23 +376,16 @@ def _sentences(fp: vp.Fingerprint, pieces: Mapping[str, str],
     return picked, unmeasured
 
 
-def _reason_kind(reason: str) -> str:
-    """What a reason is about ('colon', 'length'), without its count."""
-    head = reason.split(' (', 1)[0]
-    if re.fullmatch(r'\d+ words?', head):
-        return 'length'
-    return re.sub(r'\s*x\d+$', '', head)
-
-
 # ============================================================================
 # Constructions
 # ============================================================================
 
 @dataclass(frozen=True)
 class Construction:
-    """A phrase the prose uses that the corpus doesn't: how often in the
-    prose, in the corpus (None measured against the baseline), the ratio of
-    their rates, and the first sentence using it."""
+    """A phrase the prose uses far more than the reference: how often in
+    the prose, in the corpus (None measured against the baseline), the ratio
+    of their rates, and the first sentence using it ('' when every use spans
+    punctuation the sentence search can't cross, which the report says)."""
     phrase: str
     count: int
     corpus_count: int | None
@@ -309,9 +409,16 @@ def _construction_shape(phrase: str, topical: set[str]) -> bool:
     return len(open_words) <= allowed and not any(w in topical for w in open_words)
 
 
+def _word_pattern(word: str) -> str:
+    return '[\'\u2019]'.join(re.escape(part) for part in word.split("'"))
+
+
 def _example(pieces: Mapping[str, str], phrase: str) -> tuple[str, str]:
-    pattern = re.compile(r'(?<![\w\'-])' + r'\s+'.join(re.escape(w) for w in phrase.split())
-                         + r'(?![\w\'-])', re.IGNORECASE)
+    # the phrase list counts across commas and dashes, so the words may be
+    # parted by any run of non-word characters
+    pattern = re.compile(r'(?<![\w\'\u2019-])'
+                         + r'[\W_]+'.join(_word_pattern(w) for w in phrase.split())
+                         + r'(?![\w\'\u2019-])', re.IGNORECASE)
     for name, text in pieces.items():
         for para in vp.paragraphs(text):
             for sent in vp.split_sentences(para):
@@ -330,38 +437,46 @@ def _overlaps(a: str, b: str) -> bool:
     return k >= 2 and (wa[-k:] == wb[:k] or wb[-k:] == wa[:k])
 
 
+#: what constructions were measured against (`constructions`)
+Basis = Literal['corpus', 'baseline']
+
+
 def constructions(source: Source, pieces: Mapping[str, str],
-                  keep: int = CONSTRUCTION_KEEP) -> tuple[list[Construction], str]:
-    """The phrases the prose uses that the corpus doesn't (see the module
-    doc): the sizes in turn, each size's most telling first (ratio times
-    the square root of the count), none overlapping another listed
-    (`_overlaps`). Returns them and the reference they were measured
-    against, in words."""
-    fp, corpus = source.fingerprint, source.corpus
+                  keep: int = CONSTRUCTION_KEEP) -> tuple[list[Construction], Basis]:
+    """The phrases the prose uses far more than the reference (see the
+    module doc): the sizes in turn, each size's most telling first (ratio
+    times the square root of the count), none overlapping another listed
+    (`_overlaps`). Returns them and the reference: 'corpus' (every size in
+    `CONSTRUCTION_SIZES`) or 'baseline' (only `voiceprint.NGRAM_SIZES`, the
+    writer's own phrases in `Fingerprint.ngrams` left out). Names, in the
+    prose or the corpus, are left out of both sides."""
+    fp = source.fingerprint
+    counted = source.corpus_counts
     pooled = '\n\n'.join(pieces.values())
     names = vp.proper_words(pooled)
     unigrams = vp.ngram_counts(pooled, 1, frozenset())
     n_words = sum(unigrams.values()) or 1
     topical = {w for w, c in unigrams.items()
                if not _closed(w) and 1000 * c / n_words >= TOPIC_RATE}
-    corpus_text = '\n\n'.join(corpus.values()) if corpus else ''
-    corpus_names = vp.proper_words(corpus_text) | names if corpus else frozenset()
-    baseline = None if corpus else vp.load_baseline()
+    if counted:
+        corpus_names, ref_counts = counted
+        names = names | corpus_names
+    baseline = None if counted else vp.load_baseline()
     own = {g for grams in fp.ngrams.values() for g, *_ in grams}
-    sizes = CONSTRUCTION_SIZES if corpus else tuple(n for n in CONSTRUCTION_SIZES
-                                                    if n in vp.NGRAM_SIZES)
+    sizes = CONSTRUCTION_SIZES if counted else tuple(n for n in CONSTRUCTION_SIZES
+                                                     if n in vp.NGRAM_SIZES)
     found = []
     for n in sizes:
         counts = vp.ngram_counts(pooled, n, names)
         total = sum(counts.values()) or 1
-        if corpus:
-            ref = vp.ngram_counts(corpus_text, n, corpus_names)
+        if counted:
+            ref = ref_counts[n]
             ref_total = sum(ref.values()) or 1
         for gram, c in counts.items():
             if c < CONSTRUCTION_MIN_COUNT or not _construction_shape(gram, topical):
                 continue
             rate = 1e6 * c / total
-            if corpus:
+            if counted:
                 ref_count = ref.get(gram, 0)
                 ref_rate = 1e6 * ref_count / ref_total
             else:
@@ -385,10 +500,7 @@ def constructions(source: Source, pieces: Mapping[str, str],
         out.append(Construction(gram, c, ref_count, ratio, piece, example))
         if len(out) >= keep:
             break
-    basis = ('the corpus itself' if corpus else
-             'the general baseline, leaving out the writer\'s own favoured phrases (the corpus '
-             'isn\'t at hand with a fingerprint alone; --voice-repo reads it)')
-    return out, basis
+    return out, ('corpus' if counted else 'baseline')
 
 
 # ============================================================================
@@ -397,32 +509,41 @@ def constructions(source: Source, pieces: Mapping[str, str],
 
 @dataclass(frozen=True)
 class PieceDistance:
+    """One piece measured alone: its words, distance, `CLOSE_LIMITS` limit
+    and `reading` (`CLOSE`, `UNCLEAR` or `FAR`)."""
     name: str
     words: int
     distance: float
     limit: float
+    reading: str
 
     @property
     def close(self) -> bool:
-        return self.distance <= self.limit
+        return self.reading == CLOSE
 
 
 @dataclass(frozen=True)
 class Report:
-    """The meter's reading (`meter`). `short` names the pieces under
-    `voiceprint.MIN_COMPARE_WORDS` (in the pool, not measured alone) and
-    `empty` those with no prose."""
+    """The meter's reading (`meter`). `reading` is `CLOSE`, `UNCLEAR` or
+    `FAR` against `limit`; when `source.calibrated` is False the limits were
+    measured on another writer, so it is a scale, not a verdict. `short`
+    names the pieces under `voiceprint.MIN_COMPARE_WORDS` (in the pool, not
+    measured alone) and `empty` those with no prose. `top`: how many
+    measures, pieces and sentences are listed. `warnings` are printed as
+    they are."""
     source: Source
     words: int
     comparison: vp.Comparison
     limit: float
+    reading: str
     pieces: tuple[PieceDistance, ...]
     short: tuple[str, ...]
     empty: tuple[str, ...]
     sentences: tuple[Sentence, ...]
     unmeasured_sentences: int
     constructions: tuple[Construction, ...]
-    construction_basis: str
+    construction_basis: Basis
+    top: int = 10
     warnings: tuple[str, ...] = field(default=())
 
     @property
@@ -431,7 +552,7 @@ class Report:
 
     @property
     def close(self) -> bool:
-        return self.distance <= self.limit
+        return self.reading == CLOSE
 
 
 def _prose_words(text: str) -> int:
@@ -440,24 +561,25 @@ def _prose_words(text: str) -> int:
 
 def meter(source: Source, pieces: Mapping[str, str], top: int = 10) -> Report:
     """Measure `pieces` (name -> prose, in order; a book's scenes or any
-    files) against `source`'s fingerprint. Raises TooShort when they hold
-    under `voiceprint.MIN_COMPARE_WORDS` words of prose together, and
-    MeterError when the baseline can't be read."""
+    files) against `source`'s fingerprint, listing `top` measures, pieces
+    and sentences. Raises TooShort when they hold under
+    `voiceprint.MIN_COMPARE_WORDS` words of prose together, and MeterError
+    when the baseline can't be read."""
     fp = source.fingerprint
     words_by_piece = {name: _prose_words(text) for name, text in pieces.items()}
     empty = tuple(name for name, n in words_by_piece.items() if not n)
     prose = {name: text for name, text in pieces.items() if words_by_piece[name]}
     total = sum(words_by_piece.values())
     if total < vp.MIN_COMPARE_WORDS:
-        raise TooShort(total)
+        raise TooShort(total, empty)
     try:
         comparison = vp.compare(fp, '\n\n'.join(prose.values()))
         measured = []
         for name, text in prose.items():
             if words_by_piece[name] >= vp.MIN_COMPARE_WORDS:
                 n = words_by_piece[name]
-                measured.append(PieceDistance(name, n, vp.compare(fp, text).distance,
-                                              close_limit(n)))
+                d = vp.compare(fp, text).distance
+                measured.append(PieceDistance(name, n, d, close_limit(n), reading(d, n)))
         found, basis = constructions(source, prose)
     except vp.VoiceprintError as e:
         # the word counts above are `compare`'s, so this is the baseline
@@ -476,8 +598,13 @@ def meter(source: Source, pieces: Mapping[str, str], top: int = 10) -> Report:
     if unmeasured:
         warnings.append(f'WARNING: {unmeasured} sentence(s) couldn\'t be measured alone '
                         f'(capitals or heading-like), and aren\'t ranked')
-    return Report(source, total, comparison, close_limit(total), tuple(measured), short,
-                  empty, tuple(sentences), unmeasured, tuple(found), basis, tuple(warnings))
+    if basis == 'baseline' and not fp.ngrams:
+        warnings.append('WARNING: the fingerprint holds no phrase list, so the writer\'s own '
+                        'favoured phrases can\'t be left out of the constructions; some listed '
+                        'may be the writer\'s habits (--voice-repo measures against the corpus)')
+    return Report(source, total, comparison, close_limit(total),
+                  reading(comparison.distance, total), tuple(measured), short, empty,
+                  tuple(sentences), unmeasured, tuple(found), basis, top, tuple(warnings))
 
 
 # ============================================================================
@@ -494,10 +621,38 @@ def _names(names: tuple[str, ...], most: int = 10) -> str:
     return shown + (f' (and {len(names) - most} more)' if len(names) > most else '')
 
 
-def report_lines(report: Report, top: int = 10) -> list[str]:
-    """The report as printed by `score --voice`."""
+#: how the constructions' reference is shown, by `Report.construction_basis`
+_BASIS_TEXT = {
+    'corpus': 'the corpus itself',
+    'baseline': ('the general baseline, 2- and 3-word phrases only (it holds no 4-word '
+                 'rates), leaving out the writer\'s own favoured phrases (the corpus isn\'t '
+                 'at hand with a fingerprint alone; --voice-repo reads it)'),
+}
+
+
+def _distance_line(report: Report) -> str:
+    step = _step(report.words)
+    nearest_other = step[2] if step else None
+    said = {
+        CLOSE: 'close',
+        UNCLEAR: (f'unclear: inside the limit, but at this length another writer\'s prose '
+                  f'came as near ({nearest_other:.2f}), so the meter can\'t tell them apart'),
+        FAR: 'far',
+    }[report.reading]
+    scale = ('' if report.source.calibrated else
+             ' This fingerprint isn\'t that reference, so read the limit as a scale for this '
+             'writer, not a verdict.')
+    return (f'Distance: {report.distance:.3f}, {said}. Austen\'s own held-out prose of this '
+            f'length stays within {report.limit:.2f} (`CLOSE_LIMITS`, measured on the Austen '
+            f'reference voiceprint; 0 is the same profile, and the other writers measured sit '
+            f'beyond the limit from 2,000 words).{scale}')
+
+
+def report_lines(report: Report) -> list[str]:
+    """The report as printed by `score --voice` (`report.top` of each
+    list)."""
     fp = report.source.fingerprint
-    reading = ('close' if report.close else 'far')
+    top = report.top
     lines = [
         f'# Voice drift against {report.source.label}',
         '',
@@ -505,9 +660,7 @@ def report_lines(report: Report, top: int = 10) -> list[str]:
         '',
         f'Fingerprint: {fp.words:,} words of corpus. Measured: {report.words:,} words of prose'
         f' in {len(report.pieces) + len(report.short)} piece(s).',
-        f'Distance: {report.distance:.3f}, {reading}. Prose of this length by the reference '
-        f'author stays within {report.limit:.2f} (`CLOSE_LIMITS`, measured on the Austen '
-        f'reference voiceprint; 0 is the same profile, unrelated writers sit near 1).',
+        _distance_line(report),
         '',
         '## By group (mean |z|, in population standard deviations)',
         '',
@@ -523,12 +676,14 @@ def report_lines(report: Report, top: int = 10) -> list[str]:
                      f'{f"{st.p10:.3g}-{st.p90:.3g}":>19} {m.z:>+6.2f}{flag}')
     lines += ['', '## Pieces furthest from the fingerprint (each measured alone)', '']
     if report.pieces:
-        far = sum(1 for p in report.pieces if not p.close)
+        far = sum(1 for p in report.pieces if p.reading == FAR)
+        unclear = sum(1 for p in report.pieces if p.reading == UNCLEAR)
         lines.append(f'{far} of {len(report.pieces)} measured alone are beyond the limit for '
-                     f'their length.')
+                     f'their length' + (f'; {unclear} unclear (inside it, where another '
+                                        f'writer came as near).' if unclear else '.'))
         for p in report.pieces[:top]:
             lines.append(f'  {p.name}: {p.distance:.3f} ({p.words:,} words; limit '
-                         f'{p.limit:.2f}, {"close" if p.close else "far"})')
+                         f'{p.limit:.2f}, {p.reading})')
     else:
         lines.append('None is long enough to measure alone.')
     if report.short:
@@ -540,11 +695,11 @@ def report_lines(report: Report, top: int = 10) -> list[str]:
     if report.sentences:
         for i, s in enumerate(report.sentences, 1):
             lines.append(f'{i}. [{s.piece}] "{_quote(s.text)}"')
-            lines.append(f'   {"; ".join(s.reasons)}')
+            lines.append(f'   {"; ".join(r.text for r in s.reasons)}')
     else:
         lines.append('None stands out.')
-    lines += ['', '## Constructions the prose uses that the corpus doesn\'t', '',
-              f'Measured against {report.construction_basis}.', '']
+    lines += ['', '## Constructions the prose uses far more than the reference', '',
+              f'Measured against {_BASIS_TEXT[report.construction_basis]}.', '']
     if report.constructions:
         for c in report.constructions:
             where = (f'the corpus: {c.corpus_count}; {c.ratio:.0f}x its rate'
@@ -552,6 +707,8 @@ def report_lines(report: Report, top: int = 10) -> list[str]:
             lines.append(f'  "{c.phrase}": {c.count} times ({where})')
             if c.example:
                 lines.append(f'     e.g. [{c.piece}] "{_quote(c.example, 160)}"')
+            else:
+                lines.append('     (no example: no sentence holds it as written)')
     else:
         lines.append(f'None used {CONSTRUCTION_MIN_COUNT}+ times at {CONSTRUCTION_MIN_RATIO:.0f}x '
                      f'the reference\'s rate.')

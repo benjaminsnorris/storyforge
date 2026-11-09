@@ -953,6 +953,19 @@ class Fingerprint:
             if not isinstance(data.get(key, kind()), kind):
                 raise VoiceprintError(f'fingerprint {key} is not a JSON '
                                       f'{"object" if kind is dict else "list"}')
+        # the meter reads these entry by entry, so a malformed one is named
+        # here rather than crashing there
+        buckets = {label for _, label in _LENGTH_BUCKETS}
+        for bucket, share in data.get('sentence_lengths', {}).items():
+            if bucket not in buckets or not _is_number(share):
+                raise VoiceprintError(f'fingerprint sentence_lengths {bucket!r}: {share!r} is not '
+                                      f'a share of a known length bucket; compute it again')
+        for size, grams in data.get('ngrams', {}).items():
+            if not (isinstance(grams, list) and all(
+                    isinstance(g, list) and len(g) == 3 and isinstance(g[0], str)
+                    and _is_number(g[1]) and _is_number(g[2]) for g in grams)):
+                raise VoiceprintError(f'fingerprint ngrams {size!r}: not a list of [phrase, '
+                                      f'count, ratio]; compute it again')
         return cls(data['words'], data['sentences'], data['paragraphs'], data['chunks'],
                    stats, data.get('sentence_lengths', {}), data.get('first_words', {}),
                    data.get('pieces', []), data.get('ngrams', {}))

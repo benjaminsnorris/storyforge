@@ -97,7 +97,8 @@ def parse_args(argv):
                              'book\'s with no filter, or --prose files) drifts from an '
                              'author\'s fingerprint: the distance, each measure\'s, the '
                              'sentences furthest from the corpus, and constructions the '
-                             'corpus never uses. It measures drift; it can\'t tell good '
+                             'prose uses far more than the corpus (or, with --fingerprint, '
+                             'the general baseline). It measures drift; it can\'t tell good '
                              'prose from bad, and it is never an optimisation target for an '
                              'automatic rewrite loop. Needs --fingerprint or --voice-repo. '
                              'No API calls, no cycle, nothing written.')
@@ -1210,11 +1211,18 @@ def _voice_pieces(args):
     that can't be read in `unreadable` (each with why)."""
     pieces, missing, unreadable = {}, [], {}
     if args.prose:
+        seen = {}
         for path in args.prose:
+            real = os.path.realpath(path)
+            if real in seen:
+                # one file named twice would count twice in the pool
+                log(f'WARNING: {path} is {seen[real]} again; it is measured once')
+                continue
+            seen[real] = path
             try:
                 pieces[path] = read_scene_prose(path)   # any markers stripped, as in a scene
             except (OSError, UnicodeDecodeError) as e:
-                unreadable[path] = e.__class__.__name__
+                unreadable[path] = _why(e)
         return pieces, missing, unreadable
     project_dir = detect_project_root()
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -1232,8 +1240,14 @@ def _voice_pieces(args):
         try:
             pieces[sid] = read_scene_prose(path)
         except (OSError, UnicodeDecodeError) as e:
-            unreadable[sid] = e.__class__.__name__
+            unreadable[sid] = _why(e)
     return pieces, missing, unreadable
+
+
+def _why(e: Exception) -> str:
+    """Why a file can't be read: the error's kind and its message."""
+    detail = getattr(e, 'strerror', None) or str(e)
+    return f'{e.__class__.__name__}: {detail}' if detail else e.__class__.__name__
 
 
 def _run_voice_only(args):
@@ -1264,18 +1278,27 @@ def _run_voice_only(args):
                      f'aren\'t measured: {shown}')
     for name, why in unreadable.items():
         notes.append(f'ERROR: {name} can\'t be read ({why}); it isn\'t measured')
+    if not pieces and unreadable:
+        for line in notes:
+            log(line)
+        log('ERROR: none of the files in scope could be read, so there is nothing to measure.')
+        sys.exit(1)
     try:
         report = meter.meter(source, pieces, top=top)
     except meter.TooShort as e:
         print(f'Too short to measure: {e.words:,} words of prose in scope; the voice meter '
               f'needs at least {MIN_COMPARE_WORDS:,} to read a distance.')
+        if e.empty:
+            shown = ', '.join(e.empty[:10]) + (f' (and {len(e.empty) - 10} more)'
+                                               if len(e.empty) > 10 else '')
+            print(f'No prose to measure: {shown}.')
         for line in notes:
             log(line)
         sys.exit(1)
     except meter.MeterError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
-    for line in meter.report_lines(report, top):
+    for line in meter.report_lines(report):
         print(line)
     for line in notes:
         log(line)
