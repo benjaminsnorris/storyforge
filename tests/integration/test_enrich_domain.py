@@ -588,6 +588,20 @@ class TestApplyEnrichResult:
                                     force=True)
         assert count == 1
 
+    def test_force_keeps_the_authors_must_beats(self, project_dir):
+        """#642: a forced re-read of key_actions keeps every `must` beat."""
+        ref = os.path.join(project_dir, 'reference')
+        briefs_csv = os.path.join(ref, 'scene-briefs.csv')
+        update_csv_field(briefs_csv, 'act1-sc01', 'key_actions',
+                         'Reviews maps;must: Files as error')
+        result = {'_status': 'ok', 'key_actions': 'Reviews maps;Consults Tessa'}
+        apply_enrich_result('act1-sc01', result, os.path.join(ref, 'scenes.csv'),
+                            os.path.join(ref, 'scene-intent.csv'), force=True,
+                            briefs_csv=briefs_csv)
+        from storyforge.csv_cli import get_field
+        assert get_field(briefs_csv, 'act1-sc01', 'key_actions') == (
+            'Reviews maps; must: Files as error; Consults Tessa')
+
     def test_writes_intent_fields(self, project_dir):
         meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
         intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')

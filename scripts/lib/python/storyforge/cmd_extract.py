@@ -443,6 +443,11 @@ def _merge_fields(row: dict, result: dict, force: bool) -> bool:
     Empty fields are filled; populated ones are overwritten only with force.
     Keys starting with '_' (e.g. _confidence) are response metadata, not columns.
     """
+    from storyforge.must import keep_must_fields
+    # #642: a `must` beat is the author's; a forced re-extraction keeps it
+    result, notes = keep_must_fields(row, result)
+    for note in notes:
+        log(f'  NOTE: {row.get("id", "")}: {note}')
     changed = False
     for k, v in result.items():
         if not v or k == 'id' or k.startswith('_'):

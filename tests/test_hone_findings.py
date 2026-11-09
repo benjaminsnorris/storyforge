@@ -158,3 +158,74 @@ class TestResolveTargetsToSceneIds:
         valid = {'scene-a'}
         result = _resolve_targets_to_scene_ids(['nonexistent-thing'], valid, ref_dir)
         assert result == []
+
+
+class TestMustBeatsSurviveHone:
+    """#642: a `must` beat is the author's; hone's rewrites never drop or
+    reword one (`_apply_checked_rewrites` is the one place they land)."""
+
+    def test_a_rewrite_that_drops_a_must_beat_gets_it_back(self, project_dir, capsys):
+        from storyforge.hone import _apply_checked_rewrites
+        row = {'key_actions': 'Cross-references maps;must: Discovers missing village;'
+                              'Searches removal logs',
+               'emotions': 'routine;dread'}
+        current = dict(row)
+        rewrites = {'key_actions': 'Dorren lays the maps side by side; her finger stops',
+                    'emotions': 'routine;dread;resolve'}
+        n = _apply_checked_rewrites(row, 'act1-sc02', rewrites, current, 'trim', project_dir,
+                                    'Dorren', {})
+        assert n == 2
+        assert row['key_actions'] == ('Dorren lays the maps side by side; must: Discovers '
+                                      'missing village; her finger stops')
+        assert row['emotions'] == 'routine;dread;resolve'
+        assert 'put back the author\'s must item(s)' in capsys.readouterr().out
+
+    def test_a_rewrite_that_keeps_them_is_applied_as_written(self, project_dir):
+        from storyforge.hone import _apply_checked_rewrites
+        row = {'key_actions': 'Cross-references maps;must: Discovers missing village'}
+        new = 'Dorren lays the maps side by side; must: Discovers missing village'
+        assert _apply_checked_rewrites(row, 'act1-sc02', {'key_actions': new}, dict(row),
+                                       'trim', project_dir, 'Dorren', {}) == 1
+        assert row['key_actions'] == new
+
+    def test_a_rewrite_that_only_rewords_a_must_beat_changes_nothing(self, project_dir):
+        from storyforge.hone import _apply_checked_rewrites
+        row = {'key_actions': 'must: Discovers missing village'}
+        assert _apply_checked_rewrites(row, 'act1-sc02',
+                                       {'key_actions': 'must: Finds the village gone'},
+                                       dict(row), 'concretize', project_dir, 'Dorren', {}) == 0
+        assert row['key_actions'] == 'must: Discovers missing village'
+
+    def test_the_name_check_skips_the_authors_must_items(self, project_dir):
+        """T8 (#642's review): a must beat naming someone not in the reference
+        or prose is the author's; it doesn't make hone refuse the rewrite."""
+        from storyforge.hone import _apply_checked_rewrites
+        row = {'key_actions': 'Cross-references maps;must: Zorvath arrives at the archive'}
+        new = 'Dorren lays the maps side by side; must: Zorvath arrives at the archive'
+        assert _apply_checked_rewrites(row, 'act1-sc02', {'key_actions': new}, dict(row),
+                                       'trim', project_dir, 'Dorren', {}) == 1
+        assert row['key_actions'] == new
+        # the same name in the rewrite's own words is still refused
+        row = {'key_actions': 'Cross-references maps'}
+        rejected = {}
+        assert _apply_checked_rewrites(row, 'act1-sc02',
+                                       {'key_actions': 'Zorvath arrives at the archive'},
+                                       dict(row), 'trim', project_dir, 'Dorren', rejected) == 0
+        assert 'Zorvath' in rejected['act1-sc02'][0]
+
+    def test_the_prompts_say_so_only_when_there_is_one(self):
+        from storyforge.hone import (build_concretize_prompt, build_evaluation_fix_prompt,
+                                     build_trim_prompt)
+        marked = {'key_actions': 'Reviews maps;must: Finds anomaly', 'goal': 'x'}
+        plain = {'key_actions': 'Reviews maps;Finds anomaly', 'goal': 'x'}
+        rule = 'Items that start with `must:` are beats the author requires'
+        for values, said in ((marked, True), (plain, False)):
+            prompts = [
+                build_concretize_prompt('s', ['key_actions'], values),
+                build_trim_prompt('s', [{'field': 'key_actions', 'issue': 'overspecified'}],
+                                  values, target_words=1000),
+                build_evaluation_fix_prompt('s', ['key_actions'], values, 'fix'),
+            ]
+            assert all((rule in p) is said for p in prompts)
+        # a field the rewrite doesn't touch doesn't count
+        assert rule not in build_concretize_prompt('s', ['goal'], marked)

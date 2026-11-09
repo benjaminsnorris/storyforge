@@ -52,6 +52,14 @@ def render_human(verdict: dict) -> str:
             lines.append(f"  [{b['source']}] {b['detail']}")
     else:
         lines.append('BLOCKERS: none')
+    advisory = verdict.get('advisory') or []
+    if advisory:
+        lines.append(f'ADVISORY: {len(advisory)} broken promise(s) the gate reported but did '
+                     f'not stop on (working/gate-advisory.csv); the prose stands. Amend the '
+                     f'brief, or mark the beat `must:` to require it:')
+        from storyforge.gate import advisory_line
+        for row in advisory:
+            lines.append(f'  {advisory_line(row)}')
     return '\n'.join(lines)
 
 

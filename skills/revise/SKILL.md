@@ -128,6 +128,8 @@ Categorize each finding by where the fix belongs:
 
 When fixing CSV fields interactively (upstream passes), all registry-backed fields must use canonical IDs from `reference/` registries (characters.csv, locations.csv, values.csv, motif-taxonomy.csv, mice-threads.csv, and the knowledge facts and physical states in commitments.csv, the commitments ledger). Read the registries before making CSV edits. If a fix introduces a new entity, add it to the appropriate registry first; a new knowledge fact is a row of `reference/commitments.csv`, the commitments ledger, with `type` `knowledge`: `id`, the `scene_id` that establishes it (blank for backstory), the fact as one sentence in `statement`, `origin` `author` (or `plan` for a brief), `status` `binding`, `mutable` `state`; leave the other columns empty.
 
+**`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. An advisory broken promise (listed at the end of a run, and in `storyforge status`) is fixed in the brief, not the prose, unless the author says otherwise.
+
 ### Ordering Principles (upstream first)
 
 1. **Structural passes first** — scene additions, removals, reordering. Reorder by changing `seq`; never rename a scene id. New scenes get a 3-5 word slug of their core event as id, never a positional one (see the elaborate skill's Scene IDs section).

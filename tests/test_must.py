@@ -1,0 +1,156 @@
+"""The `must:` marker on a brief beat (#642): one parser, and `keep_must`,
+which every brief rewrite passes its reply through."""
+
+import pytest
+
+from storyforge import must
+
+
+@pytest.mark.parametrize('item, text', [
+    ('must: Priam kisses his hands', 'Priam kisses his hands'),
+    ('MUST: Priam kisses his hands', 'Priam kisses his hands'),
+    ('Must : Priam kisses his hands', 'Priam kisses his hands'),
+    ('  must:Priam kisses his hands  ', 'Priam kisses his hands'),
+    ('must:\tPriam kisses his hands', 'Priam kisses his hands'),
+])
+def test_the_marker_in_any_case_and_spacing(item, text):
+    parsed = must.parse_item(item)
+    assert parsed.must and parsed.text == text
+    assert must.is_must(item)
+    assert must.strip_marker(item) == text
+
+
+@pytest.mark.parametrize('item', [
+    'Priam kisses his hands',
+    'Priam says he must: go',          # not at the start
+    'mustering: the Myrmidons arm',    # another word
+    'must Priam kiss his hands',       # no colon
+    '',
+])
+def test_not_the_marker(item):
+    parsed = must.parse_item(item)
+    assert not parsed.must
+    assert parsed.text == item.strip()
+
+
+def test_an_item_that_is_only_the_marker_marks_nothing():
+    parsed = must.parse_item(' must: ')
+    assert parsed.must and parsed.text == ''
+    assert must.must_items('must:; Hector runs') == []
+    assert must.bare_markers('must:; Hector runs; MUST :') == 2
+
+
+def test_items_and_must_items_of_a_cell():
+    cell = 'Hector runs;must: Achilles chases him ; ; MUST: Athena tricks Hector'
+    assert [i.text for i in must.items(cell)] == [
+        'Hector runs', 'Achilles chases him', 'Athena tricks Hector']
+    assert [i.raw for i in must.must_items(cell)] == [
+        'must: Achilles chases him', 'MUST: Athena tricks Hector']
+
+
+def test_a_quoted_labelled_line_keeps_its_label():
+    parsed = must.parse_item('must: Priam: "I have kissed the hands"')
+    assert parsed.text == 'Priam: "I have kissed the hands"'
+
+
+class TestKeepMust:
+    OLD = 'Hector runs; must: Achilles chases him three times round the walls; Athena lies'
+
+    def test_a_rewrite_keeping_every_must_item_is_unchanged(self):
+        new = 'Hector flees;must: Achilles chases him three times round the walls'
+        kept = must.keep_must(self.OLD, new)
+        assert kept.value == new and not kept.changed
+
+    def test_a_dropped_must_item_is_put_back_at_its_place(self):
+        kept = must.keep_must(self.OLD, 'Hector flees; Athena takes the shape of Deiphobus')
+        assert kept.restored == ['must: Achilles chases him three times round the walls']
+        assert kept.value == ('Hector flees; must: Achilles chases him three times round '
+                              'the walls; Athena takes the shape of Deiphobus')
+
+    def test_a_reworded_must_item_is_replaced_by_the_authors(self):
+        kept = must.keep_must(self.OLD, 'Hector flees; must: Achilles pursues him round Troy')
+        assert kept.dropped == ['must: Achilles pursues him round Troy']
+        assert kept.restored == ['must: Achilles chases him three times round the walls']
+        assert kept.value == 'Hector flees; must: Achilles chases him three times round the walls'
+
+    def test_a_must_item_the_rewrite_made_up_is_left_out(self):
+        kept = must.keep_must('Hector runs', 'must: Hector runs; Achilles follows')
+        assert kept.dropped == ['must: Hector runs']
+        assert kept.value == 'Achilles follows'
+
+    def test_the_markers_spelling_and_spacing_do_not_count(self):
+        new = 'Hector flees; MUST :  Achilles chases him three times round the walls'
+        assert not must.keep_must(self.OLD, new).changed
+
+    def test_a_beat_kept_without_its_marker_is_marked_again_in_place(self):
+        new = 'Achilles chases him three times round the walls; Hector flees'
+        kept = must.keep_must(self.OLD, new)
+        assert kept.value == 'must: Achilles chases him three times round the walls; Hector flees'
+        assert kept.restored and not kept.dropped
+
+    def test_an_empty_rewrite_keeps_the_must_items(self):
+        assert must.keep_must(self.OLD, '').value == (
+            'must: Achilles chases him three times round the walls')
+
+    def test_no_must_items_leaves_any_rewrite(self):
+        assert must.keep_must('Hector runs', 'Hector flees').value == 'Hector flees'
+
+    def test_fields(self):
+        row = {'key_actions': self.OLD, 'key_dialogue': 'must: Hector: "Let me not die"',
+               'goal': 'must: survive'}
+        out, notes = must.keep_must_fields(row, {'key_actions': 'Hector flees',
+                                                 'key_dialogue': 'must: Hector: "Let me not die"',
+                                                 'goal': 'flee'})
+        assert out['key_actions'] == ('Hector flees; must: Achilles chases him three times '
+                                      'round the walls')
+        assert out['goal'] == 'flee'          # only MUST_FIELDS carry the marker
+        assert len(notes) == 1 and notes[0].startswith('key_actions: put back')
+
+
+@pytest.mark.parametrize('quote, beat, same', [
+    ('Searches removal logs', 'Searches removal logs', True),
+    ('must: searches removal logs.', 'Searches removal logs', True),       # marker, case
+    ('Searches the removal logs twice', 'Searches the removal logs twice over', True),
+    ('the logs', 'Searches the removal logs', False),                     # too few words
+    ('Burns the archive to the ground', 'Searches the removal logs', False),
+    ('', 'Searches removal logs', False),
+    ('must:', 'must:', False),                                             # no beat
+])
+def test_names_beat(quote, beat, same):
+    assert must.names_beat(quote, beat) is same
+
+
+# #642's review SF-3: a marker that marks nothing is found, for a NOTE
+@pytest.mark.parametrize('col, cell, found', [
+    ('key_dialogue', 'Priam: must: "Pity me, Achilles"', ['Priam: must: "Pity me, Achilles"']),
+    ('key_actions', '**must:** Priam kneels;Hector runs', ['**must:** Priam kneels']),
+    ('key_actions', '"must: Priam kneels"', ['"must: Priam kneels"']),
+    ('key_actions', 'must: Priam kneels;Hector runs', []),
+    ('key_actions', 'mustering: the Myrmidons arm', []),
+    ('outcome', 'must: Achilles relents', ['must: Achilles relents']),
+    ('knowledge_out', 'k-12;must: k-13', ['must: k-13']),
+    ('outcome', 'Achilles relents', []),
+])
+def test_misplaced(col, cell, found):
+    assert must.misplaced(cell, col) == found
+
+
+def test_item_beat():
+    # TD-6
+    assert must.parse_item('must: Priam kneels').beat
+    assert not must.parse_item('must:').beat
+    assert not must.parse_item('Priam kneels').beat
+
+
+# T9: a must beat written twice, and one the rewrite kept in another case
+def test_keep_must_with_a_beat_written_twice():
+    old = 'must: Priam kneels;Hector runs;must: Priam kneels'
+    kept = must.keep_must(old, 'Hector runs')
+    assert kept.value.count('must: Priam kneels') == 2
+
+
+def test_keep_must_puts_back_a_beat_reworded_in_case():
+    kept = must.keep_must('must: Achilles chases Hector', 'must: achilles chases hector')
+    assert kept.value == 'must: Achilles chases Hector'
+    assert kept.restored == ['must: Achilles chases Hector']
+    assert kept.dropped == ['must: achilles chases hector']

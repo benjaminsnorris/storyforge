@@ -74,6 +74,24 @@ class TestGatedWrite:
         assert calls == [('act1-sc01', 'draft'), ('act1-sc02', 'draft')]
         assert gate.pending(setup) == {}
 
+    def test_the_advisory_broken_promises_are_listed_at_the_end(self, setup, monkeypatch,
+                                                                 capsys):
+        """#642: a broken promise doesn't stop a scene; the run lists it."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                          'not delivered')
+
+        def fake(project_dir, scene_id, *, command, prose, log_dir, **k):
+            gate.record_advisory(project_dir, scene_id, command, [promise])
+            r = _result(scene_id, True)
+            return gate.GatedScene(prose, r, r)
+        monkeypatch.setattr(gate, 'gate_and_fix', fake)
+        gate.record_advisory(setup, 'act2-sc01', 'draft', [promise])   # not this run's
+        main(['--scenes', 'act1-sc01'])
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+        assert 'act1-sc01: PRM the brief\'s key_actions promises "Finds nothing"' in out
+
     def test_the_fixed_prose_is_what_is_saved(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
         fixed = GOOD.replace('word.', 'ending.')
@@ -259,6 +277,17 @@ class TestReview443:
         assert commits == ['Draft scene act1-sc01']
         assert not mock_git.calls_for('run_review_phase') and drift == []
         assert 'Skipping the timeline drift check and the review phase' in out
+
+    def test_the_advisory_list_is_committed_with_the_scene(self, setup, monkeypatch,
+                                                           mock_git):
+        """T7 (#642's review): working/gate-advisory.csv goes in the scene's
+        commit, so an advisory doesn't leave the tree dirty."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        main(['--scenes', 'act1-sc01'])
+        [paths] = [c[2] for c in mock_git.calls
+                   if c[0] == 'commit_and_push' and c[1] == 'Draft scene act1-sc01']
+        assert gate.ADVISORY_PATH in paths
 
     def test_a_failed_commit_of_a_scene_the_gate_stopped_says_both(
             self, setup, monkeypatch, capsys, mock_git):

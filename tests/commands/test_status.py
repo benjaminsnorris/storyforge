@@ -204,7 +204,7 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     assert data['next']['stage'] == 'logline'
     # Full verdict contract forge/elaborate route on — lock the whole shape.
     assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
-                         'ladder', 'next', 'then', 'blockers'}
+                         'ladder', 'next', 'then', 'blockers', 'advisory'}
     assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
     assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
     assert isinstance(data['blockers'], list)
@@ -566,3 +566,67 @@ def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
                              'reference', 'voice-guide.md'),
                 os.path.join(project_dir, 'reference', 'voice-guide.md'))
     assert status.build_status(project_dir)['next']['stage'] != 'voice'
+
+
+def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
+    """#642: the gate's advisory broken promises are in the verdict and the
+    human output, and never a blocker or the next step."""
+    from storyforge import gate
+    from storyforge.checker import Finding
+    gate.record_advisory(project_dir, 'act1-sc02', 'draft', [Finding(
+        'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
+    verdict = status.build_status(project_dir)
+    # TD-3: records, not preformatted lines
+    assert verdict['advisory'] == [{
+        'scene_id': 'act1-sc02', 'command': 'draft', 'source': 'key_actions',
+        'quote': 'Finds nothing', 'stale': '',
+        'finding': 'PRM the brief\'s key_actions promises "Finds nothing" — not delivered'}]
+    assert not any(b['source'] == 'gate' for b in verdict['blockers'])
+    assert verdict['next']['stage'] != 'check'
+    out = cmd_status.render_human(verdict)
+    assert 'ADVISORY: 1 broken promise(s) the gate reported but did not stop on' in out
+    assert '  act1-sc02: PRM the brief' in out
+
+
+def test_no_advisory_section_without_any(project_dir):
+    verdict = status.build_status(project_dir)
+    assert verdict['advisory'] == []
+    assert 'ADVISORY' not in cmd_status.render_human(verdict)
+
+
+def test_an_unreadable_advisory_list_says_so(project_dir):
+    from storyforge import gate
+    os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+    with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
+        f.write('bad header\n')
+    # CR-4, SF-5, TD-2: a gate blocker, never listed as a promise
+    verdict = status.build_status(project_dir)
+    assert verdict['advisory'] == []
+    [blocker] = [b for b in verdict['blockers'] if b['source'] == 'gate']
+    assert blocker['detail'].startswith(f'{gate.ADVISORY_PATH} could not be read')
+    out = cmd_status.render_human(verdict)
+    assert 'ADVISORY' not in out and f'{gate.ADVISORY_PATH} could not be read' in out
+
+
+def test_an_advisory_row_the_scene_moved_past_says_so(project_dir):
+    # SF-7, TD-4: the row was found on other prose, or another brief
+    from storyforge import gate
+    from storyforge.checker import Finding
+    finding = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                      'not delivered')
+    path = os.path.join(project_dir, 'scenes', 'act1-sc02.md')
+    prose = open(path).read()
+    gate.record_advisory(project_dir, 'act1-sc02', 'draft', [finding], prose=prose)
+    assert status.build_status(project_dir)['advisory'][0]['stale'] == ''
+    with open(path, 'a') as f:
+        f.write('\nShe closed the ledger.\n')
+    [row] = status.build_status(project_dir)['advisory']
+    assert row['stale'] == gate.STALE_PROSE
+    assert gate.STALE_PROSE in cmd_status.render_human(status.build_status(project_dir))
+    gate.record_advisory(project_dir, 'act1-sc02', 'draft', [finding],
+                         prose=open(path).read())
+    briefs = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    text = open(briefs).read().replace('Searches removal logs', 'Burns the archive')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    assert status.build_status(project_dir)['advisory'][0]['stale'] == gate.STALE_BRIEF

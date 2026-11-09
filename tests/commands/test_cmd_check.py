@@ -360,6 +360,24 @@ class TestKeepGoing:
         assert 'Not checked' not in report
         assert commits and commits[-1][0] == 'Check: 1 of 3 scene(s) passed'
 
+    def test_the_advisory_broken_promises_are_listed(self, project, monkeypatch, capsys):
+        """#642: a broken promise doesn't stop a scene, but the run lists it."""
+        from storyforge.checker import Finding
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', SCENE)
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                          'not delivered')
+        gate.record_advisory(project_dir, SCENE, 'advisor', [promise])
+        gate.record_advisory(project_dir, 'act2-sc01', 'advisor', [promise])
+        _fake_gate(monkeypatch, {})
+        cmd_check.main(['--pending'])                          # all pass: exit 0
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+        assert f'{SCENE}: PRM the brief\'s key_actions promises "Finds nothing"' in out
+        assert 'act2-sc01' not in out.split('WARNING: 1 broken promise')[1]   # not checked
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert '## Advisory' in report and 'Finds nothing' in report
+
     def test_results_after_a_failure_are_provisional(self, project, monkeypatch, capsys):
         project_dir, _ = project
         self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')

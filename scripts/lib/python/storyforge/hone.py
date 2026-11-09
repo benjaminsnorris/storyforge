@@ -1557,6 +1557,17 @@ def _labels_block(labels: str) -> str:
     return f'\n{labels}\n' if labels else ''
 
 
+def _must_block(current_values: dict[str, str], fields) -> str:
+    """A brief rewrite prompt's rule for the author's `must:` items (#642),
+    after its rules: '' when the fields it rewrites have none. The rewrite
+    is held to it in code too (`must.keep_must`)."""
+    from storyforge.must import MUST_FIELDS, must_items
+    if not any(must_items(current_values.get(f, '') or '') for f in fields if f in MUST_FIELDS):
+        return ''
+    return ('\nItems that start with `must:` are beats the author requires: copy each one '
+            'exactly as written, `must:` included, and never cut, merge or reword one.\n')
+
+
 def build_concretize_prompt(
     scene_id: str,
     fields: list[str],
@@ -1608,7 +1619,7 @@ def build_concretize_prompt(
 4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
 5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
 6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
-{_labels_block(labels)}
+{_labels_block(labels)}{_must_block(current_values, fields)}
 ## Output Format
 
 Return each field on its own labeled line, exactly like the input but rewritten:
@@ -1685,7 +1696,7 @@ def build_trim_prompt(
 2. For emotions: use 2 beats maximum (start → end). "resolve;bitter-defiance" not "resolve;frustration;bitter-resignation;quiet-defiance".
 3. For decision/crisis/goal/conflict: one clause. No sentences, no em-dashes, no elaboration.
 4. Preserve the MEANING — just say it in fewer words.
-{_labels_block(labels)}
+{_labels_block(labels)}{_must_block(current_values, [i['field'] for i in issues])}
 ## Output Format
 
 Return each field on its own labeled line:
@@ -1825,7 +1836,7 @@ def build_evaluation_fix_prompt(
 2. Every action must be something the POV character physically does or perceives. No thematic descriptions, no narrator interpretations.
 3. Do not invent characters, locations, or events not implied by the existing fields.
 4. Keep each field concise — brief contract language, not prose.
-{_labels_block(labels)}
+{_labels_block(labels)}{_must_block(current_values, fields)}
 ## Output Format
 
 Return each field on its own labeled line:
@@ -1858,14 +1869,22 @@ def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values:
     number of fields changed."""
     from storyforge.brief_names import invented_names
     from storyforge.illustrations import read_scene_prose
+    from storyforge.must import MUST_FIELDS, keep_must_fields, unmarked
     changed = {f: v for f, v in rewrites.items() if v and v != current_values.get(f)}
+    # #642: a `must` beat is the author's; a rewrite never drops or rewords one
+    changed, must_notes = keep_must_fields(row, changed)
+    for note in must_notes:
+        log(f'    NOTE: {sid}: {kind} rewrite: {note}')
+    changed = {f: v for f, v in changed.items() if v != row.get(f)}
     if not changed:
         return 0
     prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
     notes: list[str] = []
     prose = (read_scene_prose(prose_path, notes=notes, label=f'scenes/{sid}.md')
              if os.path.isfile(prose_path) else '')
-    names = invented_names(list(changed.values()), '\n'.join((known_reference, prose)))
+    # the author's `must` items are theirs, not the rewrite's: not name-checked
+    names = invented_names([unmarked(v) if f in MUST_FIELDS else v for f, v in changed.items()],
+                           '\n'.join((known_reference, prose)))
     if names:
         reason = f'{kind} rewrite of {", ".join(sorted(changed))} named {", ".join(names)}'
         log(f'    WARNING: not rewriting {sid}: the {reason}, which appear nowhere in the '

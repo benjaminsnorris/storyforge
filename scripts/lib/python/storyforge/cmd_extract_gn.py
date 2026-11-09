@@ -670,6 +670,12 @@ def _merge_rows_into_csv(csv_path: str, columns: list[str],
                 skipped += 1
                 continue
             # Merge: overwrite only the fields present in the new row.
+            # #642: a `must` beat is the author's; a forced re-extraction
+            # keeps it (its review SF-4)
+            from storyforge.must import keep_must_fields
+            r, notes = keep_must_fields(by_id[sid], {k: v for k, v in r.items() if v})
+            for note in notes:
+                log(f'  NOTE: {sid}: {note}')
             for k, v in r.items():
                 if v:
                     by_id[sid][k] = v

@@ -2582,6 +2582,32 @@ class TestDiscardKeepsTheBlockedList:
         assert [r['quote'] for r in gate.blocked(project_dir)[SCENE]] == [
             'The coffeepot sat cold on the stove']
 
+    def test_the_advisory_list_is_put_back_to_the_kept_run(self, project_dir, monkeypatch,
+                                                           tmp_path):
+        """T4 (#642's review): the discarded fix's advisory promises don't
+        replace the kept run's."""
+        from storyforge.checker import Finding
+        first, again = self._first_and_worse()
+        first.advisory = [Finding('broken-promise', 'PRM', '', '', 'Finds nothing',
+                                  'key_actions', 'kept run')]
+        again.advisory = [Finding('broken-promise', 'PRM', '', '', 'Searches removal logs',
+                                  'key_actions', 'discarded fix')]
+        runs = iter([first, again])
+
+        def gate_run(pd, sid, *, command, **k):
+            r = next(runs)
+            gate._note_advisory(pd, sid, command, r, prose='x')   # as the real gate does
+            gate._note_blocked(pd, sid, command, r)
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', gate_run)
+        monkeypatch.setattr(gate, 'fix_scene', lambda sid, prose, result, **k: (
+            k['edits_out'].append({'find': 'x', 'replace': 'y'}) or self.FIXED))
+        monkeypatch.setattr(gate, '_brief_phrases', lambda *a: [])
+        out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=self.PROSE,
+                                log_dir=str(tmp_path))
+        assert out.discarded == 1
+        assert [r['quote'] for r in gate.advisories(project_dir)[SCENE]] == ['Finds nothing']
+
     def test_a_file_that_cannot_be_written_is_said_and_the_prose_kept(
             self, project_dir, monkeypatch, tmp_path):
         first, again = self._first_and_worse()
@@ -2900,8 +2926,10 @@ class TestAccepted:
         promise = {'kind': 'broken-promise', 'code': 'PRM', 'scene_quote': '',
                    'established_scene': '', 'fact_id': 'outcome', 'explanation': 'w',
                    'established_quote': outcome}
-        result = _gate(project_dir, tmp_path, [_commitment()], findings=[promise],
+        both = [promise, {**_contradiction(), 'scene_quote': 'no such words in the scene'}]
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=both,
                        command='recheck')
+        # #642: the broken promise is advisory; the unverified contradiction blocks
         assert not result.passed and gate.blocked(project_dir) == {}
 
     def test_accepting_moves_them_and_lists_a_failed_recheck_again(self, project_dir, tmp_path):
@@ -3636,3 +3664,394 @@ class TestALinkPastTheOfferCap:
         assert not result.passed and not result.committed
         assert result.problems['ends'] == [f'{SCENE}: {nothing}']
         assert gate._only_extractor_slips(result)   # so it earns the re-extraction
+
+
+# ============================================================================
+# #642: a broken promise is advisory unless the brief marks the beat `must:`
+# ============================================================================
+
+def _set_brief(project_dir, **cols):
+    """Set the scene's brief columns, pipe-delimited and unquoted as the
+    project writes them."""
+    path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    header = lines[0].split('|')
+    for n, line in enumerate(lines[1:], start=1):
+        cells = line.split('|')
+        if cells[0] == SCENE:
+            for col, value in cols.items():
+                cells[header.index(col)] = value
+            lines[n] = '|'.join(cells)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
+def _promise(quote, fact_id='key_actions', scene_quote=''):
+    return {'kind': 'broken-promise', 'code': 'PRM', 'scene_quote': scene_quote,
+            'established_scene': '', 'fact_id': fact_id, 'explanation': 'not delivered',
+            'established_quote': quote}
+
+
+class TestAdvisoryPromises:
+    def test_a_broken_promise_is_reported_but_does_not_stop_the_scene(
+            self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Searches removal logs')])
+        assert result.passed and result.committed
+        assert [f.established_quote for f in result.advisory] == ['Searches removal logs']
+        assert result.findings == [] and gate.problems_to_fix(result) == []
+        lines = gate.report_lines(result)
+        advisory = [line for line in lines if line.startswith('ADVISORY')]
+        assert len(advisory) == 1 and 'Searches removal logs' in advisory[0]
+        assert 'must:' in advisory[0] and gate.ADVISORY_PATH in advisory[0]
+        assert not any(line.startswith('ADVISORY') for line in gate.blocking_lines(lines))
+        rows = gate.advisories(project_dir)[SCENE]
+        assert [(r['command'], r['source'], r['quote']) for r in rows] == [
+            ('draft', 'key_actions', 'Searches removal logs')]
+
+    def test_a_broken_must_beat_still_stops_the_scene(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Cross-references maps;must: Searches removal '
+                                            'logs;Finds nothing')
+        # the check may quote the beat without its marker, or with it
+        for quote in ('Searches removal logs', 'must: Searches removal logs'):
+            result = _gate(project_dir, tmp_path, [_commitment()], findings=[_promise(quote)])
+            assert not result.passed and not result.committed
+            assert result.advisory == []
+            assert [f.established_quote for f in result.findings] == [quote]
+            assert any('Broken promise' in p for p in gate.problems_to_fix(result))
+            assert gate.advisories(project_dir) == {}
+
+    def test_only_the_must_beat_blocks(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Cross-references maps;MUST : Searches removal '
+                                            'logs;Finds nothing')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Finds nothing'), _promise('Searches removal logs')])
+        assert not result.passed
+        assert [f.established_quote for f in result.findings] == ['Searches removal logs']
+        assert [f.established_quote for f in result.advisory] == ['Finds nothing']
+        # reported on a failing run too
+        assert [r['quote'] for r in gate.advisories(project_dir)[SCENE]] == ['Finds nothing']
+
+    def test_an_unverified_broken_promise_is_advisory(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Burns the archive to the ground')])
+        assert result.passed
+        assert [f.problem != '' for f in result.advisory] == [True]
+        assert result.unverified == []
+        assert 'unverified' in gate.advisories(project_dir)[SCENE][0]['finding']
+
+    def test_an_unverified_broken_must_beat_blocks(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Cross-references maps;must: Searches the '
+                                            'removal logs twice over')
+        # quoted in part, under a made-up id: not verified, still the must beat's
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Searches the removal logs twice', fact_id='beat-3')])
+        assert not result.passed and result.advisory == []
+        assert len(result.unverified) == 1
+
+    def test_a_registry_promise_is_advisory(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('', fact_id='village-vanished')])
+        assert result.passed and [f.fact_id for f in result.advisory] == ['village-vanished']
+
+    # #642's review: when the brief has a must beat, only a quote that is
+    # positively an unmarked item is advisory (TD-1, CR-2, T2)
+    def test_a_paraphrased_must_beat_blocks(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions="Cross-references maps;must: Priam kisses "
+                                            "Achilles' hands")
+        for quote in ('Priam kisses the hands of Achilles', 'Priam kneels and kisses hands'):
+            result = _gate(project_dir, tmp_path, [_commitment()],
+                           findings=[_promise(quote)])
+            assert not result.passed and result.advisory == [], quote
+            assert [w for _, w in result.promise_why] == [gate.MUST_BEAT]
+
+    def test_a_short_partial_quote_of_a_must_beat_blocks(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Cross-references maps;must: Achilles chases him '
+                                            'round the walls')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Achilles chases him')])
+        assert not result.passed and result.advisory == []
+
+    def test_a_quote_naming_an_unmarked_item_stays_advisory(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Searches the removal logs for the village;'
+                                            'must: Dorren burns the archive')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('the removal logs for the village')])
+        assert result.passed
+        assert [f.established_quote for f in result.advisory] == [
+            'the removal logs for the village']
+
+    def test_a_verified_outcome_promise_is_advisory_beside_a_must_beat(
+            self, project_dir, tmp_path):
+        # SF-6: outcome takes no marker; sharing words with a must beat
+        # doesn't make its promise one
+        _set_brief(project_dir, outcome='Dorren searches removal logs and finds nothing',
+                   key_actions='must: Dorren searches removal logs')
+        for quote in ('Dorren searches removal logs and finds nothing',
+                      'searches removal logs and finds nothing'):
+            result = _gate(project_dir, tmp_path, [_commitment()],
+                           findings=[_promise(quote, fact_id='outcome')])
+            assert result.passed and len(result.advisory) == 1, quote
+
+    def test_a_must_line_reported_under_another_field_blocks(self, project_dir, tmp_path):
+        # T1: the check files the must line under key_actions, which has a
+        # must beat of its own
+        _set_brief(project_dir, key_actions='Hector runs;must: Achilles chases him round the '
+                                            'walls',
+                   key_dialogue='must: Dorren: "I have kissed the hands of the man"')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Dorren: "I have kissed the hands of the man"')])
+        assert not result.passed and result.advisory == []
+
+    def test_a_must_line_beside_its_unmarked_longer_form_blocks(self, project_dir, tmp_path):
+        # SF-1: the check reports the unmarked line (advisory); the must line
+        # inside it is missing too, and still blocks
+        _set_brief(project_dir, key_dialogue='Dorren: "The map has been altered by hand, '
+                                             'Tessa";must: Dorren: "The map has been altered '
+                                             'by hand"')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_promise(
+            'Dorren: "The map has been altered by hand, Tessa"', fact_id='key_dialogue')])
+        assert not result.passed
+        assert [f.established_quote for f in result.advisory] == [
+            'Dorren: "The map has been altered by hand, Tessa"']
+        assert [f.established_quote for f in result.findings] == [
+            'must: Dorren: "The map has been altered by hand"']
+
+    def test_a_registry_promise_set_up_in_this_scene_blocks(self, project_dir, tmp_path):
+        # CR-1, SF-2: the ledger sets archive-key-dorren up in this scene;
+        # committed without it, later scenes would be read against a fact
+        # the prose never established
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('', fact_id='archive-key-dorren')])
+        assert not result.passed and not result.committed and result.advisory == []
+        assert [f.fact_id for f in result.findings] == ['archive-key-dorren']
+        line = next(line for line in gate.report_lines(result)
+                    if line.startswith('BROKEN-PROMISE'))
+        assert 'blocking: the ledger sets up archive-key-dorren in this scene' in line
+        assert any('archive-key-dorren' in p for p in gate.problems_to_fix(result))
+
+    def test_a_later_run_without_one_clears_the_scenes_rows(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
+        assert SCENE in gate.advisories(project_dir)
+        _gate(project_dir, tmp_path, [_commitment()], command='recheck')
+        assert gate.advisories(project_dir) == {}
+        assert not os.path.exists(os.path.join(project_dir, gate.ADVISORY_PATH))
+
+    def test_a_bare_marker_is_reported(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Cross-references maps;must:;Finds nothing')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Finds nothing')])
+        assert result.passed and result.bare_must == ['key_actions (1)']
+        assert any(line.startswith('NOTE (brief items that are only the must: marker')
+                   for line in gate.report_lines(result))
+
+    def test_a_misplaced_marker_is_reported(self, project_dir, tmp_path):
+        # SF-3: the label-first form marks nothing, and says so
+        _set_brief(project_dir, key_dialogue='Dorren: must: "The map has been altered"',
+                   outcome='must: Dorren pursues it')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed
+        assert result.misplaced_must == ['outcome: must: Dorren pursues it',
+                                         'key_dialogue: Dorren: must: "The map has been altered"']
+        assert any(line.startswith('NOTE (brief items with a must: that marks nothing')
+                   for line in gate.report_lines(result))
+
+    def test_an_unwritable_list_is_a_warning_not_a_stop(self, project_dir, tmp_path, capsys):
+        os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+        with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
+            f.write('not|the|header\n')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Finds nothing')])
+        assert result.passed
+        assert f'{gate.ADVISORY_PATH} could not be updated' in capsys.readouterr().out
+
+    def test_advisory_lines(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
+        lines = gate.advisory_lines(project_dir)
+        assert lines == [f'{SCENE}: PRM the brief\'s key_actions promises "Finds nothing" '
+                         f'— not delivered']
+        assert gate.advisory_lines(project_dir, ['act1-sc01']) == []
+
+    def test_a_gate_run_stamps_its_rows_with_what_it_read(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
+        [row] = gate.advisories(project_dir)[SCENE]
+        assert row['paragraphs'].startswith('prose=') and ';brief=' in row['paragraphs']
+        assert [r['stale'] for r in gate.read_advisory(project_dir).rows] == ['']
+
+    def test_an_unreadable_list_is_a_warning_not_a_promise(self, project_dir):
+        # CR-4, SF-5, TD-2
+        os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+        with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
+            f.write('not|the|header\n')
+        found = gate.read_advisory(project_dir)
+        assert found.rows == [] and len(found.problems) == 1
+        assert gate.advisory_lines(project_dir) == []
+        [line] = gate.advisory_summary(project_dir)
+        assert line.startswith(f'WARNING: {gate.ADVISORY_PATH} could not be read')
+        assert 'broken promise' not in line
+
+    def test_an_unreadable_reading_order_is_said(self, project_dir, tmp_path):
+        # SF-8: listed unordered, and said
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
+        with patch('storyforge.ledger.scene_order', side_effect=ValueError('no seq')):
+            found = gate.read_advisory(project_dir)
+            summary = gate.advisory_summary(project_dir)
+        assert len(found.rows) == 1
+        assert found.problems == [f'{gate.ADVISORY_PATH}: listed unordered, the reading '
+                                  f'order could not be read: no seq']
+        assert summary[0] == f'WARNING: {found.problems[0]}'
+        assert summary[1].startswith('WARNING: 1 broken promise(s)')
+
+    def test_gate_and_fix_does_not_fix_an_advisory_promise(self, project_dir, tmp_path):
+        calls = []
+
+        def fake(path, body, **k):
+            calls.append(body)
+            if 'tools' in body:
+                return _text({'findings': [_promise('Finds nothing')], 'kept': []})
+            if 'commitments' in body['output_config']['format']['schema']['properties']:
+                return _text({'commitments': [_commitment()]})
+            raise AssertionError('the fix was called')
+        prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake, ())):
+            out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=prose,
+                                    log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                    check_model='m')
+        assert out.result.passed and not out.fixed and out.rounds == []
+
+
+class TestMustLines:
+    """A `must` beat's scripted words are checked word for word, by code."""
+
+    def test_a_must_line_in_the_prose_passes(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: Dorren: "It was here last quarter"')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed
+
+    def test_a_must_line_missing_from_the_prose_blocks(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert not result.passed
+        [f] = result.findings
+        assert (f.kind, f.fact_id) == ('broken-promise', 'key_dialogue')
+        assert 'The map has been altered by hand' in f.explanation
+        assert f.established_quote == 'must: Dorren: "The map has been altered by hand"'
+
+    def test_a_paraphrase_is_not_the_line(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: Dorren: "It was there last quarter"')
+        assert not _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_an_unmarked_missing_line_is_left_to_the_check(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'Dorren: "The map has been altered by hand"')
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_a_quoted_line_in_a_must_action_is_checked(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='must: Dorren says "the map has been altered"')
+        assert not _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_an_unquoted_must_action_is_left_to_the_check(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='must: Dorren burns the archive')
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_the_code_found_finding_has_its_own_code(self, project_dir, tmp_path):
+        # TD-5: told apart from a checker's reading
+        _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
+        [f] = _gate(project_dir, tmp_path, [_commitment()]).findings
+        assert f.code == gate.MUST_CODE != 'PRM'
+
+    # T3: an unquoted must line, with a cast label or a role label
+    def test_an_unquoted_cast_labelled_line_in_the_prose_passes(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: Dorren: It was here last quarter')
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_an_unquoted_role_labelled_line_in_the_prose_passes(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: The old cartographer: It was here last quarter')
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_an_unquoted_role_labelled_line_missing_blocks(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: The old cartographer: The map was altered by '
+                                       'hand')
+        assert not _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_a_must_line_too_short_to_check_is_noted(self, project_dir, tmp_path):
+        # CR-5: not checked by code, and said
+        _set_dialogue_raw(project_dir, 'must: Dorren: "Pity me."')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed and result.short_must == ['key_dialogue: "Pity me."']
+        assert any(line.startswith('NOTE (must: lines under 3 words')
+                   and 'Pity me.' in line for line in gate.report_lines(result))
+
+    def test_one_finding_when_the_check_reported_it_too(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Dorren: "The map has been altered by hand"',
+                                          fact_id='key_dialogue')])
+        assert len(result.findings) == 1 and result.findings[0].explanation == 'not delivered'
+
+
+class TestMustLineFixed:
+    def test_gate_and_fix_fixes_a_missing_must_line(self, project_dir, tmp_path):
+        """T5: the code-found must finding goes to the fix, and the fixed
+        scene passes."""
+        _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
+        prompts = []
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            if 'edits' in json.dumps(body.get('output_config', {})):
+                prompts.append(body['messages'][0]['content'])
+                return _text({'edits': [{
+                    'problem': 1, 'find': 'She tapped the empty space on the map.',
+                    'replace': 'She tapped the empty space on the map. "The map has been '
+                               'altered by hand," she said.'}]})
+            return _text({'commitments': [_commitment()]})
+        prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake, ())):
+            out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=prose,
+                                    log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                    check_model='m')
+        assert len(prompts) == 1 and 'The map has been altered by hand' in prompts[0]
+        assert out.fixed and out.result.passed, gate.report_lines(out.result)
+
+
+def _set_dialogue_raw(project_dir, value):
+    _set_brief(project_dir, key_dialogue=value)
+
+
+class TestVerbatimIn:
+    PROSE = '"Left hand on the case," he said quietly. "Right hand free." She nodded.'
+
+    def test_whole(self):
+        assert gate._verbatim_in('right hand free', self.PROSE)
+
+    def test_split_by_a_speech_tag(self):
+        assert gate._verbatim_in('Left hand on the case, right hand free.', self.PROSE)
+
+    def test_parts_too_far_apart(self):
+        prose = ('"Left hand on the case," he said, and then he walked to the window and '
+                 'looked out at the rain for a long time. "Right hand free."')
+        assert not gate._verbatim_in('Left hand on the case, right hand free.', prose)
+
+    def test_words_put_inside_the_quotation_are_not_a_tag(self):
+        # CR-3: the inserted words invert the line; they are inside the quote
+        line = 'I have kissed the hands, of the man, who killed my son'
+        assert not gate._verbatim_in(
+            line, '"I have kissed the hands, he said, but never of the man who killed my son."')
+        assert gate._verbatim_in(
+            line, '"I have kissed the hands," he said, "of the man, who killed my son."')
+        assert not gate._verbatim_in(
+            'Kill him, now', '"Kill him," she said, "never, not now."')
+
+    def test_curly_quotes_split_by_a_tag(self):
+        assert gate._verbatim_in('Left hand on the case, right hand free.',
+                                 '\u201cLeft hand on the case,\u201d he said. '
+                                 '\u201cRight hand free.\u201d')
+
+    def test_quotations_in_different_paragraphs_are_not_joined(self):
+        assert not gate._verbatim_in('Left hand on the case, right hand free.',
+                                     '"Left hand on the case," he said.\n\n"Right hand free."')
+
+    def test_a_word_changed(self):
+        assert not gate._verbatim_in('Left hand on the box, right hand free.', self.PROSE)

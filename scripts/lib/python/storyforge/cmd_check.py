@@ -49,7 +49,7 @@ goes on, re-check failures included. At the end a summary lists every
 scene that didn't pass with its findings, the re-checks that failed or
 weren't run, and the exact `storyforge check --accept a,b,c` for the
 scenes this run recorded contradictions for (a scene that couldn't be
-checked, or failed only on a broken promise, an unverified quote, an
+checked, or failed only on a broken `must` beat, an unverified quote, an
 extraction problem or a halt, has nothing to accept and is named apart),
 and it exits 1 if any didn't pass. A scene checked after an earlier one
 that hadn't passed (in the run, or a re-check) and that depends on it
@@ -69,8 +69,16 @@ accepts the verified contradictions that stopped each scene's last gate run
 instead of stopping, and a failed re-check is listed for a re-check again.
 No model call; it commits, and `--pending` then checks the scenes. Only
 verified contradictions a gate run recorded can be accepted: broken
-promises, unverified quotes, extraction problems, halts and a check that
-couldn't run still have to be fixed.
+`must` beats, unverified quotes, extraction problems, halts and a check
+that couldn't run still have to be fixed.
+
+A broken promise (a brief item the prose doesn't deliver) doesn't stop a
+scene (#642): the brief is a plan and the prose stands. It is reported
+(ADVISORY), kept in `working/gate-advisory.csv`, and listed at the end of
+the run. A `key_actions` or `key_dialogue` item the author starts with
+`must:` still stops the scene when broken, and its quoted words must be in
+the prose word for word; so does a promised registry fact the ledger sets
+up in this scene, which only the prose can establish.
 """
 
 from __future__ import annotations
@@ -257,6 +265,11 @@ def main(argv=None):
     if summary:
         report += ['## Summary', ''] + summary + ['']
         for line in summary:   # before the commit: a failed commit mustn't hide it
+            log(line)
+    advisory = gate.advisory_summary(project_dir, scene_ids)
+    if advisory:
+        report += ['## Advisory', ''] + advisory + ['']
+        for line in advisory:
             log(line)
     path = os.path.join(project_dir, REPORT_PATH)
     try:
@@ -565,7 +578,7 @@ def _keep_going_summary(project_dir: str, run: _Run) -> list[str]:
                      f'`storyforge check --pending`.')
     if to_fix:
         lines.append(f'Nothing to accept for {", ".join(to_fix)} (no verified contradiction '
-                     f'stopped it in this run: a broken promise, an unverified quote, an '
+                     f'stopped it in this run: a broken must beat, an unverified quote, an '
                      f'extraction problem, a halt, or a check that could not run): fix the '
                      f'scene, its brief or the book, then check it again.')
     return lines

@@ -156,3 +156,18 @@ def test_the_gate_makes_a_planned_fact_binding_when_the_prose_establishes_it():
     assert ledger.fill_quote(rows, 'f', 'the archivist knew where it went')
     assert rows[0]['status'] == 'binding'
     assert rows[0]['quote'] == 'the archivist knew where it went'
+
+
+def test_a_rerun_keeps_the_authors_must_beats(novel, mock_api, capsys):
+    """#642: regenerating a brief never drops or rewords a `must` beat."""
+    from storyforge.elaborate import _read_csv_as_map
+    _run(mock_api, _briefs(_row('new-x1', 'archivist-knows-village')))
+    from storyforge.enrich import update_csv_field
+    path = os.path.join(novel, 'reference', 'scene-briefs.csv')
+    update_csv_field(path, 'new-x1', 'key_actions', 'Asks;must: Kael burns the ledger')
+    update_csv_field(path, 'new-x1', 'key_dialogue', 'must: Kael: "Ask me again"')
+    _run(mock_api, _briefs(_row('new-x1', 'archivist-knows-village')))
+    row = _read_csv_as_map(path)['new-x1']
+    assert row['key_actions'] == 'Asks; must: Kael burns the ledger; Listens'
+    assert row['key_dialogue'].startswith('must: Kael: "Ask me again"')
+    assert 'put back the author\'s must item(s)' in capsys.readouterr().out

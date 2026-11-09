@@ -372,11 +372,14 @@ COLUMN_SCHEMA = {
     },
     'key_actions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Concrete things that happen in this scene.',
+        'description': ('Concrete things that happen in this scene. An item starting `must:` '
+                        'is a beat the author requires (see below).'),
     },
     'key_dialogue': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Specific lines or exchanges that must appear.',
+        'description': ('Specific lines or exchanges the scene should carry. Label each quoted '
+                        'line\'s speaker (`Name: "line"`); see scene-column-guide.md. An item '
+                        'starting `must:` is required word for word (see below).'),
     },
     'emotions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',

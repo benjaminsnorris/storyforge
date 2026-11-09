@@ -19,9 +19,11 @@ finish isn't counted). They are not false alarms by default: the judge
 looks only for the case's error, and most of the first 14 (#478's
 recording) were other real errors the replay made (2026-11-01).
 `gate_new` / `gate_plan_conflicts` / `gate_extraction` / `gate_inherited`
-sum what the gate's last run found over the gated replays
+/ `gate_advisory` sum what the gate's last run found over the gated replays
 (`e8.gate_counts`): `gate_inherited` is what was already in the book
-before the pass, reported but not blocking. A prose replay with no counts
+before the pass, reported but not blocking; `gate_advisory` (#642) the
+broken promises of beats the brief doesn't mark `must:`, reported but not
+blocking (before #642 they were in `gate_new` and blocked). A prose replay with no counts
 (the naturalness-upstream family gates through revise itself; a gate that
 couldn't finish) is noted and counted in `gate_counts_missing`.
 """

@@ -951,6 +951,19 @@ class TestDeferralThroughMain:
         assert deferred == [frozenset({'act2-sc01'}), frozenset()]
         assert finals == [set()]   # the final re-check, nothing skipped
 
+    def test_a_plan_run_lists_the_advisory_promises_and_a_dry_run_does_not(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """T6 (#642's review): `main` calls `_log_advisory` after a plan run,
+        and not on a dry run."""
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        self._run(project_dir, monkeypatch, mock_git, None)
+        calls = []
+        monkeypatch.setattr(cmd_revise, '_log_advisory', lambda pd: calls.append(pd))
+        main(['--dry-run'])
+        assert calls == []
+        main([])
+        assert calls == [project_dir]
+
     def test_a_final_recheck_that_fails_exits_1(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
         mock_api.set_response('=== SCENE: act1-sc01 === ...')
@@ -962,3 +975,17 @@ class TestDeferralThroughMain:
         out = capsys.readouterr().out
         assert 'a re-check they owed did not finish: new-x1 (re-checked after the last' in out
         assert 'All revision passes are done' not in out
+
+
+def test_revise_lists_the_advisory_broken_promises(project_dir, capsys):
+    """#642: revise's end of run lists the gate's advisory broken promises."""
+    from storyforge import cmd_revise, gate
+    from storyforge.checker import Finding
+    cmd_revise._log_advisory(project_dir)
+    assert 'broken promise' not in capsys.readouterr().out      # none: nothing said
+    gate.record_advisory(project_dir, 'act1-sc02', 'revise', [Finding(
+        'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
+    cmd_revise._log_advisory(project_dir)
+    out = capsys.readouterr().out
+    assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+    assert 'act1-sc02: PRM the brief\'s key_actions promises "Finds nothing"' in out
