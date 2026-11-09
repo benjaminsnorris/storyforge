@@ -278,6 +278,17 @@ class TestReview443:
         assert not mock_git.calls_for('run_review_phase') and drift == []
         assert 'Skipping the timeline drift check and the review phase' in out
 
+    def test_the_advisory_list_is_committed_with_the_scene(self, setup, monkeypatch,
+                                                           mock_git):
+        """T7 (#642's review): working/gate-advisory.csv goes in the scene's
+        commit, so an advisory doesn't leave the tree dirty."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        main(['--scenes', 'act1-sc01'])
+        [paths] = [c[2] for c in mock_git.calls
+                   if c[0] == 'commit_and_push' and c[1] == 'Draft scene act1-sc01']
+        assert gate.ADVISORY_PATH in paths
+
     def test_a_failed_commit_of_a_scene_the_gate_stopped_says_both(
             self, setup, monkeypatch, capsys, mock_git):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})

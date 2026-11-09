@@ -2582,6 +2582,32 @@ class TestDiscardKeepsTheBlockedList:
         assert [r['quote'] for r in gate.blocked(project_dir)[SCENE]] == [
             'The coffeepot sat cold on the stove']
 
+    def test_the_advisory_list_is_put_back_to_the_kept_run(self, project_dir, monkeypatch,
+                                                           tmp_path):
+        """T4 (#642's review): the discarded fix's advisory promises don't
+        replace the kept run's."""
+        from storyforge.checker import Finding
+        first, again = self._first_and_worse()
+        first.advisory = [Finding('broken-promise', 'PRM', '', '', 'Finds nothing',
+                                  'key_actions', 'kept run')]
+        again.advisory = [Finding('broken-promise', 'PRM', '', '', 'Searches removal logs',
+                                  'key_actions', 'discarded fix')]
+        runs = iter([first, again])
+
+        def gate_run(pd, sid, *, command, **k):
+            r = next(runs)
+            gate._note_advisory(pd, sid, command, r, prose='x')   # as the real gate does
+            gate._note_blocked(pd, sid, command, r)
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', gate_run)
+        monkeypatch.setattr(gate, 'fix_scene', lambda sid, prose, result, **k: (
+            k['edits_out'].append({'find': 'x', 'replace': 'y'}) or self.FIXED))
+        monkeypatch.setattr(gate, '_brief_phrases', lambda *a: [])
+        out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=self.PROSE,
+                                log_dir=str(tmp_path))
+        assert out.discarded == 1
+        assert [r['quote'] for r in gate.advisories(project_dir)[SCENE]] == ['Finds nothing']
+
     def test_a_file_that_cannot_be_written_is_said_and_the_prose_kept(
             self, project_dir, monkeypatch, tmp_path):
         first, again = self._first_and_worse()
@@ -3962,6 +3988,32 @@ class TestMustLines:
                        findings=[_promise('Dorren: "The map has been altered by hand"',
                                           fact_id='key_dialogue')])
         assert len(result.findings) == 1 and result.findings[0].explanation == 'not delivered'
+
+
+class TestMustLineFixed:
+    def test_gate_and_fix_fixes_a_missing_must_line(self, project_dir, tmp_path):
+        """T5: the code-found must finding goes to the fix, and the fixed
+        scene passes."""
+        _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
+        prompts = []
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            if 'edits' in json.dumps(body.get('output_config', {})):
+                prompts.append(body['messages'][0]['content'])
+                return _text({'edits': [{
+                    'problem': 1, 'find': 'She tapped the empty space on the map.',
+                    'replace': 'She tapped the empty space on the map. "The map has been '
+                               'altered by hand," she said.'}]})
+            return _text({'commitments': [_commitment()]})
+        prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake, ())):
+            out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=prose,
+                                    log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                    check_model='m')
+        assert len(prompts) == 1 and 'The map has been altered by hand' in prompts[0]
+        assert out.fixed and out.result.passed, gate.report_lines(out.result)
 
 
 def _set_dialogue_raw(project_dir, value):

@@ -951,6 +951,19 @@ class TestDeferralThroughMain:
         assert deferred == [frozenset({'act2-sc01'}), frozenset()]
         assert finals == [set()]   # the final re-check, nothing skipped
 
+    def test_a_plan_run_lists_the_advisory_promises_and_a_dry_run_does_not(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """T6 (#642's review): `main` calls `_log_advisory` after a plan run,
+        and not on a dry run."""
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        self._run(project_dir, monkeypatch, mock_git, None)
+        calls = []
+        monkeypatch.setattr(cmd_revise, '_log_advisory', lambda pd: calls.append(pd))
+        main(['--dry-run'])
+        assert calls == []
+        main([])
+        assert calls == [project_dir]
+
     def test_a_final_recheck_that_fails_exits_1(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
         mock_api.set_response('=== SCENE: act1-sc01 === ...')
