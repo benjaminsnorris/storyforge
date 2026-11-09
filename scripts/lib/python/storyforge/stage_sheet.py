@@ -894,8 +894,11 @@ def carried_opening(project_dir: str, scene_id: str) -> tuple[list[Entry], str]:
         return [], f'no state carried over: {prev} has no stage sheet yet'
     try:
         sheet = load_sheet(path)
-        with open(os.path.join(project_dir, 'scenes', f'{prev}.md'), encoding='utf-8') as f:
-            prev_prose = f.read()
+        from storyforge.illustrations import read_scene_raw
+        # the bytes the gate read (the gate exception, docs/history.md)
+        prev_prose = read_scene_raw(project_dir, prev)
+        if prev_prose is None:
+            return [], f'no state carried over: {prev} has no prose'
     except (OSError, ValueError) as e:
         return [], f'no state carried over: {prev}\'s stage sheet could not be used ({e})'
     if sheet.get('prose_sha256') != prose_hash(prev_prose):

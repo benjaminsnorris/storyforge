@@ -149,7 +149,8 @@ it the same way, gating on its own recorded values (`FLOORS` in
 couldn't be checked; per-scene counts in the private outcomes file). Its
 recordings are in `blocking-set/cassettes/blocking-set-sheet/` and its
 per-case outcomes in `blocking-set/results/latest-stage-sheet.json`, both in
-storyforge-evals.
+storyforge-evals (recorded 2026-11-09, $0.49 on haiku 5.5:
+benjaminsnorris/storyforge-evals#78, stacked on #77).
 
 **Side by side:** `python3 evals/run.py --suite blocking-set --suite
 blocking-set-sheet`. The read runs first and writes `results/latest.json`;
