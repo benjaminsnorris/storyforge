@@ -9,6 +9,8 @@ Usage:
     storyforge check --pending --stop-at-first # ... stopping at the first that fails
     storyforge check --accept act1-sc03        # accept what stopped it, then --pending
     storyforge check --blocking                # only each scene's blocking, reported (#626)
+    storyforge check --stage-sheet act1-sc03   # blocking by the stage sheet, not the read (#647)
+    storyforge check --blocking --stage-sheet  # ... the stage sheet alone, reported
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -72,6 +74,15 @@ verified contradictions a gate run recorded can be accepted: broken
 `must` beats, unverified quotes, extraction problems, halts and a check
 that couldn't run still have to be fixed.
 
+Blocking (#626, #647): the gate reads each scene's blocking alone (hands,
+posture, what is worn, light) with the whole-scene blocking read by default.
+`--stage-sheet` checks it with the stage sheet instead (`storyforge.stage_sheet`:
+a small model records each physical action as a transition, code checks the
+transitions, and a yes/no question asked twice covers the rest), saving each
+scene's sheet to `working/stage-sheets/` for the next scene to carry over.
+Its findings are blocking findings like the read's: they stop only their
+scene, and `--accept` takes them. What it couldn't check is a NOTE.
+
 A broken promise (a brief item the prose doesn't deliver) doesn't stop a
 scene (#642): the brief is a plan and the prose stands. It is reported
 (ADVISORY), kept in `working/gate-advisory.csv`, and listed at the end of
@@ -95,6 +106,10 @@ REPORT_PATH = 'working/check-report.md'
 BLOCKING_REPORT_PATH = 'working/blocking-report.md'
 #: `--blocking`'s forecast per scene: one call on the scene alone
 BLOCKING_COST_PER_SCENE = 0.1   # BLOCKING_READINGS readings, about $0.04 each
+#: `--blocking --stage-sheet`'s forecast per scene: one extraction and two
+#: askings on the small model (cents; a larger STORYFORGE_STAGE_SHEET_MODEL
+#: costs more)
+STAGE_SHEET_COST_PER_SCENE = 0.05
 
 
 def parse_args(argv):
@@ -127,6 +142,13 @@ def parse_args(argv):
                              'no ledger, no commit. '
                              'Reports to working/blocking-report.md; exit 1 on a finding. '
                              'With no scenes named, every scene with prose.')
+    parser.add_argument('--stage-sheet', action='store_true',
+                        help='Check blocking with the stage sheet (a small model records '
+                             'each physical action, code checks it) instead of the '
+                             'whole-scene blocking read; each scene\'s sheet is saved to '
+                             'working/stage-sheets/. With --blocking, the stage sheet alone. '
+                             'Model: STORYFORGE_STAGE_SHEET_MODEL (default the extraction '
+                             'tier).')
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -152,8 +174,9 @@ def main(argv=None):
     ledger.exit_if_unordered(project_dir)
     if args.accept:
         if (args.positional or args.scenes or args.act or args.from_seq or args.pending
-                or args.keep_going or args.stop_at_first):
-            log('ERROR: --accept takes its own scene list; name no others with it.')
+                or args.keep_going or args.stop_at_first or args.stage_sheet):
+            log('ERROR: --accept takes its own scene list; name no others with it '
+                '(and no --stage-sheet: accepting reads nothing).')
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
         return
@@ -165,6 +188,21 @@ def main(argv=None):
                 '--pending, --keep-going or --stop-at-first.')
             sys.exit(1)
         sys.exit(_blocking_report(args, project_dir))
+    if not args.stage_sheet:
+        return _check_named(args, project_dir)
+    # this run only: an in-process caller after it keeps its own method
+    saved = gate.GATE_BLOCKING_METHOD
+    gate.GATE_BLOCKING_METHOD = 'stage-sheet'
+    try:
+        return _check_named(args, project_dir)
+    finally:
+        gate.GATE_BLOCKING_METHOD = saved
+
+
+def _check_named(args, project_dir: str):
+    """`check`'s scenes (named, or `--pending`) through the gate."""
+    from storyforge import gate, ledger
+    from storyforge.git import commit_and_push, create_branch
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')
@@ -674,10 +712,16 @@ def _named(args) -> list[str]:
 
 def _blocking_report(args, project_dir: str) -> int:
     """`check --blocking` (#626): each named scene's blocking alone
-    (`blocking.check_blocking`), reported, nothing committed. Every scene
-    with prose when none is named. The exit code: 0 clean, 1 a finding, a
-    scene that couldn't be read, or a selection that isn't scenes."""
+    (`blocking.check_blocking`, or with `--stage-sheet` the stage sheet,
+    #647, its sheets saved to working/stage-sheets/ without carrying one
+    scene's into the next, since the scenes run in parallel), reported,
+    nothing committed. Every scene with prose when none is named. The exit
+    code: 0 clean, 1 a finding, a scene that couldn't be read, or a
+    selection that isn't scenes. What the stage sheet couldn't check is
+    listed as NOT CHECKED, without changing the exit code."""
     from storyforge.blocking import BlockingError, check_blocking
+    from storyforge.stage_sheet import StageSheetError, check_stage_sheet
+    from storyforge.world_table import WorldTableError
     from storyforge.costs import check_threshold, cost_threshold
     from storyforge.runner import run_parallel
     from storyforge import api
@@ -696,8 +740,10 @@ def _blocking_report(args, project_dir: str) -> int:
     if not scene_ids:
         log('ERROR: no scene with prose matches.')
         return 1
-    forecast = len(scene_ids) * BLOCKING_COST_PER_SCENE
-    log(f'{len(scene_ids)} scene(s) to read for blocking, forecast about ${forecast:.2f}')
+    sheet = args.stage_sheet
+    forecast = len(scene_ids) * (STAGE_SHEET_COST_PER_SCENE if sheet else BLOCKING_COST_PER_SCENE)
+    how = 'with the stage sheet' if sheet else 'for blocking'
+    log(f'{len(scene_ids)} scene(s) to read {how}, forecast about ${forecast:.2f}')
     if not check_threshold(forecast):
         log(f'ERROR: that is over the cost threshold (${cost_threshold():g}): nothing read.')
         return 1
@@ -705,29 +751,35 @@ def _blocking_report(args, project_dir: str) -> int:
     os.makedirs(log_dir, exist_ok=True)
 
     def one(sid):
+        if sheet:
+            return check_stage_sheet(project_dir, sid, carry=False, save=True,
+                                     log_file=os.path.join(log_dir, f'stage-{sid}.json'))
         return check_blocking(project_dir, sid,
                               log_file=os.path.join(log_dir, f'blocking-{sid}.json'))
 
     with api.metered() as meter:
         results = run_parallel(scene_ids, one, label='scene')
     try:
-        meter.log(project_dir, 'blocking', '')
+        meter.log(project_dir, 'stage-sheet' if sheet else 'blocking', '')
     except Exception as e:
         log(f'WARNING: could not log the cost of the blocking read: {e}')
-    lines = ['# Blocking', '']
+    lines = ['# Blocking' + (' (stage sheet)' if sheet else ''), '']
     status = 0
     total = 0
     for sid in scene_ids:
         r = results.get(sid)
         if isinstance(r, Exception) or r is None:
-            why = r if isinstance(r, BlockingError) else f'{type(r).__name__}: {r}'
+            why = (r if isinstance(r, (BlockingError, StageSheetError, WorldTableError))
+                   else f'{type(r).__name__}: {r}')
             lines += [f'## {sid}', '', f'- NOT READ: {why}', '']
             log(f'{sid}: NOT READ: {why}')
             status = 1
             continue
-        if not (r.findings or r.unverified):
+        notes = getattr(r, 'notes', [])
+        if not (r.findings or r.unverified or notes):
             continue
-        status = 1
+        if r.findings or r.unverified:
+            status = 1
         lines += [f'## {sid}', '']
         for f in r.findings:
             other = (f' (against "{f.established_quote}")'
@@ -737,9 +789,14 @@ def _blocking_report(args, project_dir: str) -> int:
         for f in r.unverified:
             lines.append(f'- UNVERIFIED ({f.problem}): "{f.scene_quote}": {f.explanation}')
             total += 1
+        for note in notes:
+            lines.append(f'- NOT CHECKED: {note}')
+            log(f'{sid}: NOT CHECKED: {note}')
         lines.append('')
     if total == 0 and status == 0:
-        lines.append('Every scene read holds together.')
+        lines.append('No finding, but some of it was not checked (above).'
+                     if any(l.startswith('- NOT CHECKED') for l in lines)
+                     else 'Every scene read holds together.')
     path = os.path.join(project_dir, BLOCKING_REPORT_PATH)
     with open(path, 'w', encoding='utf-8') as fh:
         fh.write('\n'.join(lines) + '\n')

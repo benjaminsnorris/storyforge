@@ -15,6 +15,7 @@ sys.path.insert(0, str(PLUGIN_DIR / 'evals'))
 
 import blocking_set  # noqa: E402
 import harness  # noqa: E402
+from blocking_set import runner  # noqa: E402
 
 SUITE_FILE = PLUGIN_DIR / 'evals' / 'suites' / 'blocking_set.py'
 
@@ -551,6 +552,11 @@ class TestSuite:
         assert any('Point of view: Tom' in c for c in calls)
 
 
+def _floor_gates(suite, metrics):
+    """The suite's gates on `metrics` against its FLOORS (as its run sets them)."""
+    return runner.floor_gates(metrics, suite.run.__globals__['FLOORS'])
+
+
 class TestFloorGates:
     """The shipped FLOORS keys, on the path before the baseline (all None)
     and after (#670 review: an absent metric passed as -1 == -1)."""
@@ -560,7 +566,7 @@ class TestFloorGates:
 
     def test_every_shipped_floor_unset_fails_and_says_what_to_write(self):
         suite = _suite()
-        gates, notes = suite.run.__globals__['floor_gates'](self._metrics(suite))
+        gates, notes = _floor_gates(suite, self._metrics(suite))
         assert gates and not any(g.passed for g in gates)
         assert all('no floor recorded' in n for n in notes)
 
@@ -572,7 +578,7 @@ class TestFloorGates:
         _with_floors(monkeypatch, suite, **floors)
         metrics = self._metrics(suite)
         del metrics['recall_other']
-        gates, notes = suite.run.__globals__['floor_gates'](metrics)
+        gates, notes = _floor_gates(suite, metrics)
         by_name = {g.name: g for g in gates}
         assert not by_name['recall_other'].passed
         assert all(g.passed for n, g in by_name.items() if n != 'recall_other')
@@ -586,7 +592,7 @@ class TestFloorGates:
                                                                      value, word):
         suite = _suite()
         _with_floors(monkeypatch, suite, **{name: 0.5})
-        _, notes = suite.run.__globals__['floor_gates']({name: value})
+        _, notes = _floor_gates(suite, {name: value})
         assert notes[0].startswith(f'{name} {value}, FLOORS 0.5: {word}')
 
     def test_the_independent_and_per_book_numbers_are_gated(self):
@@ -594,3 +600,154 @@ class TestFloorGates:
         for name in ('recall_found_by_readers', 'recall_found_by_tool',
                      'recall_book_gawain', 'recall_book_wrath'):
             assert name in floors
+
+
+# ----------------------------------------------------------------------------
+# The stage sheet on the same set (#647), and side by side
+# ----------------------------------------------------------------------------
+
+def _sheet_reply(payload):
+    return {'stop_reason': 'end_turn', 'model': 'claude-haiku-5-5',
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 1000, 'output_tokens': 300}}
+
+
+def _ev(quote, who, field, to, frm='', item=''):
+    return {'quote': quote, 'who': who, 'field': field, 'item': item, 'from': frm, 'to': to}
+
+
+def _fake_sheet_api(calls):
+    """The stage sheet's extraction per scene: the harbour's hands and the
+    second sitting down (two slips), and the rain's coat, clean."""
+    def live(*args):
+        body = json.dumps(args)
+        calls.append(body)
+        if '"answers"' in body:
+            return _sheet_reply({'answers': []})
+        if 'Scene: harbour' in body:
+            return _sheet_reply({'cast': ['Tom', 'Ann'], 'questions': [], 'events': [
+                _ev('Tom held the lamp in his right hand', 'Tom', 'hand_right', 'lamp'),
+                _ev('the rope in his left', 'Tom', 'hand_left', 'rope'),
+                _ev(FREE_HAND, 'Tom', 'hand_either', 'empty', frm='empty'),
+                _ev('Ann sat on the step', 'Ann', 'posture', 'sitting'),
+                _ev(SAT_AGAIN, 'Ann', 'posture', 'sitting', frm='standing')]})
+        return _sheet_reply({'cast': ['Ann'], 'questions': [], 'events': [
+            _ev(COAT, 'Ann', 'worn', 'on', frm='off', item='coat')]})
+    return live
+
+
+def _sheet_suite():
+    return next(s for s in harness.discover(str(SUITE_FILE.parent))
+                if s.name == 'blocking-set-sheet')
+
+
+class TestSheetSuite:
+    def test_records_beside_the_set_then_replays_free(self, private_set, tmp_path, monkeypatch):
+        from storyforge import api
+        calls = []
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api(calls))
+        suite = _sheet_suite()
+        result = _record(suite, str(tmp_path / 'public-cassettes'))
+        assert len(calls) == 2                          # one extraction a scene, no questions
+        m = result['metrics']
+        assert m['caught'] == 2 and m['recall_hands'] == 1.0 and m['recall_posture'] == 1.0
+        assert m['left_flagged'] == 0 and m['false_alarms_per_10k'] == 0.0
+        assert m['events'] == 6 and m['questions_asked'] == 0
+        assert os.path.isdir(os.path.join(private_set, 'cassettes', 'blocking-set-sheet'))
+        assert not (tmp_path / 'public-cassettes').exists()
+
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        replayed = harness.run_suite(suite, 'replay', str(tmp_path / 'public-cassettes'))
+        assert replayed['metrics'] == result['metrics']
+        assert replayed['cost']['usd_spent'] == 0
+
+    def test_the_report_carries_no_prose(self, private_set, tmp_path, monkeypatch):
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
+        result = _record(_sheet_suite(), str(tmp_path / 'c'))
+        text = json.dumps({k: result[k] for k in ('metrics', 'gates', 'notes', 'error')})
+        for words in (FREE_HAND, HOLDS_BOTH, COAT, SAT_AGAIN, 'harbour', 'rain', 'lamp'):
+            assert words.lower() not in text.lower(), words
+
+    def test_outcomes_go_to_their_own_private_file(self, private_set, tmp_path, monkeypatch):
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
+        _record(_sheet_suite(), str(tmp_path / 'c'))
+        assert not os.path.exists(os.path.join(private_set, 'results', 'latest.json'))
+        with open(os.path.join(private_set, 'results', 'latest-stage-sheet.json')) as f:
+            data = json.load(f)
+        # tale-005 shares tale-001's line: the one hands finding catches only
+        # one of them (#670's matching)
+        assert {c['id'] for c in data['cases'] if c['caught']} == {'tale-001', 'tale-002'}
+
+    def test_without_a_read_run_the_comparison_says_so(self, private_set, tmp_path, monkeypatch):
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
+        result = _record(_sheet_suite(), str(tmp_path / 'c'))
+        assert any(n.startswith('side by side: no read run to compare with')
+                   for n in result['notes'])
+
+    def test_side_by_side_with_the_read(self, private_set, tmp_path, monkeypatch):
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', _fake_api([]))
+        _record(_suite(), str(tmp_path / 'c'))
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
+        result = _record(_sheet_suite(), str(tmp_path / 'c'))
+        notes = result['notes']
+        assert ('side by side with the read (its last run): caught by both 1, only here 1, '
+                'only by the read 0, of 3') in notes
+        assert 'only this caught: tale-002' in notes
+        assert 'left readings flagged: here 0, by the read 1' in notes
+
+    def test_a_scene_the_sheet_cannot_finish_errors_the_suite(self, private_set, tmp_path,
+                                                              monkeypatch):
+        from storyforge import stage_sheet
+
+        def check(project_dir, scene_id, **kw):
+            raise stage_sheet.StageSheetError('the reply quoted: secret words')
+        monkeypatch.setattr(stage_sheet, 'check_stage_sheet', check)
+        result = harness.run_suite(_sheet_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'error'
+        assert 'stage sheet did not finish on 2 scene(s): tale/harbour, tale/rain' in result['error']
+        assert 'secret words' not in result['error']
+
+    def test_frozen_a_miss_is_stale_and_never_goes_live(self, private_set, tmp_path,
+                                                        monkeypatch):
+        """Frozen like the read (#645, ported from #670): auto replays it."""
+        from storyforge import api, stage_sheet
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
+        _record(_sheet_suite(), str(tmp_path / 'r'))
+        monkeypatch.setattr(stage_sheet, 'PROMPT', 'A changed prompt. ' + stage_sheet.PROMPT)
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        suite = _sheet_suite()
+        assert suite.frozen
+        result = harness.run_suite(suite, 'auto', str(tmp_path / 'c'))
+        assert result['status'] == 'stale', result.get('error')
+
+    def test_frozen_never_recorded_is_an_error(self, private_set, tmp_path, monkeypatch):
+        """No recordings at all is a missing fixture, not a changed request (#661 review)."""
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        result = harness.run_suite(_sheet_suite(), 'auto', str(tmp_path / 'c'))
+        assert result['status'] == 'error' and 'has no recordings' in result['error']
+
+    def test_no_private_set_is_unavailable(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path / 'nowhere'))
+        result = harness.run_suite(_sheet_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'stale' and result['unavailable'] is True
+        assert result['error'] is None
+        assert 'storyforge-evals' in result['stale']
+
+    def test_each_run_of_runs_n_records_on_its_own(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+        _write_set(tmp_path)
+        suite = _sheet_suite()
+        assert suite.cassettes('') == os.path.join(str(tmp_path), 'blocking-set', 'cassettes',
+                                                   'blocking-set-sheet')
+        assert suite.cassettes('run2') == os.path.join(str(tmp_path), 'blocking-set',
+                                                       'cassettes', 'run2', 'blocking-set-sheet')
+
+    def test_it_gates_the_same_metrics_as_the_read(self):
+        """The per-book and per-finder numbers are gated on the sheet too."""
+        assert (set(_sheet_suite().run.__globals__['FLOORS'])
+                == set(_suite().run.__globals__['FLOORS']))

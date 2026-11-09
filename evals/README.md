@@ -150,7 +150,8 @@ matched by place (whole words, a `...` quote's parts in order), so a short or
 shared line can't inflate recall. The clean scenes are all gawain's (no Wrath
 scene has had a human read), so the false-alarm rate is one book's. The #647
 stage sheet is measured on the same set before the whole-scene read is
-retired (plan A4).
+retired (plan A4;
+`blocking-set-sheet` below). The two suites share `evals/blocking_set/runner.py`.
 
 The suite is **frozen** (#645): `auto` and `record` replay it, and a miss is
 `stale`. **Not recorded yet** (forecast about $6.60 a run; needs Ben's
@@ -168,6 +169,42 @@ approval). To record:
 4. `python3 evals/run.py --baseline` writes `baseline.json`. It needs a full
    run with no suite in `error`; on this branch's base E3, E5 and the re-check
    set error in replay, so that waits for them.
+
+### The stage sheet on the set (#647)
+
+`blocking-set-sheet` runs the stage sheet (`storyforge.stage_sheet`: a small
+model records each scene's physical action as transitions, code checks them,
+a yes/no question asked twice covers the rest) on the same scenes and scores
+it the same way, gating on its own recorded values (`FLOORS` in
+`evals/suites/blocking_set_sheet.py`). It also reports `events`,
+`questions_asked` and `scenes_with_unchecked` (scenes where something
+couldn't be checked; per-scene counts in the private outcomes file). Its
+recordings are in `blocking-set/cassettes/blocking-set-sheet/` and its
+per-case outcomes in `blocking-set/results/latest-stage-sheet.json`, both in
+storyforge-evals (benjaminsnorris/storyforge-evals#78, stacked on #77;
+first recorded 2026-11-09 for $0.49 on haiku 5.5, re-recorded after #671's
+review fixes for $0.85).
+
+**Side by side:** `python3 evals/run.py --suite blocking-set --suite
+blocking-set-sheet`. The read runs first and writes `results/latest.json`;
+the sheet's notes then compare the two case by case (caught by both, only
+by one, the case ids each alone caught, and left readings flagged). The gate
+keeps the read (`gate.GATE_BLOCKING_METHOD = 'read'`) until the sheet's
+recall is at least the read's with no more false alarms (plan A4).
+
+The model is the stage sheet's default (the extraction tier);
+`STORYFORGE_STAGE_SHEET_MODEL` runs another, which is a different request:
+recorded on purpose beside the default's, and a replay without the
+variable replays the default's.
+
+Like `blocking-set`, the suite is **frozen** (#645; `auto` and `record`
+replay it, a miss is `stale`, recording takes `--mode record --suite
+blocking-set-sheet --runs 3`), and without the private checkout it is
+`stale` (unavailable), not an error. Its harness (`check_all`,
+`floor_gates`, the outcomes file) is `blocking-set`'s, in
+`evals/blocking_set/runner.py`, so the two suites score, match and gate
+identically. The recordings so far are the main run only (made before the
+suite was frozen).
 
 ## Recorded API calls
 
