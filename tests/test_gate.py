@@ -2589,11 +2589,11 @@ class TestDiscardKeepsTheBlockedList:
         real = gate.record_blocked
         calls = []
 
-        def flaky(pd, sid, command, findings):
+        def flaky(pd, sid, command, findings, **kw):
             calls.append(findings)
             if len(calls) == 3:   # the put-back after the discard
                 raise PermissionError('read-only')
-            return real(pd, sid, command, findings)
+            return real(pd, sid, command, findings, **kw)
         monkeypatch.setattr(gate, 'record_blocked', flaky)
         out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=self.PROSE,
                                 log_dir=str(tmp_path))
@@ -2756,10 +2756,13 @@ class TestFixConverges:
         assert seen == [[]]
 
 
-def test_a_recheck_is_gated_with_no_baseline(project_dir, tmp_path, monkeypatch):
+def test_a_recheck_is_gated_against_its_own_prose_only(project_dir, tmp_path, monkeypatch):
     """#480's review: a re-check runs because another scene changed, not this
-    one's words; a baseline would make every finding inherited."""
+    one's words; a baseline of the book would make every finding inherited.
+    #631: its baseline is the scene's own gated prose alone, so only a
+    finding within the scene can be inherited."""
     gate.mark_pending(project_dir, SCENE, 'recheck', 'x')
+    monkeypatch.setattr(gate, 'gated_prose', lambda pd, sid: ('The gated prose.', ''))
     kwargs = []
 
     def fake(pd, sid, **k):
@@ -2771,7 +2774,8 @@ def test_a_recheck_is_gated_with_no_baseline(project_dir, tmp_path, monkeypatch)
     monkeypatch.setattr(gate, 'gate_scene', fake)
     monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
     gate.recheck_pending(project_dir, log_dir=str(tmp_path))
-    assert kwargs and all(k.get('before') is None for k in kwargs)
+    assert kwargs and all(k['before'].scenes == {SCENE: 'The gated prose.'}
+                          and k['before'].files == {} for k in kwargs)
 
 
 @pytest.mark.gate_readings
@@ -3148,10 +3152,13 @@ class TestSteadyParagraphs:
         assert 'The clerk insists the census still counts 412' in [
             r['statement'] for r in self._mine(project_dir)]
 
-    def test_a_kept_fact_stating_an_accepted_contradiction_is_held_back(
+    def test_a_kept_fact_stating_an_accepted_contradiction_stays_and_is_said(
             self, project_dir, tmp_path):
-        """#558's second review: kept facts were added after the hold-back,
-        so one stating a held-back contradiction was committed anyway."""
+        """#558's second review ran the kept facts through the hold-back,
+        which then dropped them; #632 (iliad-teen: each accept dropped steady
+        facts, which counted as changed and re-listed most of the book): a
+        kept fact is in the ledger already and its prose didn't change, so
+        it stays, and the report says it states the contradiction."""
         self._git(project_dir)
         old = self._first(project_dir, tmp_path)
         gate.record_reported(project_dir, SCENE, 'draft', [gate.Finding(
@@ -3161,9 +3168,11 @@ class TestSteadyParagraphs:
         result = _gate(project_dir, tmp_path, [self._temple()],
                        findings=[_contradiction()], command='redraft')
         assert result.committed and result.inherited
-        ids = {r['id'] for r in self._mine(project_dir)}
-        assert old['tarrens-hollow']['id'] not in ids
-        assert [st for st, _ in result.held_back] == [old['tarrens-hollow']['statement']]
+        mine = {r['id']: r for r in self._mine(project_dir)}
+        assert mine[old['tarrens-hollow']['id']] == old['tarrens-hollow']
+        assert result.held_back == []
+        assert [st for st, _ in result.kept_stating] == [old['tarrens-hollow']['statement']]
+        assert old['tarrens-hollow']['id'] not in result.changed
 
     # #599 (Telemachy pilot): `check --pending`'s re-checks read prose that
     # hasn't changed, and extraction quoted another sentence for a fact the

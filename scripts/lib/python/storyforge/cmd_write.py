@@ -762,7 +762,8 @@ def report_changes(result) -> None:
     """Log, after a pass, what the scene changed that no re-check can cover:
     facts whose dependents can't all be traced, later scenes that depend on
     it but can't be re-checked, and the author's registry links to facts it
-    removed (CLAUDE.md: every path that can't check something says so)."""
+    removed (CLAUDE.md: every path that can't check something says so); and
+    why each scene it listed for a re-check was listed (#632)."""
     for fid, why in result.unrelated.items():
         log(f'  WARNING: {result.scene_id} changed {fid}, whose dependents can\'t all be '
             f'found ({why}): check the later scenes that mention it with `storyforge check`.')
@@ -771,6 +772,9 @@ def report_changes(result) -> None:
             f'on fewer names: {note}')
     for note in getattr(result, 'prose_notes', []):
         log(f'  NOTE: {note}')
+    # #632: why each later scene was listed (the fact and the rule)
+    for sid, why in getattr(result, 'recheck_why', {}).items():
+        log(f'  NOTE: {sid} listed for a re-check: {result.scene_id} changed {why}')
     if result.not_rechecked:
         log(f'  NOTE: later scenes that depend on what {result.scene_id} changed but can\'t be '
             f're-checked now: {", ".join(result.not_rechecked)}')
