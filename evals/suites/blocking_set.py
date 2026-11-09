@@ -4,8 +4,10 @@ Day* (gawain) and *Wrath Like Smoke* (iliad-adult), and clean scenes for
 false alarms. See ``evals/blocking_set``.
 
 The set and its recordings are private (the author's unpublished prose) and
-live in the storyforge-evals repo; a machine without it errors here, saying
-where to put it. The suite writes each case's outcome, with the findings'
+live in the storyforge-evals repo; on a machine without it the suite is
+reported unavailable (``stale``, exit code unaffected), saying where to put
+it. Frozen (#645): recorded once, on purpose, as three runs
+(``--mode record --suite blocking-set --runs 3``); a miss is ``stale``. The suite writes each case's outcome, with the findings'
 quotes, to ``blocking-set/results/latest.json`` there (gitignored), never to
 this repo: notes carry counts and case ids only.
 """
@@ -19,19 +21,26 @@ import blocking_set
 from harness import Gate, Suite, SuiteOutput
 
 NAME = 'blocking-set'
-#: The set must keep its size: the plan measures the stage sheet on "gawain's
-#: 35 and Wrath's 70"
+#: The set must keep its size: it has 117 in-scene fixed cases (the plan's
+#: "gawain's 35 and Wrath's 70", as built); 100 guards against a build
+#: that drops a source
 MIN_CASES = 100
 
 #: The gates: the recorded baseline's values, each to be held exactly
-#: (#488: a gain moves its floor up in the same commit; a drop is a
-#: decision). `None` until the baseline is recorded: the gate then fails and
-#: the note says what to write here.
+#: (#488). For recall a rise is a gain, for false alarms, left_flagged and
+#: flags a fall is; a gain moves the value here in the same commit, a loss
+#: is a decision. `None` until the baseline is recorded: the gate then
+#: fails and the note says what to write here. A metric the run doesn't
+#: emit fails its gate either way (a category or book gone from the set).
+#: `recall_found_by_readers` is the independent number (slips people
+#: found); `recall_found_by_tool` is partly the read agreeing with itself.
 FLOORS: dict[str, float | None] = {
     'recall': None,
     'recall_hands': None, 'recall_posture': None, 'recall_sightline': None,
     'recall_worn': None, 'recall_position': None, 'recall_light': None,
     'recall_other': None,
+    'recall_book_gawain': None, 'recall_book_wrath': None,
+    'recall_found_by_readers': None, 'recall_found_by_tool': None,
     'false_alarms_per_10k': None,
     'left_flagged': None,
     'flags': None,
@@ -69,11 +78,14 @@ def check_all(scenes: list[dict], work_dir: str) -> dict[tuple[str, str], list[d
     results = run_parallel(sorted(by_label), check, label='scene')
     failed = sorted(k for k in by_label if not isinstance(results.get(k), blocking.BlockingResult))
     if failed:
-        # The exception's type only: its message can carry the reply, which
-        # quotes the private prose, and this message reaches the report
+        # The scenes by slug and the exception's type only: its message can
+        # carry the reply, which quotes the private prose, and this message
+        # reaches the report. (run_parallel has already logged each failure
+        # in full to the terminal: a local run's screen, not a report.)
         first = results.get(failed[0])
-        raise RuntimeError(f'the blocking read did not finish on {len(failed)} scene(s); '
-                           f'first: {type(first).__name__ if first is not None else "no result"}')
+        raise RuntimeError(f'the blocking read did not finish on {len(failed)} scene(s): '
+                           f'{", ".join(failed)}; first: '
+                           f'{type(first).__name__ if first is not None else "no result"}')
     flags = {}
     for label, result in results.items():
         s = by_label[label]
@@ -89,17 +101,21 @@ def floor_gates(metrics: dict) -> tuple[list[Gate], list[str]]:
     gates, notes = [], []
     for name, floor in FLOORS.items():
         value = metrics.get(name)
-        gates.append(Gate(name, -1 if value is None else value, '==',
-                          -1 if floor is None else floor))
         if value is None:
-            notes.append(f'{name}: FLOORS has {floor} but the run has no such metric')
-        elif floor is None:
+            # Fails whatever the floor: -1 never equals -2
+            gates.append(Gate(name, -1, '==', -2 if floor is None else floor))
+            notes.append(f'{name}: the run has no such metric (no in-scene fixed case of it '
+                         f'in the set?); FLOORS has {floor}')
+            continue
+        gates.append(Gate(name, value, '==', -1 if floor is None else floor))
+        if floor is None:
             notes.append(f'{name} {value}: no floor recorded; set FLOORS[{name!r}] = {value} '
                          f'with the baseline')
         elif value != floor:
+            gain = (value > floor) == name.startswith('recall')
             notes.append(f'{name} {value}, FLOORS {floor}: '
-                         + ('raise its floor in the same commit' if value > floor and name.startswith('recall')
-                            else 'a change; moving the floor is a decision (see FLOORS)'))
+                         + ('a gain: move FLOORS to it in the same commit' if gain
+                            else 'a loss; moving the floor is a decision (see FLOORS)'))
     return gates, notes
 
 
@@ -146,4 +162,5 @@ def run(ctx):
 
 
 SUITE = Suite(NAME, 'Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; '
-                    'private set', run, cassettes=lambda: blocking_set.cassettes_dir(NAME))
+                    'private set', run, frozen=True,
+              cassettes=lambda run: blocking_set.cassettes_dir(NAME, run=run))

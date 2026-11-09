@@ -100,8 +100,10 @@ def _forecast(suites, baseline_file: str, runs: int) -> tuple[float, list[str]]:
     ``usd_if_live`` in the baseline; and the suites it has no figure for."""
     try:
         with open(baseline_file) as f:
+            # an entry for a suite unavailable where the baseline was written
+            # measured nothing, so it has no figure
             by_suite = {r['suite']: r['cost']['usd_if_live']
-                        for r in json.load(f).get('results', [])}
+                        for r in json.load(f).get('results', []) if not r.get('unavailable')}
     except (OSError, ValueError, KeyError, TypeError):
         by_suite = {}
     known = [by_suite[s.name] for s in suites if s.name in by_suite]
@@ -205,10 +207,15 @@ def _summary(report: dict, deltas: dict | None, notes: bool = False) -> str:
     cost = report['cost']
     lines.append(f"Total: {cost['calls']} calls ({cost['replayed_calls']} replayed), "
                  f"${cost['usd_spent']} spent, ${cost['usd_if_live']} if live")
-    stale = [r['suite'] for r in report['results'] if r['status'] == 'stale']
+    stale = [r['suite'] for r in report['results']
+             if r['status'] == 'stale' and not r.get('unavailable')]
     if stale:
         lines.append(f"  stale (frozen, not re-recorded, nothing spent; exit code unaffected): "
                      f"{', '.join(stale)}")
+    unavailable = [r['suite'] for r in report['results'] if r.get('unavailable')]
+    if unavailable:
+        lines.append(f"  unavailable here (private inputs not on this machine, nothing measured; "
+                     f"exit code unaffected): {', '.join(unavailable)}")
     if cost['unpriced_calls']:
         lines.append(f"  {cost['unpriced_calls']} call(s) used a model with no known price "
                      f"and were costed at sonnet rates")
@@ -263,7 +270,7 @@ def _main(args) -> int:
     try:
         report = run_all(suites, args.mode, args.cassettes_dir, record_frozen=record_frozen)
         extra = {f'run{k}': run_all(suites, args.mode, os.path.join(args.runs_dir, f'run{k}'),
-                                    record_frozen=record_frozen)
+                                    record_frozen=record_frozen, run=f'run{k}')
                  for k in range(2, args.runs + 1)}
     finally:
         for key, value in saved.items():
@@ -325,21 +332,29 @@ def _carry_stale(report: dict, baseline_file: str) -> str:
     """Put the old baseline's entry in place of each stale suite's result
     (marked ``carried_over``): a frozen suite keeps its last measurement
     until it is re-recorded on purpose. Returns why it can't ('' when it
-    can): a stale suite the old baseline has no measurement of."""
-    stale = [r['suite'] for r in report['results'] if r['status'] == 'stale']
-    if not stale:
+    can): a stale suite the old baseline has no measurement of.
+
+    A suite unavailable on this machine (private inputs, #646) keeps the old
+    baseline's measurement the same way; with none to keep, its unavailable
+    entry is written as it is (no metrics), so a clone without the private
+    repo can still write the baseline for every other suite, and the file
+    says the suite wasn't measured there."""
+    measured = ('pass', 'fail')
+    if not any(r['status'] == 'stale' for r in report['results']):
         return ''
     try:
         with open(baseline_file) as f:
             old = {r['suite']: r for r in json.load(f).get('results', [])}
     except (OSError, ValueError, TypeError, AttributeError):
         old = {}
-    missing = [s for s in stale if s not in old or old[s].get('status') not in ('pass', 'fail')]
+    missing = [r['suite'] for r in report['results']
+               if r['status'] == 'stale' and not r.get('unavailable')
+               and old.get(r['suite'], {}).get('status') not in measured]
     if missing:
         return (f'{", ".join(missing)} is stale and the old baseline has no measurement '
                 f'of it to keep')
     for i, r in enumerate(report['results']):
-        if r['status'] == 'stale':
+        if r['status'] == 'stale' and old.get(r['suite'], {}).get('status') in measured:
             report['results'][i] = {**old[r['suite']], 'carried_over': True}
     report['status'] = overall_status(r['status'] for r in report['results'])
     return ''
