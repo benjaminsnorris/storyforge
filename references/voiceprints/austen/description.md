@@ -1,6 +1,6 @@
 # The described voice: Jane Austen
 
-Written by `storyforge voice accept` from proposals/description-claims.csv: the claims the author marked yes (22 of 22). To change it, edit and mark the claims there and accept again.
+<!-- Written by `storyforge voice accept` from proposals/description-claims.csv: the claims marked yes there (22 of 22). To change it, edit and mark the claims there and accept again. -->
 
 ## What the voice does
 
