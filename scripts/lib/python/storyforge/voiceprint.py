@@ -98,12 +98,12 @@ Z_CAP = 6.0
 MATTR_WINDOW = 500
 
 #: two fingerprints further apart than this don't share a voice. Measured:
-#: Austen's three novels 0.21-0.23 apart, the two Verne translations 0.382,
-#: Austen and her nearest other author (Middlemarch) 0.61
+#: Austen's three novels 0.21-0.24 apart, the two Verne translations 0.368,
+#: Austen and her nearest other author (Middlemarch) 0.63
 SAME_VOICE_MAX = 0.30
 #: in `consistency`, a minority of pieces is in another voice when its typical
 #: piece sits further than this from the rest's. Measured: pure Austen
-#: corpora 0.60-0.63; Austen seeded with 20% of another author 0.77-1.50
+#: corpora 0.59-0.62; Austen seeded with 20% of another author 0.74-1.47
 #: (18 of 21 above it)
 OUTLIER_SEPARATION = 0.85
 #: the least corpus whose fingerprint is stable: two disjoint samples of
@@ -199,20 +199,60 @@ _WORD_RE = re.compile(r"[^\W\d_]+(?:['\-][^\W\d_]+)*")
 #: a candidate sentence end: . ! ? (any closing quotes or brackets), then
 #: space and an opening quote, bracket, capital or digit
 _BOUNDARY_RE = re.compile(r'[.!?]+["\')\]]*(?=\s+["\'(\[]*[^\W_a-z])')
+#: a roman numeral, strictly formed (so "Did", "Mild" and "Civil" are words)
+_ROMAN = r'(?=[ivxlcdm])m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})(?<=[ivxlcdm])'
 #: a chapter's number: roman, arabic, or spelled ("the Third", "FORTY-FOURTH")
-_NUMBER = (r'(?:[ivxlcdm]+|\d+|(?:the\s+)?(?:(?:twenty|thirty|forty|fifty|sixty|seventy|'
+_NUMBER = (r'(?:' + _ROMAN + r'|\d+|(?:the\s+)?(?:(?:twenty|thirty|forty|fifty|sixty|seventy|'
            r'eighty|ninety)-?)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|'
            r'twelve|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|'
            r'eleventh|twelfth|[a-z]+teen(?:th)?|twenty|thirty|forty|fifty|[a-z]+ieth))')
-#: a markdown heading, a scene break, a bare chapter heading ("CHAPTER IV.",
-#: "Part Two: The Return", "XIV.") but not prose that opens on such a word
-#: ("Part of me wanted to go.")
+#: a markdown heading, a scene break, a bare numeral ("XIV.", "12"), the end
 _NON_PROSE_RE = re.compile(
-    r'^\s*(?:#.*|[*\-_=~](?:\s*[*\-_=~]){2,}'
-    r'|(?:chapter|book|volume|vol\.|part|stave|canto|letter|section)\s+' + _NUMBER
-    + r'\b[.:]?(?:\s*[.:\-—]?\s+[^.!?]{0,60}[.]?)?'
-    r'|[ivxlcdm]+\.?|\d+\.?|the end\.?|finis\.?)\s*$',
-    re.IGNORECASE)
+    r'^\s*(?:#.*|[*\-_=~](?:\s*[*\-_=~]){2,}|(?:' + _ROMAN + r')\.?|\d+\.?'
+    r'|the end\.?|finis\.?)\s*$', re.IGNORECASE)
+#: a heading word and its number ("CHAPTER IV", "Part Two", "Letter 12"),
+#: then the rest of the line (`_is_heading` judges it)
+_HEADING_RE = re.compile(
+    r'^\s*(?:chapter|book|volume|vol\.|part|stave|canto|letter|section)\s+' + _NUMBER
+    + r'\b(.*)$', re.IGNORECASE)
+#: the small words a title-cased heading's title leaves lower case
+_TITLE_SMALL = frozenset({'a', 'an', 'the', 'of', 'and', 'or', 'in', 'on', 'at', 'to',
+                          'for', 'by', 'with', 'from', 'into', 'upon', 'his', 'her'})
+#: a footnote ("[1] A somewhat remarkable ...")
+_FOOTNOTE_RE = re.compile(r'^\s*\[\d+\]\s')
+
+
+def _is_heading(para: str) -> bool:
+    """A chapter heading ("CHAPTER IV.", "Part Two: The Return", "STAVE I:
+    MARLEY'S GHOST", "Chapter the Third") and not prose that opens on a
+    heading word ("Part of me wanted to go.", "Letter three came on
+    Tuesday."): after the word and its number, nothing, a title set off by
+    `.`, `:` or a dash, or a title-cased title."""
+    m = _HEADING_RE.match(para)
+    if not m:
+        return False
+    tail = m.group(1).strip()
+    if tail in ('', '.', ':'):
+        return True
+    if len(tail) > 60 or tail[-1] in '!?,;':
+        return False
+    if tail[0] in '.:-—':
+        return True
+    ws = words(tail)
+    return bool(ws) and all(w[0].isupper() or w.lower() in _TITLE_SMALL for w in ws)
+
+
+def _is_caption(para: str) -> bool:
+    """A line set in capitals ("PRELUDE", "BEFORE THE DAWN", a letter's
+    "WILLIAM COLLINS.") or a footnote: not the writer's running prose. A
+    shout ("NO!") stays."""
+    if _FOOTNOTE_RE.match(para):
+        return True
+    ws = words(para)
+    return (bool(ws) and len(ws) <= 10 and not any(c.islower() for c in para)
+            and para.rstrip('"\')] ')[-1:] not in ('!', '?'))
+
+
 _ILLUSTRATION_RE = re.compile(r'\[Illustration[^\]]*\]', re.IGNORECASE | re.DOTALL)
 _LINK_RE = re.compile(r'!?\[([^\]]*)\]\([^)]*\)')
 _CLAUSE_RE = re.compile(r'[,;:—()]')
@@ -233,8 +273,8 @@ def _syllables(word: str) -> int:
 
 def paragraphs(text: str) -> list[str]:
     """The prose paragraphs of `text`, one line each: blank lines separate
-    paragraphs; headings, scene breaks, bare chapter headings and
-    illustration markers are dropped; curly quotes are folded straight,
+    paragraphs; headings, scene breaks, bare chapter headings, lines set
+    in capitals, footnotes and illustration markers are dropped; curly quotes are folded straight,
     `--` and spaced en dashes become em dashes, emphasis marks and link
     syntax go."""
     text = strip_markers(text.lstrip('﻿').replace('\r\n', '\n').replace('\r', '\n'))
@@ -244,7 +284,7 @@ def paragraphs(text: str) -> list[str]:
     out = []
     for block in re.split(r'\n\s*\n', text):
         para = ' '.join(line.strip() for line in block.split('\n') if line.strip())
-        if not para or _NON_PROSE_RE.match(para):
+        if not para or _NON_PROSE_RE.match(para) or _is_heading(para) or _is_caption(para):
             continue
         para = re.sub(r'[*_]+', '', para).strip()
         if _WORD_RE.search(para):
@@ -591,6 +631,16 @@ class Baseline:
     sources: tuple[str, ...] = ()
 
 
+def _spaced(n: int, k: int) -> list[int]:
+    """`k` indexes spread evenly over `range(n)`, the first and last
+    included (all of them when `n <= k`)."""
+    if n <= k:
+        return list(range(n))
+    if k == 1:
+        return [0]
+    return [round(i * (n - 1) / (k - 1)) for i in range(k)]
+
+
 def build_baseline(texts: Mapping[str, str], chunks_per_text: int = 12,
                    keep: int = 4000) -> dict:
     """The general baseline's data (what `baseline.json` holds) from a
@@ -604,8 +654,7 @@ def build_baseline(texts: Mapping[str, str], chunks_per_text: int = 12,
         runs = _chunk_paras(paras)
         if not runs:
             raise VoiceprintError(f'baseline text {name} has no chunk of {CHUNK_WORDS} words')
-        step = max(1, len(runs) // chunks_per_text)
-        picked = runs[::step][:chunks_per_text]
+        picked = [runs[i] for i in _spaced(len(runs), chunks_per_text)]
         chunk_values += [_measures(r) for r in picked]
         paras_all += paras
         sources.append({'name': name, 'words': sum(p.n_words for p in paras),

@@ -86,25 +86,25 @@ each floor sits below the result with a margin.
 | Test | Measured | Floor or threshold |
 |---|---|---|
 | 1. Held-out Austen chunks (117 from *Emma* and *Persuasion*) nearest Austen among eight authors | 117/117 = 1.000 | 0.95 |
-| 1. Other authors' chunks (70, each left out of its author's fingerprint) nearest their own author | 64/70 = 0.914 | 0.80 |
-| 1. Other authors' chunks nearest Austen | 0/70 | at most 1 |
-| 1. Ranked by distance from Austen alone: held-out Austen ahead of the others (AUC) | 0.999 | 0.97 |
-| 1. The same against Brunton's *Self-Control* alone | 0.999 | 0.95 |
-| 2. *Pride and Prejudice*'s two halves | 0.165 apart | share a voice (`SAME_VOICE_MAX` 0.30) |
+| 1. Other authors' chunks (70, each left out of its author's fingerprint) nearest their own author | 62/70 = 0.886 | 0.80 |
+| 1. Other authors' chunks nearest Austen | 1/70 (a *Middlemarch* chunk) | at most 2 |
+| 1. Ranked by distance from Austen alone: held-out Austen ahead of the others (AUC) | 1.000 | 0.97 |
+| 1. The same against Brunton's *Self-Control* alone | 1.000 | 0.95 |
+| 2. *Pride and Prejudice*'s two halves | 0.168 apart | share a voice (`SAME_VOICE_MAX` 0.30) |
 | 2. Disjoint same-author samples (six pairs each, across her three novels): 10k / 25k / 50k words | worst 0.351 / 0.221 / 0.121; median 0.274 / 0.165 / 0.090 | `MIN_CORPUS_WORDS` = the smallest size whose worst pair shares a voice: 25,000 |
-| 3. The Verne translations | 0.382 apart: two voices | `SAME_VOICE_MAX` 0.30 |
+| 3. The Verne translations | 0.368 apart: two voices | `SAME_VOICE_MAX` 0.30 |
 | 3. Austen's novels in pairs | 0.209, 0.225, 0.226 | share a voice |
 | 3. Each Verne translation's halves | share a voice | |
 | 3. 16 Austen chunks + 4 of another author's (7 authors x 3 novels = 21 corpora) reported inconsistent | 18/21 | 0.75 |
 | 3. Seeded chunks named | 63/84 = 0.75 | 0.60 |
 | 3. Austen chunks named | 0 | 0 |
-| 3. Pure Austen corpora (20 chunks of each novel): the minority's separation | 0.602-0.632: consistent | `OUTLIER_SEPARATION` 0.85 |
+| 3. Pure Austen corpora (20 chunks of each novel): the minority's separation | 0.589-0.618: consistent | `OUTLIER_SEPARATION` 0.85 |
 
 The three seeded corpora not reported inconsistent are *Pride and
-Prejudice* seeded with *Middlemarch* (separation 0.792) and with
-*Self-Control* (0.771), and *Persuasion* with *Self-Control* (0.848): Eliot
+Prejudice* seeded with *Middlemarch* (separation 0.808) and with
+*Self-Control* (0.737), and *Persuasion* with *Self-Control* (0.843): Eliot
 and Brunton are the other authors nearest her. The flagged corpora's
-separations run 0.903 to 1.495; where fewer than four seeded chunks are
+separations run 0.874 to 1.468; where fewer than four seeded chunks are
 named, the split found a smaller minority (one or two of them).
 
 The Verne pair is two voices because what the fingerprint reads in a

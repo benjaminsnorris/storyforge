@@ -47,16 +47,42 @@ def test_paragraphs_drop_headings_breaks_and_markers():
 
 @pytest.mark.parametrize('heading', [
     'CHAPTER IV.', 'Chapter the Third', 'CHAPTER FORTY-FOURTH.', 'Part Two: The Return',
-    'PART II', 'XIV.', "STAVE I: MARLEY'S GHOST", 'Letter 12', 'THE END.'])
+    'PART II', 'XIV.', "STAVE I: MARLEY'S GHOST", 'Letter 12', 'THE END.',
+    'CHAPTER XII. THE BALL', 'Book One of the Trilogy', 'Chapter 3 — in which she leaves',
+    'iv.'])
 def test_paragraphs_drop_bare_headings(heading):
     assert vp.paragraphs(f'{heading}\n\nShe went home.') == ['She went home.']
 
 
 @pytest.mark.parametrize('prose', [
     'Part of me wanted to go.', 'Book in hand, she left.', 'Chapter and verse, he said.',
-    'Volume after volume fell.', 'Letter by letter it came.'])
+    'Volume after volume fell.', 'Letter by letter it came.',
+    # a heading word and a number, then a sentence (#662 review C1, SF2)
+    'Part two of the plan failed badly.', 'Book one was the best of them.',
+    'Letter three came on Tuesday.', 'Chapter one ended badly.',
+    'Section four was closed, so we went home.', 'Book in hand, she left.',
+    # one-word paragraphs spelled in roman-numeral letters aren't numerals
+    'Mild.', 'Civil.', 'Did.', 'Vivid.', '"NO!"'])
 def test_paragraphs_keep_prose_that_opens_on_a_heading_word(prose):
     assert vp.paragraphs(prose) == [prose]
+
+
+@pytest.mark.parametrize('caption', [
+    'PRELUDE', 'BEFORE THE DAWN', 'WILLIAM COLLINS.',
+    '[1] A somewhat remarkable eccentricity of the translator.'])
+def test_paragraphs_drop_capital_captions_and_footnotes(caption):
+    """A line set in capitals or a footnote isn't the writer's running prose
+    (#662 review CR-8)."""
+    assert vp.paragraphs(f'{caption}\n\nShe went home.') == ['She went home.']
+
+
+def test_build_baseline_spaces_its_chunks_through_each_text():
+    """The population chunks run from the start of a text to its end, not
+    the first `chunks_per_text` of a short step (#662 review C3)."""
+    assert vp._spaced(23, 12) == [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]
+    assert vp._spaced(30, 12)[-1] == 29 and vp._spaced(30, 12)[0] == 0
+    assert vp._spaced(5, 12) == [0, 1, 2, 3, 4]
+    assert vp._spaced(9, 1) == [0]
 
 
 def test_split_sentences_titles_initials_and_run_ons():
