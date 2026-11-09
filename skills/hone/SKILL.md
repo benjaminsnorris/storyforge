@@ -97,6 +97,8 @@ For dimensions below target (pacing, function variety, character presence, MICE 
 
 For all creative dimensions: **bring analysis and a point of view.** The author decides, but they need a partner who thinks, not a tool that reports.
 
+**Craft frameworks advise; they never gate** (#643). Pacing shape, function variety, MICE health, a flat emotional arc, a value shift that disagrees with the outcome, a conflict-free brief, an empty value_shift, turning_point, goal, conflict, crisis or decision: these measure a book against a craft framework, and a book may depart from one on purpose (scene endings that don't land, scenes with no turn). hone reports them tagged `(craft framework, advisory)` and never rewrites them on its own; `--diagnose` lists the empty craft fields apart from the gaps. Offer a change with your reasoning; don't treat one as a problem to clear.
+
 ## Step 4: Assess Domain Needs
 
 ### Briefs Domain
@@ -131,6 +133,7 @@ flagged = detect_abstract_fields(briefs_map)
 **Conflict-free scenes** — the conflict field describes observation or contemplation rather than genuine opposition:
 - "observes how the landscape has shifted" instead of "the locked door blocks the only exit"
 - Detected by keyword analysis (observation vs. opposition words) and structural cross-reference (outcome=yes with flat value_shift)
+- A craft-framework diagnostic (advisory): a scene of observation can be the right scene. Point it out; don't rewrite it unasked
 
 Present all findings together — abstract detection is one signal among several.
 
@@ -164,6 +167,7 @@ Present results:
 - Number of gaps by file (scene-intent.csv vs scene-briefs.csv)
 - Which scenes have the most gaps
 - Recommend `storyforge elaborate --stage gap-fill` to fill them
+- Each gap has `advisory`: True for a craft-framework field (any of `elaborate.CRAFT_FRAMEWORK_COLUMNS`). Report those apart, as optional notes the author may want, never as missing data
 
 ### Voice Profile Validation
 

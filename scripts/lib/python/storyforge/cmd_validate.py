@@ -4,7 +4,8 @@ Usage:
     storyforge validate                  # Both structural + schema (default)
     storyforge validate --no-schema      # Structural only
     storyforge validate --json           # Output as JSON
-    storyforge validate --quiet          # Exit code only (0=pass, 1=fail)
+    storyforge validate --quiet          # Exit code only (0 = no blocking failure;
+                                         # advisory diagnostics never fail)
 """
 
 import argparse
@@ -17,11 +18,13 @@ from storyforge.common import detect_project_root, log
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog='storyforge validate',
-                                     description='Run structural and schema validation')
+                                     description='Run structural and schema validation. Exits 1 on a blocking '
+                                     'failure; advisory diagnostics (#643: every craft-framework '
+                                     'check) are listed but never fail.')
     parser.add_argument('--no-schema', action='store_true', help='Skip schema validation')
     parser.add_argument('--structural', action='store_true', help='Include structural scoring')
     parser.add_argument('--json', action='store_true', dest='json_output', help='Output as JSON')
-    parser.add_argument('--quiet', action='store_true', help='Exit code only')
+    parser.add_argument('--quiet', action='store_true', help='Exit code only (0 = no blocking failure)')
     return parser.parse_args(argv)
 
 
@@ -211,7 +214,7 @@ def _status_logger(args):
 
 
 def _print_human_readable(combined):
-    from storyforge.elaborate import finding_scene_list
+    from storyforge.elaborate import finding_scene_list, split_failures
     r = combined['structural']
     schema = combined['schema']
     knowledge = combined.get('knowledge')
@@ -219,26 +222,35 @@ def _print_human_readable(combined):
     flashbacks = combined.get('flashbacks') or []
 
     total = len(r['checks'])
-    fail_count = len(r['failures'])
+    blocking, advisory = split_failures(r['failures'])
 
     print('--- Structural validation ---')
-    if r['passed'] and not fail_count:
+    if r['passed'] and not advisory:
         print(f'  Passed ({total} checks, 0 failures)')
     elif r['passed']:
         # Advisory findings don't fail validation, but a bare "Passed" would
         # read as checked and clean (F-124), so list them.
-        print(f'  Passed ({total} checks, 0 blocking, {fail_count} advisory):')
+        print(f'  Passed ({total} checks, 0 blocking, {len(advisory)} advisory):')
     else:
-        print(f'  Failed ({total} checks, {fail_count} failure(s)):')
-    for f in r['failures']:
-        severity = f.get('severity', 'blocking')
-        scene = f.get('scene_id', '')
-        prefix = f'    [{severity}]'
-        if scene:
-            prefix += f' {scene}:'
-        print(f"{prefix} {f['message']}")
-        if finding_scene_list(f):
-            print(f'      {finding_scene_list(f)}')
+        print(f'  Failed ({total} checks, {len(blocking)} blocking, '
+              f'{len(advisory)} advisory):')
+    # Two groups (#643): errors block; diagnostics, every craft-framework
+    # check among them, never do
+    for heading, group in (('Blocking (errors to fix):', blocking),
+                           ('Advisory (diagnostics, not blocking; craft-framework '
+                            'checks are here):', advisory)):
+        if not group:
+            continue
+        print(f'  {heading}')
+        for f in group:
+            severity = f.get('severity', 'blocking')
+            scene = f.get('scene_id', '')
+            prefix = f'    [{severity}]'
+            if scene:
+                prefix += f' {scene}:'
+            print(f"{prefix} {f['message']}")
+            if finding_scene_list(f):
+                print(f'      {finding_scene_list(f)}')
 
     if schema is not None:
         print()

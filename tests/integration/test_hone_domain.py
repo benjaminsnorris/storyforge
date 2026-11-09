@@ -785,4 +785,5 @@ class TestBuildIntentFixPrompt:
             issues=issues,
         )
         assert 'testable actions' in prompt  # vague instruction
-        assert 'transition phrase' in prompt  # flat instruction
+        # a flat arc is a craft-framework diagnostic hone never rewrites (#643)
+        assert 'transition phrase' not in prompt

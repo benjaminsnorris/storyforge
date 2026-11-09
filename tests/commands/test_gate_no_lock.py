@@ -309,7 +309,7 @@ class TestStatus:
 
     @pytest.fixture(autouse=True)
     def _solid(self, monkeypatch):
-        monkeypatch.setattr(status, 'ladder_states', lambda pd, medium='novel': [
+        monkeypatch.setattr(status, 'ladder_states', lambda pd, medium='novel', floors=None: [
             {'level': lvl, 'name': name, 'state': 'solid', 'detail': ''}
             for lvl, name in status.LEVEL_NAMES.items()])
 

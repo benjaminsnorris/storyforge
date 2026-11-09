@@ -10,7 +10,9 @@ No LLM, no writes. Pure over project files.
 import os
 from typing import Literal
 
-from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
+from storyforge.scoring_levels import (
+    LEVEL_NAMES, blocking_failed, counts_against_rung, is_advisory_failure, score_all_levels,
+)
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import (
@@ -84,18 +86,49 @@ def artifact_present(project_dir: str, level: int) -> bool:
                for row in rows for v in row.values())
 
 
+#: The `source` of each `advisory` record from a craft-framework floor
+#: check (#643), so consumers tell them from the gate's broken promises
+#: (whose `source` is a fact id or a scene id, never with a space) by a
+#: field, not a string prefix (#643's review TD-2)
+CRAFT_ADVISORY_SOURCE = 'craft framework'
+
+
 def _real_failed(floor: dict) -> int:
-    """Floor failures that the author has NOT accepted via override."""
-    return floor['failed'] - floor['accepted']
+    """Floor failures that keep a rung thin: not accepted by the author via
+    override, and not advisory (a craft-framework check, #643)."""
+    return blocking_failed(floor)
 
 
-def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
+def craft_advisory(floors: list[dict]) -> list[dict[str, str]]:
+    """#643: the failed craft-framework floor checks (value shift, turning
+    point, action/sequel balance, goal/conflict/crisis/decision) of the
+    rungs in `floors` (the caller passes those whose artifact is present),
+    one record each, in `gate.read_advisory`'s shape: `scene_id` '' (a floor
+    check is book-wide; its `finding` names the first scene), `command` the
+    `storyforge score --level N` that lists every scene, `source`
+    `CRAFT_ADVISORY_SOURCE`, `quote` '', `finding` `L<n> <rung>: <check>
+    (<detail>)`, `stale` ''. Reported, never blockers and never the next
+    step: a scene needn't fit a framework."""
+    return [{'scene_id': '', 'command': f"storyforge score --level {r['level']}",
+             'source': CRAFT_ADVISORY_SOURCE, 'quote': '',
+             'finding': (f"L{r['level']} {r['name']}: {c['check']}"
+                         + (f" ({c['detail']})" if c.get('detail') else '')),
+             'stale': ''}
+            for r in floors for c in r['checks'] if is_advisory_failure(c)]
+
+
+def ladder_states(project_dir: str, medium: str = 'novel',
+                  floors: list[dict] | None = None) -> list[dict]:
     """Return per-rung state for levels 0-6, derived from floor checks only.
 
     Coverage/consistency are NOT folded in here — they look downstream and
     would wrongly keep an upstream rung `thin`; they surface as blockers.
+    Advisory (craft-framework) floor checks don't either (#643). `floors`
+    is `score_all_levels`' answer when the caller already has it.
     """
-    floors = {r['level']: r for r in score_all_levels(project_dir, medium)}
+    if floors is None:
+        floors = score_all_levels(project_dir, medium)
+    floors = {r['level']: r for r in floors}
     ladder = []
     for level in LADDER_LEVELS:
         floor = floors[level]
@@ -106,7 +139,7 @@ def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
         else:
             state = 'thin'
             fails = [c['detail'] or c['check'] for c in floor['checks']
-                     if not c['passed'] and not c.get('accepted')]
+                     if counts_against_rung(c)]
             detail = fails[0] if fails else ''
         ladder.append({'level': level, 'name': LEVEL_NAMES[level],
                        'state': state, 'detail': detail})
@@ -306,7 +339,8 @@ def free_to_draft(project_dir: str) -> tuple[int, int, list[str]]:
 
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
     """Compose the full next-step verdict. Deterministic, read-only."""
-    ladder = ladder_states(project_dir, medium)
+    floors = score_all_levels(project_dir, medium)   # once (#643's review SF-7)
+    ladder = ladder_states(project_dir, medium, floors)
 
     # Current phase = first rung that is not solid; if all solid, derive from
     # scene draft-state.
@@ -419,5 +453,9 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'next': nxt,
         'then': then,
         'blockers': blockers,
-        'advisory': advisory,
+        # one list of records, never blockers (#642): the gate's broken
+        # promises, then the craft-framework floor checks of rungs that
+        # exist (#643, `source` CRAFT_ADVISORY_SOURCE)
+        'advisory': advisory + craft_advisory(
+            [f for f in floors if artifact_present(project_dir, f['level'])]),
     }

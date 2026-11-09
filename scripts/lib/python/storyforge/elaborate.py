@@ -597,6 +597,27 @@ _REQUIRED_BY_STATUS = {
 }
 
 
+#: Columns that record a scene's place in a craft framework: Swain's
+#: action/sequel and goal/conflict, McKee's value at stake and its shift, the
+#: turning point, the emotional arc, the Story Grid's crisis and decision
+#: (#643, plan D6). They're useful notes, but requiring them on every scene
+#: presses every book toward one shape (each scene a closed unit with a turn
+#: and a landing), so a missing one is advisory everywhere: validate's
+#: `craft-columns-{id}`, the status floors, hone's gaps. `elaborate
+#: --gap-fill` still fills them.
+CRAFT_FRAMEWORK_COLUMNS = ('action_sequel', 'emotional_arc', 'value_at_stake',
+                           'value_shift', 'turning_point', 'goal', 'conflict',
+                           'crisis', 'decision')
+
+
+def split_failures(failures: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(blocking, advisory) failures of a validation report, each in its
+    order. A failure with no severity is blocking (``_check``'s default)."""
+    blocking = [f for f in failures if f.get('severity', 'blocking') != 'advisory']
+    advisory = [f for f in failures if f.get('severity', 'blocking') == 'advisory']
+    return blocking, advisory
+
+
 def finding_scene_list(finding: dict) -> str:
     """``scenes: a, b, c`` for a finding over more than two scenes, else ''.
 
@@ -1234,11 +1255,15 @@ def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
     Each check has a `severity` field — ``'blocking'`` (default) or
-    ``'advisory'``. Blocking failures indicate structural problems that
-    must be fixed before drafting (orphaned rows, missing required
-    columns, timeline contradictions, broken MICE nesting). Advisory
-    failures are reported as FYI signals — for example, crosscut pacing
-    on a single timeline_day — and do not gate the pipeline.
+    ``'advisory'``. Blocking failures are errors to fix before drafting:
+    orphaned or duplicate rows, missing required columns, a broken
+    ``told_by`` chain, a faithful adaptation's unnamed cast. Advisory
+    failures are diagnostics, and every check of conformity to a craft
+    framework is one (#643, plan D6): MICE nesting and operations, value
+    shift polarity runs, scene-type and turning-point rhythm, missing
+    craft-framework columns (``CRAFT_FRAMEWORK_COLUMNS``), as well as FYI
+    signals such as flashbacks and crosscuts. Advisory failures never gate
+    the pipeline.
 
     Returns:
         A dict with:
@@ -1247,8 +1272,8 @@ def validate_structure(ref_dir: str) -> dict:
             affect ``'passed'``.
           - ``'checks'`` (list): every check run, passed or failed.
           - ``'failures'`` (list): all failed checks (blocking AND
-            advisory). Callers that need to distinguish should inspect
-            each entry's ``'severity'`` field.
+            advisory), each with its ``'severity'``; :func:`split_failures`
+            splits them.
     """
     checks: list[dict] = []
 
@@ -1326,9 +1351,11 @@ def validate_structure(ref_dir: str) -> dict:
             merged.update({k: v for k, v in briefs_map[sid].items() if k != 'id'})
 
         clockless = time_mode(merged) in CLOCKLESS_MODES
-        missing = [col for col in required if not merged.get(col, '').strip()
-                   and not (unmigrated and col == 'act')
-                   and not (clockless and col in CLOCK_FIELDS)]
+        empty = [col for col in required if not merged.get(col, '').strip()
+                 and not (unmigrated and col == 'act')
+                 and not (clockless and col in CLOCK_FIELDS)]
+        missing = [col for col in empty if col not in CRAFT_FRAMEWORK_COLUMNS]
+        craft = [col for col in empty if col in CRAFT_FRAMEWORK_COLUMNS]
         checks.append(_check(
             'completeness', f'required-columns-{sid}',
             len(missing) == 0,
@@ -1337,6 +1364,15 @@ def validate_structure(ref_dir: str) -> dict:
             scene_id=sid,
             fields=missing if missing else None,
         ))
+        if craft:
+            # A craft framework's columns advise (#643): reported, with the
+            # fields gap-fill reads, never blocking
+            checks.append(_check(
+                'completeness', f'craft-columns-{sid}', False,
+                f"Scene {sid} (status={status}) has no craft-framework notes in: {craft} "
+                f"(advisory: a scene needn't fit a framework)",
+                severity='advisory', scene_id=sid, fields=craft,
+            ))
 
     # --- Thread, timeline, knowledge, pacing ---
     _validate_threads(scenes_map, intent_map, checks, ref_dir=ref_dir)
@@ -1352,7 +1388,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_narrator(ref_dir, scenes_map, checks)
 
     failures = [c for c in checks if not c['passed']]
-    blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
+    blocking_failures, _advisory = split_failures(failures)
     return {
         'passed': len(blocking_failures) == 0,
         'checks': checks,
@@ -1807,14 +1843,17 @@ def analyze_gaps(ref_dir: str) -> dict:
     """
     report = validate_structure(ref_dir)
 
-    # Collect per-scene missing fields from completeness failures
+    # Collect per-scene missing fields from completeness failures: a scene
+    # can have a blocking required-columns failure and an advisory
+    # craft-columns one (#643), and gap-fill fills both
     scene_missing: dict = {}
     for failure in report['failures']:
         if failure['category'] == 'completeness' and failure.get('scene_id'):
             sid = failure['scene_id']
             fields = failure.get('fields', [])
             if fields:
-                scene_missing[sid] = fields
+                scene_missing.setdefault(sid, []).extend(
+                    f for f in fields if f not in scene_missing.get(sid, []))
 
     # Categorize into gap groups
     groups: dict = {}

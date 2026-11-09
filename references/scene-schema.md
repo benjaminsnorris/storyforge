@@ -144,15 +144,17 @@ The `status` field tracks how deeply a scene has been elaborated:
 
 ## Validation
 
-Run `./storyforge validate` to check both structural integrity and schema compliance:
+Run `./storyforge validate` to check both structural integrity and schema compliance. It prints its structural findings in two groups: **blocking** errors, which fail validation (exit 1) and hold an elaborate stage's phase, then **advisory** diagnostics, which never do.
+
+**Checks catch errors; craft frameworks advise** (#643). Every check of conformity to a craft framework is advisory: a scene's empty craft-framework columns (`action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift`, `turning_point`, `goal`, `conflict`, `crisis`, `decision`), MICE nesting and operations, flat polarity, scene-type and turning-point runs, and in `storyforge status` and `score --level` the architecture's action/sequel balance. These are useful notes, but a book may leave a scene without a turn or a landing on purpose. Errors still block: a required column that isn't a craft one, duplicate seqs or ids, orphaned rows, a broken `told_by` chain, schema errors, canon errors, and for a faithful adaptation its coverage gaps and unnamed cast.
 
 **Structural checks:**
 - **Identity:** Every ID in intent/briefs exists in scenes.csv
-- **Completeness:** Required columns for the scene's status are populated
-- **Timeline:** flashbacks and crosscuts (scenes set before the story's present) are listed and gauged, never errors
+- **Completeness:** Required columns for the scene's status are populated (blocking: `required-columns-{id}`); the craft-framework ones among them are a separate advisory finding (`craft-columns-{id}`), which `elaborate --gap-fill` still fills
+- **Timeline (advisory):** flashbacks and crosscuts (scenes set before the story's present) are listed and gauged, never errors
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
-- **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes between its open and its close (a mention before the open or after the close is allowed and not counted; a close before the open is reported; `elaborate --stage mice-fill` adds bare-name mentions inside the span)
-- **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
+- **Thread management (advisory):** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes between its open and its close (a mention before the open or after the close is allowed and not counted; a close before the open is reported; `elaborate --stage mice-fill` adds bare-name mentions inside the span)
+- **Pacing (advisory):** flat polarity stretches (3+ scenes), action/sequel runs and turning-point runs (4+) are reported
 - **Brief names (advisory):** names in a brief's goal, conflict, outcome, crisis, decision, key actions and dialogue, knowledge, physical states and subtext that no scene's prose and no reference file uses (scene-briefs.csv and scene-intent.csv don't count: a brief rewrite that drifted writes them). A draft takes its facts from the brief, so it would write these people into the book. One finding per scene, naming each field and its names, and one for each thing it couldn't check (a missing fact column, no `id` column, an unreadable or non-UTF-8 file), so a pass means checked and clean. Reference files include subfolders (canon/, source/); a graphic novel's pages count as prose. The briefs never vouch for each other, drafted or not (a drift puts the same stray in several briefs): a real name a scene plans before it is drafted belongs in characters.csv or locations.csv. A run of capitalized words ("Danny Olinsky") is one name; possessives, plurals, words the book uses in any case (Unicode names included), weekdays, months, titles ("Detective", "Dr.") and institutional words ("Internal Affairs") pass. Only the first word of a run that opens a sentence, a beat (after `;`) or a `[note]` is excused, and only when no brief uses that word as a name (capitalized mid-sentence, or possessive where a sentence or beat opens). It still over-reports drug and brand names, so check each against the book. `validate` lists advisories on every run; elaborate and extract list them only when validation otherwise fails
 
 **Schema checks:**

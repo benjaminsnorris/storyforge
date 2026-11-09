@@ -42,7 +42,13 @@ Before doing anything else, orient yourself:
      An advisory file that can't be read is a `gate` blocker, not a record. Not blockers: the prose stands. Mention them, and
      offer to amend the brief, or to mark the beat `must:` (in
      `key_actions` or `key_dialogue`) if the author wants the gate to
-     require it.
+     require it. Records whose `source` is `craft framework` are the failed
+     craft-framework floor checks (`scene_id` and `quote` empty; `finding`
+     names the rung, the check and the first scene; `command` is the
+     `storyforge score --level N` that lists every scene) (#643: a missing value shift or turning
+     point, the action/sequel balance, a brief with no goal, conflict,
+     crisis or decision). They never keep a rung thin; mention them as
+     observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
      stage and blocker).
@@ -175,7 +181,7 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```bash
 ./storyforge validate --structural
 ```
-If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
+If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv` with the author: they measure the book against craft frameworks and are advisory, never a reason to hold drafting (#643). At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
 **"Is my elaboration on track?" / "Drift check" / "Are the levels consistent?":**
 Run the elaboration drift report — deterministic, no LLM, no cost:
@@ -319,9 +325,9 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1.5. Post-extraction reconciliation:** If `scenes.csv` has rows AND registries are missing or incomplete (no `characters.csv`, `values.csv`, etc.) → "Your data needs reconciliation to normalize cross-scene consistency." → Provide `./storyforge reconcile` command.
 
-**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
+**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns `passed` False (a **blocking** failure; `split_failures(report['failures'])[0]` is non-empty) → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state). Advisory findings alone (empty craft-framework columns, MICE or pacing runs; #643) never send the book to gap-fill: mention them as optional notes the author may fill.
 
-**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
+**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure." → Provide `./storyforge validate --structural`. Review scores and proposals with the author. They're advisory (#643) and never hold drafting: a below-target dimension is something the author may act on, not work to clear first.
 
 **2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --keep-going` command.
 
@@ -350,7 +356,7 @@ the source of truth for position and next step:
 - **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → voice → draft → evaluate (voice from the `voice` stage/blocker, not a rung).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
 - **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
-- **Advisory:** list `advisory` (broken promises the gate didn't stop on) apart from the blockers: the author amends the brief, marks the beat `must:`, or leaves it.
+- **Advisory:** list `advisory` (broken promises the gate didn't stop on, then the records whose `source` is `craft framework`) apart from the blockers: for a promise the author amends the brief, marks the beat `must:`, or leaves it; a craft-framework line is a diagnostic the author can use or ignore.
 
 Then add the context the verdict doesn't carry:
 

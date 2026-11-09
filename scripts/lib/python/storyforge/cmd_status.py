@@ -12,7 +12,7 @@ import argparse
 import json
 
 from storyforge.common import detect_project_root, get_medium
-from storyforge.status import build_status
+from storyforge.status import CRAFT_ADVISORY_SOURCE, build_status
 
 _STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—'}
 
@@ -52,7 +52,9 @@ def render_human(verdict: dict) -> str:
             lines.append(f"  [{b['source']}] {b['detail']}")
     else:
         lines.append('BLOCKERS: none')
-    advisory = verdict.get('advisory') or []
+    every = verdict.get('advisory') or []
+    craft = [a for a in every if a['source'] == CRAFT_ADVISORY_SOURCE]
+    advisory = [a for a in every if a['source'] != CRAFT_ADVISORY_SOURCE]
     if advisory:
         lines.append(f'ADVISORY: {len(advisory)} broken promise(s) the gate reported but did '
                      f'not stop on (working/gate-advisory.csv); the prose stands. Amend the '
@@ -60,6 +62,12 @@ def render_human(verdict: dict) -> str:
         from storyforge.gate import advisory_line
         for row in advisory:
             lines.append(f'  {advisory_line(row)}')
+    if craft:
+        # #643: diagnostics the author can use, never a stop
+        lines.append(f'ADVISORY: {len(craft)} craft-framework check(s) not met; a scene '
+                     f"needn't fit a framework, so these never block:")
+        for row in craft:
+            lines.append(f"  {row['finding']}  [{row['command']}]")
     return '\n'.join(lines)
 
 
