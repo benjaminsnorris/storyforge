@@ -25,10 +25,12 @@ The measures, in groups (`GROUPS`):
   suffix heuristic plus a closed list of common adjectives) per 1000 words.
   The Latinate, adverb and adjective counts are heuristics, not a
   part-of-speech tagger: they're consistent, so compare like with like;
-- **openings**: how paragraphs open and close, kept apart (paragraphs of
-  two sentences or more): the first and last sentences' lengths, the share
-  opening on dialogue, a pronoun, an article or a conjunction, the share
-  closing on a question, an exclamation or a closing quote.
+- **openings**: how paragraphs open and close: the share of paragraphs
+  opening on dialogue (over every paragraph), and, over the paragraphs of
+  two sentences or more (where a first and last sentence differ), the
+  first and last sentences' lengths, the share opening on a pronoun, an
+  article or a conjunction, the share closing on a question, an
+  exclamation or a closing quote.
 
 Outside the distance, a fingerprint also keeps the sentence-length
 distribution (`sentence_lengths`), the words paragraphs open on
@@ -40,7 +42,9 @@ the phrases the writer uses more often than the general baseline does
 breaks) and every measure is taken on each chunk: a measure's `center` is
 its median over the chunks, `spread` a robust standard deviation, `p10` /
 `p90` the writer's typical range (`Stat`). `value` is the measure over the
-whole corpus.
+whole corpus. Ranges and distances are on this chunk scale: a text much
+shorter than a chunk falls outside a range more often by chance, so
+`compare` refuses a text under `MIN_COMPARE_WORDS`.
 
 **The distance.** Cosine Delta (Smith and Aldridge 2011, the strongest of
 the Delta family for authorship): each measure becomes a z score against the
@@ -60,7 +64,8 @@ chunks already measured; `compare(fp, other)` -> `Comparison` (`other` a
 `Fingerprint` or a text; `.distance`, `.groups`, `.measures` of
 `MeasureDistance`, `.furthest(n)`); `compare_values(fp, values)`;
 `same_voice(a, b)` -> `VoiceMatch`; `consistency(pieces)` -> `Consistency`
-(the pieces in another voice, named); `measure(text)` -> every measure's
+(the pieces in another voice, named), `consistency_values(names, values)`;
+`measure(text)` -> every measure's
 value; `chunks(text)` -> the text cut as a fingerprint cuts it;
 `load_baseline()`, `build_baseline(texts)`, `population_text(raw)`.
 `SAME_VOICE_MAX`, `OUTLIER_SEPARATION` and `MIN_CORPUS_WORDS` are calibrated
@@ -89,6 +94,8 @@ from storyforge.register import fold
 #: version can't be compared (`Fingerprint.from_dict` refuses it)
 FINGERPRINT_VERSION = 1
 #: words per chunk, the unit every measure's center and range are taken over
+#: (a change means rebuilding baseline.json and every fingerprint.json, and
+#: bumping FINGERPRINT_VERSION once one has shipped)
 CHUNK_WORDS = 2000
 #: fewer chunks than this give no spread worth the name
 MIN_CHUNKS = 3
@@ -566,9 +573,12 @@ def measure_group(name: str) -> str:
 
 
 def measure(text: str) -> dict[str, float]:
-    """Every measure's value for `text`, by name (all 0.0 for a text with no
-    prose)."""
-    return _measures(_parse(paragraphs(text)))
+    """Every measure's value for `text`, by name. Raises VoiceprintError for
+    a text with no prose (all zeros would read as a profile)."""
+    paras = _parse(paragraphs(text))
+    if not paras:
+        raise VoiceprintError('the text has no prose to measure')
+    return _measures(paras)
 
 
 # ============================================================================
@@ -593,8 +603,8 @@ def _is_rate(name: str) -> bool:
 def _noise_floor(name: str, center: float) -> float:
     """The least spread a measure can have on the chunk scale: for a rate per
     1000 words, a chunk's counting noise (Poisson: a rare word's count of 1
-    or 3 in a chunk is chance, not voice); else 1% of the scale (shares) or
-    5% of the center."""
+    or 3 in a chunk is chance, not voice); else the larger of 5% of the
+    center and 0.01."""
     if _is_rate(name):
         unit = 1000.0 / CHUNK_WORDS
         return math.sqrt(max(center, unit) * unit)
@@ -669,6 +679,8 @@ def build_baseline(texts: Mapping[str, str], chunks_per_text: int = 12,
     `chunks_per_text` chunks of each text, spaced evenly through it, and
     the `keep` most frequent n-grams of each size over the whole texts.
     Every measure's sd is floored at its noise floor."""
+    if not texts:
+        raise VoiceprintError('a baseline needs at least one population text')
     chunk_values, paras_all, sources = [], [], []
     for name, text in texts.items():
         paras = _parse(paragraphs(text))
@@ -974,18 +986,26 @@ def fingerprint(texts: Mapping[str, str] | Sequence[str] | str,
                 baseline: Baseline | None = None, ngrams: bool = True) -> Fingerprint:
     """The fingerprint of a corpus: `texts` by name (a mapping keeps the
     names, in order), a list, or one text. Raises VoiceprintError for a
-    corpus under `MIN_CHUNKS` chunks of `CHUNK_WORDS` words, or (with
-    `ngrams`) when the baseline can't be read. `ngrams=False` leaves the
-    phrase list empty (the distance never uses it)."""
+    piece with no prose (named: an empty file, the wrong encoding), for a
+    corpus under `MIN_CHUNKS` chunks (a last chunk of half `CHUNK_WORDS`
+    counts, so about 5,000 words), or (with `ngrams`) when the baseline
+    can't be read. `ngrams=False` leaves the phrase list empty (the distance
+    never uses it). A corpus under `MIN_CORPUS_WORDS` is fingerprinted but
+    isn't stable: `Fingerprint.below_minimum_corpus` says so, and a caller
+    showing the fingerprint should warn."""
     pieces = _as_pieces(texts)
     parsed = [(name, _parse(paragraphs(t))) for name, t in pieces]
+    empty = [name for name, ps in parsed if not ps]
+    if empty:
+        raise VoiceprintError(f'corpus pieces with no prose: {", ".join(empty[:10])}')
     paras = [p for _, ps in parsed for p in ps]
     runs = _chunk_paras(paras)
     n_words = sum(p.n_words for p in paras)
     if len(runs) < MIN_CHUNKS:
+        least = CHUNK_WORDS * (MIN_CHUNKS - 1) + CHUNK_WORDS // 2
         raise VoiceprintError(
             f'the corpus has {n_words} words of prose: a fingerprint needs at least '
-            f'{MIN_CHUNKS} chunks of {CHUNK_WORDS} words ({MIN_CHUNKS * CHUNK_WORDS} words)')
+            f'{MIN_CHUNKS} chunks (about {least} words)')
     stats = _stats([_measures(run) for run in runs], _measures(paras))
     sent_lens = [len(s) for p in paras for s in p.sentences]
     buckets: Counter = Counter()
@@ -999,9 +1019,6 @@ def fingerprint(texts: Mapping[str, str] | Sequence[str] | str,
                    for w, c in sorted(first.items(), key=lambda kv: (-kv[1], kv[0]))[:15]}
     piece_info = []
     for name, ps in parsed:
-        if not ps:
-            piece_info.append({'name': name, 'words': 0})
-            continue
         sents = [s for p in ps for s in split_sentences(p.text)]
         piece_info.append({'name': name, 'words': sum(p.n_words for p in ps),
                            'first_sentence': sents[0], 'last_sentence': sents[-1]})
@@ -1103,8 +1120,15 @@ def _centers(fp: Fingerprint) -> dict[str, float]:
 
 def compare_values(fp: Fingerprint, values: Mapping[str, float],
                    baseline: Baseline | None = None) -> Comparison:
-    """Measure values (`measure`) against a fingerprint."""
+    """Measure values (`measure`) against a fingerprint. Ranges and the
+    distance are on the chunk scale (`CHUNK_WORDS`): values from a much
+    shorter text sit further out by chance."""
     return _rows(_centers(fp), values, baseline or load_baseline(), fp.stats)
+
+
+#: a text shorter than this can't be read on the chunk scale (half a chunk,
+#: the shortest run a fingerprint measures as one): `compare` refuses it
+MIN_COMPARE_WORDS = CHUNK_WORDS // 2
 
 
 def compare(fp: Fingerprint, other: Fingerprint | str,
@@ -1112,14 +1136,20 @@ def compare(fp: Fingerprint, other: Fingerprint | str,
     """`other` (a fingerprint, or a text) against `fp`, on the baseline's
     scale. A text is measured whole against the fingerprint's chunk
     centers; two fingerprints compare their chunk centers (symmetric in
-    `distance`). Raises VoiceprintError for a text with no prose, or when
-    the baseline can't be read."""
+    `distance`). Raises VoiceprintError for a text under
+    `MIN_COMPARE_WORDS` words of prose (its distance would be noise), or
+    when the baseline can't be read. `compare_values` takes values measured
+    on any length, and the caller answers for what they mean."""
     base = baseline or load_baseline()
     if isinstance(other, Fingerprint):
         return _rows(_centers(fp), _centers(other), base, None)
     paras = _parse(paragraphs(other))
     if not paras:
         raise VoiceprintError('the text has no prose to measure')
+    n = sum(p.n_words for p in paras)
+    if n < MIN_COMPARE_WORDS:
+        raise VoiceprintError(f'the text has {n} words of prose: a comparison on the chunk '
+                              f'scale needs at least {MIN_COMPARE_WORDS}')
     return _rows(_centers(fp), _measures(paras), base, fp.stats)
 
 
@@ -1143,8 +1173,8 @@ class Consistency:
     piece's distance from the corpus's typical piece (every measure's median
     over the pieces), in the order given; `outliers`: the pieces in another
     voice, furthest first, or () when the corpus holds one voice;
-    `separation`: how far the outlying group's typical piece sits from the
-    rest's (0.0 when there was no group to test)."""
+    `separation`: how far the minority's typical piece sits from the
+    rest's (the minority is named when this passes `OUTLIER_SEPARATION`)."""
     distances: dict[str, float]
     outliers: tuple[str, ...]
     separation: float
@@ -1170,8 +1200,8 @@ def _minority(values: Sequence[Mapping[str, float]], base: Baseline) -> tuple[se
     """Two groups by their profiles (2-medoids-like, deterministic): the
     piece furthest from the typical piece starts the second group, then each
     piece joins the group whose median profile it is nearer, until nothing
-    moves. The second group stays a minority (a move that would make it the
-    majority stops the search). Returns its indexes and the distance between
+    moves. The second group stays at most half the pieces (a move that would
+    make it more stops the search). Returns its indexes and the distance between
     the two groups' median profiles."""
     center = _median_profile(values)
     first = max(range(len(values)), key=lambda i: (_cosine_distance(center, values[i], base), -i))

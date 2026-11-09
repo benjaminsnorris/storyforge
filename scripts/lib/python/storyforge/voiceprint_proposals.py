@@ -629,6 +629,14 @@ RANGE_WINDOWS = 400
 RANGE_MIN_WINDOWS = 20
 
 
+def _passage_distance(fp: vp.Fingerprint, text: str, base: vp.Baseline) -> float:
+    """A passage's distance from the fingerprint. Through `compare_values`
+    on `measure(text)`: `compare` refuses a text under
+    `voiceprint.MIN_COMPARE_WORDS`, which is the chunk scale's floor; the
+    passage scale is handled here, by judging against passages."""
+    return vp.compare_values(fp, vp.measure(text), base).distance
+
+
 def _band_bounds(band: int) -> tuple[int, int]:
     i = PASSAGE_BANDS.index(band)
     upper = PASSAGE_BANDS[i + 1] - 1 if i + 1 < len(PASSAGE_BANDS) else PASSAGE_MAX
@@ -657,7 +665,7 @@ class PassageRange:
         return self.limits[band_of(words)]
 
     def distance(self, text: str) -> float:
-        return vp.compare(self.fingerprint, text, self.baseline).distance
+        return _passage_distance(self.fingerprint, text, self.baseline)
 
     def judge(self, passage: Passage) -> Passage:
         """`passage` with its distance, its band's limit and whether it's
@@ -700,7 +708,7 @@ def passage_range(fp: vp.Fingerprint, texts: Mapping[str, str],
                 n += lens[j]
                 j += 1
             if lo <= n <= hi:
-                dists.append(vp.compare(fp, '\n\n'.join(paras[i:j]), base).distance)
+                dists.append(_passage_distance(fp, '\n\n'.join(paras[i:j]), base))
         if len(dists) < RANGE_MIN_WINDOWS:
             raise ProposalError(f'the corpus gives {len(dists)} passages of {lo}-{hi} words, '
                                 f'too few for a typical range (at least {RANGE_MIN_WINDOWS})')

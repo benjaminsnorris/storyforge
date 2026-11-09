@@ -48,10 +48,25 @@ paragraph per line. Configs:
   byte-identical to the evals' `manuscript.md`.
 - `tests/fixtures/voiceprint/others/<book>/01.md`..`10.md`: ten chunks of
   about 2,000 words (`voiceprint.chunks`), evenly spaced through each of the
-  evals' manuscripts of *The Age of Innocence* (Wharton), *The Brimming Cup*
-  (Dorothy Canfield Fisher), *A Christmas Carol* (Dickens), *The Great
-  Gatsby* (Fitzgerald), *Middlemarch* (Eliot), *The Plastic Age* (Percy
-  Marks) and *Self-Control* (Mary Brunton, 1811, Austen's contemporary).
+  evals' manuscripts (normalized from Project Gutenberg, header and licence
+  stripped):
+
+  | Book | Gutenberg | Published | Author died |
+  |---|---|---|---|
+  | *The Age of Innocence*, Edith Wharton | 541 | 1920 | 1937 |
+  | *The Brimming Cup*, Dorothy Canfield Fisher | 14957 | 1921 | 1958 |
+  | *A Christmas Carol*, Charles Dickens | 46 | 1843 | 1870 |
+  | *The Great Gatsby*, F. Scott Fitzgerald | 64317 | 1925 | 1940 |
+  | *Middlemarch*, George Eliot | 145 | 1872 | 1880 |
+  | *The Plastic Age*, Percy Marks | 16532 | 1924 | 1956 |
+  | *Self-Control*, Mary Brunton (Austen's contemporary) | 41196 | 1811 | 1818 |
+
+**Public domain.** Every text here was published in the United States
+before 1930 (or is a translation of that age), so it is in the US public
+domain, which is the basis Project Gutenberg distributes them on. Two are
+not yet out of copyright everywhere under life plus 70 years: *The Plastic
+Age* (Marks died 1956: until 2027) and *The Brimming Cup* (Fisher died 1958:
+until 2029). Each is a 20,000-word excerpt used as a test fixture.
 
 Together the texts here and in the fixtures are about 4 MB (2.0 MB of Austen
 and baseline, 0.9 MB of Verne, 0.9 MB of excerpts).
@@ -69,8 +84,19 @@ from `https://www.gutenberg.org/cache/epub/<n>/pg<n>.txt` into an empty
 folder, then:
 
 ```python
-texts = {name: vp.population_text(open(path, encoding='utf-8').read()) for name, path in ...}
-json.dump(vp.build_baseline(texts), open(vp.BASELINE_REL, 'w'), indent=1, ensure_ascii=False)
+import glob, json, re
+from storyforge import voiceprint as vp
+texts = {}
+for path in glob.glob('<folder>/pg*.txt'):
+    raw = open(path, encoding='utf-8').read().replace('\r\n', '\n')
+    gid = re.search(r'pg(\d+)', path).group(1)
+    title = re.search(r'^Title: (.*)$', raw, re.M).group(1).strip()
+    author = re.search(r'^Author: (.*)$', raw, re.M).group(1).strip()
+    # the key is the `sources` name: "Gutenberg 33: Nathaniel Hawthorne, The Scarlet Letter"
+    texts[f'Gutenberg {gid}: {author}, {title}'] = vp.population_text(raw)
+texts = dict(sorted(texts.items(), key=lambda kv: int(kv[0].split()[1].rstrip(':'))))
+with open(vp.BASELINE_REL, 'w', encoding='utf-8', newline='\n') as f:
+    f.write(json.dumps(vp.build_baseline(texts), indent=1, ensure_ascii=False) + '\n')
 ```
 
 It's a 19th- and early 20th-century baseline. A modern writer's phrases
@@ -80,8 +106,14 @@ writers, not its level.
 
 ## The tests and their numbers
 
-`tests/test_voiceprint_reference.py`, free, about 6 s. Measured 2026-11-08;
+`tests/test_voiceprint_reference.py`, free, about 10 s. Measured 2026-11-08;
 each floor sits below the result with a margin.
+
+**These numbers are in-sample.** The distance's design, `OTHER_WEIGHT`,
+`SAME_VOICE_MAX` and `OUTLIER_SEPARATION` were chosen on these same texts
+(`docs/history.md`), so the floors show the fingerprint fits them and catch
+a regression; they don't show how it finds a voice it has never seen. A
+held-out validation set (more Austen, Burney, Edgeworth) would.
 
 | Test | Measured | Floor or threshold |
 |---|---|---|
@@ -98,7 +130,8 @@ each floor sits below the result with a margin.
 | 3. Each Verne translation's halves | share a voice | |
 | 3. 16 Austen chunks + 4 of another author's (7 authors x 3 novels = 21 corpora) reported inconsistent | 18/21 | 0.75 |
 | 3. Seeded chunks named | 63/84 = 0.75 | 0.60 |
-| 3. Austen chunks named | 0 | 0 |
+| 3. Austen chunks named | 0 | 0 (on purpose: naming the writer's own piece as another voice is the error an author can't shrug off) |
+| 3. *Self-Control* seeded corpora reported inconsistent | 1/3 | at least 1 |
 | 3. Pure Austen corpora (20 chunks of each novel): the minority's separation | 0.589-0.618: consistent | `OUTLIER_SEPARATION` 0.85 |
 | 3. Pure Austen corpora of 20 pieces of `MIN_PIECE_WORDS` (1,500) words, through `consistency` | 0.560-0.680: consistent (1,000-word pieces reach 0.906, which is why the minimum is 1,500) | `OUTLIER_SEPARATION` 0.85 |
 
@@ -108,6 +141,22 @@ Prejudice* seeded with *Middlemarch* (separation 0.808) and with
 and Brunton are the other authors nearest her. The flagged corpora's
 separations run 0.874 to 1.468; where fewer than four seeded chunks are
 named, the split found a smaller minority (one or two of them).
+
+Each seeded corpus's separation and how many of its four seeded chunks the
+minority holds (named when the corpus is flagged), so later drift shows
+(`test_mixed_voices_seeded_corpus_is_inconsistent` prints them). A flagged
+corpus can name as few as one: the floor is on the total.
+Brunton is flagged in one of three (`BRUNTON_FLAGGED_MIN` 1):
+
+| Seeded with | *Emma* | *Pride and Prejudice* | *Persuasion* |
+|---|---|---|---|
+| *The Age of Innocence* | 1.192 (3/4) | 1.057 (4/4) | 0.945 (1/4) |
+| *The Brimming Cup* | 1.093 (4/4) | 1.055 (4/4) | 1.028 (4/4) |
+| *A Christmas Carol* | 1.066 (4/4) | 1.147 (4/4) | 1.015 (4/4) |
+| *The Great Gatsby* | 1.468 (4/4) | 1.466 (4/4) | 1.390 (4/4) |
+| *Middlemarch* | 0.939 (2/4) | 0.808 (2/4), not flagged | 0.927 (1/4) |
+| *The Plastic Age* | 1.228 (4/4) | 1.255 (4/4) | 1.236 (4/4) |
+| *Self-Control* | 0.874 (4/4) | 0.737 (2/4), not flagged | 0.843 (1/4), not flagged |
 
 The Verne pair is two voices because what the fingerprint reads in a
 translation is the translator's English. A real author's corpus can mix
