@@ -33,6 +33,27 @@ def time_mode(row: dict) -> str:
     return (row.get('time_mode') or '').strip().lower() or 'scene'
 
 
+#: `frame` values (#648): a scene whose events aren't the story's present
+#: action though it may sit on a day: a memory relived, a dream, a vision, a
+#: ghost's visit. Blank (or no column) is a present-time scene. `time_mode`
+#: says where a scene sits on the calendar; `frame` says whether what it
+#: shows happens there. The continuity checks read both (`off_present`)
+FRAMES = ('memory', 'dream', 'vision', 'ghost')
+
+
+def frame(row: dict) -> str:
+    """A scenes.csv row's `frame`, normalized: stripped, lower case, '' for
+    a present-time scene (blank, or no column)."""
+    return (row.get('frame') or '').strip().lower()
+
+
+def off_present(row: dict) -> bool:
+    """Whether the scene shows something other than the story's present: a
+    `frame` in `FRAMES`, or a `time_mode` in `OFF_PRESENT_MODES`. A `frame`
+    outside `FRAMES` is not off-present (validate and cleanup report it)."""
+    return frame(row) in FRAMES or time_mode(row) in OFF_PRESENT_MODES
+
+
 def told_by(row: dict) -> str:
     """A scenes.csv row's `told_by`, stripped: the id of the scene that
     tells this one (an embedded tale), or '' for a scene lived on the page.
@@ -66,6 +87,9 @@ _SCENES_COLS = [
     # song or report a character gives there); empty for a scene lived on
     # the page (#548)
     'told_by',
+    # A scene whose events aren't the present's: memory, dream, vision or
+    # ghost (`FRAMES`, #648); blank for a present-time scene
+    'frame',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',

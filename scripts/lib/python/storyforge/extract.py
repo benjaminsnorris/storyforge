@@ -259,7 +259,8 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - type: the scene's primary narrative purpose
 - target_words: current word count is a reasonable target — the approximate word count
 - act: which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading
-- told: true when this scene's events are a tale told inside the previous scene (a story, song or report a character gives there, or the narrator's digression from it), or go on with one; then pov is the teller. false for a scene lived on the page"""
+- told: true when this scene's events are a tale told inside the previous scene (a story, song or report a character gives there, or the narrator's digression from it), or go on with one; then pov is the teller. false for a scene lived on the page
+- frame: "memory" (a past the character relives), "dream", "vision" (something a character is shown) or "ghost" (the dead visit) when what the scene shows isn't the story's present action; "" for a present-time scene"""
 
 
 def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
@@ -775,10 +776,11 @@ CAST_SCHEMA = _object({'characters': _STR_LIST, 'on_stage': _STR_LIST})
 
 
 _SKELETON_FIELDS = ('title', 'pov', 'location', 'time_of_day', 'duration', 'type',
-                    'target_words', 'act')
+                    'target_words', 'act', 'frame')
 
 
 def _skeleton_schema() -> dict:
+    from .elaborate import FRAMES
     from .schema import VALID_TIMES, VALID_TYPES
     from .timeline import CUE_FIELDS, RELATIONS
     cues = {label.lower(): _STR for label in CUE_FIELDS}
@@ -790,6 +792,8 @@ def _skeleton_schema() -> dict:
         'target_words': _STR, 'act': _STR,
         # An embedded tale (#548): code turns it into told_by
         'told': {'type': 'boolean'},
+        # Not the story's present (#648): blank for a present-time scene
+        'frame': {'type': 'string', 'enum': [''] + list(FRAMES)},
     })
 
 

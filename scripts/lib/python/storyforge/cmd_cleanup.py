@@ -172,7 +172,7 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     # Added to the schema after projects existed; elaborate and extract add
     # them on their next write of the file
     'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene',
-                             'told_by'},
+                             'told_by', 'frame'},
     'reference/scene-intent.csv': {'theme_threads'},
     'reference/scene-briefs.csv': {'motif_details'},
 }
@@ -2598,6 +2598,33 @@ def _check_world_table(project_dir: str) -> list[dict]:
     } for p in found]
 
 
+def _check_scene_frames(project_dir: str) -> list[dict]:
+    """Report scenes.csv `frame` cells outside `elaborate.FRAMES` (#648). The
+    continuity check reads such a scene as present-time, so a dead character
+    there is reported; the author may have meant a memory or a dream. A
+    missing column is no finding: every scene is then present-time (the
+    column is in OPTIONAL_CSV_COLUMNS, and elaborate and extract add it on
+    their next write of the file). Never repaired."""
+    from storyforge.elaborate import FRAMES, _read_csv, frame
+    rel = 'reference/scenes.csv'
+    path = os.path.join(project_dir, rel)
+    if not os.path.isfile(path):
+        return []
+    try:
+        rows = _read_csv(path)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return []   # report_csv_schema and _check_unreadable_inputs say so
+    return [{
+        'type': 'scene_frame', 'file': rel, 'category': 'integrity',
+        'detail': csv_safe(f'{(row.get("id") or "").strip()}: frame "{frame(row)}" is not one '
+                           f'of {", ".join(FRAMES)}; the continuity check reads the scene as '
+                           f'the story\'s present'),
+        'action': f'Set frame to one of {", ".join(FRAMES)}, or leave it blank for a '
+                  f'present-time scene (references/scene-schema.md)',
+        'severity': 'error',
+    } for row in rows if frame(row) and frame(row) not in FRAMES]
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Report CRLF line endings in the CSVs and in `storyforge.yaml`.
 
@@ -2905,8 +2932,9 @@ def build_cleanup_report(project_dir: str) -> dict:
             finding['category'] = 'unexpected'
             all_findings.append(finding)
 
-    # --- The world table's rows (#647) ---
+    # --- The world table's rows (#647), scenes.csv's frame values (#648) ---
     all_findings.extend(_check_world_table(project_dir))
+    all_findings.extend(_check_scene_frames(project_dir))
 
     # --- Canon files (graphic-novel projects only) ---
     all_findings.extend(report_canon_files(project_dir))
