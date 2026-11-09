@@ -42,6 +42,12 @@ class Item(NamedTuple):
     must: bool      # it opens with the marker
     text: str       # the item without the marker, stripped ('' for a bare `must:`)
 
+    @property
+    def beat(self) -> bool:
+        """Whether it is a `must` beat: marked, and naming something (a
+        bare `must:` marks nothing)."""
+        return self.must and bool(self.text)
+
 
 def parse_item(item: str) -> Item:
     """`item` read for the marker."""
@@ -69,7 +75,7 @@ def items(cell: str) -> list[Item]:
 
 def must_items(cell: str) -> list[Item]:
     """The cell's `must` items that name a beat (a bare `must:` names none)."""
-    return [i for i in items(cell) if i.must and i.text]
+    return [i for i in items(cell) if i.beat]
 
 
 def unmarked(cell: str) -> str:
@@ -137,12 +143,12 @@ def keep_must(old: str, new: str) -> Kept:
     keep = must_items(old)
     wanted = {_key(i.text) for i in keep}
     new_items = items(new)
-    dropped = [i.raw for i in new_items if i.must and i.text and _key(i.text) not in wanted]
+    dropped = [i.raw for i in new_items if i.beat and _key(i.text) not in wanted]
     present = {_key(i.text) for i in new_items if i.must and _key(i.text) in wanted}
     restored = [i for i in keep if _key(i.text) not in present]
     if not dropped and not restored:
         return Kept(new, [], [])
-    kept = [i for i in new_items if not (i.must and i.text and _key(i.text) not in wanted)]
+    kept = [i for i in new_items if not (i.beat and _key(i.text) not in wanted)]
     out = [i.raw for i in kept]
     old_items = items(old)
     missing = []

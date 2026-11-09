@@ -206,6 +206,10 @@ class GateResult:
     #: Reported (`ADVISORY`), kept in `ADVISORY_PATH`, never sent to the
     #: fix. Set by `_classify`; disjoint from `findings` and `unverified`
     advisory: list[Finding] = field(default_factory=list)
+    #: (broken promise, why it blocks) for each one that isn't advisory: a
+    #: `must` beat (`MUST_BEAT`) or a registry fact set up in this scene
+    #: (`SET_UP_HERE`); set by `_classify`, for the report
+    promise_why: list[tuple[Finding, str]] = field(default_factory=list)
     #: brief items that are only the `must:` marker (`field (n)`): they
     #: mark nothing, and are reported
     bare_must: list[str] = field(default_factory=list)
@@ -1024,23 +1028,59 @@ def _bare_must(scene: dict[str, str]) -> list[str]:
 
 
 def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
-    """Whether the broken promise `f` is of a `must` beat. A quote that is
-    one whole item of the brief's field is that item, marked or not;
-    otherwise it is a `must` beat's when it names one (`must.names_beat`) in
-    its field, or in any field when `f` names one without `must` beats (an
-    unverified finding's made-up id). In doubt it is a `must` beat's: a
-    wrong stop costs a look, a wrong pass loses the author's beat."""
-    from storyforge.must import items, names_beat, strip_marker
+    """Whether the broken promise `f` is of a `must` beat. With no `must`
+    beat in the brief, never. Otherwise, in this order:
+
+    1. a quote that is one whole item of the brief is that item, marked or
+       not (its own field first, then any promise field);
+    2. a quote found in its own field when that field takes no marker
+       (`outcome`, the registry fields: a verified promise of one) is not;
+    3. a quote that names a `must` beat (`must.names_beat`) is;
+    4. a quote that names an unmarked item of its own field (of any field,
+       for a made-up id) is not;
+    5. anything else (a paraphrase, a short partial quote, words that name
+       no item) is: in doubt, `must`. A wrong stop costs a look; a wrong
+       pass loses the author's beat (#642's review TD-1, CR-2)."""
+    from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    from storyforge.must import MUST_FIELDS, items, names_beat, strip_marker
     if not any(beats.values()):
         return False
-    quote = _words(strip_marker(f.established_quote))
-    fields = [f.fact_id] if f.fact_id in beats and beats[f.fact_id] else list(beats)
-    for col in fields:
-        for item in items(scene.get(col) or ''):
-            if quote.strip() and _words(item.text) == quote:
-                return item.must and bool(item.text)
-    return any(names_beat(f.established_quote, b.text)
-               for col in fields for b in beats[col])
+    said = f.established_quote or ''
+    quote = _words(strip_marker(said))
+    fields = list(PROMISE_FIELDS) + list(REGISTRY_PROMISE_FIELDS)
+    own = [f.fact_id] if f.fact_id in fields else []
+    if quote.strip():
+        for col in own + [c for c in fields if c not in own]:
+            for item in items(scene.get(col) or ''):
+                if _words(item.text) == quote:
+                    return item.beat
+        if own and own[0] not in MUST_FIELDS and quote in _words(scene.get(own[0]) or ''):
+            return False
+    if any(names_beat(said, b.text) for col in MUST_FIELDS for b in beats.get(col, [])):
+        return True
+    return not any(names_beat(said, item.text) for col in (own or fields)
+                   for item in items(scene.get(col) or '') if not item.must)
+
+
+def _set_up_here(project_dir: str, scene_id: str,
+                 rows: list[dict[str, str]] | None = None) -> set[str]:
+    """The binding registry facts (knowledge, physical) the ledger says
+    `scene_id` sets up (#642's review CR-1): a broken promise of one stops
+    the scene, for the prose is the fact's only evidence and later scenes
+    are read against it as set up here. `rows`: the ledger (read when
+    None)."""
+    if rows is None:
+        rows = ledger.load(project_dir)
+    return {r['id'] for r in rows
+            if (r.get('scene_id') or '').strip() == scene_id
+            and r.get('status') == 'binding' and not ledger.is_commitment(r)
+            and r.get('type') in ledger.VIEW_COLUMNS}
+
+
+#: Why a broken promise stops the scene (`GateResult.promise_why`)
+MUST_BEAT = 'the brief marks this beat must:'
+SET_UP_HERE = ('the ledger sets up {id} in this scene, and later scenes are read against it: '
+               'establish it in the prose, or move or reject the fact')
 
 
 #: How many words a speech tag between two parts of a `must` line may take
@@ -1089,7 +1129,10 @@ def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
     beats = _must_beats(scene)
     if not any(beats.values()):
         return []
-    reported = [f for f in check.findings + check.unverified if f.kind == 'broken-promise']
+    # only a reported promise that stays the must beat's covers it: one of
+    # an unmarked item goes to advisory (#642's review SF-1, T1)
+    reported = [f for f in check.findings + check.unverified
+                if f.kind == 'broken-promise' and _is_must(f, scene, beats)]
     holder: list[Cast | None] = [None]
     out = []
     for col, items_ in beats.items():
@@ -1110,7 +1153,8 @@ def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
 
 
 def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
-              reported: list[dict[str, str]], prose: str = '') -> None:
+              reported: list[dict[str, str]], prose: str = '',
+              rows: list[dict[str, str]] | None = None) -> None:
     """Sort the check's verified contradictions into `inherited` and
     `plan_conflicts` (each set anew).
 
@@ -1129,16 +1173,26 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
 
     Broken promises and unverified findings are neither. A broken promise,
     verified or not, is `advisory` (#642) unless it is of a beat the brief
-    marks `must:` (`_is_must`)."""
+    marks `must:` (`_is_must`) or of a registry fact the ledger sets up in
+    this scene (`_set_up_here`); those block, and `promise_why` says why.
+    `rows`: the ledger (read when None)."""
     result.inherited, result.plan_conflicts, result.speaker_notes = [], [], []
-    result.advisory, result.bare_must = [], []
+    result.advisory, result.bare_must, result.promise_why = [], [], []
     if not result.check:
         return
     scene = _brief_row(project_dir, result.scene_id)
     beats = _must_beats(scene)
     result.bare_must = _bare_must(scene)
-    result.advisory = [f for f in result.check.findings + result.check.unverified
-                       if f.kind == 'broken-promise' and not _is_must(f, scene, beats)]
+    here = _set_up_here(project_dir, result.scene_id, rows)
+    for f in result.check.findings + result.check.unverified:
+        if f.kind != 'broken-promise':
+            continue
+        if f.fact_id in here:
+            result.promise_why.append((f, SET_UP_HERE.format(id=f.fact_id)))
+        elif _is_must(f, scene, beats):
+            result.promise_why.append((f, MUST_BEAT))
+        else:
+            result.advisory.append(f)
     old = before.scenes.get(result.scene_id) if before else None
     known = {(r['source'], _words(r['quote'])) for r in reported}
     phrases = None
@@ -1531,7 +1585,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         log(f'  {scene_id}: {result.blocking_note}')
     # #642: a `must` line's words, checked by code
     result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check))
-    _classify(result, project_dir, before, already_reported, prose=prose)
+    _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
@@ -3528,6 +3582,12 @@ def advisory_report_lines(result: GateResult) -> list[str]:
             f'{_one_line(_advisory_message(f))}' for f in result.advisory]
 
 
+def _promise_why(result: GateResult, f: Finding) -> str:
+    """' (blocking: why)' for a broken promise that isn't advisory, else ''."""
+    why = next((w for g, w in result.promise_why if g is f), '')
+    return f' (blocking: {_one_line(why)})' if why else ''
+
+
 def report_lines(result: GateResult) -> list[str]:
     """The gate's verdict on a scene as one-line strings (log lines, list
     items): everything that stopped the commit, then what is reported
@@ -3544,10 +3604,11 @@ def report_lines(result: GateResult) -> list[str]:
                          f'brief or {f.source}){_from_reading(f)}: {_one_line(f.message())}'
                          + (f' ({_one_line(note)})' if note else ''))
         else:
-            lines.append(f'{f.kind.upper()}{_from_reading(f)}: {_one_line(f.message())}')
+            lines.append(f'{f.kind.upper()}{_from_reading(f)}: {_one_line(f.message())}'
+                         + _promise_why(result, f))
     for f in result.unverified:
         lines.append(f'UNVERIFIED ({f.problem}){_from_reading(f)}: '
-                     f'{_one_line(f.message())}')
+                     f'{_one_line(f.message())}' + _promise_why(result, f))
     for d in result.unruled:
         lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
                      f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '

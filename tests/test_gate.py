@@ -3729,6 +3729,82 @@ class TestAdvisoryPromises:
                        findings=[_promise('', fact_id='village-vanished')])
         assert result.passed and [f.fact_id for f in result.advisory] == ['village-vanished']
 
+    # #642's review: when the brief has a must beat, only a quote that is
+    # positively an unmarked item is advisory (TD-1, CR-2, T2)
+    def test_a_paraphrased_must_beat_blocks(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions="Cross-references maps;must: Priam kisses "
+                                            "Achilles' hands")
+        for quote in ('Priam kisses the hands of Achilles', 'Priam kneels and kisses hands'):
+            result = _gate(project_dir, tmp_path, [_commitment()],
+                           findings=[_promise(quote)])
+            assert not result.passed and result.advisory == [], quote
+            assert [w for _, w in result.promise_why] == [gate.MUST_BEAT]
+
+    def test_a_short_partial_quote_of_a_must_beat_blocks(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Cross-references maps;must: Achilles chases him '
+                                            'round the walls')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Achilles chases him')])
+        assert not result.passed and result.advisory == []
+
+    def test_a_quote_naming_an_unmarked_item_stays_advisory(self, project_dir, tmp_path):
+        _set_brief(project_dir, key_actions='Searches the removal logs for the village;'
+                                            'must: Dorren burns the archive')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('the removal logs for the village')])
+        assert result.passed
+        assert [f.established_quote for f in result.advisory] == [
+            'the removal logs for the village']
+
+    def test_a_verified_outcome_promise_is_advisory_beside_a_must_beat(
+            self, project_dir, tmp_path):
+        # SF-6: outcome takes no marker; sharing words with a must beat
+        # doesn't make its promise one
+        _set_brief(project_dir, outcome='Dorren searches removal logs and finds nothing',
+                   key_actions='must: Dorren searches removal logs')
+        for quote in ('Dorren searches removal logs and finds nothing',
+                      'searches removal logs and finds nothing'):
+            result = _gate(project_dir, tmp_path, [_commitment()],
+                           findings=[_promise(quote, fact_id='outcome')])
+            assert result.passed and len(result.advisory) == 1, quote
+
+    def test_a_must_line_reported_under_another_field_blocks(self, project_dir, tmp_path):
+        # T1: the check files the must line under key_actions, which has a
+        # must beat of its own
+        _set_brief(project_dir, key_actions='Hector runs;must: Achilles chases him round the '
+                                            'walls',
+                   key_dialogue='must: Dorren: "I have kissed the hands of the man"')
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Dorren: "I have kissed the hands of the man"')])
+        assert not result.passed and result.advisory == []
+
+    def test_a_must_line_beside_its_unmarked_longer_form_blocks(self, project_dir, tmp_path):
+        # SF-1: the check reports the unmarked line (advisory); the must line
+        # inside it is missing too, and still blocks
+        _set_brief(project_dir, key_dialogue='Dorren: "The map has been altered by hand, '
+                                             'Tessa";must: Dorren: "The map has been altered '
+                                             'by hand"')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_promise(
+            'Dorren: "The map has been altered by hand, Tessa"', fact_id='key_dialogue')])
+        assert not result.passed
+        assert [f.established_quote for f in result.advisory] == [
+            'Dorren: "The map has been altered by hand, Tessa"']
+        assert [f.established_quote for f in result.findings] == [
+            'must: Dorren: "The map has been altered by hand"']
+
+    def test_a_registry_promise_set_up_in_this_scene_blocks(self, project_dir, tmp_path):
+        # CR-1, SF-2: the ledger sets archive-key-dorren up in this scene;
+        # committed without it, later scenes would be read against a fact
+        # the prose never established
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('', fact_id='archive-key-dorren')])
+        assert not result.passed and not result.committed and result.advisory == []
+        assert [f.fact_id for f in result.findings] == ['archive-key-dorren']
+        line = next(line for line in gate.report_lines(result)
+                    if line.startswith('BROKEN-PROMISE'))
+        assert 'blocking: the ledger sets up archive-key-dorren in this scene' in line
+        assert any('archive-key-dorren' in p for p in gate.problems_to_fix(result))
+
     def test_a_later_run_without_one_clears_the_scenes_rows(self, project_dir, tmp_path):
         _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
         assert SCENE in gate.advisories(project_dir)
