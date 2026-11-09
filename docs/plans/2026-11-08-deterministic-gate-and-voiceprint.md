@@ -38,10 +38,18 @@ scenes broke down like this:
 | CONTRADICTION WLD | 1 |
 
 So the gate spent ten times the drafting budget, and most of what it stopped
-on was blocking a reader would not notice. Examples: "Apollo stood up" when
-he had never sat; a spear still in the hand. A handful were real (Ida on the
-wrong side of the sky; a wagon's shadow pointing into the sun). The
-**sequential stop** made it worse. Any failing scene holds every later scene
+on was blocking: "Apollo stood up" when he had never sat, a spear still in
+a hand that then grips two ankles, a sun setting behind a mountain the
+dawn rises over. **These are real errors.** The fix agents judged nearly all
+70 of them genuine and fixed them. Think of the book as a film: the
+narration has to know where everyone is, what they hold and which way they
+face, or a description contradicts itself. A careful reader notices and is
+thrown out of the story, and most readers feel it as a vague
+dissatisfaction even when they can't say why. The problem was the method,
+not the category. Each error was found after the fact, by a large model
+reading the whole scene twice, at about a dollar a scene, and then the
+scene was patched one clause at a time. The **sequential stop** made it
+worse. Any failing scene holds every later scene
 at `pending`, so `write` and `revise` refuse to run, and the author has to
 work around the tool to make progress. Meanwhile **no step looked at voice**,
 which is the thing the reader actually judged.
@@ -60,8 +68,11 @@ toward one writer holding a voice that comes from examples.
 2. **Narrow questions, not open hunts.** "Find contradictions" invites
    findings. "Is X still true in this scene? Yes or no, and quote it"
    doesn't.
-3. **Block only what a reader would notice:** deaths, knowledge, who holds
-   what, time, place, names. Everything else is advisory.
+3. **Continuity is a film set.** Where everyone is, their posture, what
+   they hold and wear, and which way they face are tracked as state, the
+   way a script supervisor tracks a shoot. They're prevented while writing
+   and checked by code after, not hunted for by a reader model. Craft
+   *frameworks* are advisory; continuity *errors* block.
 4. **Voice comes from examples, not rules.** A rule list moves tics around.
    A bank of chosen passages pulls toward a voice.
 5. **One writer per stretch.** Fanning drafting out to many calls averages
@@ -155,12 +166,58 @@ from the ledger, for the scenes where the subject appears:
   book 13 broken promises came from briefs that revision had made stale. A
   brief is a plan, and the prose wins.
 
-### A4. Blocking becomes advisory
+### A4. Blocking: a stage sheet, like a film's continuity
 
-`blocking.py` (#626) stays as an optional line-editor pass:
-`storyforge check --blocking`, or part of a polish. Its findings never stop
-a scene and never hold later scenes at `pending`. They go to the report for
-the author or a polish pass to take or leave.
+Blocking errors (who stands, who sits, which hand holds what, who is in
+front, what's worn, where the light is) are what make a scene feel
+untrustworthy, and they stay errors that block. What changes is how
+they're caught: prevention first, then cheap checks.
+
+**The stage sheet.** For each scene, a running record of the stage, beat by
+beat:
+
+| field | example |
+|---|---|
+| present | Priam, Idaeus, Hermes |
+| posture | Priam: seated in the car; Hermes: on foot |
+| hands | Priam: L reins, R empty; Hermes: R wand |
+| position | the wagon ahead, the car behind; Hermes at the mules' heads |
+| facing / sightline | Priam facing the gate; Cassandra too far to see her face |
+| worn / carried | Achilles: no cloak; the thongs in the car |
+| light / place | dawn behind Ida (east); the yard, out of sight of the shore |
+
+1. **Prevention: the writer keeps the sheet.** In a session (Part C), the
+   writer starts each scene with the sheet carried over from the last one
+   and the scene's opening state. When it moves a body, it updates the
+   sheet in a side channel (a short structured note after each scene, not
+   in the prose). Most of Wrath's 70 errors were the drafter losing track,
+   and a written sheet is what a careful human writer or a film's
+   continuity supervisor uses.
+2. **Extraction: the stage as events.** After drafting, the extractor
+   labels each physical action as a transition on the sheet:
+   `posture: seated -> standing`, `hands.R: spear -> empty (drove it into
+   the ground)`, `position: Hermes ground -> ground`. A fixed schema, with
+   every event quoted and the quote verified.
+3. **Code checks the transitions, for free.** A transition from a state
+   the sheet doesn't hold is an error: standing up when standing, gripping
+   with a full hand, taking a cloak off that was never on, seeing a face
+   past sight range, a shadow that points toward the sun. A small table of
+   world facts (directions, light, distances) covers the sky and
+   geography cases.
+4. **A narrow yes/no for the rest.** Where an action can't be typed ("he
+   could see the jaw under her hand"), a small model gets one question
+   against the sheet at that beat, asked twice and kept only if both
+   answers agree.
+
+**Fixing.** A blocking error is always local to its scene. It goes back to
+the writer of the stretch as a note with the sheet at that beat ("Priam is
+in the car, which is behind the wagon; 'the box behind him' can't be
+reached"), not to a separate fix agent. A blocking error stops *its*
+scene from being marked done; it doesn't hold later scenes (A5).
+
+`blocking.py` (#626), the whole-scene line-editor read, stays as a fallback
+behind a flag until the sheet's recall on gawain's 35 and Wrath's 70 known
+errors matches it. Those 105 cases are a ready-made labelled set.
 
 ### A5. No sequential lock
 
@@ -267,6 +324,8 @@ continued conversation) that writes a whole stretch in order. In context:
   and what must be true at the end. No motifs, no beat lists, no subtext
   fields, no "key dialogue";
 - the canon and name map.
+- the stage sheet carried over from the last scene (A4), which the writer
+  updates after each scene.
 
 The writer works scene after scene without a fresh call per scene, so the
 voice carries over. Long output limits matter here. The session resumes
@@ -466,9 +525,10 @@ inputs, a change in the number is a change in the tool.
 New suites (numbered when built; E9 is already taken by
 `extract-upper-layers.md`):
 
-- **False-stop rate:** scenes stopped per 10k words on findings a human
-  labels "a reader wouldn't notice". It can be built for free from Wrath's
-  last gate run, where 70 of the 92 stopping findings were blocking.
+- **Blocking recall and false stops:** the stage sheet (A4) against a
+  fixed set of known blocking errors, gawain's 35 (#626) and Wrath's 70
+  with their fixes, plus clean scenes for false alarms. It's free to
+  build: the cases and the fix agents' verdicts already exist.
 - **Voice:** blind pairwise reads of the same scene, (a) from today's
   pipeline and (b) from a session with the exemplars. Ben and a second
   reader pick which "sounds written". It costs readers' time, not dollars,
@@ -481,22 +541,25 @@ at a fraction of the cost.
 
 ## Phasing
 
-1. **Gate policy (small, first):** blocking becomes advisory (A4), the
-   sequential lock goes (A5), and promises become advisory (A3, last
-   bullet). These are mostly flags and gate rules, and they would have
-   saved most of this book's gate spend.
-2. **Typed state and A2 checks:** knowledge and life-and-death first, then
+1. **Gate policy (small, first):** the sequential lock goes (A5), and
+   promises become advisory (A3, last bullet). Blocking still blocks,
+   through today's `blocking.py` for now. These are mostly flags and gate
+   rules.
+2. **The stage sheet (A4):** the writer keeps it in sessions, extraction
+   labels transitions, code checks them. Measure on the blocking set
+   (Part E) before retiring the whole-scene read.
+3. **Typed state and A2 checks:** knowledge and life-and-death first, then
    possession, place, time and injury. Measure on E4 and E8.
-3. **The A3 question layer** replaces the open checker for the facts A2
+4. **The A3 question layer** replaces the open checker for the facts A2
    can't cover. The open checker stays behind a flag until the evals say
    it can go.
-4. **The voiceprint, B1 to B4 and B6:** a prototype on Ben's site corpus
+5. **The voiceprint, B1 to B4 and B6:** a prototype on Ben's site corpus
    before it becomes a command.
-5. **B5 fiction calibration and C sessions:** pilot on one act of *Wrath
+6. **B5 fiction calibration and C sessions:** pilot on one act of *Wrath
    Like Smoke* against the existing draft, then the voice suite (Part E).
-6. **The ladder (Part D):** craft checks become advisory (D5) and briefs
+7. **The ladder (Part D):** craft checks become advisory (D5) and briefs
    get lean, note-style defaults (D2, D3). Both are small and can ride
-   phase 1. Voice moves up the ladder (D4) with phase 4. The adaptation
+   phase 1. Voice moves up the ladder (D4) with phase 5. The adaptation
    track (D7) is piloted on Wrath's redraft, which already has its source
    map and its interpretation decisions in `key-decisions.md`.
 
@@ -509,17 +572,18 @@ at a fraction of the cost.
    examples?**
    *Recommend:* yes. That's where Storyforge is strong, and where Wrath
    went wrong.
-2. **Does phase 1 ship alone first?** (Blocking and promises advisory, no
-   sequential lock, craft checks advisory, lean briefs.)
+2. **Does phase 1 ship alone first?** (Promises advisory, no sequential
+   lock, craft checks advisory, lean briefs; blocking still blocks.)
    *Recommend:* yes. It's small and mostly policy, and it removes most of
    the cost and friction Wrath hit.
 
 **The gate**
 
-3. **Blocking: advisory everywhere, or a stop for some books?**
-   *Recommend:* advisory everywhere, with a `--blocking` line-editor pass
-   to run before publishing. Gawain's slips (#626) are real but cosmetic;
-   they belong in polish.
+3. **Blocking: the stage sheet (A4) as the way it's caught?** (Decided:
+   blocking errors are real errors and they block.)
+   *Recommend:* yes. The writer keeps the sheet, extraction labels
+   transitions, and code checks them. The whole-scene read stays until the
+   sheet matches it on the 105 known cases.
 4. **Broken promises: advisory unless a beat is marked `must`?**
    *Recommend:* yes. A brief is a plan, and the prose wins. Revision made 13
    of Wrath's briefs stale.
@@ -536,8 +600,9 @@ at a fraction of the cost.
 7. **Make fixed labelled sets the default kind of eval?**
    *Recommend:* yes. When a suite needs live generation for its inputs,
    record them once and freeze them.
-8. **Adopt the false-stop and voice suites?**
-   *Recommend:* yes to both. False-stop is free from Wrath's run. Voice is
+8. **Adopt the blocking-set and voice suites?**
+   *Recommend:* yes to both. The blocking set is free from gawain's and
+   Wrath's known errors. Voice is
    the one that matters most.
 
 **The ladder and briefs**
