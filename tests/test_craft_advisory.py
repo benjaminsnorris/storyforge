@@ -415,3 +415,48 @@ class TestHone:
         assert 'act1-sc01: missing outcome' in required
         assert 'goal' not in required
         assert 'act1-sc01: goal, crisis' in craft
+
+
+# ============================================================================
+# the interactive path: skills and help text (#643's review)
+# ============================================================================
+
+_PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _skill(name):
+    with open(os.path.join(_PLUGIN, 'skills', name, 'SKILL.md'), encoding='utf-8') as f:
+        return f.read()
+
+
+class TestSkillsDontGateOnCraft:
+    def test_forge_routes_gap_fill_on_blocking_failures(self):
+        """C2, SF-1: advisory findings alone never send a book to gap-fill."""
+        step = next(line for line in _skill('forge').splitlines()
+                    if line.startswith('**1.6.'))
+        assert 'failures > 0' not in step and '`passed` False' in step
+
+    def test_forge_structural_scoring_never_holds_drafting(self):
+        """C1, SF-2"""
+        step = next(line for line in _skill('forge').splitlines()
+                    if line.startswith('**1.7.'))
+        assert 'before drafting' not in step and 'never hold drafting' in step
+
+    def test_elaborate_gap_fill_routes_on_blocking_failures(self):
+        """C2: the stage tables, and full coaching asks before craft fields."""
+        text = _skill('elaborate')
+        assert '| failures > 0 |' not in text
+        assert 'Drafted with validation failures > 0' not in text
+        assert "I'll fill them all" not in text
+
+    def test_score_floor_gating_excludes_advisory(self):
+        """C3"""
+        assert 'non-advisory checks' in _skill('score')
+
+    def test_validate_help_says_advisory_never_fails(self, capsys):
+        """C5"""
+        from storyforge.cmd_validate import parse_args
+        with pytest.raises(SystemExit):
+            parse_args(['--help'])
+        out = ' '.join(capsys.readouterr().out.split())
+        assert 'advisory diagnostics' in out and 'never fail' in out

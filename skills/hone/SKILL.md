@@ -167,7 +167,7 @@ Present results:
 - Number of gaps by file (scene-intent.csv vs scene-briefs.csv)
 - Which scenes have the most gaps
 - Recommend `storyforge elaborate --stage gap-fill` to fill them
-- Each gap has `advisory`: True for a craft-framework field (value_at_stake, value_shift, emotional_arc, goal, conflict, crisis, decision). Report those apart, as optional notes the author may want, never as missing data
+- Each gap has `advisory`: True for a craft-framework field (any of `elaborate.CRAFT_FRAMEWORK_COLUMNS`). Report those apart, as optional notes the author may want, never as missing data
 
 ### Voice Profile Validation
 

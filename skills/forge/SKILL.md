@@ -325,9 +325,9 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1.5. Post-extraction reconciliation:** If `scenes.csv` has rows AND registries are missing or incomplete (no `characters.csv`, `values.csv`, etc.) → "Your data needs reconciliation to normalize cross-scene consistency." → Provide `./storyforge reconcile` command.
 
-**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
+**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns `passed` False (a **blocking** failure; `split_failures(report['failures'])[0]` is non-empty) → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state). Advisory findings alone (empty craft-framework columns, MICE or pacing runs; #643) never send the book to gap-fill: mention them as optional notes the author may fill.
 
-**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
+**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure." → Provide `./storyforge validate --structural`. Review scores and proposals with the author. They're advisory (#643) and never hold drafting: a below-target dimension is something the author may act on, not work to clear first.
 
 **2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --keep-going` command.
 

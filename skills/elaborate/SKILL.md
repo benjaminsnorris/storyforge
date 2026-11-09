@@ -21,7 +21,7 @@ Read the following files to understand where the project stands:
 
 1. `storyforge.yaml` — check the `phase` field to determine current stage
 2. `reference/scenes.csv` — check if it exists and how many rows (0 = no spine yet)
-3. `reference/scene-intent.csv` — check column depth (function only = spine; has value_shift = architecture; has characters = mapped)
+3. `reference/scene-intent.csv` — check column depth (function only = spine; `reference/architecture.csv` has rows, or value_shift is filled = architecture: value_shift is a craft-framework column and may be empty on purpose, #643; has characters = mapped)
 4. `reference/scene-briefs.csv` — check if it exists and has non-empty rows
 5. `reference/story-architecture.md` — does it exist?
 6. `reference/character-bible.md` — does it exist?
@@ -84,10 +84,10 @@ Based on the project state, identify where the author is:
 | any | 0 | — | — | `storyforge status` next.stage ∈ {logline, synopsis, act-shape} (story-summary.md missing or thin) | Needs prose tier / Start at Stage 0 |
 | spine | 0 | — | — | — | Needs spine |
 | spine | 5-10 | function only | — | — | Spine done, ready for architecture |
-| architecture | 15-25 | has value_shift | — | — | Architecture done, ready for map |
+| architecture | 15-25 | architecture.csv has rows (value_shift and the other craft columns are optional, #643) | — | — | Architecture done, ready for map |
 | scene-map | target_words/2000 to target_words/1500 | has characters, on_stage | — | — | Map done, ready for briefs |
-| briefs | same as map | full | has goal/conflict/outcome | — | Briefs done, ready for drafting |
-| drafting+ | status=drafted | populated but gaps | populated | failures > 0 | **Gap-fill mode** |
+| briefs | same as map | full | has outcome (goal/conflict optional, #643) | — | Briefs done, ready for drafting |
+| drafting+ | status=drafted | populated but gaps | populated | blocking failures > 0 (`passed` False) | **Gap-fill mode** |
 | drafting+ | — | — | — | passes | Past elaboration — redirect to forge |
 
 ## Step 3: Determine Mode
@@ -116,11 +116,11 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 | `storyforge status` next.stage ∈ {logline, synopsis, act-shape} (story-summary.md missing or thin) | Needs prose tier / Start at Stage 0 |
 | No scenes.csv (or 0 rows) | Start spine |
 | Spine done (5-10 rows, function only) | Run architecture |
-| Architecture done (has value_shift) | Run scene map |
+| Architecture done (architecture.csv has rows; value_shift is optional, #643) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
 | Briefs done, `storyforge status` has a `voice` blocker (next.stage `voice`, or then.stage `voice` behind a gate `check`: the voice guide is missing, init's template, empty, unreadable, or only persistent-prompt.md) | Run the Voice Stage |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
-| Drafted with validation failures > 0 | Run gap-fill |
+| Drafted with blocking validation failures (`passed` False; advisory findings alone never count, #643) | Run gap-fill |
 | Everything passes | Redirect to forge |
 
 **Coaching level determines posture:**
@@ -401,7 +401,7 @@ This mode activates when post-extraction data has validation gaps. Run `analyze_
    - List each gap group with count of scenes and missing fields
    - Note any structural issues (MICE nesting, timeline order, knowledge wording)
 2. Adapt to coaching level:
-   - **Full:** "I found N gap types across M scenes. I'll fill them all — starting with the parallel batches."
+   - **Full:** "I found N gap types across M scenes. I'll fill the required ones — starting with the parallel batches." Present the craft-framework groups (`elaborate.CRAFT_FRAMEWORK_COLUMNS`: value_shift, turning_point, goal, …) as optional and ask before filling them, even at full (#643: a scene needn't fit a framework).
    - **Coach:** "Here are the gaps I found. Which would you like me to work on?" (present each group as a choice)
    - **Strict:** "Validation report: X scenes missing `type`, Y missing `timeline_day`..." (data only)
 3. Offer the standard two execution options:

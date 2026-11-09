@@ -744,8 +744,8 @@ def score_briefs(project_dir: str) -> dict:
         severity='high',
     ))
 
-    # Required at brief stage: outcome, because the gate reads it
-    # (`checker.PROMISE_FIELDS`: outcome, key_actions, key_dialogue) and a
+    # Required at brief stage: outcome, because the gate reads it (it's
+    # one of `checker.PROMISE_FIELDS`) and a
     # promise the gate can't read can't be kept. Goal, conflict, crisis and
     # decision place the scene in a craft framework (Swain, the Story Grid),
     # so they're advisory (#643)
