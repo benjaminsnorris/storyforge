@@ -194,6 +194,82 @@ def test_fingerprint_from_another_storyforge_is_refused(change, match):
         vp.Fingerprint.from_dict(data)
 
 
+@pytest.fixture(scope='module')
+def fp_dict():
+    return vp.fingerprint(_prose(4, 300), ngrams=False).to_dict()
+
+
+def _stat(d, name='fw_the'):
+    return d['measures'][name]['stat']
+
+
+@pytest.mark.parametrize('change, match', [
+    (lambda d: d.pop('words'), 'words None is not a count'),
+    (lambda d: d.update(words='many'), 'words'),
+    (lambda d: d.update(chunks=True), 'chunks'),
+    (lambda d: d.update(words=0), 'not a corpus'),
+    (lambda d: d.update(chunks=2), 'not a corpus'),
+    (lambda d: _stat(d).pop(), 'fw_the: stat'),
+    (lambda d: _stat(d).__setitem__(0, 'a'), 'fw_the: stat'),
+    (lambda d: _stat(d).__setitem__(1, float('nan')), 'fw_the: stat'),
+    (lambda d: d['measures'].__setitem__('fw_the', [1, 2, 3, 4, 5]), 'fw_the: stat'),
+    (lambda d: d.update(stat_fields=['center', 'value', 'spread', 'p10', 'p90']), 'stat_fields'),
+    (lambda d: d.pop('stat_fields'), 'stat_fields'),
+    (lambda d: d.update(pieces={}), 'pieces'),
+    (lambda d: d.update(ngrams=[]), 'ngrams'),
+])
+def test_malformed_fingerprint_is_refused_naming_the_field(fp_dict, change, match):
+    """A hand-edited or truncated fingerprint.json is a VoiceprintError that
+    names the field, never a traceback or a silent wrong verdict (#662
+    review SF1, TD-2, TD-3, TD-4)."""
+    data = json.loads(json.dumps(fp_dict))
+    change(data)
+    with pytest.raises(vp.VoiceprintError, match=match):
+        vp.Fingerprint.from_dict(data)
+
+
+def test_fingerprint_that_is_not_an_object_is_refused():
+    with pytest.raises(vp.VoiceprintError, match='JSON object'):
+        vp.Fingerprint.from_dict([1, 2])
+
+
+def test_load_refuses_nan_and_names_the_file(tmp_path, fp_dict):
+    text = json.dumps(fp_dict).replace(json.dumps(_stat(fp_dict)), '[NaN, 1, 1, 1, 1]', 1)
+    bad = tmp_path / 'fingerprint.json'
+    bad.write_text(text)
+    with pytest.raises(vp.VoiceprintError, match='could not be read.*NaN'):
+        vp.Fingerprint.load(str(bad))
+    data = json.loads(json.dumps(fp_dict))
+    data['words'] = -1
+    bad.write_text(json.dumps(data))
+    with pytest.raises(vp.VoiceprintError, match=f'{bad}: fingerprint words -1'):
+        vp.Fingerprint.load(str(bad))
+
+
+def test_fingerprint_needs_every_measure():
+    fp = vp.fingerprint(_prose(4, 300), ngrams=False)
+    stats = dict(fp.stats)
+    stats.pop('fw_the')
+    with pytest.raises(vp.VoiceprintError, match='fw_the'):
+        vp.Fingerprint(1, 1, 1, 3, stats)
+    with pytest.raises(vp.VoiceprintError, match='Stat'):
+        vp.Fingerprint(1, 1, 1, 3, {n: 1.0 for n in vp.measure_names()})
+
+
+def test_a_profile_cannot_be_saved(tmp_path):
+    """A profile has measures but no corpus counts: saved, it would read as a
+    fingerprint of 0 words (#662 review TD-4)."""
+    prof = vp.profile([vp.measure(c) for c in vp.chunks(_prose(3, 400))])
+    with pytest.raises(vp.VoiceprintError, match='profile'):
+        prof.save(str(tmp_path / 'fingerprint.json'))
+    assert not (tmp_path / 'fingerprint.json').exists()
+
+
+def test_below_minimum_corpus():
+    small = vp.fingerprint(_prose(4, 300), ngrams=False)
+    assert small.words < vp.MIN_CORPUS_WORDS and small.below_minimum_corpus
+
+
 def test_load_of_an_unreadable_fingerprint_says_so(tmp_path):
     bad = tmp_path / 'fingerprint.json'
     bad.write_text('{not json')
@@ -221,6 +297,8 @@ def test_compare_a_fingerprint_with_itself_is_zero():
     assert c.distance == pytest.approx(0.0, abs=1e-9)
     assert all(m.z == 0 for m in c.measures)
     assert set(c.groups) == set(vp.GROUPS)
+    # two fingerprints have no single value to place in a range (#662 TD-6)
+    assert all(m.typical is None for m in c.measures)
 
 
 def test_compare_text_names_the_measures_that_moved():
@@ -231,7 +309,7 @@ def test_compare_text_names_the_measures_that_moved():
     top = other.furthest(3)
     assert 'contraction_rate' in [m.name for m in top]
     moved = next(m for m in other.measures if m.name == 'contraction_rate')
-    assert moved.z > 0 and not moved.typical
+    assert moved.z > 0 and moved.typical is False
     assert len(other.measures) == len(vp.measure_names())
 
 
@@ -267,6 +345,27 @@ def test_unreadable_or_stale_baseline_says_so(tmp_path):
         vp.load_baseline(str(stale))
 
 
+@pytest.mark.parametrize('change, match', [
+    (lambda d: d['measures'].__setitem__('fw_the', [1.0, 0.0]), 'sd > 0.*fw_the'),
+    (lambda d: d['measures'].__setitem__('fw_the', [1.0]), 'fw_the'),
+    (lambda d: d['ngrams']['2'].pop('rates'), 'n = 2'),
+    (lambda d: d['ngrams'].pop('3'), 'n = 3'),
+])
+def test_malformed_baseline_is_refused(tmp_path, change, match):
+    """A baseline with a zero sd or no n-gram rates is a VoiceprintError,
+    not a ZeroDivisionError or KeyError later (#662 review SF6)."""
+    with open(os.path.join(PLUGIN, vp.BASELINE_REL), encoding='utf-8') as f:
+        data = json.load(f)
+    change(data)
+    bad = tmp_path / 'baseline.json'
+    bad.write_text(json.dumps(data))
+    with pytest.raises(vp.VoiceprintError, match=match):
+        vp.load_baseline(str(bad))
+    bad.write_text('[]')
+    with pytest.raises(vp.VoiceprintError, match='JSON object'):
+        vp.load_baseline(str(bad))
+
+
 def test_population_text_strips_gutenberg_boilerplate():
     body = '\n\n'.join(f'Paragraph {i} of the story goes on here.' for i in range(100))
     raw = ('The Project Gutenberg eBook of X\n\n*** START OF THE PROJECT GUTENBERG EBOOK X ***\n\n'
@@ -288,6 +387,16 @@ def test_consistency_refuses_too_few_or_too_short_pieces():
     pieces['tiny'] = 'Too short to judge.'
     with pytest.raises(vp.VoiceprintError, match='tiny'):
         vp.consistency(pieces)
+
+
+def test_consistency_values_refuses_mismatched_or_too_few():
+    v = vp.measure(_prose(1, 60))
+    with pytest.raises(vp.VoiceprintError, match='names for'):
+        vp.consistency_values(['a', 'b'], [v] * 5)
+    with pytest.raises(vp.VoiceprintError, match='at least 5'):
+        vp.consistency_values(list('abcd'), [v] * 4)
+    with pytest.raises(vp.VoiceprintError, match='named once'):
+        vp.consistency_values(list('aabcd'), [v] * 5)
 
 
 def test_consistency_of_one_voice_names_nothing():

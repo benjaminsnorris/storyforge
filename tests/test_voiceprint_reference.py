@@ -285,18 +285,16 @@ def test_mixed_voices_seeded_corpus_is_inconsistent(texts, chunk_values):
     is reported inconsistent, with the seeded chunks named, across the seven
     other authors and three Austen novels; a pure Austen corpus is
     consistent (separations 0.59-0.62, against OUTLIER_SEPARATION 0.85).
-    The 21 cases run on measured chunks through the split `consistency`
-    uses (`_minority`); one case runs `consistency` itself on the texts."""
-    base = vp.load_baseline()
+    The 21 cases run on measured chunks through `consistency_values`, what
+    `consistency` calls; one case runs `consistency` itself on the texts."""
     flagged = caught = false = 0
     cases = list(_seeded_cases(chunk_values))
     for name, author, austen_chunks, seeded in cases:
-        values = austen_chunks + seeded
-        group, separation = vp._minority(values, base)
-        if separation > vp.OUTLIER_SEPARATION:
-            flagged += 1
-            caught += sum(1 for i in group if i >= 16)
-            false += sum(1 for i in group if i < 16)
+        names = [f'austen-{i}' for i in range(16)] + [f'{author}-{i}' for i in range(4)]
+        result = vp.consistency_values(names, austen_chunks + seeded)
+        caught += sum(1 for n in result.outliers if not n.startswith('austen'))
+        false += sum(1 for n in result.outliers if n.startswith('austen'))
+        flagged += not result.consistent
     total = len(cases)
     print(f'seeded: {flagged}/{total} flagged, {caught}/{4 * total} seeded chunks named, '
           f'{false} Austen chunks named')
@@ -307,9 +305,9 @@ def test_mixed_voices_seeded_corpus_is_inconsistent(texts, chunk_values):
     # pure Austen corpora are consistent
     for slug, step in (('emma', 3), ('pride-and-prejudice', 3), ('persuasion', 2)):
         values = chunk_values[slug][::step][:20]
-        group, separation = vp._minority(values, base)
-        print(f'pure {slug}: separation {separation:.3f}')
-        assert separation <= vp.OUTLIER_SEPARATION, slug
+        result = vp.consistency_values([str(i) for i in range(len(values))], values)
+        print(f'pure {slug}: separation {result.separation:.3f}')
+        assert result.consistent, slug
 
     # pieces of MIN_PIECE_WORDS: shorter pure-Austen pieces split as if two
     # voices (1,000-word pieces of Pride and Prejudice up to 0.906, 1,500 up

@@ -262,6 +262,27 @@ class VoiceprintError(Exception):
     """A fingerprint that can't be made or read; the message says why."""
 
 
+def _reject_constant(name: str):
+    raise ValueError(f'{name} is not a number JSON allows')
+
+
+def _read_json(path: str, what: str):
+    """`path`'s JSON (NaN and Infinity refused), or VoiceprintError."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f, parse_constant=_reject_constant)
+    except (OSError, ValueError) as e:
+        raise VoiceprintError(f'{what} {path} could not be read: {e}') from e
+
+
+def _is_number(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _is_count(x) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool) and x >= 0
+
+
 # ============================================================================
 # Text
 # ============================================================================
@@ -706,28 +727,41 @@ def load_baseline(path: str | None = None) -> Baseline:
         path = os.path.join(get_plugin_dir(), BASELINE_REL)
     if path in _BASELINE_CACHE:
         return _BASELINE_CACHE[path]
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:
-        raise VoiceprintError(f'the voiceprint baseline {path} could not be read: {e}') from e
+    data = _read_json(path, 'the voiceprint baseline')
+    if not isinstance(data, dict):
+        raise VoiceprintError(f'the voiceprint baseline {path} is not a JSON object; build it again')
     if data.get('version') != FINGERPRINT_VERSION or data.get('chunk_words') != CHUNK_WORDS:
         raise VoiceprintError(f'the voiceprint baseline {path} was built for another '
                               f'version or chunk size; build it again')
-    measures = data.get('measures', {})
+    measures = data.get('measures')
+    measures = measures if isinstance(measures, dict) else {}
     missing = [n for n in measure_names() if n not in measures]
     if missing:
         raise VoiceprintError(f'the voiceprint baseline {path} has no figures for '
                               f'{", ".join(missing[:5])}; build it again')
-    grams = data.get('ngrams', {})
-    if not all(str(n) in grams for n in NGRAM_SIZES):
-        raise VoiceprintError(f'the voiceprint baseline {path} has no n-gram table for '
-                              f'each of n = {NGRAM_SIZES}; build it again')
-    tables = {n: grams[str(n)]['rates'] for n in NGRAM_SIZES}
+    bad = [n for n in measure_names()
+           if not (isinstance(measures[n], list) and len(measures[n]) == 2
+                   and all(_is_number(x) for x in measures[n]) and measures[n][1] > 0)]
+    if bad:
+        raise VoiceprintError(f'the voiceprint baseline {path} has figures that are not '
+                              f'[mean, sd > 0] for {", ".join(bad[:5])}; build it again')
+    grams = data.get('ngrams')
+    grams = grams if isinstance(grams, dict) else {}
+    tables = {}
+    for n in NGRAM_SIZES:
+        table = grams.get(str(n))
+        rates = table.get('rates') if isinstance(table, dict) else None
+        if not (isinstance(rates, dict) and all(_is_number(r) and r > 0
+                                                for r in rates.values())):
+            raise VoiceprintError(f'the voiceprint baseline {path} has no n-gram table of '
+                                  f'rates for n = {n}; build it again')
+        tables[n] = rates
+    sources = data.get('sources')
+    sources = sources if isinstance(sources, list) else []
     base = Baseline({n: measures[n][0] for n in measure_names()},
                     {n: measures[n][1] for n in measure_names()},
                     tables, {n: min(t.values()) if t else 0.0 for n, t in tables.items()},
-                    tuple(s.get('name', '') for s in data.get('sources', [])))
+                    tuple(str(s.get('name', '')) for s in sources if isinstance(s, dict)))
     _BASELINE_CACHE[path] = base
     return base
 
@@ -778,8 +812,15 @@ class Stat:
         return [self.value, self.center, self.spread, self.p10, self.p90]
 
 
+#: the order of a `Stat`'s numbers in `fingerprint.json`
+STAT_FIELDS = ('value', 'center', 'spread', 'p10', 'p90')
+
+
 @dataclass(frozen=True)
 class Fingerprint:
+    """A corpus's measures (`stats`, every measure by name) and what it was
+    made from. Made by `fingerprint` (or `profile`, which has no counts and
+    can't be saved); `save`/`load` as `fingerprint.json`."""
     words: int
     sentences: int
     paragraphs: int
@@ -790,6 +831,21 @@ class Fingerprint:
     pieces: list[dict] = field(default_factory=list)
     ngrams: dict[str, list] = field(default_factory=dict)
 
+    def __post_init__(self):
+        if set(self.stats) != set(measure_names()):
+            missing = sorted(set(measure_names()) - set(self.stats))
+            extra = sorted(set(self.stats) - set(measure_names()))
+            raise VoiceprintError(f'a fingerprint needs every measure (missing {missing[:5]}, '
+                                  f'unknown {extra[:5]})')
+        if not all(isinstance(st, Stat) for st in self.stats.values()):
+            raise VoiceprintError('a fingerprint\'s stats must be Stat values')
+
+    @property
+    def below_minimum_corpus(self) -> bool:
+        """Made from fewer than `MIN_CORPUS_WORDS` words: a fingerprint this
+        small isn't stable, and whoever shows it should say so."""
+        return self.words < MIN_CORPUS_WORDS
+
     def to_dict(self) -> dict:
         return {
             'version': FINGERPRINT_VERSION,
@@ -798,7 +854,7 @@ class Fingerprint:
             'sentences': self.sentences,
             'paragraphs': self.paragraphs,
             'chunks': self.chunks,
-            'stat_fields': ['value', 'center', 'spread', 'p10', 'p90'],
+            'stat_fields': list(STAT_FIELDS),
             'measures': {name: {'group': measure_group(name),
                                 'stat': [_round(x) for x in s.to_list()]}
                          for name, s in self.stats.items()},
@@ -811,7 +867,12 @@ class Fingerprint:
     @classmethod
     def from_dict(cls, data: dict) -> 'Fingerprint':
         """Raises VoiceprintError for another version, chunk size or measure
-        set (a fingerprint made by another Storyforge: compute it again)."""
+        set (a fingerprint made by another Storyforge: compute it again), or
+        a malformed one (a field missing or of the wrong type, a stat that
+        isn't five finite numbers in `STAT_FIELDS` order, a corpus of no
+        words or under `MIN_CHUNKS` chunks), naming the field."""
+        if not isinstance(data, dict):
+            raise VoiceprintError('a fingerprint must be a JSON object')
         if data.get('version') != FINGERPRINT_VERSION:
             raise VoiceprintError(
                 f'fingerprint version {data.get("version")!r} is not this Storyforge\'s '
@@ -826,7 +887,29 @@ class Fingerprint:
             raise VoiceprintError(f'fingerprint measures differ from this Storyforge\'s '
                                   f'(missing {missing[:5]}, unknown {extra[:5]}); '
                                   f'compute it again')
-        stats = {n: Stat(*data['measures'][n]['stat']) for n in measure_names()}
+        if data.get('stat_fields') != list(STAT_FIELDS):
+            raise VoiceprintError(f'fingerprint stat_fields {data.get("stat_fields")!r} are not '
+                                  f'{list(STAT_FIELDS)}; compute it again')
+        for key in ('words', 'sentences', 'paragraphs', 'chunks'):
+            if not _is_count(data.get(key)):
+                raise VoiceprintError(f'fingerprint {key} {data.get(key)!r} is not a count')
+        if not data['words'] or data['chunks'] < MIN_CHUNKS:
+            raise VoiceprintError(f'fingerprint of {data["words"]} words in {data["chunks"]} '
+                                  f'chunks: not a corpus\'s fingerprint; compute it again')
+        stats = {}
+        for n in measure_names():
+            entry = data['measures'][n]
+            stat = entry.get('stat') if isinstance(entry, dict) else None
+            if not (isinstance(stat, list) and len(stat) == len(STAT_FIELDS)
+                    and all(_is_number(x) for x in stat)):
+                raise VoiceprintError(f'fingerprint measure {n}: stat {stat!r} is not '
+                                      f'{len(STAT_FIELDS)} finite numbers')
+            stats[n] = Stat(*stat)
+        kinds = {'sentence_lengths': dict, 'first_words': dict, 'pieces': list, 'ngrams': dict}
+        for key, kind in kinds.items():
+            if not isinstance(data.get(key, kind()), kind):
+                raise VoiceprintError(f'fingerprint {key} is not a JSON '
+                                      f'{"object" if kind is dict else "list"}')
         return cls(data['words'], data['sentences'], data['paragraphs'], data['chunks'],
                    stats, data.get('sentence_lengths', {}), data.get('first_words', {}),
                    data.get('pieces', []), data.get('ngrams', {}))
@@ -835,18 +918,23 @@ class Fingerprint:
         return json.dumps(self.to_dict(), indent=1, ensure_ascii=False) + '\n'
 
     def save(self, path: str) -> None:
-        """Write `fingerprint.json` (LF, UTF-8)."""
+        """Write `fingerprint.json` (LF, UTF-8). Raises VoiceprintError for
+        a fingerprint with no words (`profile`'s: measures, not a corpus)."""
+        if not self.words:
+            raise VoiceprintError('a profile has no corpus counts and can\'t be saved as a '
+                                  'fingerprint; use fingerprint(texts)')
         with open(path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(self.to_json())
 
     @classmethod
     def load(cls, path: str) -> 'Fingerprint':
+        """`fingerprint.json` at `path`. Raises VoiceprintError (naming the
+        file) when it can't be read or `from_dict` refuses it."""
+        data = _read_json(path, 'the fingerprint')
         try:
-            with open(path, encoding='utf-8') as f:
-                data = json.load(f)
-        except (OSError, ValueError) as e:
-            raise VoiceprintError(f'{path} could not be read: {e}') from e
-        return cls.from_dict(data)
+            return cls.from_dict(data)
+        except VoiceprintError as e:
+            raise VoiceprintError(f'{path}: {e}') from e
 
 
 def _stats(per_chunk: Sequence[Mapping[str, float]],
@@ -865,7 +953,8 @@ def profile(chunk_values: Sequence[Mapping[str, float]]) -> Fingerprint:
     """A fingerprint's measures from chunks already measured (`measure` of
     each of `chunks(text)`), for comparing without measuring a text twice:
     its stats are the ones `fingerprint` would give those chunks (`value` is
-    the center), its counts and descriptive fields empty. Raises
+    the center), its counts and descriptive fields empty, so it can't be
+    saved. Raises
     VoiceprintError under `MIN_CHUNKS` chunks."""
     if len(chunk_values) < MIN_CHUNKS:
         raise VoiceprintError(f'{len(chunk_values)} chunks: a fingerprint needs at least '
@@ -935,16 +1024,18 @@ OTHER_WEIGHT = 0.25
 class MeasureDistance:
     """How far one measure sits from the fingerprint's center, in population
     standard deviations (`scale`, the baseline's): `z`, signed (positive:
-    more than the fingerprint's center) and capped at `Z_CAP`. `typical`
-    when `value` is inside the fingerprint's p10..p90 (always False
-    comparing two fingerprints, where `value` is the other's center)."""
+    more than the fingerprint's center) and capped at `Z_CAP`. `typical`:
+    whether `value` is inside the fingerprint's p10..p90, or None comparing
+    two fingerprints (no single value to place in a range). The range is on
+    the chunk scale: a text much shorter than a chunk falls outside it more
+    often by chance."""
     name: str
     group: str
     value: float
     center: float
     scale: float
     z: float
-    typical: bool
+    typical: bool | None
 
 
 @dataclass(frozen=True)
@@ -996,7 +1087,7 @@ def _rows(center: Mapping[str, float], values: Mapping[str, float], base: Baseli
     rows = []
     for name in measure_names():
         c, x, scale = center[name], values[name], base.sd[name]
-        typical = bool(ranges) and ranges[name].p10 <= x <= ranges[name].p90
+        typical = None if ranges is None else ranges[name].p10 <= x <= ranges[name].p90
         rows.append(MeasureDistance(name, measure_group(name), x, c, scale,
                                     _cap((x - c) / scale), typical))
     by_group: dict[str, list[float]] = {g: [] for g in GROUPS}
@@ -1118,8 +1209,25 @@ def consistency(pieces: Mapping[str, str] | Sequence[str],
     if short:
         raise VoiceprintError(f'pieces under {MIN_PIECE_WORDS} words can\'t be judged: '
                               f'{", ".join(short[:10])}')
-    names = [name for name, _ in parsed]
-    values = [_measures(ps) for _, ps in parsed]
+    return consistency_values([name for name, _ in parsed],
+                              [_measures(ps) for _, ps in parsed], base)
+
+
+def consistency_values(names: Sequence[str], values: Sequence[Mapping[str, float]],
+                       baseline: Baseline | None = None) -> Consistency:
+    """`consistency` on pieces already measured (`measure` of each), named
+    by `names`, in order. The caller vouches that each piece is at least
+    `MIN_PIECE_WORDS` words; raises VoiceprintError for fewer than
+    `MIN_PIECES` pieces or names and values that don't pair."""
+    if len(names) != len(values):
+        raise VoiceprintError(f'{len(names)} names for {len(values)} pieces')
+    if len(values) < MIN_PIECES:
+        raise VoiceprintError(f'consistency needs at least {MIN_PIECES} pieces, '
+                              f'not {len(values)}')
+    if len(set(names)) != len(names):
+        raise VoiceprintError('consistency needs each piece named once')
+    base = baseline or load_baseline()
+    names = list(names)
     center = _median_profile(values)
     distances = {n: _cosine_distance(center, v, base) for n, v in zip(names, values)}
     group, separation = _minority(values, base)
