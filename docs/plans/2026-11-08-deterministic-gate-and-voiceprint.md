@@ -240,17 +240,55 @@ The feature is for writers who have a voice but can't name it, and
 especially for people with a large body of published writing (Ben has
 years of posts on bennorris.com).
 
+**A voiceprint belongs to an author, not a book.** It's made once per
+author, in the author's own repo, and every book points to it. It works
+the way `series.canon` points a book at `../homer`: read in place, never
+copied into the book.
+
+### B0. The author voice repo
+
+A dedicated repo per author (for Ben, say `ben-voice`), created with
+`storyforge voice init`:
+
+```
+<author-voice>/
+  voice.yaml          # author name, corpus sources, sections in or out
+  corpus/             # the author's writing, as imported (B1)
+  fingerprint.json    # B2, computed
+  description.md      # B3, corrected by the author
+  exemplars/          # B4, chosen by the author, tagged by job
+  fiction/            # B5 anchors, one folder per narrator stance tried
+```
+
+A book's `storyforge.yaml` names it:
+
+```yaml
+voice:
+  author: ../ben-voice          # the author voice repo, read in place
+  narrator: fiction/close-third # optional: which fiction anchor this book uses
+```
+
+The book keeps only what's particular to it in
+`reference/voice/book.md`: the narrator's stance, the period register
+(the *Iliad*'s bronze-age vocabulary), and any book-level exemplars. The
+author's voice is the constant, and the book adjusts the narrator.
+
+The corpus stays in the author repo. Storyforge reads it and sends it
+nowhere except the model calls listed in this part. The repo can be
+private.
+
 ### B1. Import a corpus
 
-`storyforge voice import <folder|urls|feed>` takes the author's own
-writing: Markdown, HTML, a site's RSS, or exported posts. It strips
-boilerplate, keeps the date and genre (essay, fiction, notes), and stores
-it under `reference/voice/corpus/`. Storyforge reads the corpus and never
-sends it anywhere except the model calls listed here.
+`storyforge voice import <folder|urls|feed>`, run in the author repo,
+takes the author's own writing: Markdown, HTML, a site's RSS, or exported
+posts. It strips boilerplate, keeps each piece's date and kind (essay,
+fiction, notes, link post), and stores it under `corpus/`. `voice.yaml`
+says which kinds count. Short pieces and link posts carry less voice and
+are out by default.
 
 ### B2. The fingerprint (code, free)
 
-Measured over the corpus, stored as `reference/voice/fingerprint.json`:
+Measured over the corpus, stored in the author repo as `fingerprint.json`:
 
 - the sentence-length distribution and how much it varies; paragraph
   length; how long sentences run before a full stop;
@@ -268,12 +306,12 @@ Measured over the corpus, stored as `reference/voice/fingerprint.json`:
 A model reads a large sample alongside the fingerprint and writes a short
 description: what the voice does and never does, its stance toward the
 reader, its humour, its rhythm. The author marks each claim "yes, me" or
-"no". The corrected version is `reference/voice/description.md`. This is
+"no". The corrected version is the author repo's `description.md`. This is
 the part people can't do for themselves, and it's cheap.
 
 ### B4. The exemplar bank
 
-`reference/voice/exemplars/`: 20 to 40 passages from the corpus, each 100
+The author repo's `exemplars/`: 20 to 40 passages from the corpus, each 100
 to 400 words, tagged by job (description, argument, a turn, humour,
 quiet, dialogue if any). The author picks them from a shortlist the model
 proposes. **The writing model always has the exemplars in context.**
@@ -306,6 +344,70 @@ list of constructions the corpus never uses but the draft does (that's
 where AI tells show up). It catches drift. It can't tell good from bad,
 and it is never used as an optimisation target for an automatic rewrite
 loop.
+
+### B7. A public-domain reference voiceprint, with tests
+
+Storyforge itself ships one complete voiceprint, built from a
+public-domain author, under `references/voiceprints/<author>/`, in the
+same layout as an author repo. It does two jobs: it's the worked example
+a new author can look at, and it's the fixture the tests run against. If
+Storyforge can find a known author's voice accurately, there's reason to
+trust it on a living author's corpus.
+
+**Which author.** It needs at least two substantial works, so one can be
+held out. It should be written in English, so the voice is the author's
+and not a translator's. The evals repo already has extracted texts, but a
+voiceprint needs only raw text, which Project Gutenberg supplies, so
+extraction isn't an advantage.
+
+- *Recommend:* **Edith Wharton.** *The Age of Innocence* is already in
+  the evals, and *The House of Mirth* is the held-out book. She has a
+  distinct, measurable voice (long periodic sentences, social irony, a
+  Latinate vocabulary), and it's novel-length fiction, which is what the
+  tool has to serve. Austen (*Pride and Prejudice*, plus *Emma* or
+  *Persuasion*) is the alternative, with an even better-studied voice.
+- *Jules Verne* works as a second fixture, but for a different test.
+  *Around the World in Eighty Days* and *Five Weeks in a Balloon* are in
+  English translation, by different translators (to confirm from the
+  Gutenberg headers). A good voiceprint should report that the two
+  corpora don't share a voice, and that what it measures is the
+  translator's. That's a useful test, because a real author's corpus can
+  mix voices too: ghostwritten posts, a decade of drift, quoted material.
+
+**The tests.** Most are free and deterministic. They run on every commit.
+
+1. **Attribution (free).** Fingerprint the reference author from one
+   book. Cut held-out chunks of about 2,000 words from the other book and
+   from six to eight other public-domain authors (the evals' Austen,
+   Dickens, Eliot, Fitzgerald, Fisher, Marks, Brunton). The fingerprint has
+   to rank the held-out book's chunks closest to the author, at a fixed
+   accuracy floor. This is classic stylometric authorship attribution, and
+   it's the core evidence the fingerprint measures a voice.
+2. **Stability (free).** Fingerprints from two halves of the corpus agree
+   within a set tolerance. Fingerprints from 10k, 25k and 50k words show
+   how much corpus is enough. That number becomes `voice import`'s
+   minimum-corpus warning.
+3. **Mixed voices (free).** The Verne pair, plus a corpus seeded with
+   20% of another author's chunks: the tool reports low consistency and
+   names the outlying pieces, rather than averaging them in.
+4. **The description (recorded once, then frozen).** The B3 description of
+   the reference author is checked against a fixed list of claims a
+   critic would make or reject (for Wharton: irony at her characters'
+   expense, yes; plain short sentences, no). It's recorded once, replayed
+   free, and re-recorded only when the description prompt changes on
+   purpose.
+5. **The exemplar shortlist (free).** The B4 shortlist's passages sit
+   inside the fingerprint's typical range, and they span the jobs (not
+   twenty descriptions of rooms).
+6. **Writing in the voice (frozen, three runs when run).** A scene written
+   with the reference exemplars scores closer to the author on the meter
+   than to the other authors, and a judge picks the author from four
+   candidates. It's the expensive test, so it follows Part E's rules: frozen
+   inputs, run only for a decision, three runs.
+
+Building the reference voiceprint is also the first real run of B1 to B4,
+so the prototype on Ben's corpus follows it, with the tool already
+checked.
 
 ---
 
@@ -593,6 +695,11 @@ New suites (numbered when built; E9 is already taken by
   and it's the suite that measures what the product is for. The B6 meter's
   distance is tracked alongside to see whether it agrees.
 
+- **The voiceprint's tests** (B7): attribution, stability, mixed voices
+  and the exemplar shortlist are free and run on every commit. The
+  description is recorded once and frozen. Writing in the voice follows
+  the frozen, three-run rule.
+
 The gate's targets carry over: the new gate has to match or beat today's
 recall on the hard categories (KNO, PHY, TIM, WLD) on the frozen E4 and E8,
 at a fraction of the cost.
@@ -611,8 +718,9 @@ at a fraction of the cost.
 4. **The A3 question layer** replaces the open checker for the facts A2
    can't cover. The open checker stays behind a flag until the evals say
    it can go.
-5. **The voiceprint, B1 to B4 and B6:** a prototype on Ben's site corpus
-   before it becomes a command.
+5. **The voiceprint:** first the reference voiceprint and its tests (B7),
+   which also builds B1 to B4 and B6. Then Ben's author repo (B0) from his
+   site corpus.
 6. **B5 fiction calibration and C sessions:** pilot on one act of *Wrath
    Like Smoke* against the existing draft, then the voice suite (Part E).
 7. **The ladder (Part D):** craft checks become advisory (D6) and briefs
@@ -695,16 +803,18 @@ at a fraction of the cost.
 
 **Voiceprint**
 
-16. **bennorris.com as the prototype corpus, and which sections?**
-    *Recommend:* yes. Essays and longer posts first. Leave out link posts
-    and short notes, which carry less voice and would skew the fingerprint.
-17. **Prototype the voiceprint before building the command?**
-    *Recommend:* yes. Fingerprint, description and exemplar shortlist from
-    the site as a one-off. If it doesn't sound like Ben, nothing's lost.
-18. **Exemplar bank per book or per series?**
-    *Recommend:* per series, like `series.canon`, with an optional book
-    layer on top. The author's voice is the constant, and a book adjusts
-    the narrator.
+16. **One voiceprint per author, in its own repo, pointed to by each book
+    (B0)?** (Decided, Ben 2026-11-08.)
+17. **Which public-domain author is Storyforge's reference voiceprint
+    (B7)?**
+    *Recommend:* Edith Wharton (*The Age of Innocence*, with *The House of
+    Mirth* held out), with Austen as the alternative. Verne's two
+    translations serve as the mixed-voice fixture, not the reference.
+18. **bennorris.com as the first author corpus, and which sections?**
+    *Recommend:* yes, in a private `ben-voice` repo, after the reference
+    voiceprint passes its tests. Essays and longer posts first. Leave out
+    link posts and short notes, which carry less voice and would skew the
+    fingerprint.
 
 **Wrath Like Smoke**
 
