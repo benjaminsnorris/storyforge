@@ -145,6 +145,33 @@ class TestDraftingAFactOnlyBrief:
         assert 'emotional_arc' not in dep
         assert 'outcome: no-and' in dep
 
+    def test_the_authors_notes_still_reach_the_drafter(self, project_dir):
+        """#644's review T3: notes the author fills go to drafting (subtext
+        under its show-never-tell framing), and none of them is a fact the
+        scene is held to."""
+        _set_cols(project_dir, 'scene-briefs.csv', 'act1-sc02',
+                  subtext='Dorren says the archive is complete but means it was purged',
+                  emotions='routine;dread', motifs='maps/cartography')
+        p = build_scene_prompt_from_briefs('act1-sc02', project_dir, PLUGIN, 'full')
+        assert ('**SUBTEXT (show, never tell):** Dorren says the archive is complete but '
+                'means it was purged') in p
+        assert 'routine;dread' in p and 'maps/cartography' in p
+        facts = p.split('## Task', 1)[1].split('Hold to its facts:', 1)[1].split(
+            'Its other fields', 1)[0]
+        for note in ('purged', 'routine;dread', 'maps/cartography'):
+            assert note not in facts
+
+    def test_coach_mode_names_what_the_brief_has(self, project_dir):
+        """#644's review T4: the other half of the coach test, on the
+        fixture's full brief."""
+        p = build_scene_prompt_from_briefs('act1-sc02', project_dir, PLUGIN, 'coach')
+        task = p.split('## Task', 1)[1]
+        assert '- Craft reminders relevant to the scene type (sequel)' in task
+        assert '- How the value shift noted in the brief (-/--) might land' in task
+        assert '- Suggested approach for the crisis/decision moment' in task
+        assert '- Line-level suggestions for key dialogue' in task
+        assert '- Pacing guidance given the emotional arc' in task
+
     def test_only_a_must_line_is_required(self, project_dir):
         """#642: only a `must:` line must be in the prose word for word; the
         author's other lines are notes."""

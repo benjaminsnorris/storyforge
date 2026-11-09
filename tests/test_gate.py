@@ -4048,6 +4048,17 @@ class TestFactOnlyBrief:
         assert result.passed
         assert [f.established_quote for f in result.advisory] == ['Searches removal logs']
 
+    def test_a_missing_must_line_still_blocks(self, project_dir, tmp_path):
+        """#644's review T6: the one blocking case a fact-only brief keeps,
+        a `must:` key_dialogue line the prose leaves out."""
+        _set_brief(project_dir, **{**self.EMPTY,
+                                   'key_dialogue': 'must: Dorren: "I have kissed the hands '
+                                                   'of the man"'})
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Dorren: "I have kissed the hands of the man"',
+                                          fact_id='key_dialogue')])
+        assert not result.passed and result.advisory == []
+
     def test_a_brief_with_no_promise_fields_passes(self, project_dir, tmp_path):
         _set_brief(project_dir, outcome='', key_actions='', **self.EMPTY)
         result = _gate(project_dir, tmp_path, [_commitment()])
