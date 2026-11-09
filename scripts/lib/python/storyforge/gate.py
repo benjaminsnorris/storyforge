@@ -150,6 +150,10 @@ class GateResult:
     #: on commit: the later scenes, with prose, listed pending for a re-check
     #: because their facts depend on `changed` (`recheck_pending` runs it)
     recheck: list[str] = field(default_factory=list)
+    #: on commit (#632): each scene in `recheck` → why it was listed (the
+    #: changed fact and the rule, `ledger.Dependents.why`), for the log and
+    #: its pending reason
+    recheck_why: dict[str, str] = field(default_factory=dict)
     #: on commit: changed fact id → why its dependents can't all be found
     #: (`ledger.Dependents.unrelated`), for the caller to report
     unrelated: dict[str, str] = field(default_factory=dict)
@@ -195,6 +199,10 @@ class GateResult:
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
     held_back: list[tuple[str, Finding]] = field(default_factory=list)
+    #: on commit (#632): (statement, finding) for each kept (`steady`) fact
+    #: the hold-back would have taken: it stays as it was, since its prose
+    #: didn't change, and is reported
+    kept_stating: list[tuple[str, Finding]] = field(default_factory=list)
     #: (finding, why) for each verified contradiction with an earlier scene
     #: the source backs this scene on (`gate_source`, #557): not blocking,
     #: never sent to the fix; the earlier scene is listed `SOURCE_FIX` on
@@ -216,6 +224,16 @@ class GateResult:
     source_ruled: bool = False
     #: committed without a pass (`commit_provisional`, `write --keep-going`)
     provisional: bool = False
+    #: #631: the prose has had a blocking read (`check_blocking`): this run
+    #: made one, or skipped it as already made on the same prose; recorded
+    #: with the prose on commit (`record_prose`)
+    blocking_read: bool = False
+    #: #631: this re-check skipped the blocking read (the prose is the gated
+    #: prose, which had one); the scene's reported blocking findings are kept
+    blocking_skipped: bool = False
+    #: #631: on a re-check, whether the blocking read ran and why, for the log
+    #: and the report
+    blocking_note: str = ''
     #: what `_commit` needs from the run (`_CommitContext`); None until the
     #: run reaches the check
     _ctx: 'object' = field(default=None, repr=False, compare=False)
@@ -951,7 +969,7 @@ def _unchanged_since(project_dir: str, snap: Snapshot, source: str, scene_id: st
 
 
 def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
-              reported: list[dict[str, str]]) -> None:
+              reported: list[dict[str, str]], prose: str = '') -> None:
     """Sort the check's verified contradictions into `inherited` and
     `plan_conflicts` (each set anew).
 
@@ -959,8 +977,11 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
     words (`_quoted_in`) were in the scene in `before` and its established
     side is unchanged since (`_unchanged_since`), or the author was already
     told of it (`reported`: the same source and quote, from
-    working/gate-reported.csv). Inherited comes first: an error the pass
-    didn't make doesn't stop it, whatever its source.
+    working/gate-reported.csv), or (#631) it is a blocking finding against
+    the scene itself in paragraphs of `prose` an accepted one was recorded
+    on, unchanged since (`_accepted_blocking_covers`). Inherited comes
+    first: an error the pass didn't make doesn't stop it, whatever its
+    source.
 
     Plan conflict: its words are the brief's own (`_is_plan_conflict`;
     a split line's speech tags must fit the speaker the brief names).
@@ -978,7 +999,9 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
         if ((f.established_scene or '', _words(f.scene_quote)) in known
                 or (old is not None and _quoted_in(f.scene_quote, old)
                     and _unchanged_since(project_dir, before, f.established_scene,
-                                         result.scene_id, f.established_quote))):
+                                         result.scene_id, f.established_quote))
+                or (prose and any(_accepted_blocking_covers(r, f, result.scene_id, prose)
+                                  for r in reported))):
             result.inherited.append(f)
             continue
         if phrases is None:
@@ -1003,7 +1026,14 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
     finding's, lies in the same paragraph of `prose` as the finding's quote,
     or has the subject and type of the fact the finding says it
     contradicts (`_finding_subjects` over `rows`, the ledger). They go to `held_back`,
-    reported."""
+    reported.
+
+    A kept fact (`result.steady`: an earlier commitment read from a
+    paragraph the prose has unchanged) is never held back (#632, iliad-teen:
+    each `check --accept` dropped steady facts, which counted as changed and
+    listed most of the book for a re-check): it is in the ledger already,
+    and holding it back would change the ledger for a finding about words
+    that didn't change. It goes to `kept_stating`, reported."""
     def overlaps(quote: str, f: Finding) -> bool:
         return bool(f.scene_quote) and _count(quote) >= _MIN_BRIEF_WORDS and (
             quote in _words(f.scene_quote) or _words(f.scene_quote) in quote)
@@ -1029,6 +1059,7 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
     # a source-backed contradiction whose earlier fact couldn't be found to
     # supersede is held back like an inherited one (`_source_supersede`)
     strict = result.inherited + list(result.source_unmatched)
+    steady = set(result.steady)
     for row in result.proposed:
         quote = _words(row.get('quote') or '')
         hit = next((f for f in strict if overlaps(quote, f)), None)
@@ -1045,6 +1076,9 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
                        None)
         if hit is None:
             keep.append(row)
+        elif row.get('id') in steady:
+            keep.append(row)
+            result.kept_stating.append((row.get('statement', ''), hit))
         else:
             result.held_back.append((row.get('statement', ''), hit))
     result.proposed = keep
@@ -1218,7 +1252,11 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     record; a re-check keeps the prose's writer.
 
     `before` is the book before the pass that wrote `prose` (`snapshot`;
-    None: a new scene, a re-check, or advisor mode). A contradiction that
+    None: a new scene or advisor mode; a re-check through `gate_unchanged`
+    passes the scene's own gated prose alone, `own_snapshot`, #631). On a
+    re-check of the prose the scene was last committed with, whose gate had
+    a blocking read, the blocking read is skipped (`blocking_read_before`,
+    #631), and the log says whether it ran and why. A contradiction that
     was already there is `inherited`: reported, not blocking (Ben,
     2026-11-01: a pass doesn't stop on an error it didn't make), and so is
     one already in working/gate-reported.csv, whatever the command; the
@@ -1315,7 +1353,18 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
         raise error from e
-    if GATE_BLOCKING:
+    skip, why_not = (blocking_read_before(project_dir, scene_id, prose)
+                     if GATE_BLOCKING and command == 'recheck' else (False, ''))
+    if skip:
+        # #631: a re-check runs because an earlier scene changed; the
+        # blocking read takes the scene alone, so on the gated prose it can
+        # only read the same words again (and word them otherwise)
+        result.blocking_read = result.blocking_skipped = True
+        result.blocking_note = ('blocking read skipped: the prose is unchanged since its '
+                                'last gate, which read its blocking')
+    elif GATE_BLOCKING:
+        if command == 'recheck':
+            result.blocking_note = f'blocking read run: {why_not}'
         # The scene against itself (#626): the checker reads it against the
         # book; this reads its blocking alone. Its findings join the check's,
         # so they are sorted, reported, fixed and accepted the same way
@@ -1327,7 +1376,11 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             raise GateError(str(e)) from e
         result.check.findings.extend(blocked.findings)
         result.check.unverified.extend(blocked.unverified)
-    _classify(result, project_dir, before, already_reported)
+        result.blocking_read = True
+    if result.blocking_note:
+        from storyforge.common import log
+        log(f'  {scene_id}: {result.blocking_note}')
+    _classify(result, project_dir, before, already_reported, prose=prose)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
@@ -1456,7 +1509,8 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     write; returns whether the scene was fixed toward its source."""
     _source_supersede(result, rows)
     fixed_toward_source = _keep_superseded(project_dir, result, rows, prose)
-    # #558's second review: the kept facts go through the hold-back too
+    # #558's second review: the kept facts go through the hold-back too,
+    # which keeps them and reports them (#632)
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
     _carry_ids(result.proposed, old_rows, result.steady)
@@ -1467,16 +1521,30 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     # the old side only: a fact new to the scene lists nothing
     new_keys = {ledger._fact_key(r) for r in result.proposed}
     result.changed = [r['id'] for r in old_rows if ledger._fact_key(r) not in new_keys]
+    _keep_steady_ends(project_dir, result, new, ended_before, loaded, prose)
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
     result.changed += [i for i in revised_rejection if i not in result.changed]
     if result.changed:
-        found = ledger.dependents(old_rows + new, result.changed, order, names=names)
+        # #632: the narrower rule (a compatible type, mentions only in
+        # knowledge and relationship facts) for what the prose changed; a
+        # rejected fact keeps the wide one, which `audit --mark rejected`
+        # told the author it would list (`cmd_audit._reject_recheck`)
+        rejected = [i for i in result.changed if i in revised_rejection]
+        found = ledger.dependents(old_rows + new,
+                                  [i for i in result.changed if i not in rejected],
+                                  order, names=names, narrow=True)
+        if rejected:
+            wide = ledger.dependents(old_rows + new, rejected, order, names=names)
+            found.scenes = sorted(set(found.scenes) | set(wide.scenes), key=order.get)
+            found.unrelated.update(wide.unrelated)
+            found.why = {**wide.why, **found.why}
         result.unrelated = found.unrelated
         result.name_notes = name_notes
         # a rejected fact's re-check also reaches the scenes whose brief
         # names it, as `audit --mark rejected` tells the author it will
         briefs = audit.leaning_scenes(project_dir, revised_rejection) if revised_rejection else {}
         named = {b for v in briefs.values() for b in v}
+        briefs_named = set(named)
         # #621: a state whose end moved here from a later scene: that scene
         # ended it, and is re-checked (the moved row no longer names it)
         newly_ended = ledger.ended_by(new, scene_id) - ended_before
@@ -1488,6 +1556,9 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
                         if s in order and order[s] > order[scene_id]}, key=order.get)
         gone = _gone_scenes(project_dir)
         result.recheck = [s for s in later if s not in gone and _has_prose(project_dir, s)]
+        result.recheck_why = {s: found.why.get(s) or (
+            'its brief names a rejected fact' if s in briefs_named else
+            'an end moved here from it') for s in result.recheck}
         result.not_rechecked = [f'{s} ({"cut or merged" if s in gone else "no prose yet"})'
                                 for s in later if s not in result.recheck]
         result.not_rechecked += [f'{s} (its brief names a rejected fact, but it is not in '
@@ -1511,7 +1582,7 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
     """What follows a written commit: the prose recorded, the source-fix,
     reported, blocked and pending lists updated (a failure is a WARNING:
     the ledger is written)."""
-    note = record_prose(project_dir, scene_id, prose)
+    note = record_prose(project_dir, scene_id, prose, blocking=result.blocking_read)
     if note:
         result.prose_notes.append(f'{scene_id}: {note}')
     if fixed_toward_source:
@@ -1521,7 +1592,8 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
             result.source_notes.append(f'{SOURCE_FIX_PATH} could not be updated ({e}); '
                                        f'remove {scene_id}\'s row by hand')
     try:
-        record_reported(project_dir, scene_id, command, result.inherited, prose=prose)
+        record_reported(project_dir, scene_id, command, result.inherited, prose=prose,
+                        keep_blocking=result.blocking_skipped)
         if holding is None:
             record_blocked(project_dir, scene_id, command, [])
     except GateError as e:   # the ledger is written; the findings were logged
@@ -1536,9 +1608,10 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
         waiting = pending(project_dir)
         for sid in result.recheck:
             if sid not in waiting:   # one waiting for another reason stays as it is
+                why = result.recheck_why.get(sid)
                 mark_pending(project_dir, sid, RECHECK,
                              f're-check: {scene_id} changed {len(result.changed)} fact(s) '
-                             f'its facts depend on')
+                             f'its facts depend on' + (f' ({why})' if why else ''))
         for f, why in result.source_backed:
             mark_source_fix(project_dir, f.established_scene,
                             f'{scene_id} tells it the source\'s way and this scene does not: '
@@ -1753,7 +1826,13 @@ def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, 
 #: blob of its text (#558): what `steady_facts` diffs a later version
 #: against. Rows replaced on each commit
 PROSE_PATH = 'working/gate-prose.csv'
-_PROSE_COLUMNS = ['scene_id', 'blob']
+#: `blocking`: `BLOCKING_READ` when the gate run that committed the prose
+#: had a blocking read of it (#631), so a re-check of the same prose skips
+#: it; blank for a scene gated before #626, or with the read off
+_PROSE_COLUMNS = ['scene_id', 'blob', 'blocking']
+#: the header before #631, still read (its rows had no blocking read)
+_OLD_PROSE_COLUMNS = ['scene_id', 'blob']
+BLOCKING_READ = 'read'
 
 
 def _git_out(project_dir: str, *args: str, data: bytes | None = None) -> bytes | None:
@@ -1766,15 +1845,30 @@ def _git_out(project_dir: str, *args: str, data: bytes | None = None) -> bytes |
     return r.stdout if r.returncode == 0 else None
 
 
-def _prose_rows(project_dir: str) -> dict[str, str]:
+def _prose_table(project_dir: str) -> dict[str, dict[str, str]]:
+    """Scene id → its `PROSE_PATH` row (`blob`, `blocking`). A file with the
+    header from before #631 (no `blocking` column) reads as blank there."""
     path = os.path.join(project_dir, PROSE_PATH)
     if not os.path.isfile(path):
         return {}
     with open(path, encoding='utf-8') as f:
         lines = [line.rstrip('\n') for line in f if line.strip()]
-    if not lines or lines[0].split('|') != _PROSE_COLUMNS:
+    header = lines[0].split('|') if lines else []
+    if header not in (_PROSE_COLUMNS, _OLD_PROSE_COLUMNS):
         raise ValueError(f'{PROSE_PATH}: the header must be {"|".join(_PROSE_COLUMNS)}')
-    return dict(line.split('|', 1) for line in lines[1:] if '|' in line)
+    out = {}
+    for line in lines[1:]:
+        cells = line.split('|')
+        if len(cells) < 2:
+            continue
+        out[cells[0]] = {'blob': cells[1],
+                         'blocking': cells[2] if len(cells) > 2 else ''}
+    return out
+
+
+def _prose_rows(project_dir: str) -> dict[str, str]:
+    """Scene id → the git blob of the prose its commitments were read from."""
+    return {sid: row['blob'] for sid, row in _prose_table(project_dir).items()}
 
 
 def gated_prose(project_dir: str, scene_id: str) -> tuple[str | None, str]:
@@ -1791,8 +1885,35 @@ def gated_prose(project_dir: str, scene_id: str) -> tuple[str | None, str]:
         return None, f'{PROSE_PATH} doesn\'t record the prose its facts were read from'
     out = _git_out(project_dir, 'cat-file', 'blob', blob)
     if out is None:
+        # #632: the committed prose at the scene's last gate commit, as for
+        # a book gated before PROSE_PATH existed
+        earlier = _prose_from_history(project_dir, scene_id)
+        if earlier is not None:
+            return earlier, ''
         return None, f'git has no blob {blob[:12]} (the prose its facts were read from)'
     return out.decode('utf-8', errors='replace'), ''
+
+
+def blocking_read_before(project_dir: str, scene_id: str, prose: str) -> tuple[bool, str]:
+    """#631: whether `prose` is the prose `scene_id` was last committed with
+    (`PROSE_PATH`: the same git blob) and that commit's gate run had a
+    blocking read of it, and why not. The blocking read takes the scene
+    alone, so on the same prose another read can only add noise (a new
+    reading of the same words), never a finding a change elsewhere made."""
+    try:
+        row = _prose_table(project_dir).get(scene_id)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return False, f'{PROSE_PATH} can\'t be read ({e})'
+    if not row or not row['blob']:
+        return False, f'{PROSE_PATH} records no gated prose for it'
+    blob = _git_out(project_dir, 'hash-object', '--stdin', data=prose.encode('utf-8'))
+    if blob is None:
+        return False, 'git can\'t compare the prose with the gated one'
+    if blob.decode().strip() != row['blob']:
+        return False, 'its prose changed since its last gate'
+    if row['blocking'] != BLOCKING_READ:
+        return False, 'its last gate had no blocking read (gated before it existed)'
+    return True, ''
 
 
 #: How far back `_prose_from_history` looks through the ledger's commits.
@@ -1851,19 +1972,20 @@ def _prose_from_history(project_dir: str, scene_id: str) -> str | None:
     return None
 
 
-def record_prose(project_dir: str, scene_id: str, prose: str) -> str:
+def record_prose(project_dir: str, scene_id: str, prose: str, blocking: bool = False) -> str:
     """Record `prose` as what `scene_id`'s commitments were read from: its
-    git blob, written to the object store, in `PROSE_PATH`. Returns why it
+    git blob, written to the object store, in `PROSE_PATH`, with whether the
+    gate run had a blocking read of it (`blocking`, #631). Returns why it
     couldn't be ('' when it was); its row goes then, so a later gate never
     diffs against the wrong prose."""
     blob = _git_out(project_dir, 'hash-object', '-w', '--stdin', data=prose.encode('utf-8'))
     blob_id = blob.decode().strip() if blob else ''
     try:
-        rows = _prose_rows(project_dir)
+        rows = _prose_table(project_dir)
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return f'{PROSE_PATH} not updated ({e}); the next re-check counts every reworded fact'
     if blob_id:
-        rows[scene_id] = blob_id
+        rows[scene_id] = {'blob': blob_id, 'blocking': BLOCKING_READ if blocking else ''}
     elif rows.pop(scene_id, None) is None:
         return ''   # no git, and nothing recorded to take back
     path = os.path.join(project_dir, PROSE_PATH)
@@ -1872,7 +1994,7 @@ def record_prose(project_dir: str, scene_id: str, prose: str) -> str:
         with open(path, 'w', encoding='utf-8', newline='') as f:
             f.write('|'.join(_PROSE_COLUMNS) + '\n')
             for sid in sorted(rows):
-                f.write(f'{sid}|{rows[sid]}\n')
+                f.write(f'{sid}|{rows[sid]["blob"]}|{rows[sid]["blocking"]}\n')
     except OSError as e:
         return f'{PROSE_PATH} not updated ({e}); the next re-check counts every reworded fact'
     return ''   # no git: the next gate's note says the prose isn't kept
@@ -1908,14 +2030,28 @@ def steady_facts(old_rows: list[dict[str, str]], earlier: str, prose: str) -> di
     """The ids of `old_rows` (commitments read from `earlier`, the prose
     last committed) read from a paragraph `prose` has unchanged and in
     place (`steady_paragraphs`), each with that paragraph's index in
-    `prose`: their quote lies within it. A quote not found in `earlier`, or
-    across paragraphs, is not steady."""
+    `prose`: their quote lies within it, or (#632) across unchanged
+    paragraphs that follow one another in both (the index of the first). A
+    quote not found in `earlier`, or across a changed paragraph, is not
+    steady."""
     paras = _paragraphs(earlier)
     pairs = _steady_pairs(earlier, prose)
+    # runs of unchanged paragraphs in sequence in both: a quote may span them
+    runs, run = [], []
+    for i in sorted(pairs):
+        if run and not (i == run[-1] + 1 and pairs[i] == pairs[run[-1]] + 1):
+            runs.append(run)
+            run = []
+        run.append(i)
+    if run:
+        runs.append(run)
     out = {}
     for o in old_rows:
-        at = next((j for i, j in pairs.items()
-                   if _quote_spans(o.get('quote') or '', list(paras[i]))), None)
+        quote = o.get('quote') or ''
+        at = next((j for i, j in pairs.items() if _quote_spans(quote, list(paras[i]))), None)
+        if at is None:
+            at = next((pairs[r[0]] for r in runs if len(r) > 1
+                       and _quote_spans(quote, [w for i in r for w in paras[i]])), None)
         if at is not None:
             out[o['id']] = at
     return out
@@ -1954,8 +2090,8 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
     facts are new readings, so only they can count as changed. A steady fact
     re-extraction left out is kept too, never dropped silently. Without the
     earlier prose (no git, nothing recorded) nothing is kept, and
-    `prose_notes` says so. Runs before the hold-back, which then applies to
-    the kept facts too."""
+    `prose_notes` says so. Runs before the hold-back, which leaves the kept
+    facts as they are (#632) and reports them."""
     from storyforge.common import log
     if not old_rows:
         return
@@ -2019,6 +2155,40 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
                 f'{_one_line(p.get("statement") or "")[:160]}"')
     result.proposed = kept + fresh
     result.steady = [o['id'] for o in kept]
+
+
+def _keep_steady_ends(project_dir: str, result: GateResult, new: list[dict[str, str]],
+                      ended_before: set[str], loaded, prose: str) -> None:
+    """#632: on prose with every paragraph unchanged since the scene's last
+    gate (`gated_prose`), the earlier states the scene ended stay ended
+    here and no others are, whatever the new reading's `ends` say: a
+    re-extraction of the same words that dropped or added an `ends` link
+    counted as a change and listed the later scenes for a re-check. An end
+    the new reading dropped is put back (on a state still open); one it
+    added on an open state is not applied. An end moved here from a later
+    scene (#621, `ENDS_MOVED`) is left as extraction made it. Each is said
+    in `prose_notes`. On prose with any paragraph changed, nothing here can
+    tell which paragraph an end was read from, so every change counts."""
+    now = ledger.ended_by(new, result.scene_id)
+    if not ended_before ^ now:
+        return
+    earlier, _ = gated_prose(project_dir, result.scene_id)
+    if earlier is None or _paragraphs(earlier) != _paragraphs(prose):
+        return
+    was = {r['id']: (r.get('resolves') or '').strip() for r in loaded}
+    by_id = {r['id']: r for r in new}
+    for rid in sorted(ended_before - now):
+        r = by_id.get(rid)
+        if r is not None and not (r.get('resolves') or '').strip():
+            r['resolves'] = result.scene_id
+            result.prose_notes.append(f'{result.scene_id}: kept its end of {rid} (unchanged '
+                                      f'prose; the new reading left it out)')
+    for rid in sorted(now - ended_before):
+        r = by_id.get(rid)
+        if r is not None and not was.get(rid):
+            r['resolves'] = ''
+            result.prose_notes.append(f'{result.scene_id}: did not apply a new end of {rid} '
+                                      f'(unchanged prose; the earlier reading had none)')
 
 
 def _subject(row: dict[str, str]) -> str:
@@ -3100,13 +3270,21 @@ def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: st
     `afford()` False (the caller's cost threshold) skips it, and the
     `Reextraction` says so.
 
+    A re-check (`command` 'recheck') is gated against a baseline of the
+    scene's own gated prose only (`own_snapshot`, #631): a contradiction
+    within the scene whose words were there when it last passed is
+    inherited, as when revise gates it; one with any other scene, the
+    ledger or a reference file still blocks (#480's review: that is what a
+    re-check is for).
+
     Raises:
         GateError: from the first run.
         Exception: anything else, from either run (a bug, not the extractor).
     """
+    before = own_snapshot(project_dir, scene_id) if command == 'recheck' else None
     result = gate_scene(project_dir, scene_id, command=command, log_dir=log_dir,
                         extract_model=extract_model, check_model=check_model,
-                        introduced_by=introduced_by)
+                        introduced_by=introduced_by, before=before)
     if not _only_extractor_slips(result):
         return result, None
     if afford is not None and not afford():
@@ -3114,9 +3292,25 @@ def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: st
                                                      'threshold')
     result, _, reextraction = _reextract(
         project_dir, scene_id, command, None, result, log_dir,
-        extract_model=extract_model, check_model=check_model, before=None,
+        extract_model=extract_model, check_model=check_model, before=before,
         fallback_dir=log_dir, introduced_by=introduced_by, catch_all=False)
     return result, reextraction
+
+
+def own_snapshot(project_dir: str, scene_id: str) -> Snapshot | None:
+    """#631: a `Snapshot` holding only `scene_id`'s gated prose (`gated_prose`,
+    the prose its commitments were last read from), for a re-check: a
+    finding set against the scene itself whose quotes were in that prose is
+    inherited (`_classify`, `_unchanged_since`), and nothing else can be,
+    since no other scene or reference file is in it. None (no baseline)
+    when the gated prose can't be had; the log says so."""
+    earlier, why = gated_prose(project_dir, scene_id)
+    if earlier is None:
+        from storyforge.common import log
+        log(f'  {scene_id}: no baseline for findings within the scene ({why}); any it has '
+            f'blocks')
+        return None
+    return Snapshot(scenes={scene_id: earlier})
 
 
 def _one_line(text: str) -> str:
@@ -3203,6 +3397,11 @@ def report_lines(result: GateResult) -> list[str]:
                       if result.provisional else
                       'NOTE (not recorded: states a contradiction already in the scene): ')
                      + '; '.join(_one_line(st) for st, _ in result.held_back))
+    if result.kept_stating:
+        lines.append('NOTE (kept as it was, from unchanged prose, though it states '
+                     + ('what stopped the commit' if result.provisional else
+                        'a contradiction already in the scene') + '): '
+                     + '; '.join(_one_line(st) for st, _ in result.kept_stating))
     if result.check:
         for d in result.check.cleared:
             lines.append(f'NOTE (plan fact kept, link not applied; the check found no '
@@ -3235,6 +3434,8 @@ def report_lines(result: GateResult) -> list[str]:
                      + '; '.join(f'{_one_line(st)} ({_one_line(why)})'
                                  for st, why in result.dropped[:20])
                      + (' ...' if len(result.dropped) > 20 else ''))
+    if result.blocking_note:
+        lines.append(f'NOTE (re-check): {result.blocking_note}')
     if result.steady:
         lines.append(f'NOTE (kept as they were, read from paragraphs the prose has unchanged): '
                      f'{len(result.steady)} fact(s)')
@@ -3345,7 +3546,13 @@ def clear_pending(project_dir: str, scene_id: str) -> None:
 #: that happens not to raise one doesn't forget it (the checker's findings
 #: vary run to run), and go only when their quote leaves the scene's prose.
 REPORTED_PATH = 'working/gate-reported.csv'
-_REPORTED_COLUMNS = ['scene_id', 'command', 'source', 'quote', 'finding']
+#: `paragraphs` (#631): for a blocking finding (BLK) against the scene
+#: itself, the keys (`_paragraph_key`) of the paragraphs its two quotes lie
+#: in, `;`-joined, so an accepted one covers a new reading of the same
+#: unchanged paragraphs; blank otherwise
+_REPORTED_COLUMNS = ['scene_id', 'command', 'source', 'quote', 'finding', 'paragraphs']
+#: the header before #631, still read (its rows have no paragraphs)
+_OLD_REPORTED_COLUMNS = _REPORTED_COLUMNS[:-1]
 #: The `command` of a row the author accepted (`storyforge check --accept`)
 ACCEPTED = 'accepted'
 #: The verified contradictions that stopped each scene's last gate run, the
@@ -3366,14 +3573,16 @@ def _read_rows(project_dir: str, rel: str) -> dict[str, list[dict[str, str]]]:
             lines = [line.rstrip('\n') for line in f if line.strip()]
     except (OSError, UnicodeDecodeError) as e:
         raise GateError(f'{rel}: {e}') from e
-    if not lines or lines[0].split('|') != _REPORTED_COLUMNS:
+    header = lines[0].split('|') if lines else []
+    if header not in (_REPORTED_COLUMNS, _OLD_REPORTED_COLUMNS):
         raise GateError(f'{rel}: the header must be {"|".join(_REPORTED_COLUMNS)}')
     out: dict[str, list[dict[str, str]]] = {}
     for line in lines[1:]:
         cells = line.split('|')
-        if len(cells) != len(_REPORTED_COLUMNS):
+        if len(cells) != len(header):
             raise GateError(f'{rel}: a row with {len(cells)} cells: {line[:80]!r}')
-        row = dict(zip(_REPORTED_COLUMNS, cells))
+        row = dict(zip(header, cells))
+        row.setdefault('paragraphs', '')
         out.setdefault(row['scene_id'], []).append(row)
     return out
 
@@ -3393,12 +3602,75 @@ def _write_rows(project_dir: str, rel: str, rows: dict[str, list[dict[str, str]]
                 f.write('|'.join(row[c] for c in _REPORTED_COLUMNS) + '\n')
 
 
-def _finding_rows(scene_id: str, command: str, findings: list[Finding]) -> list[dict[str, str]]:
+def _paragraph_key(words: tuple[str, ...] | list[str]) -> str:
+    """A paragraph's key: a hash of its words (case, punctuation and spacing
+    aside, as `steady_paragraphs` compares them), so a key still in the
+    prose means the paragraph is there unchanged."""
+    import hashlib
+    return hashlib.sha1(' '.join(words).encode('utf-8')).hexdigest()[:12]
+
+
+def _quote_paragraphs(quote: str, prose: str) -> set[str] | None:
+    """The keys of the paragraphs of `prose` that `quote` lies in (every
+    place it is found; a quote across paragraphs names each), or None when
+    it isn't found."""
+    paras = _paragraphs(prose)
+    words: list[str] = []
+    owner: list[int] = []
+    for i, p in enumerate(paras):
+        words += p
+        owner += [i] * len(p)
+    spans = _quote_spans(quote, words) if quote.strip() else []
+    if not spans:
+        return None
+    return {_paragraph_key(paras[owner[k]]) for sp in spans for k in range(sp.start, sp.end)}
+
+
+def _blocking_paragraphs(scene_id: str, f: Finding, prose: str) -> str:
+    """`_REPORTED_COLUMNS`' `paragraphs` for `f`: the paragraphs both its
+    quotes lie in, for a blocking finding against the scene itself ('' for
+    any other, or when a quote can't be placed in `prose`)."""
+    if f.code != BLOCKING_CODE or (f.established_scene or '') != scene_id or not prose:
+        return ''
+    keys = set()
+    for quote in (f.scene_quote, f.established_quote):
+        found = _quote_paragraphs(quote or '', prose)
+        if found is None:
+            return ''
+        keys |= found
+    return ';'.join(sorted(keys))
+
+
+def _finding_rows(scene_id: str, command: str, findings: list[Finding],
+                  prose: str = '') -> list[dict[str, str]]:
     from storyforge.common import csv_safe
     return [{'scene_id': scene_id, 'command': command,
              'source': csv_safe(f.established_scene or ''),
              'quote': csv_safe(_one_line(f.scene_quote)),
-             'finding': csv_safe(_one_line(f.message()))} for f in findings]
+             'finding': csv_safe(_one_line(f.message())),
+             'paragraphs': _blocking_paragraphs(scene_id, f, prose)} for f in findings]
+
+
+def _accepted_blocking_covers(row: dict[str, str], f: Finding, scene_id: str,
+                              prose: str) -> bool:
+    """#631: whether the author's accepted blocking finding `row` covers `f`,
+    a new reading of the scene's blocking: both are BLK against the scene
+    itself, and each of `f`'s quotes lies only in paragraphs `row` was
+    accepted on, which `prose` still has word for word (a paragraph's key
+    is a hash of its words). The blocking read words the same slip
+    otherwise from one reading to the next (iliad-teen, 2026-11-08: three
+    rounds of accepts and new readings of the same unchanged paragraphs)."""
+    if (row.get('command') != ACCEPTED or not row.get('paragraphs')
+            or row.get('source') != scene_id or not row.get('finding', '').startswith(
+                f'{BLOCKING_CODE} ')
+            or f.code != BLOCKING_CODE or (f.established_scene or '') != scene_id):
+        return False
+    allowed = set(row['paragraphs'].split(';'))
+    for quote in (f.scene_quote, f.established_quote):
+        found = _quote_paragraphs(quote or '', prose)
+        if found is None or not found <= allowed:
+            return False
+    return True
 
 
 def _same(a: dict[str, str], b: dict[str, str]) -> bool:
@@ -3422,13 +3694,18 @@ def blocked(project_dir: str) -> dict[str, list[dict[str, str]]]:
 
 
 def record_reported(project_dir: str, scene_id: str, command: str,
-                    findings: list[Finding], prose: str | None = None) -> None:
+                    findings: list[Finding], prose: str | None = None,
+                    keep_blocking: bool = False) -> None:
     """Replace `scene_id`'s rows in `REPORTED_PATH` with `findings`, keeping
     the author's `ACCEPTED` rows (a finding matching one isn't added again)
-    except, with `prose`, those whose quote is no longer in it. The file
-    goes when it has no rows."""
+    except, with `prose`, those whose quote is no longer in it. With
+    `keep_blocking` (#631: the run skipped the blocking read, so it can't
+    report its findings again) the scene's reported blocking findings are
+    kept too, on the same terms. The file goes when it has no rows."""
     rows = reported(project_dir)
-    accepted = [r for r in rows.pop(scene_id, []) if r['command'] == ACCEPTED
+    accepted = [r for r in rows.pop(scene_id, [])
+                if (r['command'] == ACCEPTED
+                    or (keep_blocking and r['finding'].startswith(f'{BLOCKING_CODE} ')))
                 and (prose is None or _quoted_in(r['quote'], prose))]
     new = [r for r in _finding_rows(scene_id, command, findings)
            if not any(_same(r, a) for a in accepted)]
@@ -3438,13 +3715,15 @@ def record_reported(project_dir: str, scene_id: str, command: str,
 
 
 def record_blocked(project_dir: str, scene_id: str, command: str,
-                   findings: list[Finding]) -> None:
+                   findings: list[Finding], prose: str = '') -> None:
     """Replace `scene_id`'s rows in `BLOCKED_PATH` with `findings` (none:
-    its rows go)."""
+    its rows go). With `prose` (the prose the run read), a blocking finding
+    against the scene itself records the paragraphs its quotes lie in, so
+    an accept of it covers the same paragraphs (#631)."""
     rows = blocked(project_dir)
     rows.pop(scene_id, None)
     if findings:
-        rows[scene_id] = _finding_rows(scene_id, command, findings)
+        rows[scene_id] = _finding_rows(scene_id, command, findings, prose)
     _write_rows(project_dir, BLOCKED_PATH, rows)
 
 
@@ -3455,8 +3734,10 @@ def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateRe
     verdict unchanged, and returned ('' when written): its rows may then
     describe another run's prose, which `accept_blocked` refuses."""
     try:
+        ctx = getattr(result, '_ctx', None)
         record_blocked(project_dir, scene_id, command,
-                       [f for f in result.findings if f.kind == 'contradiction'])
+                       [f for f in result.findings if f.kind == 'contradiction'],
+                       prose=ctx.prose if ctx is not None else '')
     except (GateError, OSError) as e:
         from storyforge.common import log
         why = f'{BLOCKED_PATH} could not be updated: {e}'
@@ -3622,7 +3903,9 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                 f'forecast about ${len(queue) * RECHECK_COST_PER_SCENE:.2f}: {", ".join(queue)}')
             announced = True
         sid = queue[0]
-        log(f'Re-checking {sid}...')
+        # #632: why it was listed, so a cascade's cause is in the log
+        listed = (pending(project_dir).get(sid) or {}).get('reason', '')
+        log(f'Re-checking {sid}...' + (f' ({_one_line(listed)[:300]})' if listed else ''))
         run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
         try:
             logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)

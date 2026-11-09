@@ -549,6 +549,8 @@ def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], budge
     lines += [f'- dependents of {result.scene_id} matched on fewer names: {x}'
               for x in result.name_notes]
     lines += [f'- {x}' for x in result.prose_notes]
+    lines += [f'- {sid} listed for a re-check: {result.scene_id} changed {why}'
+              for sid, why in result.recheck_why.items()]
     lines += [f'- registry link to a commitment {result.scene_id} no longer makes: {x}'
               for x in result.dangling]
     if run is None:
