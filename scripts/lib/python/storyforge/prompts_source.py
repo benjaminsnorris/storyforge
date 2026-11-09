@@ -380,9 +380,9 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
     parts = [f'## Source\n\n{_header(cfg)}',
              'Write each brief while looking at the source text below: keep the source\'s '
              'events, outcomes and turns for what the treatment keeps, and make every '
-             'departure one the treatment, its note or the version rules call for. Key '
-             'dialogue keeps the substance of the source\'s lines in this novel\'s voice; '
-             'never copy the translation\'s wording.']
+             'departure one the treatment, its note or the version rules call for. Write '
+             'no dialogue (#644): a source line the author wants kept verbatim goes into '
+             'key_dialogue by hand, marked must:. Never copy the translation\'s wording.']
     note = names_note(project_dir, cfg)
     if note:
         parts.append(note)

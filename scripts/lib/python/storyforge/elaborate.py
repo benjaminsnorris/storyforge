@@ -609,6 +609,16 @@ CRAFT_FRAMEWORK_COLUMNS = ('action_sequel', 'emotional_arc', 'value_at_stake',
                            'value_shift', 'turning_point', 'goal', 'conflict',
                            'crisis', 'decision')
 
+#: Brief columns that stage the scene rather than state its facts: what is
+#: said, what lies under it, the feelings in order, the images (#644, plan
+#: D3). They stay as optional columns the author fills by hand, and nothing
+#: requires them: the briefs stage never generates them (a model's value is
+#: dropped, `cmd_elaborate`), drafting and the gate read them only when
+#: filled. Model-written staging was the route by which the plan's phrasing
+#: leaked into the prose. Extraction still records them from prose that
+#: exists (a motif is noticed in the draft and recorded after).
+AUTHOR_NOTE_COLUMNS = ('key_dialogue', 'subtext', 'emotions', 'motifs')
+
 
 def split_failures(failures: list[dict]) -> tuple[list[dict], list[dict]]:
     """(blocking, advisory) failures of a validation report, each in its

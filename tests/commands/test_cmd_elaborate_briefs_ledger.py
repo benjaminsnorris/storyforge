@@ -169,5 +169,6 @@ def test_a_rerun_keeps_the_authors_must_beats(novel, mock_api, capsys):
     _run(mock_api, _briefs(_row('new-x1', 'archivist-knows-village')))
     row = _read_csv_as_map(path)['new-x1']
     assert row['key_actions'] == 'Asks; must: Kael burns the ledger; Listens'
-    assert row['key_dialogue'].startswith('must: Kael: "Ask me again"')
+    # #644: the reply's own key_dialogue is never written; the author's stays whole
+    assert row['key_dialogue'] == 'must: Kael: "Ask me again"'
     assert 'put back the author\'s must item(s)' in capsys.readouterr().out

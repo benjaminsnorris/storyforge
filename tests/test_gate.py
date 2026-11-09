@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from storyforge import gate, ledger
+from storyforge import checker, gate, ledger
 from storyforge.gate import GateError, gate_scene
 
 SCENE = 'act1-sc02'
@@ -3821,6 +3821,40 @@ class TestMustLines:
 
 def _set_dialogue_raw(project_dir, value):
     _set_brief(project_dir, key_dialogue=value)
+
+
+class TestFactOnlyBrief:
+    """#644: the briefs stage writes facts only, so key_dialogue, subtext,
+    emotions and motifs (and the craft notes) are often empty. The gate
+    checks what's there and nothing else."""
+
+    EMPTY = {c: '' for c in ('key_dialogue', 'subtext', 'emotions', 'motifs',
+                             'goal', 'conflict', 'crisis', 'decision')}
+
+    def test_a_clean_scene_passes(self, project_dir, tmp_path):
+        _set_brief(project_dir, **self.EMPTY)
+        assert gate._brief_lines(project_dir, SCENE) == []
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed and result.committed
+
+    def test_its_promises_are_its_facts(self, project_dir):
+        _set_brief(project_dir, **self.EMPTY)
+        brief = checker._brief(checker.Book.load(project_dir, SCENE), project_dir, SCENE)
+        assert set(brief.fields) >= {'outcome', 'key_actions'}
+        assert 'key_dialogue' not in brief.fields
+        assert '**key_dialogue**' not in brief.text
+
+    def test_a_broken_promise_of_its_actions_is_still_advisory(self, project_dir, tmp_path):
+        _set_brief(project_dir, **self.EMPTY)
+        result = _gate(project_dir, tmp_path, [_commitment()],
+                       findings=[_promise('Searches removal logs')])
+        assert result.passed
+        assert [f.established_quote for f in result.advisory] == ['Searches removal logs']
+
+    def test_a_brief_with_no_promise_fields_passes(self, project_dir, tmp_path):
+        _set_brief(project_dir, outcome='', key_actions='', **self.EMPTY)
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed
 
 
 class TestVerbatimIn:

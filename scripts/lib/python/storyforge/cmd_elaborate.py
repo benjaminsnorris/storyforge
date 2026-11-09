@@ -1832,6 +1832,23 @@ def _mark_artifacts(project_dir: str, written: list[str]) -> None:
                                   updated=date.today().isoformat())
 
 
+def _drop_author_notes(rows: list[dict]) -> list[str]:
+    """Take the author's note columns (`elaborate.AUTHOR_NOTE_COLUMNS`:
+    key_dialogue, subtext, emotions, motifs) out of the briefs stage's
+    reply rows, in place, and return the ones a row had filled (#644: the
+    stage writes facts; those are the author's, by hand). The prompt
+    doesn't ask for them; this holds when a reply gives them anyway, so an
+    author's own note, or a `must:` line in key_dialogue, is never
+    written over."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    filled = []
+    for row in rows:
+        for col in AUTHOR_NOTE_COLUMNS:
+            if (row.pop(col, None) or '').strip() and col not in filled:
+                filled.append(col)
+    return [c for c in AUTHOR_NOTE_COLUMNS if c in filled]
+
+
 def _keep_must(existing: dict, row: dict, sid: str) -> dict:
     """The non-empty values of a regenerated brief `row` to write over
     `existing`, with every `must` item of `existing` kept word for word
@@ -1905,7 +1922,9 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP, validate_structure,
     )
 
-    registries = format_registries_for_prompt(project_dir)
+    # No motifs (#644): a motif is noticed in the draft and recorded after,
+    # never placed by a stage; motif-taxonomy.csv stays for that record
+    registries = format_registries_for_prompt(project_dir, exclude=('motif-taxonomy.csv',))
 
     # An adaptation (#477): a block that can't be read stops here, before any spend
     from storyforge import source as source_mod
@@ -2182,6 +2201,11 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 if rows:
                     path = os.path.join(ref_dir, 'scene-briefs.csv')
                     existing = _read_csv_as_map(path)
+                    staged = _drop_author_notes(rows)
+                    if staged:
+                        log(f'  NOTE: left out the reply\'s {", ".join(staged)}: the '
+                            f'author\'s notes, never generated (#644); any the author '
+                            f'wrote are kept')
                     for row in rows:
                         normalize_fields(row, alias_maps)
                         sid = row.get('id', '')

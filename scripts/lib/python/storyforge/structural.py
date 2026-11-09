@@ -54,10 +54,12 @@ REQUIRED_FIELDS = [
     'goal', 'conflict', 'outcome', 'crisis', 'decision',
 ]
 
-# Enrichment fields — weight 0.5 each (from briefs)
+# Enrichment fields — weight 0.5 each (from briefs). Not the author's notes
+# (key_dialogue, subtext, emotions, motifs: `elaborate.AUTHOR_NOTE_COLUMNS`,
+# #644): optional, filled by hand, so a brief without them is complete
 ENRICHMENT_FIELDS = [
-    'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs', 'continuity_deps', 'mice_threads',
+    'knowledge_in', 'knowledge_out', 'key_actions',
+    'continuity_deps', 'mice_threads',
     'physical_state_in', 'physical_state_out',
 ]
 

@@ -93,3 +93,4 @@ id|function
 - The ending must resolve all three conflict levels
 - Scene functions must be testable — "Establish the world" is vague; "Reveal that the mine has been salted through a surveying error" is testable
 - If the author provided character concepts or world details in the seed, honor them
+- Write every field as terse notes of what happens and what is true: who does what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about what the moment means. No interpretation: never say what a moment means or reveals, what a character feels underneath, or what the reader should take from it, and no polished or quotable sentences. The drafter finds the words; these notes give only the facts.

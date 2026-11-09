@@ -376,16 +376,16 @@ COLUMN_SCHEMA = {
     },
     'key_dialogue': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Specific lines or exchanges that must appear.',
+        'description': 'Optional, the author\'s: lines the author wants in the scene, filled by hand and never generated (#644). Only a line marked must: is required, word for word.',
     },
     'emotions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Emotional beats in sequence as they occur through the scene.',
+        'description': 'Optional, the author\'s note: emotional beats in sequence, filled by hand and never generated (#644). Extraction records them from prose.',
     },
     'motifs': {
         'type': 'registry', 'registry': 'motif-taxonomy.csv', 'array': True,
         'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv.',
+        'description': 'Optional: recurring images/symbols the scene has. Never placed by the briefs stage (#644): a motif is noticed in the draft and recorded after (extraction, or the author). Normalized against reference/motif-taxonomy.csv.',
     },
     'motif_details': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
@@ -393,7 +393,7 @@ COLUMN_SCHEMA = {
     },
     'subtext': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'What is happening beneath the surface — phrased as a drafting instruction. "Character says X but means Y; do not state Y directly."',
+        'description': 'Optional, the author\'s note: what is happening beneath the surface, filled by hand and never generated (#644). "Character says X but means Y; do not state Y directly."',
     },
     'continuity_deps': {
         'type': 'scene_ids', 'file': 'scene-briefs.csv', 'stage': 'brief',

@@ -11,6 +11,27 @@ from .illustrations import read_scene_prose
 from .prompts import read_yaml_field
 from .scenes import SCENE_ID_RULE
 
+#: How every elaboration stage writes what it writes (#644, plan D4): terse
+#: notes of what happens and what is true, never interpretation. Every
+#: elaborated field is model prose the drafter reads, and the drafter writes
+#: more like what it reads: on *Wrath Like Smoke* a brief's subtext ("let the
+#: list grow, and never call it pride") became the aphoristic closing lines
+#: the author singled out.
+NOTES_RULE = ('Write every field as terse notes of what happens and what is true: who does '
+              'what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; '
+              'Briseis is the sixth stud"), not a paragraph about what the moment means. No '
+              'interpretation: never say what a moment means or reveals, what a character '
+              'feels underneath, or what the reader should take from it, and no polished or '
+              'quotable sentences. The drafter finds the words; these notes give only the facts.')
+
+#: The craft-framework columns as notes, not requirements (#643, #644): what
+#: the architecture and map prompts say about them
+_CRAFT_NOTES = ('action_sequel, emotional_arc, value_at_stake, value_shift and '
+                'turning_point are craft-framework notes, not requirements: fill one when the '
+                'scene plainly has it, and leave the cell empty when it doesn\'t. Not every scene '
+                'turns or shifts a value, and validate reports flat stretches and runs of one '
+                'scene type or turning point as diagnostics, not errors.')
+
 
 def _read_file(path: str) -> str:
     """Read a file's contents, or return empty string if missing."""
@@ -118,30 +139,6 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
     return '\n\n'.join(sections) if sections else '(no reference materials yet)'
 
 
-def _craft_principles(project_dir: str, plugin_dir: str) -> str:
-    """Load craft engine excerpt for prompts."""
-    # Try plugin references first, then project
-    for base in [plugin_dir, project_dir]:
-        path = os.path.join(base, 'references', 'craft-engine.md')
-        content = _read_file(path)
-        if content:
-            # Extract sections 2-5 (Scene Craft through Rules)
-            lines = content.split('\n')
-            capture = False
-            captured = []
-            for line in lines:
-                if line.startswith('## 2'):
-                    capture = True
-                if line.startswith('## 6') or line.startswith('## 7'):
-                    capture = False
-                if capture:
-                    captured.append(line)
-            if captured:
-                return '\n'.join(captured)
-            return content[:3000]  # fallback: first 3000 chars
-    return ''
-
-
 # ============================================================================
 # Stage 1: Spine
 # ============================================================================
@@ -246,6 +243,7 @@ id|function
 - The ending must resolve all three conflict levels
 - Scene functions must be testable — "Establish the world" is vague; "Reveal that the mine has been salted through a surveying error" is testable
 - If the author provided character concepts or world details in the seed, honor them
+- {NOTES_RULE}
 """
 
 
@@ -293,9 +291,8 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 2. Add supporting scenes: character development, subplot introduction, transitions, world-building
 3. Assign every scene to a structural act (`act` — 1, 2, 3, ...)
 4. Assign POV characters
-5. Classify each as action or sequel (Swain's scene/sequel pattern)
-6. Define the value at stake and its polarity shift (McKee)
-7. Identify the turning point type (action or revelation — vary these)
+5. Where it fits the scene, note it as action or sequel (Swain's scene/sequel pattern), the value at stake and its polarity shift (McKee), and the turning point type (action or revelation). These are notes: leave a cell empty for a scene that doesn't fit
+
 ### Output Format
 
 Update the scenes CSV with new columns filled:
@@ -333,13 +330,12 @@ If the world needs a bible, output:
 
 ### Rules
 
-- No flat polarity stretches: 3+ consecutive scenes with no value shift (+/+) is a red flag
-- Vary scene types: no 4+ consecutive action or sequel scenes
-- Vary turning point types: no 4+ consecutive action or revelation turning points
+- {_CRAFT_NOTES}
 - An enum cell holds only its value: `action_sequel` is action or sequel, `turning_point` is action or revelation, never "action: she strikes" (what turns the scene goes in `function`)
 - Every thread introduced must have a planned resolution
 - Acts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
 - Character arcs need structural progression: lie reinforced → challenged → confronted → truth/refusal
+- {NOTES_RULE}
 """
 
 
@@ -447,12 +443,22 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 - Every scene must have at least one on-stage character
 - Location names must be consistent (same place = same name)
 - Total target_words should sum to within 10% of the manuscript target ({read_yaml_field(os.path.join(project_dir, 'storyforge.yaml'), 'project.target_words') or 'not set'})
+- {_CRAFT_NOTES}
+- {NOTES_RULE}
 """
 
 
 # ============================================================================
 # Stage 4: Briefs
 # ============================================================================
+
+#: The briefs stage's reply columns: the facts, and the craft notes the
+#: author may leave empty. Never the author's notes (`AUTHOR_NOTE_COLUMNS`,
+#: #644) or a graphic novel's columns (its own handler)
+BRIEFS_OUTPUT_HEADER = ('id|outcome|key_actions|knowledge_in|knowledge_out|physical_state_in|'
+                        'physical_state_out|goal|conflict|crisis|decision|continuity_deps|'
+                        'has_overflow')
+
 
 def build_briefs_prompt(project_dir: str, plugin_dir: str,
                         scene_ids: list[str] | None = None,
@@ -466,9 +472,11 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
         scene_ids: If provided, only build briefs for these scenes.
                    If None, builds for all mapped scenes without briefs.
         registries_text: Optional formatted registry contents for prompt injection.
-        system_context: If True, skip _craft_principles() and the reference
-                        docs the shared system context carries (see
-                        _existing_refs).
+        system_context: If True, leave out the reference docs the shared
+                        system context carries (see _existing_refs).
+
+    No craft principles (#644): a brief is the scene's facts, and the
+    craft engine's scene rules (every scene must turn) are for the drafter.
     """
     context = _project_context(project_dir)
     refs = _existing_refs(project_dir, shared=system_context)
@@ -476,7 +484,6 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
     briefs = _read_csv_contents(os.path.join(ref_dir, 'scene-briefs.csv'))
-    craft = '' if system_context else _craft_principles(project_dir, plugin_dir)
 
     scope_note = ""
     if scene_ids:
@@ -484,14 +491,17 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
 
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
-    craft_section = f'\n## Craft Principles\n\n{craft}\n' if craft else ''
     from .prompts_source import briefs_section
     src = briefs_section(project_dir, scene_ids)
     registries_section += f'\n{src}\n' if src else ''
 
     from .schema import OUTCOME_GUIDE   # schema imports elaborate
     from .speaker_labels import LABEL_RULE
-    return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
+    from .elaborate import AUTHOR_NOTE_COLUMNS
+    notes = ', '.join(AUTHOR_NOTE_COLUMNS)
+    return f"""You are writing the scene briefs for a novel: the facts of what happens in each scene, as terse notes, so that scenes can be drafted independently and still cohere.
+
+A brief is a plan of events, not a script. It keeps every fact the scene must honour or establish, and it drops the staging: how the scene is played, what is said, what it means. The drafter finds the gesture, the line and the image.
 
 {context}
 {scope_note}
@@ -512,32 +522,27 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
 ```
 {briefs}
 ```
-{refs_section}{craft_section}{registries_section}
+{refs_section}{registries_section}
 ## Instructions
 
-For each scene that needs a brief, define the complete drafting contract:
+For each scene that needs a brief, write its facts:
 
-- **goal**: The POV character's concrete objective entering the scene (Swain)
-- **conflict**: What specifically opposes the goal
 - **outcome**: How the scene ends — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
-- **crisis**: The dilemma — best bad choice or irreconcilable goods (Story Grid)
-- **decision**: What the character actively chooses
+- **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning.
 - **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
 - **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
 - **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
-- **key_actions**: Semicolon-separated concrete things that happen
-- **key_dialogue**: Specific lines or exchanges that must appear in the prose, semicolon-separated. {LABEL_RULE}
-- **emotions**: Semicolon-separated emotional beats in sequence
-- **motifs**: Semicolon-separated recurring images/symbols deployed
-- **subtext**: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says A but means B; don't state B" or "The tension is Z; show through [behavior], never name it." NOT a paragraph. NOT multiple clauses chained with semicolons. If no meaningful subtext, leave empty.
+- **goal**, **conflict**, **crisis**, **decision**: optional notes. Fill one only when the scene plainly has it, as a fact in a few words (goal: "buy back Hector's body"; decision: "Achilles gives up the body"), and leave it empty otherwise. Not every scene has a goal, an opponent or a dilemma.
 - **continuity_deps**: Semicolon-separated scene IDs this scene depends on (for parallel drafting)
 - **has_overflow**: false (unless you indicate a scene needs extended brief)
+
+Not yours to write: {notes}. They are the author's optional notes, filled by hand, and they are not in the output. A motif is noticed in the draft and recorded after, never placed in a brief.
 
 ### Output Format
 
 ```briefs-csv
-id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out
+{BRIEFS_OUTPUT_HEADER}
 (one row per scene being briefed)
 ```
 
@@ -550,6 +555,7 @@ id|status
 
 ### Rules
 
+- {NOTES_RULE}
 - knowledge_in uses the same fact ids as prior scenes' knowledge_out, never sentences — validation will check this
 - Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
@@ -557,11 +563,11 @@ id|status
 - Target 0-2 state changes per scene. A full novel should have 15-40 total state entries.
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
-- Every scene must have goal/conflict/outcome filled
+- Every scene must have its outcome and key_actions filled
+- Where a key_actions item does quote a line: {LABEL_RULE}
+- A key_actions item an existing brief starts with `must:` is the author's: copy it word for word, marker and all. Never add `must:` yourself
 - A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
-- Key dialogue should sound like the character, not the author
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
-- The crisis must be a genuine dilemma (two bad choices or two good choices that conflict), not "do the obvious thing or don't"
 """
 
 
@@ -941,6 +947,8 @@ def build_gap_fill_prompt(
 ## Missing Fields — Fill These
 
 {chr(10).join(field_instructions)}
+
+{NOTES_RULE}
 
 ## Output Format
 
