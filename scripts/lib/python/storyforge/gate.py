@@ -3493,7 +3493,7 @@ def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[di
             result.check.findings.append(f)
     result.state_notes = list(got.notes)
     if got.notes:
-        log(f'  {scene_id}: continuity, not checked: {"; ".join(got.notes)}')
+        log(f'  {scene_id}: continuity, not checked or advisory: {"; ".join(got.notes)}')
 
 
 def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: str,
@@ -4162,7 +4162,10 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
 #: shared-dark, and a second reading about $0.35 more against a cold cache
 #: (E8, 2026-11-01); rounded up. The blocking reading (#626) is one more
 #: call per reading on the scene alone (`blocking.BLOCKING_READINGS`), about
-#: $0.04 each on gawain (#626); rounded up.
+#: $0.04 each on gawain (#626); rounded up. The continuity checks' typed
+#: state extraction (#648, `GATE_CONTINUITY`) is one more small-model call
+#: on the scene (none when its saved file is current), about $0.01 a scene
+#: at the extraction tier: covered by the rounding.
 RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKING else 0)
 
 

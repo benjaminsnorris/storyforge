@@ -86,9 +86,9 @@ scene, and `--accept` takes them. What it couldn't check is a NOTE.
 Continuity (#648): every gated scene's typed state is read (one call on a
 small model, saved to `working/typed-state/`; none on unchanged prose) and
 checked by code against the book (`storyforge.continuity`): a dead
-character present, an object in two hands, knowledge before it is learned,
-two places at once or travel too fast, an elapsed time against the
-calendar, an injured part at full strength, a name the book rules out, the
+character present, an object in two hands in one scene or used after it
+was given away or destroyed, knowledge before a scene shows it learned,
+travel too fast for world.csv, an elapsed time against the calendar, an injured part at full strength, a name the book rules out, the
 sun against `reference/world.csv`. Its findings stop the scene like any
 contradiction (`--accept` takes them); what it couldn't check is a NOTE.
 

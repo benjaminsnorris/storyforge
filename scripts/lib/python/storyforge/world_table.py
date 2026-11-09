@@ -1,4 +1,4 @@
-"""The world table: directions, light and distances, for checks that need
+"""The world table: directions, light, distances and speeds, for checks that need
 the book's geography and sky (#647; shared with #648's continuity checks:
 geography and sky, and travel).
 
