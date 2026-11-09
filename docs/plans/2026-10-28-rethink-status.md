@@ -3,39 +3,40 @@
 Last updated 2026-11-08, at v1.162.0 (the gate's blocking read, #626); before that v1.161.0 (sync hook for subfolder projects #612, E8's mislabelled cases #614, register check #615; PR #625); before that v1.157.0 (reading level and key decisions in revision prompts, #616); before that 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalness` forecast before they spend, #510; one cost budget per run and `check --pending --keep-going`, #503; see Latest; carried states and the gate's spend at v1.130.2, #491; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling became 3 (#488); 4 at #513, and 1 since #614's audit (v1.161.0)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
 
-## Latest: the gate-and-voiceprint plan, first overnight run (2026-11-09)
+## Latest: the gate-and-voiceprint plan, phases 1–5 merged (2026-11-09, v1.173.0)
 
-Thirteen PRs implement every issue of
-`docs/plans/2026-11-08-deterministic-gate-and-voiceprint.md` that needs no
-author input. Each went through the 5-agent review, and the fixes are pushed.
-**None is merged**: they wait on Ben's review. They form two stacks. Merge
-each stack bottom-up, and expect `.claude-plugin/plugin.json` to conflict
-where the stacks meet.
+Every issue of `docs/plans/2026-11-08-deterministic-gate-and-voiceprint.md`
+that needs no author input is merged. Each PR had the 5-agent review, with its
+fixes in.
 
-| order | PR | issue | what |
-|---|---|---|---|
-| gate 1 | #661 | #645 | E4/E8 frozen (miss = stale, exit 0), monthly eval budget, spend ledger `~/.storyforge/eval-spend.jsonl` |
-| gate 2 | #663 | #641 | a failing scene holds only its dependents (#633's rule, now in write/check/status); `check` keeps going by default |
-| gate 3 | #664 | #642 | broken promises advisory unless `must:`; a registry fact set up in the same scene still blocks |
-| gate 4 | #666 | #643 | craft-framework checks advisory (`scoring_levels.is_advisory_failure`) |
-| gate 5 | #668 | #644 | lean, note-style briefs; key_dialogue/subtext/emotions/motifs author-only |
-| gate 6 | #670 | #646 | blocking-set eval; cases in private storyforge-evals #77 |
-| gate 7 | #671 | #647 | stage sheet behind `check --stage-sheet` (recall 0.22, too many false alarms to be the default); recordings in storyforge-evals #78 |
-| gate 8 | #672 | #648 | typed state and free deterministic checks; `time_mode` gains memory/dream/ghost |
-| gate 9 | #673 | #649 | yes/no question layer behind `check --questions` (8/17 against the open checker's ~12/17, about half the cost) |
-| voice 1 | #662 | #650 | fingerprint, Austen reference, attribution/stability/Verne tests |
-| voice 2 | #665 | #651 | described voice and exemplars (`voice propose/judge/accept`) |
-| voice 3 | #667 | #653 | `score --voice` drift meter (Austen held-out 0.21/0.23, Wrath 1.38) |
-| voice 4 | #669 | #652 | author voice repo (`voice init/import/fingerprint`), book `voice:` block |
+| PR | issue | what landed |
+|---|---|---|
+| #661 | #645 | E4/E8 are frozen (a miss is stale, exit 0); monthly eval budget in `evals/config.json`; spend ledger `~/.storyforge/eval-spend.jsonl` |
+| #663 | #641 | a failing scene holds only the scenes that depend on it (#633's rule, now in write, check and status); `check` keeps going by default |
+| #664 | #642 | broken promises are advisory unless marked `must:`; a registry fact set up in the same scene still blocks |
+| #666 | #643 | craft-framework checks are advisory (`scoring_levels.is_advisory_failure`) |
+| #668, #675 | #644 | lean briefs written as notes. By default only events (3–6), the turn, POV, outcome and the state in and out are generated; goal, conflict, crisis, decision, key_dialogue, subtext, emotions and motifs are author notes (plan decision 9) |
+| #670 | #646 | the blocking-set eval; its cases are in private storyforge-evals (#77) |
+| #671 | #647 | the stage sheet, behind `check --stage-sheet`; recall 0.22 with too many false alarms, so the blocking read stays the default |
+| #672 | #648 | typed state and free deterministic checks; `time_mode` gains memory, dream and ghost |
+| #673 | #649 | the yes/no question layer, behind `check --questions`: 8 of 17 caught against the open checker's ~12, at about half the cost per scene |
+| #662, #665, #667, #669 | #650, #651, #653, #652 | voiceprint: fingerprint and Austen reference, described voice and exemplars, `score --voice`, the author voice repo and the book's `voice:` block |
 
-The night's model spend was about $4.30 (it is listed in each PR). Paid steps
-waiting on Ben: the blocking-set baseline (about $20 for three frozen runs),
-and the E4/E8 recall measurements for #648 and #649 (over the monthly
-budget). E3, E5 and recheck-set already failed their replays on `main` before
-this run, after an earlier extraction prompt change. Not started, because each
-needs the author: #654 (voice samples, after Ben picks influences), #655,
-#656, #657, #658 and #659. Each PR's punch-list comment lists the decisions
-left for Ben.
+The stage sheet and the question layer stay behind flags. They are kept
+because #655's writer keeps the sheet (prevention, which the plan puts first),
+and because the question layer is the cheaper gate the plan is after. Judge
+both again once sessions exist. The open checker and the blocking read stay
+the defaults until then.
+
+E3, E5 and recheck-set were re-recorded (#676, $15.25) after the commitments
+prompt change, and every replayed suite passes again; E4, E8 and blocking-set
+replay as stale. Deliberately not run (2026-11-09): the blocking-set baseline (about $20) and
+the E4/E8 recall for #672/#673 (about $240). No decision depends on them yet;
+run them when the stage sheet or the question layer is a candidate to become
+the default.
+
+**Next:** #654 (voice samples). It needs Ben's influences and narrator stance
+for Wrath. After it come #655 (sessions), #656 and #659, then #657 and #658.
 
 ## Next direction: a deterministic gate, voiceprints, long sessions (2026-11-08)
 
