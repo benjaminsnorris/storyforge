@@ -1,0 +1,503 @@
+{
+ "book": "e2-carol",
+ "facts": {
+  "ebenezer": {
+   "type": "trait",
+   "subject": "ebenezer-scrooge",
+   "name": "Ebenezer Scrooge",
+   "statement": "Scrooge's first name is Ebenezer.",
+   "scene": "scrooge-confronts-marley-ghost",
+   "quote": "Ebenezer Scrooge"
+  },
+  "fred-name": {
+   "type": "trait",
+   "subject": "fred",
+   "name": "Fred",
+   "statement": "Scrooge's nephew is called Fred.",
+   "scene": "nephew-fred-christmas-party",
+   "quote": "More shame for him, Fred!"
+  },
+  "silent-spirit": {
+   "type": "trait",
+   "subject": "ghost-of-christmas-yet-to-come",
+   "name": "the Ghost of Christmas Yet To Come",
+   "statement": "The Ghost of Christmas Yet To Come never speaks; it only points.",
+   "scene": "scrooge-meets-final-phantom",
+   "quote": "the Spirit neither spoke nor moved"
+  },
+  "green-robe": {
+   "type": "physical",
+   "subject": "ghost-of-christmas-present",
+   "name": "the Ghost of Christmas Present",
+   "statement": "The Ghost of Christmas Present is clothed in one simple green robe, or mantle, bordered with white fur.",
+   "scene": "ghost-of-christmas-present-revealed",
+   "quote": "It was clothed in one simple green robe, or mantle, bordered with white fur."
+  },
+  "salary": {
+   "type": "trait",
+   "subject": "bob-cratchit",
+   "name": "Bob Cratchit",
+   "statement": "Bob Cratchit is paid fifteen shillings a week.",
+   "scene": "nephew-visits-scrooge",
+   "quote": "my clerk, with fifteen shillings a week, and a wife and family"
+  },
+  "bob-coat": {
+   "type": "physical",
+   "subject": "bob-cratchit",
+   "name": "Bob Cratchit",
+   "statement": "Bob Cratchit owns no great-coat; against the cold he wears a comforter.",
+   "scene": "scrooge-dismisses-clerk",
+   "quote": "for he boasted no great-coat"
+  },
+  "partner": {
+   "type": "relationship",
+   "subject": "jacob-marley",
+   "name": "Jacob Marley",
+   "statement": "Jacob Marley was Scrooge's business partner, and Scrooge was his sole friend and sole mourner.",
+   "scene": "marley-was-dead-narration",
+   "quote": "his sole friend, and sole mourner"
+  },
+  "fred-nephew": {
+   "type": "relationship",
+   "subject": "fred",
+   "name": "Fred",
+   "statement": "Fred is the son of Scrooge's late sister Fan, so Scrooge is his uncle.",
+   "scene": "scrooge-revisits-second-christmas",
+   "quote": "Your nephew!"
+  },
+  "fred-only-child": {
+   "type": "relationship",
+   "subject": "fred",
+   "name": "Fred",
+   "statement": "Fred is Fan's only child: he has no brothers or sisters.",
+   "scene": "scrooge-revisits-second-christmas",
+   "quote": "\"One child,\" Scrooge returned."
+  },
+  "never-dined": {
+   "type": "relationship",
+   "subject": "ebenezer-scrooge",
+   "name": "Ebenezer Scrooge",
+   "statement": "Scrooge has always refused his nephew Fred's invitations to dine and has never dined at Fred's house.",
+   "scene": "nephew-visits-scrooge",
+   "quote": "Dine with us to-morrow"
+  },
+  "bob-father": {
+   "type": "relationship",
+   "subject": "bob-cratchit",
+   "name": "Bob Cratchit",
+   "statement": "Bob Cratchit is Tiny Tim's father.",
+   "scene": "cratchit-family-christmas-dinner",
+   "quote": "\"What has ever got your precious father then?\" said Mrs. Cratchit. \"And your brother, Tiny Tim!"
+  },
+  "tim-lame": {
+   "type": "physical",
+   "subject": "tiny-tim",
+   "name": "Tiny Tim",
+   "statement": "Tiny Tim is lame: he bears a little crutch and his limbs are supported by an iron frame.",
+   "scene": "cratchit-family-christmas-dinner",
+   "quote": "he bore a little crutch, and had his limbs supported by an iron frame"
+  },
+  "sign": {
+   "type": "physical",
+   "subject": "scrooges-counting-house",
+   "name": "Scrooge's Counting-House",
+   "statement": "Scrooge never painted out Old Marley's name: the sign over the warehouse door still reads Scrooge and Marley.",
+   "scene": "marley-was-dead-narration",
+   "quote": "Scrooge never painted out Old Marley's name"
+  },
+  "coal": {
+   "type": "physical",
+   "subject": "scrooges-counting-house",
+   "name": "Scrooge's Counting-House",
+   "statement": "Scrooge keeps the coal-box in his own room, so his clerk's fire is very small.",
+   "scene": "scrooge-in-counting-house",
+   "quote": "Scrooge kept the coal-box in his own room"
+  },
+  "shadows": {
+   "type": "world",
+   "subject": "the-spirits",
+   "name": "the Spirits' visions",
+   "statement": "The people in the Spirits' visions cannot see or hear Scrooge.",
+   "scene": "spirit-transports-scrooge-past",
+   "quote": "They have no consciousness of us."
+  },
+  "marley-dead": {
+   "type": "world",
+   "subject": "jacob-marley",
+   "name": "Jacob Marley",
+   "statement": "Jacob Marley has been dead for seven years; he can appear only as a ghost, never as a living man.",
+   "scene": "marley-was-dead-narration",
+   "quote": "Marley was dead"
+  },
+  "camden": {
+   "type": "world",
+   "subject": "the-cratchits",
+   "name": "the Cratchits",
+   "statement": "The Cratchits live in Camden Town.",
+   "scene": "scrooge-dismisses-clerk",
+   "quote": "ran home to Camden Town"
+  }
+ },
+ "scenes": {
+  "charity-collectors-visit-scrooge": [
+   "sign",
+   "partner",
+   "marley-dead"
+  ],
+  "cratchit-family-mourns-tiny-tim": [
+   "tim-lame",
+   "bob-father",
+   "bob-coat"
+  ],
+  "scrooge-raises-bobs-salary": [
+   "coal",
+   "salary",
+   "bob-coat"
+  ],
+  "scrooge-reads-his-own-gravestone": [
+   "ebenezer",
+   "silent-spirit"
+  ],
+  "scrooge-visits-nephews-dinner": [
+   "fred-name",
+   "fred-nephew",
+   "fred-only-child"
+  ],
+  "merchants-discuss-dead-man": [
+   "silent-spirit",
+   "shadows"
+  ],
+  "spirit-ages-ignorance-and-want": [
+   "green-robe",
+   "silent-spirit"
+  ],
+  "cratchit-family-christmas-dinner": [
+   "salary",
+   "bob-coat",
+   "shadows"
+  ],
+  "belle-family-happy-without-scrooge": [
+   "partner",
+   "shadows"
+  ],
+  "nephew-fred-christmas-party": [
+   "never-dined",
+   "shadows",
+   "fred-nephew"
+  ],
+  "marley-ghost-arrives": [
+   "marley-dead",
+   "partner"
+  ],
+  "scrooge-buys-prize-turkey": [
+   "camden",
+   "bob-father"
+  ],
+  "scrooge-pledges-donation-streets": [
+   "partner",
+   "ebenezer"
+  ]
+ },
+ "variants": [
+  {
+   "id": "qs-006",
+   "kind": "error",
+   "injection": "e2-carol-006",
+   "scene": "charity-collectors-visit-scrooge",
+   "yes": [
+    "sign"
+   ]
+  },
+  {
+   "id": "qs-009",
+   "kind": "error",
+   "injection": "e2-carol-009",
+   "scene": "cratchit-family-mourns-tiny-tim",
+   "yes": [
+    "tim-lame"
+   ]
+  },
+  {
+   "id": "qs-011",
+   "kind": "error",
+   "injection": "e2-carol-011",
+   "scene": "scrooge-raises-bobs-salary",
+   "yes": [
+    "coal"
+   ]
+  },
+  {
+   "id": "qs-012",
+   "kind": "error",
+   "injection": "e2-carol-012",
+   "scene": "scrooge-reads-his-own-gravestone",
+   "yes": [
+    "ebenezer"
+   ]
+  },
+  {
+   "id": "qs-013",
+   "kind": "error",
+   "injection": "e2-carol-013",
+   "scene": "scrooge-visits-nephews-dinner",
+   "yes": [
+    "fred-name"
+   ]
+  },
+  {
+   "id": "qs-014",
+   "kind": "error",
+   "injection": "e2-carol-014",
+   "scene": "merchants-discuss-dead-man",
+   "yes": [
+    "silent-spirit"
+   ]
+  },
+  {
+   "id": "qs-015",
+   "kind": "error",
+   "injection": "e2-carol-015",
+   "scene": "spirit-ages-ignorance-and-want",
+   "yes": [
+    "green-robe"
+   ]
+  },
+  {
+   "id": "qs-016",
+   "kind": "error",
+   "injection": "e2-carol-016",
+   "scene": "cratchit-family-christmas-dinner",
+   "yes": [
+    "salary"
+   ]
+  },
+  {
+   "id": "qs-017",
+   "kind": "error",
+   "injection": "e2-carol-017",
+   "scene": "cratchit-family-christmas-dinner",
+   "yes": [
+    "bob-coat"
+   ]
+  },
+  {
+   "id": "qs-018",
+   "kind": "error",
+   "injection": "e2-carol-018",
+   "scene": "belle-family-happy-without-scrooge",
+   "yes": [
+    "partner"
+   ]
+  },
+  {
+   "id": "qs-019",
+   "kind": "error",
+   "injection": "e2-carol-019",
+   "scene": "scrooge-visits-nephews-dinner",
+   "yes": [
+    "fred-nephew"
+   ]
+  },
+  {
+   "id": "qs-020",
+   "kind": "error",
+   "injection": "e2-carol-020",
+   "scene": "scrooge-visits-nephews-dinner",
+   "yes": [
+    "fred-only-child"
+   ]
+  },
+  {
+   "id": "qs-021",
+   "kind": "error",
+   "injection": "e2-carol-021",
+   "scene": "nephew-fred-christmas-party",
+   "yes": [
+    "never-dined"
+   ]
+  },
+  {
+   "id": "qs-022",
+   "kind": "error",
+   "injection": "e2-carol-022",
+   "scene": "cratchit-family-mourns-tiny-tim",
+   "yes": [
+    "bob-father"
+   ]
+  },
+  {
+   "id": "qs-033",
+   "kind": "error",
+   "injection": "e2-carol-033",
+   "scene": "nephew-fred-christmas-party",
+   "yes": [
+    "shadows"
+   ]
+  },
+  {
+   "id": "qs-034",
+   "kind": "error",
+   "injection": "e2-carol-034",
+   "scene": "marley-ghost-arrives",
+   "yes": [
+    "marley-dead"
+   ]
+  },
+  {
+   "id": "qs-035",
+   "kind": "error",
+   "injection": "e2-carol-035",
+   "scene": "scrooge-buys-prize-turkey",
+   "yes": [
+    "camden"
+   ]
+  },
+  {
+   "id": "qs-control-charity-collectors-visit-scrooge",
+   "kind": "control",
+   "injection": null,
+   "scene": "charity-collectors-visit-scrooge",
+   "yes": []
+  },
+  {
+   "id": "qs-control-cratchit-family-mourns-tiny-tim",
+   "kind": "control",
+   "injection": null,
+   "scene": "cratchit-family-mourns-tiny-tim",
+   "yes": []
+  },
+  {
+   "id": "qs-control-scrooge-raises-bobs-salary",
+   "kind": "control",
+   "injection": null,
+   "scene": "scrooge-raises-bobs-salary",
+   "yes": []
+  },
+  {
+   "id": "qs-control-scrooge-reads-his-own-gravestone",
+   "kind": "control",
+   "injection": null,
+   "scene": "scrooge-reads-his-own-gravestone",
+   "yes": []
+  },
+  {
+   "id": "qs-control-scrooge-visits-nephews-dinner",
+   "kind": "control",
+   "injection": null,
+   "scene": "scrooge-visits-nephews-dinner",
+   "yes": []
+  },
+  {
+   "id": "qs-control-merchants-discuss-dead-man",
+   "kind": "control",
+   "injection": null,
+   "scene": "merchants-discuss-dead-man",
+   "yes": []
+  },
+  {
+   "id": "qs-control-spirit-ages-ignorance-and-want",
+   "kind": "control",
+   "injection": null,
+   "scene": "spirit-ages-ignorance-and-want",
+   "yes": []
+  },
+  {
+   "id": "qs-control-cratchit-family-christmas-dinner",
+   "kind": "control",
+   "injection": null,
+   "scene": "cratchit-family-christmas-dinner",
+   "yes": []
+  },
+  {
+   "id": "qs-control-belle-family-happy-without-scrooge",
+   "kind": "control",
+   "injection": null,
+   "scene": "belle-family-happy-without-scrooge",
+   "yes": []
+  },
+  {
+   "id": "qs-control-nephew-fred-christmas-party",
+   "kind": "control",
+   "injection": null,
+   "scene": "nephew-fred-christmas-party",
+   "yes": []
+  },
+  {
+   "id": "qs-control-marley-ghost-arrives",
+   "kind": "control",
+   "injection": null,
+   "scene": "marley-ghost-arrives",
+   "yes": []
+  },
+  {
+   "id": "qs-control-scrooge-buys-prize-turkey",
+   "kind": "control",
+   "injection": null,
+   "scene": "scrooge-buys-prize-turkey",
+   "yes": []
+  },
+  {
+   "id": "qs-control-scrooge-pledges-donation-streets",
+   "kind": "control",
+   "injection": null,
+   "scene": "scrooge-pledges-donation-streets",
+   "yes": []
+  },
+  {
+   "id": "qs-b01",
+   "kind": "benign",
+   "injection": "e2-carol-b01",
+   "scene": "scrooge-raises-bobs-salary",
+   "yes": []
+  },
+  {
+   "id": "qs-b02",
+   "kind": "benign",
+   "injection": "e2-carol-b02",
+   "scene": "merchants-discuss-dead-man",
+   "yes": []
+  },
+  {
+   "id": "qs-b03",
+   "kind": "benign",
+   "injection": "e2-carol-b03",
+   "scene": "belle-family-happy-without-scrooge",
+   "yes": []
+  },
+  {
+   "id": "qs-b04",
+   "kind": "benign",
+   "injection": "e2-carol-b04",
+   "scene": "scrooge-pledges-donation-streets",
+   "yes": []
+  },
+  {
+   "id": "qs-b05",
+   "kind": "benign",
+   "injection": "e2-carol-b05",
+   "scene": "scrooge-buys-prize-turkey",
+   "yes": []
+  },
+  {
+   "id": "qs-b06",
+   "kind": "benign",
+   "injection": "e2-carol-b06",
+   "scene": "scrooge-visits-nephews-dinner",
+   "yes": []
+  },
+  {
+   "id": "qs-b07",
+   "kind": "benign",
+   "injection": "e2-carol-b07",
+   "scene": "cratchit-family-mourns-tiny-tim",
+   "yes": []
+  },
+  {
+   "id": "qs-b08",
+   "kind": "benign",
+   "injection": "e2-carol-b08",
+   "scene": "marley-ghost-arrives",
+   "yes": []
+  }
+ ]
+}
