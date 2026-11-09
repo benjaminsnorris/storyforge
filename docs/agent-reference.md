@@ -99,7 +99,7 @@ Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjami
 | `repetition_scores` | `working/scores/latest/repetition-latest.csv` |
 | `structural_scores` | `working/scores/structural-latest.csv` |
 | `weights` | `working/craft-weights.csv` |
-| `brief_quality` | computed (`hone` brief issues and gaps): `scene_id`, `field` and `issue` are strings; the counts (`beat_count`, `target_words`, `char_count`, `max_chars`, `abstract_count`, `concrete_count`) may be numbers |
+| `brief_quality` | computed (`hone` brief issues and gaps): `scene_id`, `field` and `issue` are strings; an empty craft-framework field is issue `craft_gap` (`visualize.CRAFT_GAP_ISSUE`, #643: an optional note, never missing data), and `flat`, `outcome_mismatch`, `conflict_free` (`hone.CRAFT_ADVISORY_ISSUES`) are advisory too; the counts (`beat_count`, `target_words`, `char_count`, `max_chars`, `abstract_count`, `concrete_count`) may be numbers |
 
 A missing CSV gives an empty list.
 

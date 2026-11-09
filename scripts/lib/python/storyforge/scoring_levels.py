@@ -44,13 +44,18 @@ VALID_SEVERITIES = frozenset({'high', 'medium', 'low'})
 
 class CheckResult(TypedDict, total=False):
     """One floor-check finding. Contract for every entry in LevelResult.checks."""
-    check: str         # required — the check name (stable, used as finding_id)
+    check: str         # required — the check name (used as finding_id; a
+                       # renamed check keeps its old one in _FORMER_CHECK_NAMES)
     passed: bool       # required — did the check evaluation pass
     detail: str        # required — explanation surfaced to the author
-    severity: str      # required — one of VALID_SEVERITIES
+    severity: str      # required — one of VALID_SEVERITIES (low/medium/high:
+                       # how much it matters). NOT validate's `severity`
+                       # (blocking/advisory, elaborate.split_failures): here
+                       # that is the `advisory` flag below (#643's review TD-6)
     accepted: bool     # optional, default False — author override applied
     advisory: bool     # optional, default False — a craft-framework check
                        # (#643): reported, never keeps a rung thin
+                       # (is_advisory_failure, counts_against_rung)
 
 
 class LevelResult(TypedDict):

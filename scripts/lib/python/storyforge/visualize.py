@@ -118,11 +118,20 @@ def _read_yaml_field(project_dir: str, field: str) -> str:
     return ''
 
 
+#: brief_quality's issue for an empty craft-framework field (#643)
+CRAFT_GAP_ISSUE = 'craft_gap'
+
+
 def _compute_brief_quality(project_dir: str, strict: bool = False) -> list[dict]:
     """Run brief quality detection and return JSON-safe results.
 
     Returns a list of issue dicts, each with: scene_id, field, issue,
-    plus type-specific metrics (beat_count, char_count, etc.).
+    plus type-specific metrics (beat_count, char_count, etc.). An empty
+    craft-framework field (#643) is issue `CRAFT_GAP_ISSUE`, not `gap`:
+    an optional note, not missing data (#643's review SF-3, T1). The
+    `hone.CRAFT_ADVISORY_ISSUES` issues keep their own names. Bookshelf
+    takes only strings and numbers in a row, so this is said by the
+    issue's name, not a bool.
     Returns [] if data is missing. If detection fails, `strict` raises
     DashboardDataError; otherwise it warns and returns [].
     """
@@ -167,7 +176,7 @@ def _compute_brief_quality(project_dir: str, strict: bool = False) -> list[dict]
             results.append({
                 'scene_id': g['scene_id'],
                 'field': g['field'],
-                'issue': 'gap',
+                'issue': CRAFT_GAP_ISSUE if g.get('advisory') else 'gap',
             })
 
         return results

@@ -526,14 +526,14 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log('Running validation...')
     report = validate_structure(ref_dir)
     validate_passed = report['passed']
-    validate_failures = len(report['failures'])
+    validate_failures = _failure_counts(report['failures'])
     initial_gaps = total_gaps
 
     if validate_passed:
         log('Validation passed: no blocking gaps.')
         _log_advisory_count(report['failures'])
     else:
-        log(f'Validation: {validate_failures} issue(s) remaining (started with {initial_gaps} field gaps)')
+        log(f'Validation: {validate_failures} remaining (started with {initial_gaps} field gaps)')
         _log_failures(report['failures'])
         log('')
         log('Run gap-fill again to continue filling remaining gaps.')
@@ -563,7 +563,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     if validate_passed:
         log('Validation: PASSED')
     else:
-        log(f'Validation: {validate_failures} issue(s) remaining — run again to continue')
+        log(f'Validation: {validate_failures} remaining — run again to continue')
     log('============================================')
 
     print_summary(project_dir, 'elaborate-gap-fill', session_start=session_start)
@@ -596,6 +596,14 @@ def _log_failures(failures: list[dict]) -> None:
             log(f'    {_failure_line(fail)}')
             if finding_scene_list(fail):
                 log(f'      {finding_scene_list(fail)}')
+
+
+def _failure_counts(failures: list[dict]) -> str:
+    """`N blocking, M advisory` for a stage's validation failures (#643's
+    review SF-5): a bare total counted advisory findings as things to fix."""
+    from storyforge.elaborate import split_failures
+    blocking, advisory = split_failures(failures)
+    return f'{len(blocking)} blocking, {len(advisory)} advisory'
 
 
 def _log_advisory_count(failures: list[dict]) -> None:
@@ -2335,13 +2343,13 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         if any(f.get('severity', 'blocking') == 'blocking' for f in report['failures']):
             report['passed'] = False
     validate_passed = report['passed']
-    validate_failures = len(report['failures'])
+    validate_failures = _failure_counts(report['failures'])
 
     if validate_passed:
         log('Validation passed')
         _log_advisory_count(report['failures'])
     else:
-        log(f'Validation found {validate_failures} issue(s):')
+        log(f'Validation found {validate_failures}:')
         _log_failures(report['failures'])
 
     # Save validation report
@@ -2414,7 +2422,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     if validate_passed:
         log('Validation: PASSED')
     else:
-        log(f'Validation: {validate_failures} issue(s) — review before advancing')
+        log(f'Validation: {validate_failures} — review before advancing')
     log('============================================')
 
     print_summary(project_dir, f'elaborate-{stage}', session_start=session_start)

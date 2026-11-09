@@ -53,6 +53,23 @@ class TestValidateCraftColumns:
         assert "needn't fit a framework" in craft['message']
         assert not _failures(report, 'required-columns-')
 
+    def test_strict_extraction_cleanup_groups_advisory_apart(self, tmp_path, monkeypatch,
+                                                             capsys):
+        """#643's review SF-4: strict extraction's report says which findings
+        block, not one undifferentiated total."""
+        from storyforge import cmd_extract
+        ref = _ref(tmp_path,
+                   ['a-scene-happens-here|1|T|1|hero||1|morning|1h|mapped'],
+                   ['a-scene-happens-here|does a thing||||||hero|hero|'])
+        monkeypatch.setattr(cmd_extract, 'get_coaching_level', lambda pd: 'strict')
+        cmd_extract._run_cleanup(ref, str(tmp_path))
+        out = capsys.readouterr().out
+        blocking, advisory = out.split('Advisory (craft-framework')
+        assert 'Blocking (errors to fix):' in blocking and 'location' in blocking
+        assert 'craft-framework' not in blocking.split('Blocking (errors to fix):')[1]
+        assert 'no craft-framework notes' in advisory
+        assert 'Total: 1 blocking, ' in out
+
     def test_a_briefed_scene_needs_its_outcome_not_its_goal_or_conflict(self, tmp_path):
         from storyforge.elaborate import validate_structure
         scene = 'a-scene-happens-here|1|T|1|hero|loc|1|morning|1h|briefed'
@@ -356,12 +373,25 @@ class TestStatus:
         assert '[storyforge score --level 6]' in out
         assert 'broken promise' not in out
 
-    def test_an_absent_rungs_craft_checks_are_not_listed(self, tmp_path):
+    def test_craft_advisory_lists_only_failed_unaccepted_checks(self):
         from storyforge import status
         assert status.craft_advisory([]) == []
         floors = self._floors(False)
         assert len(status.craft_advisory(floors)) == len(floors)
         assert status.craft_advisory(self._floors(True)) == []
+        floors[0]['checks'][1]['accepted'] = True
+        assert len(status.craft_advisory(floors)) == len(floors) - 1
+
+    def test_an_absent_rungs_craft_checks_are_not_listed(self, project_dir, monkeypatch):
+        """#643's review T6: build_status filters by artifact_present."""
+        from storyforge import status
+        real = status.artifact_present
+        assert any(a['finding'].startswith('L6 ')
+                   for a in status.build_status(project_dir)['advisory'])
+        monkeypatch.setattr(status, 'artifact_present',
+                            lambda pd, level: level != 6 and real(pd, level))
+        assert not any(a['finding'].startswith('L6 ')
+                       for a in status.build_status(project_dir)['advisory'])
 
 
 # ============================================================================
@@ -403,6 +433,82 @@ class TestHone:
         out = capsys.readouterr().out
         assert 'craft-framework finding(s) reported, not rewritten' in out
         assert 's.emotional_arc (flat)' in out
+        assert 's.value_shift (outcome_mismatch)' in out   # T5
+
+    def _flat_arc_scene(self, tmp_path):
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'scene-intent.csv').write_text(
+            f'{INTENT_HEADER}\n'
+            's|Kael reads the letter and refuses|action|static dread|truth|-/-|action|'
+            'kael|kael|\n')
+        (ref / 'scenes.csv').write_text(f'{SCENES_HEADER}\ns|1|T|1|kael|here|1|morning|1h|drafted\n')
+        (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|g|c|yes|||k|k\n')
+        return ref
+
+    def test_an_evaluation_finding_on_a_flat_arc_is_still_rewritten(
+            self, tmp_path, monkeypatch, capsys):
+        """#643's review CR-4, T4: the author's finding replaces the detected
+        `flat` issue for (scene, field), so hone rewrites what was sent."""
+        from storyforge import api, hone
+        from storyforge.elaborate import _read_csv_as_map
+        ref = self._flat_arc_scene(tmp_path)
+        findings = tmp_path / 'findings.csv'
+        findings.write_text('scene_id|target_file|fields|guidance\n'
+                            's|scene-intent.csv|emotional_arc|let the dread turn to resolve\n')
+        calls = []
+
+        def reply(prompt, model, log_file, **kw):
+            calls.append(log_file)
+        monkeypatch.setattr(api, 'invoke_to_file', reply)
+        monkeypatch.setattr(api, 'extract_text_from_file',
+                            lambda path: 'emotional_arc: dread to resolve\n')
+        hone.hone_intent(str(ref), str(tmp_path), model='m', log_dir=str(tmp_path / 'logs'),
+                         coaching_level='full', findings_file=str(findings))
+        assert len(calls) == 1 and 'hone-intent-eval-s' in calls[0]
+        assert _read_csv_as_map(str(ref / 'scene-intent.csv'))['s']['emotional_arc'] \
+            == 'dread to resolve'
+        assert 's.emotional_arc (flat)' not in capsys.readouterr().out
+
+    def test_strict_analysis_files_tag_craft_issues(self, tmp_path):
+        """#643's review SF-6"""
+        from storyforge.hone import hone_intent
+        ref = self._flat_arc_scene(tmp_path)
+        hone_intent(str(ref), str(tmp_path), model='m', log_dir=str(tmp_path / 'logs'),
+                    coaching_level='strict')
+        text = (tmp_path / 'working' / 'hone' / 'intent-analysis-s.md').read_text()
+        assert '**emotional_arc:** flat (craft framework, advisory)' in text
+        assert '**value_shift:** outcome_mismatch (craft framework, advisory)' in text
+
+    def test_hone_briefs_never_rewrites_a_craft_issue(self, tmp_path, monkeypatch, capsys):
+        """#643's review TD-5: CRAFT_ADVISORY_ISSUES holds in hone_briefs
+        too, not only by its allowlist of issue types."""
+        from storyforge import api, hone
+
+        def no_call(*a, **kw):
+            raise AssertionError('hone rewrote a craft-framework diagnostic')
+        monkeypatch.setattr(api, 'invoke_to_file', no_call)
+        ref = self._flat_arc_scene(tmp_path)
+        monkeypatch.setattr(hone, 'detect_brief_issues', lambda *a, **kw: [
+            {'scene_id': 's', 'field': 'conflict', 'value': 'c', 'issue': 'conflict_free'}])
+        result = hone.hone_briefs(str(ref), str(tmp_path), model='m',
+                                  log_dir=str(tmp_path / 'logs'), coaching_level='full')
+        assert result['fields_rewritten'] == 0
+        out = capsys.readouterr().out
+        assert '1 craft-framework finding(s) reported, not rewritten' in out
+        assert '[1/' not in out   # no scene was worked on
+
+    def test_the_gaps_domain_counts_craft_fields_apart(self, project_dir, capsys):
+        """#643's review T7: the convergence loop's gap count leaves craft
+        fields out, and says how many there are."""
+        from storyforge.cmd_hone import _run_gaps_domain
+        ref = os.path.join(project_dir, 'reference')
+        for field in ('goal', 'crisis'):
+            update_field(os.path.join(ref, 'scene-briefs.csv'), 'act1-sc01', field, '')
+        _run_gaps_domain(ref, project_dir, ['act1-sc01'], dry_run=True)
+        out = capsys.readouterr().out
+        assert 'Gaps found: 0 empty fields across 0 scenes' in out
+        assert 'Craft-framework fields empty (advisory, not gaps): 2 across 1 scenes' in out
 
     def test_diagnose_lists_craft_fields_apart_from_gaps(self, project_dir, capsys):
         from storyforge.cmd_hone import _run_diagnose
