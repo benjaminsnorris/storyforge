@@ -92,6 +92,7 @@ COMMANDS = {
     'status': 'storyforge.cmd_status',
     'publish': 'storyforge.cmd_publish',
     'propose-summaries': 'storyforge.cmd_propose_summaries',
+    'voice': 'storyforge.cmd_voice',
 }
 
 # Aliases
