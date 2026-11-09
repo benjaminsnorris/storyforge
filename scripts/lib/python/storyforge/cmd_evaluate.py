@@ -45,6 +45,7 @@ from storyforge.api import (
     extract_usage, calculate_cost_from_usage,
     submit_batch, poll_batch, download_batch_results,
     get_api_key, invoke_api, build_batch_request,
+    API_TIMEOUT, THINKING_ALLOWANCE, max_output_tokens, request_max_tokens,
 )
 
 
@@ -857,6 +858,74 @@ _cut_off: list[str] = []
 _CUT_OFF_NOTE = ('\n\n> **Cut off:** this report hit the token limit; '
                  'anything after this point is missing.\n')
 
+# The answer budget for each panel report, the synthesis and the assessment
+# (api adds THINKING_ALLOWANCE on top, and thinking and the report share the
+# total). At 8,192 (24,192 with the allowance) two reports on the whole Iliad
+# stopped mid-sentence (#635). A reply still cut off is asked again, once,
+# with the model's whole output (`api.max_output_tokens`, as elaborate's map
+# does since #627) before a partial report is kept. Only generated tokens are
+# billed, so the headroom is free.
+REPORT_ANSWER_TOKENS = 32000
+#: tokens a second a report reply is given time for (elaborate's map ran at
+#: about 95), so a reply has about twice the time it needs
+REPORT_TOKENS_PER_SECOND = 40
+
+
+def report_budget(model: str, whole: bool = False) -> tuple[int, int]:
+    """(answer max_tokens, timeout) for a report call: REPORT_ANSWER_TOKENS,
+    or with ``whole`` the model's whole output (the retry after a cut-off),
+    and time to write it."""
+    tokens = max_output_tokens(model) if whole else REPORT_ANSWER_TOKENS
+    return tokens, max(API_TIMEOUT,
+                       request_max_tokens(model, tokens) // REPORT_TOKENS_PER_SECOND)
+
+
+def _limit_text(model: str, answer_tokens: int) -> str:
+    """The real output limit a request with this answer budget had: the
+    budget plus the thinking allowance, capped at the model's limit."""
+    total = request_max_tokens(model, answer_tokens)
+    if total >= max_output_tokens(model):
+        return f"the model's whole output ({total:,} tokens, thinking and report together)"
+    return (f'the {total:,}-token output limit ({answer_tokens:,} for the report '
+            f'+ {THINKING_ALLOWANCE:,} thinking allowance, shared with thinking)')
+
+
+def _retry_cut_off(project_dir, prompt, model, system, response, first_tokens,
+                   log_file, what, operation, target, first_log=None):
+    """Given a reply, return ``(reply to save, retried)``.
+
+    A reply cut off at max_tokens is asked again once with the model's whole
+    output, written to ``log_file``; the retry's reply is the one to save. If
+    the first request already had the whole output, or the retry fails, the
+    cut-off reply is returned (with a WARNING) and the caller keeps it,
+    marked. ``first_log``, when given, is the first reply's log at
+    ``log_file``: it is moved aside to ``<log_file>.cut-off`` and its usage
+    logged here, so the caller logs only the retry's from ``log_file``.
+    """
+    if not is_truncated(response):
+        return response, False
+    whole, wait = report_budget(model, whole=True)
+    if request_max_tokens(model, whole) <= request_max_tokens(model, first_tokens):
+        log(f'WARNING: {what} hit {_limit_text(model, first_tokens)}; '
+            f'its report is cut off')
+        return response, False
+    log(f'WARNING: {what} hit {_limit_text(model, first_tokens)}; '
+        f'retrying once with {_limit_text(model, whole)}')
+    if first_log and os.path.isfile(first_log):
+        aside = log_file + '.cut-off'
+        os.replace(first_log, aside)
+        _log_usage(project_dir, aside, operation, target, model)
+    try:
+        retry = invoke_to_file(prompt, model, log_file, max_tokens=whole,
+                               system=system, timeout=wait)
+    except Exception as e:
+        log(f'WARNING: the retry of {what} failed ({e}); keeping the cut-off report')
+        return response, False
+    if is_truncated(retry):
+        log(f'WARNING: {what} hit {_limit_text(model, whole)} on the retry too; '
+            f'its report is cut off')
+    return retry, True
+
 
 def main(argv=None):
     args = parse_args(argv or [])
@@ -1097,8 +1166,8 @@ def main(argv=None):
         batch_file = os.path.join(log_dir, f'eval-batch-{eval_timestamp}.jsonl')
         with open(batch_file, 'w') as f:
             for i, name in enumerate(eval_names):
-                request = build_batch_request(name, eval_prompts[i], eval_models[i], 8192,
-                                              system=system)
+                request = build_batch_request(name, eval_prompts[i], eval_models[i],
+                                              REPORT_ANSWER_TOKENS, system=system)
                 f.write(json.dumps(request) + '\n')
                 log(f'  Added to batch: {name} (model: {eval_models[i]})')
 
@@ -1133,14 +1202,24 @@ def main(argv=None):
                 failed.append(name)
                 continue
             if os.path.isfile(status_file) and open(status_file).read().strip() == 'ok':
-                cut = is_truncated(reply)
-                if cut:
-                    log(f'WARNING: evaluator {name} hit the 8192-token limit; '
-                        f'its report is cut off')
-                if os.path.isfile(eval_txt):
+                text = open(eval_txt).read() if os.path.isfile(eval_txt) else None
+                # A cut-off batch reply is asked again directly (the batch
+                # reply's usage is logged above, so the retry's is logged here)
+                retry_log = os.path.join(log_dir, f'eval-{name}-retry.log')
+                final, retried = _retry_cut_off(
+                    project_dir, eval_prompts[i], eval_models[i], system, reply,
+                    REPORT_ANSWER_TOKENS, retry_log, f'evaluator {name}', 'evaluate', name)
+                if retried:
+                    _log_usage(project_dir, retry_log, 'evaluate', name, eval_models[i])
+                    if extract_text(final):
+                        text = extract_text(final)
+                    else:
+                        final = reply
+                cut = is_truncated(final)
+                if text is not None:
                     os.makedirs(eval_dir, exist_ok=True)
                     with open(os.path.join(eval_dir, f'{name}.md'), 'w') as f:
-                        f.write(open(eval_txt).read() + (_CUT_OFF_NOTE if cut else ''))
+                        f.write(text + (_CUT_OFF_NOTE if cut else ''))
                     if cut:
                         _cut_off.append(f'{name}.md')
 
@@ -1172,12 +1251,13 @@ def main(argv=None):
             eval_log = os.path.join(log_dir, f'eval-{name}.log')
 
             try:
-                response = invoke_to_file(prompt, model, eval_log, max_tokens=8192,
-                                          system=system)
+                tokens, wait = report_budget(model)
+                response = invoke_to_file(prompt, model, eval_log, max_tokens=tokens,
+                                          system=system, timeout=wait)
+                response, _ = _retry_cut_off(
+                    project_dir, prompt, model, system, response, tokens, eval_log,
+                    f'evaluator {name}', 'evaluate', name, first_log=eval_log)
                 cut = is_truncated(response)
-                if cut:
-                    log(f'WARNING: evaluator {name} hit the 8192-token limit; '
-                        f'its report is cut off')
                 text = extract_text(response)
                 if text:
                     os.makedirs(eval_dir, exist_ok=True)
@@ -1279,11 +1359,13 @@ def main(argv=None):
 
         if api_mode:
             log(f'Running synthesis via direct API (model: {synth_model})...')
-            response = invoke_to_file(synth_prompt, synth_model, synth_log, max_tokens=8192,
-                                      system=system)
+            tokens, wait = report_budget(synth_model)
+            response = invoke_to_file(synth_prompt, synth_model, synth_log, max_tokens=tokens,
+                                      system=system, timeout=wait)
+            response, _ = _retry_cut_off(
+                project_dir, synth_prompt, synth_model, system, response, tokens, synth_log,
+                'synthesis', 'synthesize', 'synthesis', first_log=synth_log)
             synth_cut = is_truncated(response)
-            if synth_cut:
-                log('WARNING: synthesis hit the 8192-token limit; it is cut off')
             synth_response = extract_text(response)
 
             if synth_response:
@@ -1356,11 +1438,13 @@ def main(argv=None):
 
             if api_mode:
                 log(f'Running assessment via direct API (model: {assess_model})...')
-                response = invoke_to_file(assess_prompt, assess_model, assess_log, max_tokens=8192,
-                                          system=system)
+                tokens, wait = report_budget(assess_model)
+                response = invoke_to_file(assess_prompt, assess_model, assess_log,
+                                          max_tokens=tokens, system=system, timeout=wait)
+                response, _ = _retry_cut_off(
+                    project_dir, assess_prompt, assess_model, system, response, tokens,
+                    assess_log, 'assessment', 'assess', 'assessment', first_log=assess_log)
                 assess_cut = is_truncated(response)
-                if assess_cut:
-                    log('WARNING: assessment hit the 8192-token limit; it is cut off')
                 assess_response = extract_text(response)
                 if assess_response:
                     with open(os.path.join(eval_dir, 'assessment.md'), 'w') as f:
