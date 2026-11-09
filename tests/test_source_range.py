@@ -429,6 +429,9 @@ class TestPrompts:
         # Briefing only the other scene is fine
         p = prompts_source.briefs_section(ranged, ['athena-at-the-door'])
         assert '#### Source scene odyssey:minerva-visits' in p
+        # #644's review C5: the model is told what to do, not the author
+        assert "Write no dialogue, and never copy the translation's wording." in p
+        assert '#644' not in p and 'by hand' not in p
 
     def test_header_says_only_part_is_adapted(self, ranged):
         p = prompts_source.map_section(ranged)
@@ -604,8 +607,9 @@ class TestFidelity:
         ok = cmd_revise._source_drift_fix(mapped, 'olympus-council-meets', {}, {}, {}, None,
                                           ['brief goal: drifted'], ctx)
         assert isinstance(ok, tuple)
-        # #513: the fix rewrites KEY_DIALOGUE: it gets the cast and keeps
-        # speaker labels, adding one only from the text it has (P-2)
+        # #513: the fix rewrites KEY_ACTIONS (never key_dialogue since #644),
+        # which may quote a line: it gets the cast and keeps speaker labels,
+        # adding one only from the text it has (P-2)
         from storyforge.speaker_labels import LABEL_KEEP, LABEL_RULE
         assert LABEL_KEEP in ok[0] and LABEL_RULE not in ok[0]
         assert '## Cast (characters.csv)' in ok[0]

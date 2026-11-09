@@ -583,17 +583,17 @@ _REQUIRED_BY_STATUS = {
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
-                'goal', 'conflict', 'outcome'],
+                'goal', 'conflict', 'outcome', 'key_actions'],
     'drafted': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
-                'goal', 'conflict', 'outcome'],
+                'goal', 'conflict', 'outcome', 'key_actions'],
     'polished': ['id', 'seq', 'title', 'act', 'pov', 'location',
                  'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
                  'turning_point', 'characters', 'on_stage',
-                 'goal', 'conflict', 'outcome'],
+                 'goal', 'conflict', 'outcome', 'key_actions'],
 }
 
 
@@ -610,14 +610,24 @@ CRAFT_FRAMEWORK_COLUMNS = ('action_sequel', 'emotional_arc', 'value_at_stake',
                            'crisis', 'decision')
 
 #: Brief columns that stage the scene rather than state its facts: what is
-#: said, what lies under it, the feelings in order, the images (#644, plan
-#: D3). They stay as optional columns the author fills by hand, and nothing
+#: said, what lies under it, the feelings in order, the images and how they
+#: appear (#644, plan D3). They stay as optional columns the author fills by hand, and nothing
 #: requires them: the briefs stage never generates them (a model's value is
-#: dropped, `cmd_elaborate`), drafting and the gate read them only when
-#: filled. Model-written staging was the route by which the plan's phrasing
-#: leaked into the prose. Extraction still records them from prose that
-#: exists (a motif is noticed in the draft and recorded after).
-AUTHOR_NOTE_COLUMNS = ('key_dialogue', 'subtext', 'emotions', 'motifs')
+#: dropped, `cmd_elaborate`; nor does revise's source-drift fix or hone's
+#: rewrites), drafting and the gate read them only when filled.
+#: Model-written staging was the route by which the plan's phrasing leaked
+#: into the prose. Extraction still records them from prose that exists (a
+#: motif is noticed in the draft and recorded after; `motif_details` is how it
+#: appears). A prose book's only: a graphic novel's briefs stage writes
+#: key_dialogue as the balloon text the panel script carries.
+AUTHOR_NOTE_COLUMNS = ('key_dialogue', 'subtext', 'emotions', 'motifs', 'motif_details')
+
+#: The brief facts every briefed scene has (#644): how the scene ends and its
+#: events in order. The briefs prompt asks for them, validate requires them
+#: from `briefed` on (`_REQUIRED_BY_STATUS`) and hone's gaps lists them. A
+#: brief with no key_actions gives drafting and the gate nothing to hold the
+#: scene to.
+BRIEF_FACT_COLUMNS = ('outcome', 'key_actions')
 
 
 def split_failures(failures: list[dict]) -> tuple[list[dict], list[dict]]:

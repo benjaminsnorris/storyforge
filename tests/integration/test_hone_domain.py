@@ -591,7 +591,7 @@ class TestDetectGaps:
         }}
         briefs = {'scene-1': {
             'goal': 'test', 'conflict': 'test', 'outcome': 'yes',
-            'crisis': 'test', 'decision': 'go',
+            'crisis': 'test', 'decision': 'go', 'key_actions': 'she goes',
         }}
         results = detect_gaps(scenes, intent, briefs)
         assert len(results) == 0

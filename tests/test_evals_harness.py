@@ -324,7 +324,7 @@ def test_a_private_suite_records_where_it_says(tmp_path, monkeypatch):
         'usage': {'input_tokens': 10, 'output_tokens': 1}})
     monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
     private = tmp_path / 'private' / 'cassettes'
-    suite = _private_suite(lambda: str(private))
+    suite = _private_suite(lambda run: str(private))
     result = harness.run_suite(suite, 'record', str(tmp_path / 'public'))
     assert result['status'] == 'pass'
     assert private.is_dir() and not (tmp_path / 'public').exists()
@@ -336,9 +336,105 @@ def test_a_private_suite_records_where_it_says(tmp_path, monkeypatch):
 def test_a_private_suite_whose_recordings_are_missing_errors(tmp_path, monkeypatch):
     monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
 
-    def nowhere():
+    def nowhere(run):
         raise RuntimeError('the private repo is not cloned here')
     result = harness.run_suite(_private_suite(nowhere), 'replay', str(tmp_path / 'public'))
     assert result['status'] == 'error'
     assert 'not cloned here' in result['error']
     assert 'STORYFORGE_CASSETTE' not in os.environ
+
+
+def test_a_private_suite_whose_inputs_are_absent_is_unavailable_not_an_error(tmp_path,
+                                                                              monkeypatch):
+    """#645's contract for a suite that can't run here: stale with the
+    reason, never error, so a clone without the private repo isn't red."""
+    monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
+
+    def absent(run):
+        raise harness.SuiteUnavailable('the private repo is not cloned here')
+    result = harness.run_suite(_private_suite(absent), 'replay', str(tmp_path / 'public'))
+    assert result['status'] == 'stale' and result['unavailable'] is True
+    assert result['error'] is None and result['gates'] == []
+    assert 'not cloned here' in result['stale'] and 'unavailable' in result['stale']
+
+
+def test_each_run_of_a_private_suite_records_on_its_own(tmp_path, monkeypatch):
+    """--runs 3 gives each run its own recordings: run 2 must not replay
+    what run 1 just recorded (#670 review)."""
+    from storyforge import api, cassette
+    calls = []
+    monkeypatch.setattr(api, '_live_request', lambda *a: calls.append(a) or {
+        'content': [{'type': 'text', 'text': 'hello'}],
+        'usage': {'input_tokens': 10, 'output_tokens': 1}})
+    monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
+    monkeypatch.setattr(cassette, '_recorded_here', set())
+    private = tmp_path / 'private'
+    labels = []
+
+    def where(run):
+        labels.append(run)
+        return str(private / (run or 'main'))
+    suite = _private_suite(where)
+    harness.run_all([suite], 'record', str(tmp_path / 'public'))
+    harness.run_all([suite], 'record', str(tmp_path / 'e6' / 'run2'), run='run2')
+    assert labels == ['', 'run2']
+    assert len(calls) == 2
+    assert (private / 'main').is_dir() and (private / 'run2').is_dir()
+
+
+def test_a_private_suite_withholds_a_misses_prompt(tmp_path, monkeypatch):
+    from storyforge import cassette
+    monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
+    monkeypatch.delenv(cassette.PRIVATE_ENV, raising=False)
+    private = harness.run_suite(_private_suite(lambda run: str(tmp_path / 'p')), 'replay',
+                                str(tmp_path / 'public'))
+    assert 'withheld' in private['error'] and '"hi"' not in json.dumps(private)
+    assert cassette.PRIVATE_ENV not in os.environ
+    public = harness.run_suite(harness.Suite('public', 'd', _private_suite(None).run), 'replay',
+                               str(tmp_path / 'public'))
+    assert 'Prompt starts: "hi"' in public['error']
+
+
+PRIVATE_ABSENT = '''
+    from harness import Suite, SuiteUnavailable
+
+    def where(run):
+        raise SuiteUnavailable('the private set is not on this machine')
+
+    SUITE = Suite('{name}', 'private, absent', lambda ctx: None, frozen=True, cassettes=where)
+'''
+
+
+def test_run_exits_0_and_names_an_unavailable_suite(tmp_path, capsys):
+    _suite(tmp_path / 'suites', 'a.py', PASSING, 'a')
+    _suite(tmp_path / 'suites', 'p.py', PRIVATE_ABSENT, 'p')
+    assert _run(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert '[STALE] p' in out and 'unavailable here' in out and 'not on this machine' in out
+
+
+def test_a_baseline_without_the_private_set_writes_every_other_suite(tmp_path):
+    _suite(tmp_path / 'suites', 'a.py', PASSING, 'a')
+    _suite(tmp_path / 'suites', 'p.py', PRIVATE_ABSENT, 'p')
+    assert _run(tmp_path, '--baseline') == 0
+    by_name = {r['suite']: r for r in json.loads((tmp_path / 'baseline.json').read_text())['results']}
+    assert by_name['a']['status'] == 'pass'
+    assert by_name['p']['unavailable'] is True and by_name['p']['metrics'] == {}
+
+
+def test_a_baseline_without_the_private_set_keeps_its_measurement(tmp_path):
+    _suite(tmp_path / 'suites', 'a.py', PASSING, 'a')
+    _suite(tmp_path / 'suites', 'p.py', PRIVATE_ABSENT, 'p')
+    measured = {'suite': 'p', 'status': 'pass', 'metrics': {'recall': 0.5}, 'by_code': {},
+                'cost': {'usd_if_live': 6.6}}
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [measured]}))
+    assert _run(tmp_path, '--baseline') == 0
+    by_name = {r['suite']: r for r in json.loads((tmp_path / 'baseline.json').read_text())['results']}
+    assert by_name['p'] == {**measured, 'carried_over': True}
+
+
+def test_an_unavailable_baseline_entry_is_no_forecast_figure(tmp_path):
+    (tmp_path / 'b.json').write_text(json.dumps({'results': [
+        {'suite': 'p', 'status': 'stale', 'unavailable': True, 'cost': {'usd_if_live': 0.0}}]}))
+    suite = harness.Suite('p', 'd', lambda ctx: None)
+    assert eval_run._forecast([suite], str(tmp_path / 'b.json'), 3) == (0.0, ['p'])

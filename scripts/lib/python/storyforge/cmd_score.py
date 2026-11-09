@@ -50,6 +50,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, get_column, update_field
+from storyforge.scoring_levels import is_advisory_failure
 
 
 def parse_args(argv):
@@ -524,7 +525,7 @@ def _print_level_result(result: dict) -> None:
     failed = result.get('failed', 0)
     accepted = result.get('accepted', 0)
     advisory = result.get('advisory', 0)
-    real_failed = failed - accepted - advisory
+    real_failed = failed - accepted - advisory   # scoring_levels.blocking_failed
     summary = f'{passed} passed, {real_failed} failed'
     if accepted:
         summary += f' (+ {accepted} accepted)'
@@ -535,7 +536,7 @@ def _print_level_result(result: dict) -> None:
         if c.get('accepted'):
             marker = '~'  # accepted-failure marker — visible but not blocking
             tag = ' (accepted)'
-        elif c.get('advisory') and not c['passed']:
+        elif is_advisory_failure(c):
             marker = '!'  # a craft-framework check (#643): reported, never blocking
             tag = ' (advisory)'
         elif c['passed']:
@@ -1705,20 +1706,11 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                           cycle_dir, briefs_csv, score_mode, sonnet_model,
                           plugin_dir, system=None):
     """Run brief fidelity scoring."""
-    # Count scenes with brief data
-    brief_count = 0
-    with open(briefs_csv) as f:
-        header = None
-        goal_idx = 1  # fallback
-        for i, line in enumerate(f):
-            if i == 0:
-                header = line.strip().split('|')
-                if 'goal' in header:
-                    goal_idx = header.index('goal')
-                continue
-            fields = line.strip().split('|')
-            if len(fields) > goal_idx and fields[goal_idx].strip():
-                brief_count += 1
+    # Count scenes with brief data: a fact or a goal (#644: goal is optional)
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.scoring import has_brief_facts
+    brief_count = sum(1 for row in _read_csv_as_map(briefs_csv).values()
+                      if has_brief_facts(row))
 
     if brief_count == 0:
         log('No scenes with brief data — skipping fidelity scoring')
@@ -1749,6 +1741,8 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 continue
             prompt = build_fidelity_prompt(sid, project_dir, plugin_dir)
             if not prompt:
+                log(f'  WARNING: brief fidelity: {sid} not scored: its brief has no '
+                    f'outcome, key_actions or goal, or its prose is under 100 characters')
                 continue
             requested.append(sid)
             request = build_batch_request(
@@ -1772,6 +1766,8 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 continue
             prompt = build_fidelity_prompt(sid, project_dir, plugin_dir)
             if not prompt:
+                log(f'  WARNING: brief fidelity: {sid} not scored: its brief has no '
+                    f'outcome, key_actions or goal, or its prose is under 100 characters')
                 continue
             fidelity_log = os.path.join(log_dir, f'fidelity-{sid}.json')
             requested.append(sid)

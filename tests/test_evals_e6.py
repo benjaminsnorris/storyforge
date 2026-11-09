@@ -209,14 +209,16 @@ def test_consistency_suite_merges_into_the_spread_file(tmp_path, monkeypatch):
                                          errored={'e2-carol': {'run2': 'old miss'}})))
     cases = tmp_path / 'cases.json'
     report = {'git_sha': 'b', 'results': [_result('e4-generation', {'cp10k': 1.0})]}
-    calls = []
+    calls, labels = [], []
     monkeypatch.setattr(consistency, 'run_all',
-                        lambda suites, mode, d: calls.append([s.name for s in suites]) or report)
+                        lambda suites, mode, d, run='': labels.append(run)
+                        or calls.append([s.name for s in suites]) or report)
     # the old E2 error isn't this run's: exit 0
     assert consistency.main(['--suite', 'e4-generation', '--spread-file', str(spread),
                              '--cases-file', str(cases)]) == 0
     out = json.loads(spread.read_text())
     assert calls == [['e4-generation']] * 3
+    assert labels == ['', 'run2', 'run3']   # a private suite's cassettes(run) per run
     assert set(out['suites']) == {'e3-extraction', 'e4-generation'}
     assert out['git_sha']['e4-generation'] == {'run1': 'b', 'run2': 'b', 'run3': 'b'}
     assert out['git_sha']['e3-extraction'] == {'run1': 'a', 'run2': 'a', 'run3': 'a'}
@@ -228,7 +230,7 @@ def test_consistency_suite_with_an_unreadable_spread_file_says_so(tmp_path, monk
     spread = tmp_path / 'spread.json'
     spread.write_text('{not json')
     monkeypatch.setattr(consistency, 'run_all',
-                        lambda *a: {'git_sha': 'b', 'results': []})
+                        lambda *a, **kw: {'git_sha': 'b', 'results': []})
     assert consistency.main(['--suite', 'e4-generation', '--spread-file', str(spread),
                              '--cases-file', str(tmp_path / 'c.json')]) == 2
     assert "can't merge" in capsys.readouterr().err
@@ -243,7 +245,7 @@ def test_consistency_suite_that_errors_leaves_the_spread_file(tmp_path, monkeypa
     spread.write_text('{"kept": "as it was"}')
     report = {'git_sha': 'b', 'results': [_result('e4-generation', {}, status='error',
                                                   error='CassetteMiss: reading 2')]}
-    monkeypatch.setattr(consistency, 'run_all', lambda *a: report)
+    monkeypatch.setattr(consistency, 'run_all', lambda *a, **kw: report)
     assert consistency.main(['--suite', 'e4-generation', '--spread-file', str(spread),
                              '--cases-file', str(tmp_path / 'c.json')]) == 2
     assert 'left as it was' in capsys.readouterr().err
@@ -253,7 +255,7 @@ def test_consistency_suite_that_errors_leaves_the_spread_file(tmp_path, monkeypa
 def test_consistency_suite_without_a_spread_file_says_so(tmp_path, monkeypatch, capsys):
     import consistency
     monkeypatch.setattr(consistency, 'run_all',
-                        lambda *a: {'git_sha': 'b', 'results': [_result('e4-generation', {})]})
+                        lambda *a, **kw: {'git_sha': 'b', 'results': [_result('e4-generation', {})]})
     assert consistency.main(['--suite', 'e4-generation', '--spread-file',
                              str(tmp_path / 'none.json'),
                              '--cases-file', str(tmp_path / 'c.json')]) == 2
@@ -268,7 +270,7 @@ def test_consistency_suite_e8_writes_its_cases_file(tmp_path, monkeypatch):
     cases = tmp_path / 'cases.json'
     report = {'git_sha': 'b', 'results': [{**_result('e8-revision-safety', {'reintroduced': 1}),
                                            'notes': ['gov-016 (x): reintroduced']}]}
-    monkeypatch.setattr(consistency, 'run_all', lambda *a: report)
+    monkeypatch.setattr(consistency, 'run_all', lambda *a, **kw: report)
     assert consistency.main(['--suite', 'e8-revision-safety', '--spread-file', str(spread),
                              '--cases-file', str(cases)]) == 0
     assert json.loads(cases.read_text()) == {'gov-016': {'run1': 'reintroduced',

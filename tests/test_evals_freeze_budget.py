@@ -110,9 +110,10 @@ def _record_frozen(tmp_path, name='e4'):
 
 # --- frozen suites -----------------------------------------------------------
 
-def test_the_real_e4_and_e8_are_frozen_and_nothing_else():
+def test_the_real_frozen_suites():
+    """E4 and E8 (#645), and the blocking set, recorded once and frozen (#646)."""
     frozen = {s.name for s in harness.discover(eval_run.SUITES_DIR) if s.frozen}
-    assert frozen == {'e4-generation', 'e8-revision-safety'}
+    assert frozen == {'e4-generation', 'e8-revision-safety', 'blocking-set'}
 
 
 def test_a_prompt_change_makes_a_frozen_suite_stale_spends_nothing_and_exits_0(
