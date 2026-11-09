@@ -142,9 +142,9 @@ def load_source(fingerprint_path: str | None = None,
     """The fingerprint from exactly one of a `fingerprint.json` path or an
     author voice repo (`voiceprint_proposals.load_voice`: its fingerprint
     and the corpus pieces it names, so constructions are measured against
-    the corpus itself). Raises MeterError naming what's wrong. (#652 adds a
-    book's `voice.author` as a third way in; the caller resolves it to a
-    voice repo.)"""
+    the corpus itself). Raises MeterError naming what's wrong. A book's
+    `voice.author` is a third way in: `score --voice` resolves it to a voice
+    repo (`voice_repo.voice_ref`) and passes that."""
     if bool(fingerprint_path) == bool(voice_repo):
         raise MeterError('give the fingerprint one way: a fingerprint.json path or an author '
                          'voice repo')

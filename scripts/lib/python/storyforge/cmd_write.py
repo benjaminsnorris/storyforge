@@ -111,6 +111,9 @@ def main(argv=None):
     project_dir = detect_project_root()
     from storyforge.series import require_canon
     require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
+    from storyforge.voice_repo import require_voice
+    for line in require_voice(project_dir):  # likewise a bad `voice:` block (#652)
+        log(line)
     exit_if_bad_threshold()   # a bad value crashed the forecast check with a traceback
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger

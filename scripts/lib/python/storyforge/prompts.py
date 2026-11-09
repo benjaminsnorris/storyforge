@@ -880,6 +880,15 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         lines.append('')
         lines.append(f'PROSE REGISTER: {voice_profile_project["register"].replace(";", ", ")}')
 
+    # The author's voice from the book's `voice:` block (#652); nothing
+    # without one
+    if coaching_level == 'full':
+        from .voice_repo import drafting_section
+        author_voice = drafting_section(project_dir)
+        if author_voice:
+            lines.append('')
+            lines.append(author_voice)
+
     # ===== STEP 2: PREVIOUS SCENE =====
     lines.append('')
     lines.append('===== STEP 2: PREVIOUS SCENE =====')
@@ -2229,6 +2238,15 @@ Do NOT add creative interpretation or suggestions."""
 
     # Prose exemplars (optional, per-POV preferred)
     exemplar_block = _load_prose_exemplars(project_dir, pov) if coaching_level == 'full' else ''
+    # The author's voice, read in place from the voice repo the book's
+    # `voice:` block names (#652): '' without one, so other prompts are byte
+    # for byte what they were
+    if coaching_level == 'full':
+        from .voice_repo import drafting_section
+        author_voice = drafting_section(project_dir)
+        if author_voice:
+            exemplar_block = (f'{author_voice}\n\n{exemplar_block}' if exemplar_block
+                              else author_voice)
 
     return f"""You are drafting a scene for "{title}" ({genre}).
 

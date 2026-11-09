@@ -16,6 +16,7 @@ Usage:
     storyforge score --no-apply             # Report proposals, never apply them (evals)
     storyforge score --complete-cycle       # Fill in the newest incomplete cycle's gaps
     storyforge score --voice --voice-repo ../ben-voice   # Voice drift, free (never a target)
+    storyforge score --voice                    # Against the book's `voice:` block's repo
 """
 
 import argparse
@@ -99,7 +100,9 @@ def parse_args(argv):
                              'sentences furthest from the corpus, and constructions the '
                              'corpus never uses. It measures drift; it can\'t tell good '
                              'prose from bad, and it is never an optimisation target for an '
-                             'automatic rewrite loop. Needs --fingerprint or --voice-repo. '
+                             'automatic rewrite loop. Measures against --fingerprint, '
+                             '--voice-repo, or else the voice repo the book\'s `voice:` '
+                             'block names. '
                              'No API calls, no cycle, nothing written.')
     parser.add_argument('--fingerprint', metavar='PATH', default=None,
                         help='With --voice: the fingerprint.json to measure against')
@@ -1183,21 +1186,34 @@ def _refuse_without(args, flag, needs):
 
 
 def _voice_source(args):
-    """The fingerprint `score --voice` measures against, from --fingerprint
-    or --voice-repo (exactly one). ERROR, exit 1, when neither or both is
-    given or it can't be read. (#652: with neither, read the book's
-    `voice.author` from storyforge.yaml here and pass it as the voice repo.)"""
+    """The fingerprint `score --voice` measures against: --fingerprint or
+    --voice-repo (exactly one), or with neither, the voice repo the book's
+    `voice:` block names (`voice_repo.voice_ref`). ERROR, exit 1, when both
+    are given, neither is and the book has no `voice:` block (or there's no
+    book), the block can't be used, or the fingerprint can't be read."""
     from storyforge import voiceprint_meter as meter
-    if not args.fingerprint and not args.voice_repo:
-        log('ERROR: score --voice needs the fingerprint to measure against: '
-            '--fingerprint PATH (a fingerprint.json) or --voice-repo PATH (an author '
-            'voice repo)')
-        sys.exit(1)
+    from storyforge import voice_repo as vr
     if args.fingerprint and args.voice_repo:
         log('ERROR: give score --voice one of --fingerprint and --voice-repo, not both')
         sys.exit(1)
+    repo = args.voice_repo
+    if not args.fingerprint and not repo:
+        from storyforge.common import find_project_root
+        project_dir = find_project_root()
+        try:
+            ref = vr.voice_ref(project_dir) if project_dir else None
+        except vr.VoiceError as e:
+            log(f'ERROR: {e}')
+            sys.exit(1)
+        if ref is None:
+            log('ERROR: score --voice needs the fingerprint to measure against: '
+                '--fingerprint PATH (a fingerprint.json), --voice-repo PATH (an author '
+                'voice repo), or a `voice:` block in the book\'s storyforge.yaml '
+                '(`author: <path to the voice repo>`)')
+            sys.exit(1)
+        repo = ref.author_dir
     try:
-        return meter.load_source(args.fingerprint, args.voice_repo)
+        return meter.load_source(args.fingerprint, repo)
     except meter.MeterError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
