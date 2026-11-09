@@ -251,6 +251,62 @@ class TestFloorChecks:
         assert (result['failed'], result['accepted'], result['advisory']) == (1, 1, 0)
         assert blocking_failed(result) == 0
 
+    def test_accepting_an_advisory_check_recomputes_its_count(self, tmp_path):
+        """#643's review T3: through `score_level`, so `_apply_overrides`
+        recomputes `advisory` (left alone it would make blocking_failed -1)."""
+        from storyforge.scoring_levels import _BRIEF_CRAFT_CHECK, blocking_failed, score_level
+        from storyforge.scoring_state import append_override
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|||yes||||\n')
+        before = score_level(str(tmp_path), 6)
+        assert (before['accepted'], before['advisory']) == (0, 1)
+        append_override('level-6', 'level-quality', _BRIEF_CRAFT_CHECK, 'accepted',
+                        'no goals on purpose', '2026-11-09', project_dir=str(tmp_path))
+        after = score_level(str(tmp_path), 6)
+        assert (after['failed'], after['accepted'], after['advisory']) == (1, 1, 0)
+        assert blocking_failed(after) == 0
+
+    @pytest.mark.parametrize('level,old,rows', [
+        (4, 'all required columns populated',
+         [f'anchor-number-{i}-here|{i}|T|s|1|||{"action" if i % 2 else "sequel"}||||'
+          for i in range(1, 17)]),
+        (6, 'goal/conflict/outcome/crisis/decision populated', None),
+    ])
+    def test_an_override_on_a_checks_former_name_still_applies(self, tmp_path, level, old,
+                                                                 rows):
+        """#643's review C4, CR-2, TD-1: #643 split one check at L4 and at L6
+        into a blocking and an advisory half; an author's acceptance of the
+        old check still covers both."""
+        from storyforge.scoring_levels import blocking_failed, score_level
+        from storyforge.scoring_state import append_override
+        if rows is None:
+            ref = tmp_path / 'reference'
+            ref.mkdir()
+            (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns||||||||\n')
+        else:
+            _architecture(str(tmp_path), rows)
+        before = score_level(str(tmp_path), level)
+        assert blocking_failed(before) >= 1
+        append_override(f'level-{level}', 'level-quality', old, 'accepted', 'on purpose',
+                        '2026-11-09', project_dir=str(tmp_path))
+        after = score_level(str(tmp_path), level)
+        split = [c for c in after['checks']
+                 if c['check'].startswith(('all required', 'outcome', 'craft-framework'))]
+        assert len(split) == 2 and all(c['accepted'] for c in split)
+        assert blocking_failed(after) == blocking_failed(before) - 1
+
+    def test_each_split_checks_name_lists_its_columns(self):
+        """#643's review TD-3: the names are fixed strings, the split comes
+        from CRAFT_FRAMEWORK_COLUMNS; they must agree."""
+        from storyforge import scoring_levels as sl
+        for columns, required_name, craft_name in (
+                (sl._ARCHITECTURE_COLUMNS, sl._ARCH_REQUIRED_CHECK, sl._ARCH_CRAFT_CHECK),
+                (sl._BRIEF_COLUMNS, sl._BRIEF_REQUIRED_CHECK, sl._BRIEF_CRAFT_CHECK)):
+            required, craft = sl._split_craft(columns)
+            assert craft_name.endswith(f"({', '.join(craft)})")
+            assert all(c in required_name for c in required)
+
     def test_score_level_prints_advisory_apart(self, capsys):
         from storyforge.cmd_score import _print_level_result
         _print_level_result({'level': 6, 'name': 'briefs', 'passed': 1, 'failed': 1,
