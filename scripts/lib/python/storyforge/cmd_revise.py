@@ -724,36 +724,40 @@ def _exit_if_pass_blocked(project_dir: str, targets: str,
                           deferred: frozenset[str] = frozenset()) -> None:
     """Exit 1 before a prose pass spends anything when a scene waiting on
     the gate (`working/gate-pending.csv`) would stop the gating of what it
-    writes: one before its first target (`write`'s rule), or one between
-    its targets that it doesn't rewrite. A scene listed only for a re-check
-    doesn't count between its targets (the re-checks after each gated scene
-    run it), nor before them when a later pass of the plan rewrites it
-    (`deferred`, #619: its re-check waits for that pass's gate)."""
+    writes: one before its first target, or one between its targets that it
+    doesn't rewrite, that a target after it waits on
+    (`cmd_write.GateBlockers` narrowed, #633: one of the target's facts
+    depends on it, and it isn't a failed re-reading of unchanged prose). A
+    scene listed only for a re-check doesn't count between its targets (the
+    re-checks after each gated scene run it), nor before them when a later
+    pass of the plan rewrites it (`deferred`, #619: its re-check waits for
+    that pass's gate)."""
     from storyforge import cmd_write, gate, ledger
     targets_in_book = _pass_scene_ids(project_dir, targets)
     order = ledger.scene_order(project_dir)
-    try:
-        blocking = _not_deferred(project_dir, cmd_write._gate_blockers(
-            project_dir, min(targets_in_book, key=lambda s: order.get(s, 0))), deferred)
-    except gate.GateError as e:
-        log(f'ERROR: {e}')
-        sys.exit(1)
-    if blocking:
-        cmd_write._log_blockers(blocking)
-        sys.exit(1)
-    try:
-        waiting = gate.pending(project_dir)
-    except gate.GateError as e:
-        log(f'ERROR: {e}')
-        sys.exit(1)
     first = min(order[s] for s in targets_in_book)
-    last = max(order[s] for s in targets_in_book)
-    between = sorted((s for s, row in waiting.items()
-                      if s in order and s not in targets_in_book
-                      and row['command'] != gate.RECHECK and first < order[s] < last),
-                     key=order.get)
+    before: dict[str, str] = {}
+    between: dict[str, str] = {}
+    try:
+        blockers = cmd_write.GateBlockers(project_dir, narrow=True)
+        for t in sorted(targets_in_book, key=order.get):
+            for line in _not_deferred(project_dir, blockers.of(t), deferred):
+                sid = line.split(':', 1)[0]
+                if order[sid] < first:
+                    before.setdefault(sid, line)
+                elif (sid not in targets_in_book
+                      and blockers.waiting[sid]['command'] != gate.RECHECK):
+                    between.setdefault(sid, line)
+    except gate.GateError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    if before:
+        cmd_write._log_blockers(sorted(before.values(),
+                                       key=lambda b: order[b.split(':', 1)[0]]))
+        sys.exit(1)
     if between:
-        cmd_write._log_blockers([f'{s}: {waiting[s]["reason"]}' for s in between])
+        cmd_write._log_blockers(sorted(between.values(),
+                                       key=lambda b: order[b.split(':', 1)[0]]))
         log('The pass rewrites scenes after it, and they could not be gated: nothing spent.')
         sys.exit(1)
 
@@ -780,9 +784,9 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
 
     Stops at the first scene the gate doesn't pass (listed with the gate's
     reasons, its prose kept) or that waits behind an earlier pending scene
-    (a re-check that failed mid-pass): the scenes after it would be gated
-    against a ledger missing its facts, so they stay listed as revised but
-    not gated. Returns the lines naming what didn't pass, at most three:
+    (a re-check that failed mid-pass) that it waits on (`cmd_write.GateBlockers`
+    narrowed, #633): the scenes after it would be gated against a ledger
+    missing its facts, so they stay listed as revised but not gated. Returns the lines naming what didn't pass, at most three:
     that scene, the scenes left ungated, and a re-check that didn't pass or
     wasn't run (empty when all passed and every re-check did). The caller
     commits and stops the session."""
@@ -802,8 +806,8 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
         rest = ordered[i + 1:]
         try:
             _recheck_before(project_dir, sid, ordered[i:], deferred, log_dir, budget)
-            blocking = _not_deferred(project_dir, cmd_write._gate_blockers(project_dir, sid),
-                                     deferred)
+            blocking = _not_deferred(project_dir, cmd_write._gate_blockers(
+                project_dir, sid, narrow=True), deferred)
         except gate.GateError as e:
             log(f'  ERROR: {e}')
             return _pend_ungated(project_dir, ordered[i:], pass_name, str(e))
@@ -947,13 +951,14 @@ def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
 
 def _leaning(project_dir: str, scene_id: str) -> str:
     """Why `scene_id` can't be redrafted before spending ('' when it can),
-    the check `write` makes: an earlier scene waits on the gate
+    the check `write` makes, narrowed to the scenes it waits on (#633,
+    `cmd_write.GateBlockers`): an earlier scene waits on the gate
     (`working/gate-pending.csv`), so the ledger lacks its facts. Later facts
     leaning on its commitments are no reason: the scenes they are in are
     re-checked after its redraft passes (Phase 4)."""
     from storyforge import cmd_write, gate
     try:
-        blocking = cmd_write._gate_blockers(project_dir, scene_id)
+        blocking = cmd_write._gate_blockers(project_dir, scene_id, narrow=True)
     except gate.GateError as e:
         log(f'    ERROR: {e}')
         return f'{scene_id} (not redrafted: {e})'
