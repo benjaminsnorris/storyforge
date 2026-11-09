@@ -1,7 +1,9 @@
 # A deterministic gate, a voiceprint, long writing sessions, a shorter ladder, and cheaper evals
 
-Status: proposal (2026-11-08). Nothing here is decided; every section ends in
-Ben's calls. It builds on the gate-and-ledger design
+Status: **accepted** (Ben, 2026-11-08). Ben agreed with the recommendations;
+the decisions are listed at the end, and only the voice-sample influences
+are still open. Implementation is tracked in GitHub issues, one per phase
+item (see Phasing). It builds on the gate-and-ledger design
 (`2026-10-30-gate-ledger-design.md`) and does not replace the ledger.
 
 ## Why
@@ -360,12 +362,12 @@ and not a translator's. The evals repo already has extracted texts, but a
 voiceprint needs only raw text, which Project Gutenberg supplies, so
 extraction isn't an advantage.
 
-- *Recommend:* **Edith Wharton.** *The Age of Innocence* is already in
-  the evals, and *The House of Mirth* is the held-out book. She has a
-  distinct, measurable voice (long periodic sentences, social irony, a
-  Latinate vocabulary), and it's novel-length fiction, which is what the
-  tool has to serve. Austen (*Pride and Prejudice*, plus *Emma* or
-  *Persuasion*) is the alternative, with an even better-studied voice.
+- *Decided (Ben):* **Jane Austen.** *Pride and Prejudice* is already in
+  the evals. Add *Emma* and *Persuasion* from Gutenberg (and extract them
+  in the evals repo if a suite needs the extraction). One novel fingerprints
+  her, and the others are held out. Her voice is one of the best-studied in
+  English (free indirect discourse, ironic narration, balanced periodic
+  sentences), so the description test has a well-established answer key.
 - *Jules Verne* works as a second fixture, but for a different test.
   *Around the World in Eighty Days* and *Five Weeks in a Balloon* are in
   English translation, by different translators (to confirm from the
@@ -378,8 +380,10 @@ extraction isn't an advantage.
 
 1. **Attribution (free).** Fingerprint the reference author from one
    book. Cut held-out chunks of about 2,000 words from the other book and
-   from six to eight other public-domain authors (the evals' Austen,
-   Dickens, Eliot, Fitzgerald, Fisher, Marks, Brunton). The fingerprint has
+   from six to eight other public-domain authors (the evals' Wharton,
+   Dickens, Eliot, Fitzgerald, Fisher, Marks, Brunton). Brunton's
+   *Self-Control* (1811) is Austen's exact contemporary, which makes it the
+   hard case. The fingerprint has
    to rank the held-out book's chunks closest to the author, at a fixed
    accuracy floor. This is classic stylometric authorship attribution, and
    it's the core evidence the fingerprint measures a voice.
@@ -392,8 +396,9 @@ extraction isn't an advantage.
    names the outlying pieces, rather than averaging them in.
 4. **The description (recorded once, then frozen).** The B3 description of
    the reference author is checked against a fixed list of claims a
-   critic would make or reject (for Wharton: irony at her characters'
-   expense, yes; plain short sentences, no). It's recorded once, replayed
+   critic would make or reject (for Austen: an ironic narrator and free
+   indirect discourse, yes; plain short sentences or lush description,
+   no). It's recorded once, replayed
    free, and re-recorded only when the description prompt changes on
    purpose.
 5. **The exemplar shortlist (free).** The B4 shortlist's passages sit
@@ -730,74 +735,77 @@ at a fraction of the cost.
    shortcut (D8) is piloted on Wrath's redraft, which already has its source
    map and its interpretation decisions in `key-decisions.md`.
 
-## Ben's calls, with recommendations
+## Decisions (Ben, 2026-11-08)
+
+Ben agreed with the recommendations below, except where a decision is
+recorded instead. Only question 20 is still open.
 
 **Direction**
 
 1. **Is the product's core the mechanical layer (structure, ledger,
    continuity), with prose by one writer in sessions and voice set by
    examples?**
-   *Recommend:* yes. That's where Storyforge is strong, and where Wrath
+   *Decided:* yes. That's where Storyforge is strong, and where Wrath
    went wrong.
 2. **Does phase 1 ship alone first?** (Promises advisory, no sequential
    lock, craft checks advisory, lean briefs; blocking still blocks.)
-   *Recommend:* yes. It's small and mostly policy, and it removes most of
+   *Decided:* yes. It's small and mostly policy, and it removes most of
    the cost and friction Wrath hit.
 
 **The gate**
 
 3. **Blocking: the stage sheet (A4) as the way it's caught?** (Decided:
    blocking errors are real errors and they block.)
-   *Recommend:* yes. The writer keeps the sheet, extraction labels
+   *Decided:* yes. The writer keeps the sheet, extraction labels
    transitions, and code checks them. The whole-scene read stays until the
    sheet matches it on the 105 known cases.
 4. **Broken promises: advisory unless a beat is marked `must`?**
-   *Recommend:* yes. A brief is a plan, and the prose wins. Revision made 13
+   *Decided:* yes. A brief is a plan, and the prose wins. Revision made 13
    of Wrath's briefs stale.
 5. **Is the open checker kept as a fallback?**
-   *Recommend:* behind a flag until A2 and A3 match its recall on the
+   *Decided:* behind a flag until A2 and A3 match its recall on the
    frozen E4 and E8, then removed.
 
 **Evals**
 
 6. **Freeze E4 and E8 (no re-record on prompt changes, run only for a
    decision, three runs when run)?**
-   *Recommend:* yes, plus a monthly eval budget (about $25) an agent can't
+   *Decided:* yes, plus a monthly eval budget (about $25) an agent can't
    pass without asking.
 7. **Make fixed labelled sets the default kind of eval?**
-   *Recommend:* yes. When a suite needs live generation for its inputs,
+   *Decided:* yes. When a suite needs live generation for its inputs,
    record them once and freeze them.
 8. **Adopt the blocking-set and voice suites?**
-   *Recommend:* yes to both. The blocking set is free from gawain's and
+   *Decided:* yes to both. The blocking set is free from gawain's and
    Wrath's known errors. Voice is
    the one that matters most.
 
 **The ladder and briefs**
 
 9. **Which brief fields survive by default?**
-   *Recommend:* events, the turn, POV, and the knowledge and physical state
+   *Decided:* events, the turn, POV, and the knowledge and physical state
    out. Everything else becomes optional notes the author writes.
 10. **Briefs and plans written as terse notes, with interpretation
     forbidden?**
-    *Recommend:* yes. It's cheap, and it cuts the main route by which the
+    *Decided:* yes. It's cheap, and it cuts the main route by which the
     model's phrasing leaks into the prose.
 11. **Which validate checks become advisory?**
-    *Recommend:* every check of conformity to a craft framework (value
+    *Decided:* every check of conformity to a craft framework (value
     shift, MICE order, scene function, arc shape). Errors still block.
 12. **Voice right after the synopsis, or later?**
-    *Recommend:* right after the synopsis, with a short second check after
+    *Decided:* right after the synopsis, with a short second check after
     the map. It's a soft default the author can skip to do structure first.
 13. **Adaptations as the same ladder entered higher (D8): the default for
     `source:` books, or a choice?**
-    *Recommend:* the default. An adaptation that strays far from its source
+    *Decided:* the default. An adaptation that strays far from its source
     builds the upper rungs itself, as an original does.
 14. **Bibles as facts, not essays (D2)?** (Registry and ledger rows, a few
     lines of each character speaking, terse notes only for what resists
     rows.)
-    *Recommend:* yes. Same reasoning as the briefs: facts, yes; staging and
+    *Decided:* yes. Same reasoning as the briefs: facts, yes; staging and
     interpretation, no.
 15. **The two-writers test as the definition of a finished plan (D2)?**
-    *Recommend:* yes, as the question each stage's review asks. It's
+    *Decided:* yes, as the question each stage's review asks. It's
     judged by the author, with Storyforge listing the gaps it can see
     (unsettled reveals, ambiguous relationships, unanswered world rules).
 
@@ -807,11 +815,11 @@ at a fraction of the cost.
     (B0)?** (Decided, Ben 2026-11-08.)
 17. **Which public-domain author is Storyforge's reference voiceprint
     (B7)?**
-    *Recommend:* Edith Wharton (*The Age of Innocence*, with *The House of
-    Mirth* held out), with Austen as the alternative. Verne's two
-    translations serve as the mixed-voice fixture, not the reference.
+    *Decided:* Jane Austen (*Pride and Prejudice*, plus *Emma* and
+    *Persuasion* held out). Verne's two translations are the mixed-voice
+    fixture; Ben liked those tests.
 18. **bennorris.com as the first author corpus, and which sections?**
-    *Recommend:* yes, in a private `ben-voice` repo, after the reference
+    *Decided:* yes, starting with longer posts, in a private `ben-voice` repo, after the reference
     voiceprint passes its tests. Essays and longer posts first. Leave out
     link posts and short notes, which carry less voice and would skew the
     fingerprint.
@@ -819,9 +827,9 @@ at a fraction of the cost.
 **Wrath Like Smoke**
 
 19. **Redraft Wrath as the pilot for the adaptation track and sessions?**
-    *Recommend:* yes, once the voice is found. Its source map and
+    *Decided:* yes, once the voice is found. Its source map and
     interpretation decisions exist, and the current draft is the comparison
     for the voice suite.
 20. **Which influences and narrator stance start the voice samples?**
-    *Recommend:* Ben names them. If he'd rather react first, round one is
+    *Open.* Ben names them. If he'd rather react first, round one is
     four contrasting stances on one scene.
