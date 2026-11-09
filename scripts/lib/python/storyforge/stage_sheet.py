@@ -20,11 +20,12 @@ to find slips by reading the scene twice; this asks a small one only to
    with both hands full, taking off a cloak that's off, reading by a candle
    that went out, acting after leaving), as is a sun or a shadow against the
    time of day, or a face seen past sight range (`storyforge.world_table`).
-3. **A narrow yes/no for the rest** (`ask`): actions the fields can't type
-   ("he reached the box behind him") come back from extraction as yes/no
-   questions; a small model answers each against the sheet at that beat,
-   twice (`ASKINGS`), and a finding is kept only when both answers say it
-   can't happen.
+3. **A narrow yes/no for the rest** (`ask`): actions that depend on where
+   people and things are ("she reached the lamp behind her") come back from
+   extraction as yes/no questions; a small model answers each against the
+   sheet where the question's words stand in the prose, twice (`ASKINGS`),
+   and a finding is kept only when both answers say it can't happen.
+   Position and facing are recorded for these; code never compares them.
 
 Findings are `checker.Finding`s with code `blocking.BLOCKING_CODE` (BLK)
 against the scene itself, exactly as the blocking read's, so the gate
@@ -32,9 +33,11 @@ classifies, fixes and accepts them the same way (`gate._classify`,
 `problems_to_fix`, `_accepted_blocking_covers`) and they stop only their own
 scene (#641).
 
-**What isn't checked is said.** An event or question whose quote isn't in
-the scene, a state set by one, a question past `MAX_QUESTIONS`, and a
-split yes/no answer are not findings; each is counted in
+**What isn't checked is said.** A misquoted event (its states aren't
+applied: what it touches becomes unknown), a slip against a carried state,
+an event the sheet can't read or check (`Replay.skipped`), a misquoted or
+empty question, a question past `MAX_QUESTIONS`, a split yes/no answer and
+an empty extraction are not findings; each is counted in
 `StageResult.notes`, which `check --blocking` reports and the gate logs.
 
 **The sheet's file** (`working/stage-sheets/<scene>.json`, `FORMAT`): the
@@ -44,8 +47,9 @@ drafting and returns its end state after each scene; the code then compares
 the two). See `write_sheet` / `load_sheet` / `states`. The opening is
 carried over from the previous scene's sheet when that sheet was made from
 the previous scene's current prose (`carried_opening`). A carried state is
-shown to the yes/no asker but never makes a finding: a scene break allows
-any change, and only the writer's note (#655) will say what carries.
+shown to the yes/no asker but never makes a finding (a slip against one is
+counted): a scene break allows any change, and only the writer's note
+(#655) will say what carries.
 
 The gate uses this in place of the blocking read when
 `gate.GATE_BLOCKING_METHOD` is `stage-sheet` (`storyforge check
@@ -1206,7 +1210,9 @@ def _scene_meta(project_dir: str, scene_id: str) -> tuple[str, str]:
     except OSError:
         return '', ''
     row = rows.get(scene_id, {})
-    return (row.get('pov') or '').strip(), (row.get('time_of_day') or '').strip()
+    time_of_day = (row.get('time_of_day') or '').strip()
+    # scenes.csv's `unstated`: the text gives no time (the sky check says so)
+    return (row.get('pov') or '').strip(), '' if time_of_day == 'unstated' else time_of_day
 
 
 def _overlap(a: str, b: str) -> bool:

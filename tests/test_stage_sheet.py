@@ -1034,6 +1034,21 @@ class TestWhatIsSaid:
         assert 'position: at the rail' in r.stage_at[2] and 'facing: the sea' in r.stage_at[2]
 
 
+class TestUnstatedTime:
+    def test_unstated_in_scenes_csv_is_no_time(self, project_dir):
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace('|1|evening|1 hour|', '|1|unstated|1 hour|', 1))
+        fake = _fake([{'cast': [], 'events': [ev('The sun rose over the eastern hills', '',
+                                                'sun', 'east')], 'questions': []}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose='The sun rose over the eastern hills.',
+                                  model='m', carry=False)
+        assert r.findings == [] and r.notes == [f'1 {stage_sheet.SKY_NO_TIME}']
+
+
 class TestEntryFromJson:
     """TD-3: a sheet file holds only states a replay could have written."""
 
