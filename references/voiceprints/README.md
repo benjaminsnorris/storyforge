@@ -130,7 +130,8 @@ held-out validation set (more Austen, Burney, Edgeworth) would.
 | 3. Each Verne translation's halves | share a voice | |
 | 3. 16 Austen chunks + 4 of another author's (7 authors x 3 novels = 21 corpora) reported inconsistent | 18/21 | 0.75 |
 | 3. Seeded chunks named | 63/84 = 0.75 | 0.60 |
-| 3. Austen chunks named | 0 | 0 |
+| 3. Austen chunks named | 0 | 0 (on purpose: naming the writer's own piece as another voice is the error an author can't shrug off) |
+| 3. *Self-Control* seeded corpora reported inconsistent | 1/3 | at least 1 |
 | 3. Pure Austen corpora (20 chunks of each novel): the minority's separation | 0.589-0.618: consistent | `OUTLIER_SEPARATION` 0.85 |
 | 3. Pure Austen corpora of 20 pieces of `MIN_PIECE_WORDS` (1,500) words, through `consistency` | 0.560-0.680: consistent (1,000-word pieces reach 0.906, which is why the minimum is 1,500) | `OUTLIER_SEPARATION` 0.85 |
 
@@ -140,6 +141,22 @@ Prejudice* seeded with *Middlemarch* (separation 0.808) and with
 and Brunton are the other authors nearest her. The flagged corpora's
 separations run 0.874 to 1.468; where fewer than four seeded chunks are
 named, the split found a smaller minority (one or two of them).
+
+Each seeded corpus's separation and how many of its four seeded chunks the
+minority holds (named when the corpus is flagged), so later drift shows
+(`test_mixed_voices_seeded_corpus_is_inconsistent` prints them). A flagged
+corpus can name as few as one: the floor is on the total.
+Brunton is flagged in one of three (`BRUNTON_FLAGGED_MIN` 1):
+
+| Seeded with | *Emma* | *Pride and Prejudice* | *Persuasion* |
+|---|---|---|---|
+| *The Age of Innocence* | 1.192 (3/4) | 1.057 (4/4) | 0.945 (1/4) |
+| *The Brimming Cup* | 1.093 (4/4) | 1.055 (4/4) | 1.028 (4/4) |
+| *A Christmas Carol* | 1.066 (4/4) | 1.147 (4/4) | 1.015 (4/4) |
+| *The Great Gatsby* | 1.468 (4/4) | 1.466 (4/4) | 1.390 (4/4) |
+| *Middlemarch* | 0.939 (2/4) | 0.808 (2/4), not flagged | 0.927 (1/4) |
+| *The Plastic Age* | 1.228 (4/4) | 1.255 (4/4) | 1.236 (4/4) |
+| *Self-Control* | 0.874 (4/4) | 0.737 (2/4), not flagged | 0.843 (1/4), not flagged |
 
 The Verne pair is two voices because what the fingerprint reads in a
 translation is the translator's English. A real author's corpus can mix

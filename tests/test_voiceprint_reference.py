@@ -52,6 +52,9 @@ EQUAL_SIZE_CONTIGUOUS_FLOOR = 0.85
 SEEDED_FLAGGED_FLOOR = 0.75
 #: ... the seeded chunks named among all seeded chunks (63/84 = 0.750) ...
 SEEDED_RECALL_FLOOR = 0.6
+#: ... Brunton, her contemporary and the hardest case, reported in at least
+#: this many of her three seeded corpora (1: in Emma, separation 0.874) ...
+BRUNTON_FLAGGED_MIN = 1
 #: ... and no Austen chunk named (0). Zero on purpose: naming the writer's
 #: own piece as another voice is the error an author can't shrug off, so a
 #: change that trades one for recall fails here
@@ -107,6 +110,28 @@ def test_reference_fingerprint_is_current():
     assert fp.to_json() == stored, (
         'references/voiceprints/austen/fingerprint.json is stale: recompute it with '
         'voiceprint.fingerprint({"corpus/pride-and-prejudice.md": text}).save(path)')
+
+
+def _voice_yaml_files(use):
+    """The `file:` of each voice.yaml corpus entry with this `use:` (a
+    reader for the provisional format, enough for this check)."""
+    out, current = [], None
+    for line in _read(os.path.join(AUSTEN, 'voice.yaml')).splitlines():
+        line = line.split('#')[0].strip()
+        if line.startswith('- file:'):
+            current = line.split(':', 1)[1].strip()
+        elif line.startswith('use:') and current and line.split(':', 1)[1].strip() == use:
+            out.append(current)
+    return out
+
+
+def test_voice_yaml_names_the_corpus_the_tests_and_fingerprint_use():
+    """voice.yaml can't drift from fingerprint.json and the tests' split
+    (#662 review TD-8)."""
+    fp = vp.Fingerprint.load(os.path.join(AUSTEN, 'fingerprint.json'))
+    assert _voice_yaml_files('fingerprint') == [p['name'] for p in fp.pieces] == [
+        'corpus/pride-and-prejudice.md']
+    assert _voice_yaml_files('held-out') == ['corpus/emma.md', 'corpus/persuasion.md']
 
 
 def test_reference_fingerprint_loads_and_names_her_phrases():
@@ -289,20 +314,24 @@ def test_mixed_voices_seeded_corpus_is_inconsistent(texts, chunk_values):
     consistent (separations 0.59-0.62, against OUTLIER_SEPARATION 0.85).
     The 21 cases run on measured chunks through `consistency_values`, what
     `consistency` calls; one case runs `consistency` itself on the texts."""
-    flagged = caught = false = 0
+    flagged = caught = false = brunton = 0
     cases = list(_seeded_cases(chunk_values))
     for name, author, austen_chunks, seeded in cases:
         names = [f'austen-{i}' for i in range(16)] + [f'{author}-{i}' for i in range(4)]
         result = vp.consistency_values(names, austen_chunks + seeded)
-        caught += sum(1 for n in result.outliers if not n.startswith('austen'))
+        named = sum(1 for n in result.outliers if not n.startswith('austen'))
+        print(f'  {name} + {author}: separation {result.separation:.3f}, {named}/4 named')
+        caught += named
         false += sum(1 for n in result.outliers if n.startswith('austen'))
         flagged += not result.consistent
+        brunton += author == 'self-control' and not result.consistent
     total = len(cases)
     print(f'seeded: {flagged}/{total} flagged, {caught}/{4 * total} seeded chunks named, '
           f'{false} Austen chunks named')
     assert flagged / total >= SEEDED_FLAGGED_FLOOR
     assert caught / (4 * total) >= SEEDED_RECALL_FLOOR
     assert false <= SEEDED_FALSE_MAX
+    assert brunton >= BRUNTON_FLAGGED_MIN
 
     # pure Austen corpora are consistent
     for slug, step in (('emma', 3), ('pride-and-prejudice', 3), ('persuasion', 2)):

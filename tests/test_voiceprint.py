@@ -142,6 +142,47 @@ def test_every_measure_has_a_group_and_no_prose_is_refused():
         vp.measure('# Only a heading\n\n* * *')
 
 
+def test_curly_quotes_measure_as_straight_ones():
+    """Typographic apostrophes and quotes are folded before words are read:
+    without it, "didn’t" splits in two and a modern manuscript has no
+    contractions (#662 review T5)."""
+    curly = vp.measure('She didn’t go. “Why?” he asked. It’s late.')
+    straight = vp.measure('She didn\'t go. "Why?" he asked. It\'s late.')
+    assert curly == straight
+    n = len(vp.words('She didn\'t go. "Why?" he asked. It\'s late.'))
+    assert n == 8
+    assert curly['contraction_rate'] == pytest.approx(1000 * 2 / n)
+    assert curly['double_quote_rate'] == pytest.approx(1000 * 2 / n)
+
+
+def test_a_text_of_one_sentence_paragraphs_has_no_openings():
+    """Openings and closings are read over paragraphs of two sentences or
+    more; with none, they are 0 (#662 review T8)."""
+    m = vp.measure('She went home.\n\nHe stayed.\n\n"Why?"')
+    assert m['one_sentence_paragraph_share'] == 1.0
+    assert m['opening_pronoun_share'] == 0.0 and m['opening_sentence_mean'] == 0.0
+    assert m['opening_dialogue_share'] == pytest.approx(1 / 3)   # over every paragraph
+
+
+def test_measures_match_the_recorded_golden_values():
+    """A change to any measure's definition shows here first (#662 review
+    TD-1). When it is meant: bump FINGERPRINT_VERSION if a fingerprint of
+    the old version has shipped, rebuild baseline.json and the reference
+    fingerprint.json (references/voiceprints/README.md), and re-record
+    tests/fixtures/voiceprint/golden-measures.json."""
+    with open(os.path.join(PLUGIN, 'tests', 'fixtures', 'voiceprint', 'golden-measures.json'),
+              encoding='utf-8') as f:
+        golden = json.load(f)
+    with open(os.path.join(PLUGIN, 'references', 'voiceprints', 'austen', 'corpus',
+                           'pride-and-prejudice.md'), encoding='utf-8') as f:
+        chunk = vp.chunks(f.read())[0]
+    got = {k: vp._round(v) for k, v in vp.measure(chunk).items()}
+    changed = sorted(k for k in set(got) | set(golden['measures'])
+                     if got.get(k) != golden['measures'].get(k))
+    assert golden['fingerprint_version'] == vp.FINGERPRINT_VERSION
+    assert not changed, (f'measures changed: {changed[:10]}; see this test\'s docstring')
+
+
 def test_latinate_and_adjective_heuristics():
     m = vp.measure('The administration showed considerable determination. '
                    'A big dog ran home.')
@@ -386,6 +427,31 @@ def test_malformed_baseline_is_refused(tmp_path, change, match):
     bad.write_text('[]')
     with pytest.raises(vp.VoiceprintError, match='JSON object'):
         vp.load_baseline(str(bad))
+
+
+def test_build_baseline_round_trips_through_load_baseline(tmp_path):
+    """The baseline builder's output loads, every sd is positive (floored at
+    the noise floor), and a text under a chunk is refused (#662 review T7)."""
+    texts = {f'Book {i}': _prose(i, 400) for i in range(1, 4)}
+    data = vp.build_baseline(texts, chunks_per_text=4)
+    assert [s['chunks'] for s in data['sources']] == [4, 4, 4]
+    path = tmp_path / 'baseline.json'
+    path.write_text(json.dumps(data))
+    base = vp.load_baseline(str(path))
+    assert base.sources == tuple(texts)
+    assert all(sd > 0 for sd in base.sd.values())
+    # a measure every chunk scores the same still has its noise floor
+    assert base.sd['parenthesis_rate'] == pytest.approx(vp._noise_floor('parenthesis_rate', 0.0))
+    with pytest.raises(vp.VoiceprintError, match='Short'):
+        vp.build_baseline({'Short': _prose(1, 10)})
+
+
+def test_cosine_distance_of_a_profile_at_the_population_mean_is_one():
+    """A profile with every z at 0 has no direction: the distance is 1, not
+    a division by zero (#662 review T8)."""
+    base = vp.load_baseline()
+    other = vp.measure(_prose(1, 100))
+    assert vp._cosine_distance(dict(base.mean), other, base) == 1.0
 
 
 def test_build_baseline_refuses_no_texts():
