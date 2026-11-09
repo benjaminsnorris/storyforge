@@ -35,17 +35,24 @@ The Batch API is refused under a cassette: its ids and polling sequence are
 not reproducible, so a recording of one could never replay.
 
 Every live call is also appended to the eval spend ledger when
-``STORYFORGE_EVAL_SPEND_LOG`` is set, and refused (``BudgetRefused``) once the
+``STORYFORGE_EVAL_SPEND_LOG`` is set (a call with no model, the Models API
+catalog, is free and not logged), and refused (``BudgetRefused``) once the
 month's spend reaches ``STORYFORGE_EVAL_BUDGET_USD``, unless
 ``STORYFORGE_EVAL_OVER_BUDGET`` gives a reason; see ``storyforge.eval_spend``.
-The check comes before each call, so one call (or one per thread) can take
-the month past the budget, never more.
+A ledger that can't be read, or a budget that isn't a finite non-negative
+number, refuses too. The check comes before each call, so one call (or one
+per thread) can take the month past the budget, never more. ``evals/run.py``
+is the only thing that sets these variables: a recording made any other way
+(a hand-set ``STORYFORGE_CASSETTE_MODE=record``) is neither metered nor
+capped.
 """
 
 import gzip
 import hashlib
 import json
+import math
 import os
+import sys
 import tempfile
 
 MODES = ('replay', 'record', 'auto')
@@ -72,7 +79,9 @@ def _budget_refusal() -> str:
     try:
         budget = float(raw)
     except ValueError:
-        return f'{eval_spend.BUDGET_ENV}={raw!r} is not a number of dollars'
+        budget = math.nan
+    if not math.isfinite(budget) or budget < 0:
+        return f'{eval_spend.BUDGET_ENV}={raw!r} is not a non-negative number of dollars'
     return eval_spend.refusal(eval_spend.default_ledger(), budget)
 
 
@@ -93,11 +102,13 @@ def _record_spend(cassette_dir: str, body: dict | None, response: dict) -> None:
             model=model, usd=eval_spend.usage_cost(model, usage),
             over_budget=os.environ.get(eval_spend.OVERRIDE_ENV, '').strip())
     except OSError as e:
+        message = (f'eval spend ledger not written ({e}); this call is missing from '
+                   f'the month\'s eval spend')
         try:
-            _append_log({'error': f'eval spend ledger not written ({e}); this call is '
-                                  f'missing from the month\'s eval spend'})
+            _append_log({'error': message})
         except OSError:
-            pass
+            print(f'WARNING: {message} (and the cassette log could not be written either)',
+                  file=sys.stderr)
 
 
 def active_dir() -> str:
