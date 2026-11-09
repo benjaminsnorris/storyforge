@@ -370,7 +370,61 @@ it stops, where voice comes in, and what the checks between stages reward.
   POV and timeline, the source map's coverage, series canon. With the ledger
   (Part A) they're the product's core.
 
-### D2. Briefs stop at "what happens"
+### D2. Facts: planned and discovered
+
+Part D is about one ladder for every book. An original story climbs every
+rung; an adaptation's source fills some rungs, and the author starts higher
+(D8). Either way, the question is when the story's facts get settled. They
+come in two kinds, settled at different times.
+
+**Load-bearing facts are settled before drafting, by the ladder.** These are
+the facts the plot depends on, and each rung adds a layer:
+
+| rung | facts it settles |
+|---|---|
+| logline / synopsis | the premise, the ending, the central secret or question |
+| spine | the major events and what causes what |
+| architecture | the turning points, and **who learns what, when** (the order of reveals) |
+| world and characters | the rules (magic, law, technology), histories, relationships, kinship, what each character wants and what they hide |
+| scene map | each scene's POV, place, day and time, who is present, and the knowledge and physical state in and out |
+
+All of it lands in the ledger as binding facts with origin `plan`, before
+any prose. That's the mechanical layer Storyforge should be best at. Part
+A's deterministic checks hold the draft to it.
+
+**Texture facts are discovered while drafting.** Patroclus's scar, the dog
+at Antenor's gate, a herald's bad knee. The writer invents them on the
+page. Extraction records them with origin `prose`, and from then on
+they're binding for every later scene. The ledger already distinguishes
+origins (`author`, `plan`, `prose`). The stage sheet (A4) is the same idea
+at the scale of a scene.
+
+**When the plan is done: the two-writers test.** Could two different
+writers draft from the plan and produce books that agree on every plot
+point, while their sentences, gestures and images differ? If so, the
+load-bearing facts are settled, and the rest belongs to the writer. A stage
+can be checked against this: an unsettled reveal order, a relationship left
+ambiguous, or a rule of the world with no answer is a gap the ladder still
+owes.
+
+**Facts, yes; staging, no.** This is the line D3 draws for briefs. A brief
+keeps every fact the scene must honour or establish. It drops the staging:
+how the scene is played, what is said, what it means.
+
+**Bibles as facts, not essays.** The character, world and systems bibles
+are model-written essays today (`REFERENCE_DOCS` in the checker), and they
+leak the model's phrasing into drafts the same way briefs do. Proposed:
+
+- What's true about the world and the people becomes **rows**, in the
+  registries (`characters.csv`, `locations.csv`, ...) and the ledger
+  (`commitments.csv`, type `trait`, `relationship`, `world`, origin
+  `plan`).
+- What a character sounds like becomes **a few lines of them speaking**
+  (from voice samples, Part B), not a paragraph describing their speech.
+- A short prose note stays only for what really resists rows (a culture's
+  feel, a history's shape), written as terse notes (D4).
+
+### D3. Briefs stop at "what happens"
 
 Today's brief (`scene-briefs.csv`) carries `goal`, `conflict`, `outcome`,
 `crisis`, `decision`, `key_actions`, `key_dialogue`, `emotions`, `motifs`
@@ -389,18 +443,18 @@ go. A line the author wants verbatim (a source line in a faithful
 adaptation, say) is marked as such, and it's the only scripted text a draft
 must carry.
 
-### D3. The plan is written in the drafter's voice
+### D4. The plan is written in the drafter's voice
 
 Every elaborated field is model prose, and the prose inherits it. On Wrath, a
 brief's subtext ("let the list grow, and never call it pride") turned into
 the aphoristic closing lines Ben singled out. The drafter reads Claude's
-sentences and writes more like them. Leaner briefs (D2) reduce this. Writing
+sentences and writes more like them. Leaner briefs (D3) reduce this. Writing
 what remains as **terse notes**, not polished sentences, reduces it more:
 "Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud,"
 not a paragraph about what the moment means. The elaboration prompts should
 ask for notes and forbid interpretation.
 
-### D4. Voice moves up the ladder
+### D5. Voice moves up the ladder
 
 The voice stage comes after briefs today (`status` raises a `voice` blocker
 once briefs are done), and it produces a rule list. Voice is structural, not
@@ -414,7 +468,7 @@ stance it settles feeds the map: whether a narrator holds scenes, how many
 POVs, and close versus distant. Then a second, short voice check after the
 map confirms the voice holds across the POV mix.
 
-### D5. Checks catch errors, and craft frameworks advise
+### D6. Checks catch errors, and craft frameworks advise
 
 `validate` and the stage checks test value shift per scene, MICE nesting,
 scene type and function, and fidelity to the brief. Each idea is reasonable.
@@ -429,42 +483,46 @@ advisory, shown as a diagnostic the author can use. Blocking stays for
 **errors**: a broken knowledge chain, a missing source event, a timeline
 that can't happen, a canon violation.
 
-### D6. The drafting unit gets bigger
+### D7. The drafting unit gets bigger
 
 Drafting scene by scene makes each scene self-contained, with its own
 opening and landing. Chapters run into each other. Part C's sessions draft a
 stretch in one context. The ladder's last stage becomes the **act or
 chapter run**, not the scene.
 
-### D7. An adaptation track
+### D8. Adaptations: the same ladder, entered higher
 
-Wrath set out to build on a proven story so the effort could go into voice
-and prose. Storyforge ran the full new-novel ladder anyway: it re-derived a
-spine and architecture the *Iliad* already supplies, generated
-prose-shaped briefs for 91 scenes, then checked fidelity to Butler's beats.
-The faithful-mode checks were part of why speeches got re-performed instead
-of dramatised.
+An adaptation isn't a separate pipeline. It's a shortcut onto the same
+ladder: the source supplies the load-bearing facts for the upper rungs
+(D2), so the author starts lower down the table, at the scene map.
 
-For a book with a `source:` block, a shorter ladder:
+Wrath shows what goes wrong without the shortcut. It set out to build on a
+proven story so the effort could go into voice and prose. Storyforge ran
+every rung anyway: it re-derived a spine and architecture the *Iliad*
+already supplies, generated prose-shaped briefs for 91 scenes, then checked
+fidelity to Butler's beats. The faithful-mode checks were part of why
+speeches got re-performed instead of dramatised.
 
-1. **Source.** `source import` and the source map, as now. The structure is
-   given.
-2. **Interpretation.** A few pages of decisions, made by the author: what
-   this version is about, whose eyes, what's cut, what's invented, where it
-   ends, and the mode (faithful, loose). This replaces the spine and
-   architecture stages, which, for an adaptation, mostly re-describe the
-   source.
-3. **Voice.** By samples (Part B), on a scene from the source.
-4. **A light scene list.** Source events grouped into scenes with POV and
-   the turn. Invented scenes get a line of why.
-5. **Sessions.** Part C.
+For a book with a `source:` block:
 
-Checks on this track are continuity (Part A) plus **coverage**: was any
-source event dropped without a recorded decision. Fidelity means the
-events happen; it doesn't mean the source's staging or speech order is
-replayed.
+| rung | original story | adaptation |
+|---|---|---|
+| logline, synopsis, spine, architecture | the author builds them | **given by the source** (the source map), plus **interpretation decisions**: what this version is about, whose eyes, what's cut, what's invented, where it ends, and the mode |
+| world and characters | the author builds them | given by the source and canon; the author adds what the source leaves open (in a faithful mode, sparingly) |
+| voice | by samples (Part B) | by samples, on a scene from the source |
+| scene map | built | source events grouped into scenes with POV and the turn; invented scenes get a line of why |
+| drafting | sessions (Part C) | sessions |
 
-### D8. Roughly what changes
+The interpretation decisions are the author's few pages in `key-decisions.md`.
+They do for an adaptation what the spine and architecture do for an original:
+they settle the facts the version depends on that the source doesn't.
+
+Checks are the same as for any book: continuity (Part A), plus **coverage**
+from the source map, meaning whether any source event was dropped without a
+recorded decision. Fidelity means the events happen. It doesn't mean the
+source's staging or speech order is replayed.
+
+### D9. Roughly what changes
 
 About half the current approach stays as it is: the ladder through the
 scene map, the ledger and the error checks. About a quarter changes in
@@ -557,10 +615,11 @@ at a fraction of the cost.
    before it becomes a command.
 6. **B5 fiction calibration and C sessions:** pilot on one act of *Wrath
    Like Smoke* against the existing draft, then the voice suite (Part E).
-7. **The ladder (Part D):** craft checks become advisory (D5) and briefs
-   get lean, note-style defaults (D2, D3). Both are small and can ride
-   phase 1. Voice moves up the ladder (D4) with phase 5. The adaptation
-   track (D7) is piloted on Wrath's redraft, which already has its source
+7. **The ladder (Part D):** craft checks become advisory (D6) and briefs
+   get lean, note-style defaults (D3, D4). Both are small and can ride
+   phase 1. Bibles move to rows (D2) alongside the typed ledger in
+   phase 3. Voice moves up the ladder (D5) with phase 5. The adaptation
+   shortcut (D8) is piloted on Wrath's redraft, which already has its source
    map and its interpretation decisions in `key-decisions.md`.
 
 ## Ben's calls, with recommendations
@@ -620,29 +679,39 @@ at a fraction of the cost.
 12. **Voice right after the synopsis, or later?**
     *Recommend:* right after the synopsis, with a short second check after
     the map. It's a soft default the author can skip to do structure first.
-13. **The adaptation track: the default for `source:` books, or a choice?**
-    *Recommend:* the default, with the full ladder available for an
-    adaptation that strays far from its source.
+13. **Adaptations as the same ladder entered higher (D8): the default for
+    `source:` books, or a choice?**
+    *Recommend:* the default. An adaptation that strays far from its source
+    builds the upper rungs itself, as an original does.
+14. **Bibles as facts, not essays (D2)?** (Registry and ledger rows, a few
+    lines of each character speaking, terse notes only for what resists
+    rows.)
+    *Recommend:* yes. Same reasoning as the briefs: facts, yes; staging and
+    interpretation, no.
+15. **The two-writers test as the definition of a finished plan (D2)?**
+    *Recommend:* yes, as the question each stage's review asks. It's
+    judged by the author, with Storyforge listing the gaps it can see
+    (unsettled reveals, ambiguous relationships, unanswered world rules).
 
 **Voiceprint**
 
-14. **bennorris.com as the prototype corpus, and which sections?**
+16. **bennorris.com as the prototype corpus, and which sections?**
     *Recommend:* yes. Essays and longer posts first. Leave out link posts
     and short notes, which carry less voice and would skew the fingerprint.
-15. **Prototype the voiceprint before building the command?**
+17. **Prototype the voiceprint before building the command?**
     *Recommend:* yes. Fingerprint, description and exemplar shortlist from
     the site as a one-off. If it doesn't sound like Ben, nothing's lost.
-16. **Exemplar bank per book or per series?**
+18. **Exemplar bank per book or per series?**
     *Recommend:* per series, like `series.canon`, with an optional book
     layer on top. The author's voice is the constant, and a book adjusts
     the narrator.
 
 **Wrath Like Smoke**
 
-17. **Redraft Wrath as the pilot for the adaptation track and sessions?**
+19. **Redraft Wrath as the pilot for the adaptation track and sessions?**
     *Recommend:* yes, once the voice is found. Its source map and
     interpretation decisions exist, and the current draft is the comparison
     for the voice suite.
-18. **Which influences and narrator stance start the voice samples?**
+20. **Which influences and narrator stance start the voice samples?**
     *Recommend:* Ben names them. If he'd rather react first, round one is
     four contrasting stances on one scene.
