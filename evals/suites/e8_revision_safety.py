@@ -170,4 +170,5 @@ def _gate_listing(project_dir: str, scene_id: str) -> str:
 
 
 SUITE = Suite('e8-revision-safety',
-              'Current revision passes vs the E1 errors past passes introduced', run)
+              'Current revision passes vs the E1 errors past passes introduced', run,
+              frozen=True)

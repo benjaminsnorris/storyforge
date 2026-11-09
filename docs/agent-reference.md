@@ -126,7 +126,7 @@ Left out: scene prose and manuscripts (`assemble` / `produce`) and score history
 
 ## Architecture
 
-- `evals/` — eval harness and suites
+- `evals/` — eval harness and suites. E4 and E8 are frozen (a miss is `stale`, exit 0), live eval calls count against a monthly budget (`evals/config.json`, `storyforge.eval_spend`), and `--over-budget` needs Ben's approval: see `evals/README.md` (#645)
 - `scripts/lib/python/storyforge/` — commands (`cmd_*.py`), shared infrastructure, domain modules (scoring, prompts, extraction, illustrations, …)
 - `skills/` — interactive skills; `scripts/prompts/` — prompt templates; `references/` — craft engine, rubrics, schemas; `templates/` — project scaffolding; `docs/` — GitHub Pages + design docs
 

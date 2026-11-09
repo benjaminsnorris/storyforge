@@ -40,6 +40,11 @@ stops ``write``; its fixed prose is judged and drafting goes on. The judge
 stands in
 for the plan's human spot-check, which is still owed. Act 2 onward keeps the
 author's prose; only Act 1 is drafted.
+
+**Frozen** (#645): ``run.py`` never re-records this suite on a prompt change;
+a miss reports it ``stale`` and spends nothing. Re-record it only when a
+decision depends on it, as three runs:
+``python3 evals/run.py --mode record --suite e4-generation --runs 3``.
 """
 
 from __future__ import annotations

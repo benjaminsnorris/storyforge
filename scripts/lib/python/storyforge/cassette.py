@@ -29,12 +29,26 @@ logged failure as an errored suite whatever the suite returned.
 
 The Batch API is refused under a cassette: its ids and polling sequence are
 not reproducible, so a recording of one could never replay.
+
+Every live call is also appended to the eval spend ledger when
+``STORYFORGE_EVAL_SPEND_LOG`` is set (a call with no model, the Models API
+catalog, is free and not logged), and refused (``BudgetRefused``) once the
+month's spend reaches ``STORYFORGE_EVAL_BUDGET_USD``, unless
+``STORYFORGE_EVAL_OVER_BUDGET`` gives a reason; see ``storyforge.eval_spend``.
+A ledger that can't be read, or a budget that isn't a finite non-negative
+number, refuses too. The check comes before each call, so one call (or one
+per thread) can take the month past the budget, never more. ``evals/run.py``
+is the only thing that sets these variables: a recording made any other way
+(a hand-set ``STORYFORGE_CASSETTE_MODE=record``) is neither metered nor
+capped.
 """
 
 import gzip
 import hashlib
 import json
+import math
 import os
+import sys
 import tempfile
 
 MODES = ('replay', 'record', 'auto')
@@ -46,6 +60,51 @@ class CassetteError(RuntimeError):
 
 class CassetteMiss(CassetteError):
     """A replay-mode request has no recording."""
+
+
+class BudgetRefused(CassetteError):
+    """A live call refused: the monthly eval budget is spent (or can't be checked)."""
+
+
+def _budget_refusal() -> str:
+    """Why the eval budget forbids a live call now ('' when it allows one)."""
+    from storyforge import eval_spend
+    raw = os.environ.get(eval_spend.BUDGET_ENV, '')
+    if not raw or os.environ.get(eval_spend.OVERRIDE_ENV, '').strip():
+        return ''
+    try:
+        budget = float(raw)
+    except ValueError:
+        budget = math.nan
+    if not math.isfinite(budget) or budget < 0:
+        return f'{eval_spend.BUDGET_ENV}={raw!r} is not a non-negative number of dollars'
+    return eval_spend.refusal(eval_spend.default_ledger(), budget)
+
+
+def _record_spend(cassette_dir: str, body: dict | None, response: dict) -> None:
+    """Add a paid call to the eval spend ledger, when one is set. A ledger
+    that can't be written is logged as a failure (the suite errors), since
+    the month's spend would then read low."""
+    from storyforge import eval_spend
+    if not os.environ.get(eval_spend.LEDGER_ENV):
+        return
+    model = str((body or {}).get('model', ''))
+    if not model:
+        return  # a request with no model (the Models API catalog) is free
+    usage = response.get('usage') if isinstance(response, dict) else None
+    try:
+        eval_spend.record(
+            eval_spend.default_ledger(), suite=os.path.basename(os.path.normpath(cassette_dir)),
+            model=model, usd=eval_spend.usage_cost(model, usage),
+            over_budget=os.environ.get(eval_spend.OVERRIDE_ENV, '').strip())
+    except OSError as e:
+        message = (f'eval spend ledger not written ({e}); this call is missing from '
+                   f'the month\'s eval spend')
+        try:
+            _append_log({'error': message})
+        except OSError:
+            print(f'WARNING: {message} (and the cassette log could not be written either)',
+                  file=sys.stderr)
 
 
 def active_dir() -> str:
@@ -179,6 +238,9 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
             f'path, date, or id it changes every run and can never replay. Otherwise '
             f're-run with STORYFORGE_CASSETTE_MODE=record or auto.'))
 
+    refused = _budget_refusal()
+    if refused:
+        raise _fail(BudgetRefused(f'Not calling {method} {path} live: {refused}'))
     try:
         response = live()
     except Exception as e:
@@ -189,6 +251,7 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
         except OSError:
             pass
         raise
+    _record_spend(cassette_dir, body, response)
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')

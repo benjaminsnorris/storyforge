@@ -7,15 +7,89 @@ What exists, the baseline, and what's next: `docs/plans/2026-10-28-rethink-statu
 ```bash
 python3 evals/run.py               # every suite, replaying recorded API calls (free)
 python3 evals/run.py --suite NAME  # one suite (repeatable)
-python3 evals/run.py --mode auto   # replay what exists, record the rest (spends)
-python3 evals/run.py --mode record # re-record every call (spends)
+python3 evals/run.py --mode auto   # replay what exists, record the rest (spends; frozen suites replay)
+python3 evals/run.py --mode record # re-record every call (spends; frozen suites replay)
+python3 evals/run.py --mode record --suite e4-generation --runs 3   # re-record a frozen suite, on purpose
+python3 evals/run.py --over-budget "Ben approved, #NNN" ...         # spend past the monthly budget
 python3 evals/run.py --baseline    # also write evals/baseline.json
 python3 evals/run.py --list
 ```
 
-Exit code: `0` every gate passed, `1` a gate failed, `2` a suite errored (no
-measurement). The full report goes to `evals/results/latest.json` (gitignored);
-when `evals/baseline.json` exists the report carries per-metric deltas.
+The full report goes to `evals/results/latest.json` (gitignored); when
+`evals/baseline.json` exists the report carries per-metric deltas.
+
+### Exit codes and suite status
+
+Each suite ends in one of four states, and the run's status is its worst
+suite's, in this order:
+
+| status | meaning | exit code |
+|---|---|---|
+| `error` | no measurement: the suite raised, declared no gates, or the cassette logged a failure (a miss on a suite that isn't frozen, a refused live call, an unreadable recording, a frozen suite with no recordings at all); also a run refused before it started (bad arguments, the budget) or a `--baseline` that can't be written (an errored suite, `--suite` given, a stale suite with nothing to carry) | `2` |
+| `fail` | the suite measured and a gate didn't hold | `1` |
+| `stale` | a **frozen** suite whose only cassette failures are misses: a request changed since it was recorded. No measurement, nothing spent, by policy. An exception the suite raised after the miss is kept as `stale_exception` (with `stale_traceback`) and printed, with the first miss | `0` |
+| `pass` | every gate held | `0` |
+
+**Stale is not a failure.** A prompt change is expected to make E4 and E8
+stale, and the run (and CI) stays green on it: a run whose worst suite is
+stale reports `status=STALE` and exits `0`. Read the report (or the
+`[STALE]` lines and the `stale (frozen, ...)` total line) to see which. A
+stale suite has no metrics and no gates in the report, no baseline deltas,
+and `--baseline` keeps the old baseline's entry for it (marked
+`carried_over`); with no old entry to keep, `--baseline` is refused. The
+exit code is still what this run measured: a carried-over `fail` doesn't
+make it `1`.
+
+## Policy: what to record, and when (#645)
+
+About $276 went on re-recordings over five rounds, and the end-to-end suites'
+claims were mostly within run-to-run noise (E6). The cheap suites with fixed,
+labelled inputs (E2, E3, the re-check set) are the ones that found real
+things. So (plan `docs/plans/2026-11-08-deterministic-gate-and-voiceprint.md`,
+Part E):
+
+- **Fixed labelled sets are the default.** A new suite measures a tool against
+  fixed inputs with known answers, so a change in the number is a change in
+  the tool. Deterministic checks are code: they get unit tests, not a suite.
+- **E4 and E8 are frozen** (`Suite(..., frozen=True)`). `auto` and `record`
+  replay them; a miss marks them `stale` and spends nothing. They are
+  re-recorded only when a decision depends on them, by name and always as
+  three runs: `--mode record --suite e4-generation --runs 3` (run 1 to the
+  default cassettes, runs 2 and 3 to `fixtures/e6/run2` and `run3`, so
+  `consistency.py` reads the spread). Naming one with `--runs` other than 3,
+or with `--mode auto`, is refused; `--mode record` without naming them
+replays them. At about
+  $25 (E4) and $55 (E8) a run, that is past the monthly budget, so it needs
+  Ben's approval and `--over-budget`.
+- **A new suite that needs live generation for its inputs** (drafted scenes,
+  a described voice) records those inputs once, commits them as fixture files,
+  and evaluates against the frozen files, so a change to what judges them
+  re-records only the cheap part. If the suite itself has to generate end to
+  end, mark it `frozen=True`.
+- **Monthly budget.** `evals/config.json` sets `monthly_budget_usd` ($25 when
+  the file is absent; a file that doesn't give a non-negative number refuses
+  the run). Every live call the cassette makes is appended to the eval spend
+  ledger (`storyforge.eval_spend`: one JSON line per call with time, suite,
+  model and dollars, at `~/.storyforge/eval-spend.jsonl` or
+  `$STORYFORGE_EVAL_SPEND_LOG`, outside the repo so every worktree shares
+  it). The month is the UTC calendar month. `--mode record` is refused when
+  this month's spend plus its forecast (each recorded suite's `usd_if_live`
+  in the baseline, times `--runs`) passes the budget. A suite with no
+  baseline figure counts as $0 there (named in a WARNING: the forecast is a
+  lower bound, and the per-call check below is its guard); a frozen suite
+  with no figure, or a baseline that can't be read, refuses `record`
+  without `--over-budget`. `--mode auto` records
+  only misses, so it is refused once the budget is spent. During either, the
+  cassette refuses each live call once the month reaches the budget (the
+  suite errors with `BudgetRefused`; what was recorded replays free on the
+  next `auto`), so at most one call per thread goes past it. A ledger line
+  that can't be read refuses too (so does a ledger path that exists but
+  isn't a readable file): the month's spend is unknown.
+  `--over-budget REASON` is the only override: it is printed as a warning,
+  stored in the report's `budget` block, and written on every ledger line the
+  run adds. Agents don't pass it without Ben's say-so. Replay never checks
+  the budget: it never spends. Spend outside `run.py` (a hand-set
+  `STORYFORGE_CASSETTE`, a command run on a real book) isn't in the ledger.
 
 ## Adding a suite
 
@@ -33,6 +107,7 @@ def run(ctx):                       # ctx.work_dir is a fresh temp dir
     )
 
 SUITE = Suite('e2-detection', 'Contradiction detection on labeled cases', run)
+# an expensive end-to-end suite: Suite(..., run, frozen=True)  (see the policy above)
 ```
 
 A gate no run passes says nothing, so a failing suite stops meaning
@@ -45,9 +120,10 @@ and give the plan's target as a note (#488).
 Every Anthropic call goes through `api._api_request`, which consults
 `storyforge.cassette` when `STORYFORGE_CASSETTE` is set. The harness sets it to
 `evals/fixtures/cassettes/<suite>/` for each suite. Replay mode never goes live:
-a call with no recording raises `CassetteMiss` and the suite errors. Recordings
-are keyed by a hash of the request, so any prompt change is a miss — re-record
-that suite with `--mode auto`. A prompt that embeds a temp path, date, or id
+a call with no recording raises `CassetteMiss` and the suite errors (a frozen
+suite is `stale` instead). Recordings are keyed by a hash of the request, so
+any prompt change is a miss — re-record that suite with `--mode auto` (a
+frozen one only as above). A prompt that embeds a temp path, date, or id
 changes every run and can never replay; keep those out of what a suite sends.
 The Batch API is refused under a cassette; run commands in direct mode.
 In `record` mode a request already recorded earlier in the same run replays

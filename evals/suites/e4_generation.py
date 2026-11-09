@@ -107,4 +107,5 @@ def run(ctx):
     )
 
 
-SUITE = Suite('e4-generation', 'Draft shared-dark Act 1 with write; CP10k, BPS, length, voice', run)
+SUITE = Suite('e4-generation', 'Draft shared-dark Act 1 with write; CP10k, BPS, length, voice',
+              run, frozen=True)
