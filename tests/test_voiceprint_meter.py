@@ -395,19 +395,19 @@ def test_constructions_leave_corpus_names_out_of_the_prose_too(repo, monkeypatch
 
 
 @pytest.mark.parametrize('phrase,ok', [
-    ("he didn't", True), ('the ships', False), ('the edge of', True),
-    ('in the middle of', True), ('the old man', False), ('the spear', False),
+    ("he didn't", True), ('the harbour', False), ('the edge of', True),
+    ('in the middle of', True), ('the old man', False), ('the lantern', False),
 ])
 def test_construction_shape(phrase, ok):
-    assert meter._construction_shape(phrase, topical={'spear'}) is ok
+    assert meter._construction_shape(phrase, topical={'lantern'}) is ok
 
 
 def test_topic_words_never_make_constructions(repo):
     # a word used this often is what the prose is about, not how it's written
     base = _read(MODERN)
-    extra = '\n\n'.join(['The spear was by the door. He took the spear and went out.'] * 20)
+    extra = '\n\n'.join(['The lantern was by the door. He took the lantern and went out.'] * 20)
     report = meter.meter(repo, {'draft': base + '\n\n' + extra})
-    assert not any('spear' in c.phrase for c in report.constructions)
+    assert not any('lantern' in c.phrase for c in report.constructions)
 
 
 # ============================================================================

@@ -31,7 +31,7 @@ files):
 - **constructions the prose uses far more than the reference**
   (`constructions`): two- to four-word phrases built mostly of function
   words (so a construction, not a topic: "he didn't", "the edge of the",
-  not "the ships"), used `CONSTRUCTION_MIN_COUNT`+ times in the prose at
+  not "the lantern"), used `CONSTRUCTION_MIN_COUNT`+ times in the prose at
   `CONSTRUCTION_MIN_RATIO`x the reference's rate or more. With the corpus at
   hand (`load_source(voice_repo=...)`) its own rates are the reference; with
   only a fingerprint, the general baseline's (2- and 3-word phrases only),
@@ -117,7 +117,7 @@ CONSTRUCTION_MIN_RATIO = 8.0
 #: how many constructions are listed
 CONSTRUCTION_KEEP = 12
 #: a content word used this often per 1000 words of the prose is what the
-#: prose is about (a topic: "ships", "spear"), so its phrases are left out.
+#: prose is about (a topic: "lantern", "harbour"), so its phrases are left out.
 #: A phrase needs `CONSTRUCTION_MIN_COUNT` uses, so its open word has at
 #: least 5, which is 0.5 per 1,000 whenever the prose is under 10,000 words:
 #: there every open word in a construction is a topic, and only phrases
