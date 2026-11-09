@@ -15,12 +15,19 @@ in every variant of it:
 
 The suite asks each variant's questions the way the gate does
 (`questions.ask_questions`: one call per asking, two askings, a finding
-only when both say yes and the quote is in the scene), so what it measures
-is the questions, the prompt and the model, not the selection of facts
-(that is code, in `tests/test_questions.py`). A `yes` is caught when its
-finding's quote lands on the injected words (`lands_on` a `contradicted`
-quote: three words in a row in common); `recall_any` counts a finding
-anywhere in the scene.
+only when both say yes and the quote is in the scene). A `yes` is caught
+when its finding's quote lands on the injected words (`lands_on` a
+`contradicted` quote: three words in a row in common); `recall_any` counts
+a finding on the broken fact whose quote is anywhere in the scene.
+
+It asks every labelled fact, so `recall` measures the questions, the prompt
+and the model. The gate asks only the facts its selection picks
+(`questions.present_subjects`, `facts_to_ask`), so the suite also runs that
+selection, free, on each variant: the scene's labelled `cast` (who a
+perfect typed state would put there, as `at` records), its scenes.csv
+locations and the registry names in its prose, against the e2-carol
+registries. `selection_lost` counts the `yes` facts it would not ask, and
+`recall_selected` is the recall the gate would get: caught and selected.
 
 The model is the question layer's default (the extraction tier) unless
 `STORYFORGE_QUESTIONS_MODEL` (or `STORYFORGE_MODEL`) names another, which is
@@ -51,6 +58,11 @@ FLOORS: dict[str, float | None] = {
     'recall_any': 0.4706,
     'false_alarms': 0,
     'split': 3,
+    # #673's review (T6, CR-2/SF-3): a prompt that breaks quoting shows here,
+    # not only as a recall drop; and what the gate's selection costs recall
+    'misquoted': 0,
+    'selection_lost': 1,
+    'recall_selected': 0.4706,
 }
 
 
@@ -63,7 +75,8 @@ def validate(data: dict, book_dir: str, injections: dict[str, dict]) -> list[str
     """Problems with the set against the book; empty when sound: a fact's
     quote not in the scene it names, a fact asked about in the scene that
     establishes it, an unknown fact, injection or `yes`, an injection whose
-    `find` isn't once in its scene, or a `yes` fact the scene isn't asked."""
+    `find` isn't once in its scene, a `yes` fact the scene isn't asked, or a
+    scene's `cast` missing or naming someone not in characters.csv."""
     from storyforge.questions import QUESTION_TYPES
     from storyforge.quotes import quote_in
     problems = []
@@ -83,6 +96,15 @@ def validate(data: dict, book_dir: str, injections: dict[str, dict]) -> list[str
                 problems.append(f'{scene}: unknown fact {fid}')
             elif facts[fid]['scene'] == scene:
                 problems.append(f'{scene}: asks about {fid}, which it establishes')
+    from storyforge.enrich import load_alias_map
+    known = set(load_alias_map(os.path.join(book_dir, 'reference', 'characters.csv')).values())
+    for scene in data.get('scenes', {}):
+        cast = data.get('cast', {}).get(scene)
+        if not cast:
+            problems.append(f'{scene}: no cast')
+        for who in cast or []:
+            if who not in known:
+                problems.append(f'{scene}: cast {who} is not in characters.csv')
     ids = [v['id'] for v in data.get('variants', [])]
     for dup in sorted({i for i in ids if ids.count(i) > 1}):
         problems.append(f'duplicate variant {dup}')
@@ -126,6 +148,32 @@ def questions_for(data: dict, scene: str) -> list:
     return out
 
 
+def selected(data: dict, book_dir: str, scene: str, prose: str) -> set[str]:
+    """The labelled facts the gate's selection would ask `scene` (`prose`)
+    about: presence from its `cast` (as `at` records), its scenes.csv
+    locations and the registry names in the prose; the facts as binding,
+    fixed ledger rows."""
+    from storyforge import ledger, questions
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.enrich import load_alias_map
+    from storyforge.typed_state import Record
+    ref = os.path.join(book_dir, 'reference')
+    chars = load_alias_map(os.path.join(ref, 'characters.csv'))
+    places = load_alias_map(os.path.join(ref, 'locations.csv'))
+    names, _ = ledger.subject_names(book_dir)
+    location = _read_csv_as_map(os.path.join(ref, 'scenes.csv')).get(scene, {}).get(
+        'location', '')
+    present = questions.present_subjects(
+        [Record('at', who, '') for who in data['cast'][scene]], chars, places, location,
+        prose=prose, names=names)
+    rows = [{'id': fid, 'scene_id': f['scene'], 'type': f['type'], 'subject': f['subject'],
+             'statement': f['statement'], 'quote': f['quote'], 'status': 'binding',
+             'mutable': 'fixed'} for fid, f in data['facts'].items()]
+    picked = questions.facts_to_ask(rows, scene, ledger.scene_order(book_dir), present,
+                                    registry=set(names), chars=chars, places=places)
+    return {r['id'] for r in picked.facts}
+
+
 #: Words a finding's quote must share in a row with the injected quote to
 #: be on its words (all of them, when it has fewer)
 SHARED_RUN = 3
@@ -149,10 +197,12 @@ def lands_on(quote: str, where: str) -> bool:
 
 def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) -> dict:
     """`outcomes`: variant id → {'findings': {fact id: scene quote},
-    'split': n, 'misquoted': n}. Returns metrics, by_code and the missed /
-    false-alarm lists."""
+    'split': n, 'misquoted': n, 'selected': the fact ids the gate's
+    selection asks (absent: all)}. Returns metrics, by_code and the missed
+    / false-alarm / lost-by-selection lists."""
     from storyforge.checker import CODE_OF_TYPE
-    yes_total = caught = caught_any = 0
+    yes_total = caught = caught_any = caught_selected = 0
+    lost = []
     false = {'control': 0, 'benign': 0, 'error': 0}
     by_code: dict[str, dict] = {}
     missed, alarms = [], []
@@ -166,10 +216,14 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
                 row['cases'] += 1
                 yes_total += 1
                 where = [c['quote'] for c in injections[v['injection']].get('contradicted', [])]
+                picked = fid in got.get('selected', data['scenes'][v['scene']])
+                if not picked:
+                    lost.append(f'{v["id"]}:{fid}')
                 if quote is not None:
                     caught_any += 1
                     if any(lands_on(quote, w) for w in where):
                         caught += 1
+                        caught_selected += picked
                         row['caught'] += 1
                         continue
                 missed.append(v['id'])
@@ -183,6 +237,8 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
         'yes_questions': yes_total,
         'recall': round(caught / yes_total, 4) if yes_total else 0.0,
         'recall_any': round(caught_any / yes_total, 4) if yes_total else 0.0,
+        'recall_selected': round(caught_selected / yes_total, 4) if yes_total else 0.0,
+        'selection_lost': len(lost),
         'false_alarms': sum(false.values()),
         'false_alarms_control': false['control'],
         'false_alarms_benign': false['benign'],
@@ -192,7 +248,8 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
     }
     codes = {c: {'cases': r['cases'], 'recall': round(r['caught'] / r['cases'], 4)}
              for c, r in sorted(by_code.items())}
-    return {'metrics': metrics, 'by_code': codes, 'missed': missed, 'alarms': alarms}
+    return {'metrics': metrics, 'by_code': codes, 'missed': missed, 'alarms': alarms,
+            'lost': lost}
 
 
 def floor_gates(metrics: dict, floors: dict) -> tuple[list[Gate], list[str]]:
@@ -224,7 +281,8 @@ def run(ctx):
         r = questions.ask_questions(v['scene'], prose, questions_for(data, v['scene']),
                                     model=model)
         outcomes[v['id']] = {'findings': {f.fact_id: f.scene_quote for f in r.findings},
-                             'split': r.split, 'misquoted': r.misquoted}
+                             'split': r.split, 'misquoted': r.misquoted,
+                             'selected': selected(data, book_dir, v['scene'], prose)}
     result = score(data, outcomes, injections)
     gates, notes = floor_gates(result['metrics'], FLOORS)
     m = result['metrics']
@@ -232,6 +290,9 @@ def run(ctx):
               f'missed {len(result["missed"])} of {m["yes_questions"]}: '
               + ', '.join(result['missed']),
               f'false alarms ({m["false_alarms"]}): ' + ', '.join(result['alarms']),
+              f'yes facts the gate\'s selection would not ask ({m["selection_lost"]}): '
+              + ', '.join(result['lost']),
+              'by_code has 3-6 cases a code: too few to compare codes',
               'plan target (not gated): with the typed checks, the open checker\'s recall on the '
               'frozen E4/E8, with fewer false alarms']
     return SuiteOutput(metrics=m, by_code=result['by_code'], gates=gates, notes=notes)

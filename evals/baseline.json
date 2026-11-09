@@ -1280,6 +1280,27 @@
           "op": "==",
           "passed": true,
           "threshold": 3
+        },
+        {
+          "actual": 0,
+          "name": "misquoted",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 1,
+          "name": "selection_lost",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 0.4706,
+          "name": "recall_selected",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.4706
         }
       ],
       "metrics": {
@@ -1291,6 +1312,8 @@
         "questions": 96,
         "recall": 0.4706,
         "recall_any": 0.4706,
+        "recall_selected": 0.4706,
+        "selection_lost": 1,
         "split": 3,
         "variants": 38,
         "yes_questions": 17
@@ -1300,6 +1323,8 @@
         "model: claude-haiku-5-5",
         "missed 9 of 17: qs-009, qs-013, qs-016, qs-018, qs-019, qs-022, qs-033, qs-034, qs-035",
         "false alarms (0): ",
+        "yes facts the gate's selection would not ask (1): qs-018:partner",
+        "by_code has 3-6 cases a code: too few to compare codes",
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,

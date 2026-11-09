@@ -198,6 +198,75 @@
    "ebenezer"
   ]
  },
+ "cast": {
+  "charity-collectors-visit-scrooge": [
+   "ebenezer-scrooge",
+   "first-portly-gentleman",
+   "second-portly-gentleman"
+  ],
+  "cratchit-family-mourns-tiny-tim": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-yet-to-come",
+   "bob-cratchit",
+   "mrs-cratchit"
+  ],
+  "scrooge-raises-bobs-salary": [
+   "ebenezer-scrooge",
+   "bob-cratchit"
+  ],
+  "scrooge-reads-his-own-gravestone": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-yet-to-come"
+  ],
+  "scrooge-visits-nephews-dinner": [
+   "ebenezer-scrooge",
+   "fred",
+   "freds-niece"
+  ],
+  "merchants-discuss-dead-man": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-yet-to-come"
+  ],
+  "spirit-ages-ignorance-and-want": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-present",
+   "ignorance",
+   "want",
+   "ghost-of-christmas-yet-to-come"
+  ],
+  "cratchit-family-christmas-dinner": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-present",
+   "bob-cratchit",
+   "mrs-cratchit",
+   "tiny-tim"
+  ],
+  "belle-family-happy-without-scrooge": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-past",
+   "belle",
+   "belles-husband"
+  ],
+  "nephew-fred-christmas-party": [
+   "ebenezer-scrooge",
+   "ghost-of-christmas-present",
+   "fred",
+   "freds-niece",
+   "topper"
+  ],
+  "marley-ghost-arrives": [
+   "ebenezer-scrooge",
+   "jacob-marley"
+  ],
+  "scrooge-buys-prize-turkey": [
+   "ebenezer-scrooge",
+   "boy-scrooge-sends-for-turkey"
+  ],
+  "scrooge-pledges-donation-streets": [
+   "ebenezer-scrooge",
+   "first-portly-gentleman"
+  ]
+ },
  "variants": [
   {
    "id": "qs-006",

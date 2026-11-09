@@ -53,7 +53,10 @@ class TestFixture:
         (lambda d: d['variants'][0].update(yes=['camden']), 'is not asked in'),
         (lambda d: d['variants'][0].update(injection='e2-carol-b01'), 'does not apply once'),
         (lambda d: d['variants'][-1].update(yes=['partner']), 'a benign variant'),
-        (lambda d: d['facts']['ebenezer'].update(type='knowledge'), 'not one the layer asks'),
+        (lambda d: d['facts']['ebenezer'].update(type='promise'), 'not one the layer asks'),
+        (lambda d: d['cast'].pop('marley-ghost-arrives'), 'marley-ghost-arrives: no cast'),
+        (lambda d: d['cast']['marley-ghost-arrives'].append('nobody'),
+         'cast nobody is not in characters.csv'),
     ])
     def test_validation_names_the_problem(self, break_it, problem):
         m = _module()
@@ -100,6 +103,40 @@ class TestScore:
         assert got['by_code'] == {'TRT': {'cases': 1, 'recall': 1.0},
                                   'WLD': {'cases': 1, 'recall': 0.0}}
         assert got['missed'] == ['v2'] and got['alarms'] == ['v2:a', 'c:b']
+
+
+    def test_a_yes_fact_the_selection_drops_is_lost(self):
+        # CR-2/SF-3/TD1: the gate's recall is capped by what it asks
+        outcomes = {'v1': {'findings': {'a': 'past the red door'}, 'split': 0, 'misquoted': 0,
+                           'selected': {'b'}},
+                    'v2': {'findings': {}, 'split': 0, 'misquoted': 0, 'selected': {'b'}},
+                    'c': {'findings': {}, 'split': 0, 'misquoted': 0}}
+        got = _module()['score'](self.DATA, outcomes, self.INJ)
+        m = got['metrics']
+        assert (m['recall'], m['recall_selected'], m['selection_lost']) == (0.5, 0.0, 1)
+        assert got['lost'] == ['v1:a']
+
+
+class TestSelection:
+    def _selected(self, scene):
+        m = _module()
+        data = m['load_cases']()
+        with open(os.path.join(BOOK, 'scenes', f'{scene}.md'), encoding='utf-8') as f:
+            return m['selected'](data, BOOK, scene, f.read())
+
+    def test_a_group_is_asked_and_a_present_ghost_is(self):
+        # the-spirits is in no registry (CR-1); the phantom is in the cast
+        got = self._selected('merchants-discuss-dead-man')
+        assert {'shadows', 'silent-spirit'} <= got
+
+    def test_someone_only_named_in_the_prose_is_asked(self):
+        # Tiny Tim is dead in the mourning scene, named, not present (CR-2)
+        assert 'tim-lame' in self._selected('cratchit-family-mourns-tiny-tim')
+
+    def test_marley_unnamed_in_belles_scene_is_not(self):
+        # the one yes fact the selection loses (qs-018): the registry knows
+        # "Jacob Marley" and "Marley's Ghost", and the scene says neither
+        assert 'partner' not in self._selected('belle-family-happy-without-scrooge')
 
 
 def _reply(answers):
