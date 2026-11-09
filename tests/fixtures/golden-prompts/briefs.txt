@@ -92,7 +92,7 @@ id|status
 
 ### Rules
 
-- Write every field as terse notes of what happens and what is true: who does what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about what the moment means. No interpretation: never say what a moment means or reveals, what a character feels underneath, or what the reader should take from it, and no polished or quotable sentences. The drafter finds the words; these notes give only the facts.
+- Write every scene row's cells (the CSV blocks) as terse notes of what happens and what is true: who does what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about what the moment means. No interpretation in a scene row: never say what a moment means or reveals, what a character feels underneath, or what the reader should take from it, and no polished or quotable sentences. The drafter finds the words; these notes give only the facts. The story architecture and the character and world bibles are where a theme, a want, a need, a wound or a lie belongs: write those plainly, as short notes too.
 - knowledge_in uses the same fact ids as prior scenes' knowledge_out, never sentences — validation will check this
 - Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
@@ -101,7 +101,7 @@ id|status
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have its outcome and key_actions filled
-- Where a key_actions item does quote a line: Label every quoted line a character speaks, in key_dialogue or key_actions, as `Name: "line"`: start the label with the character's name, id or one of its aliases exactly as characters.csv writes it (nothing added before it, no possessive), one character per label, repeated for each line, even when the same character speaks again. Leave the label off only when it isn't clear who speaks.
+- Where an existing `must:` key_actions item quotes a line, keep it labelled: Label every quoted line a character speaks, in key_dialogue or key_actions, as `Name: "line"`: start the label with the character's name, id or one of its aliases exactly as characters.csv writes it (nothing added before it, no possessive), one character per label, repeated for each line, even when the same character speaks again. Leave the label off only when it isn't clear who speaks.
 - A key_actions item an existing brief starts with `must:` is the author's: copy it word for word, marker and all. Never add `must:` yourself
 - A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
 - Scenes with no continuity_deps can be drafted in parallel — maximize these

@@ -58,6 +58,18 @@ def test_every_elaboration_prompt_asks_for_terse_notes(project_dir, name, build)
     assert 'Briseis is the sixth stud' in pe.NOTES_RULE
 
 
+def test_the_notes_rule_is_scoped_to_scene_rows(project_dir):
+    """#644's review CR-2: the spine prompt asks for a theme and a Lie vs.
+    Need; "no interpretation" covers the scene rows, and the architecture
+    and bible documents are named as where those belong."""
+    assert "Write every scene row's cells (the CSV blocks)" in pe.NOTES_RULE
+    assert 'No interpretation in a scene row' in pe.NOTES_RULE
+    assert ('The story architecture and the character and world bibles are where a theme, '
+            'a want, a need, a wound or a lie belongs') in pe.NOTES_RULE
+    spine = pe.build_spine_prompt(project_dir, PLUGIN, 'seed')
+    assert '(Lie vs. Need)' in spine and pe.NOTES_RULE in spine
+
+
 @pytest.mark.parametrize('build', [
     lambda p: pe.build_architecture_prompt(p, PLUGIN),
     lambda p: pe.build_map_prompt(p, PLUGIN),

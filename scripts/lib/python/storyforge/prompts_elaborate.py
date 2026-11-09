@@ -11,18 +11,24 @@ from .illustrations import read_scene_prose
 from .prompts import read_yaml_field
 from .scenes import SCENE_ID_RULE
 
-#: How every elaboration stage writes what it writes (#644, plan D4): terse
-#: notes of what happens and what is true, never interpretation. Every
+#: How every elaboration stage writes its scene rows (#644, plan D4): terse
+#: notes of what happens and what is true, never interpretation. Scoped to
+#: the CSV rows: the architecture and bible documents exist to name a theme,
+#: a need or a lie (its review CR-2), so they are exempt from "no
+#: interpretation", not from terseness. Every
 #: elaborated field is model prose the drafter reads, and the drafter writes
 #: more like what it reads: on *Wrath Like Smoke* a brief's subtext ("let the
 #: list grow, and never call it pride") became the aphoristic closing lines
 #: the author singled out.
-NOTES_RULE = ('Write every field as terse notes of what happens and what is true: who does '
-              'what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; '
-              'Briseis is the sixth stud"), not a paragraph about what the moment means. No '
-              'interpretation: never say what a moment means or reveals, what a character '
-              'feels underneath, or what the reader should take from it, and no polished or '
-              'quotable sentences. The drafter finds the words; these notes give only the facts.')
+NOTES_RULE = ('Write every scene row\'s cells (the CSV blocks) as terse notes of what happens '
+              'and what is true: who does what, to whom, with what ("Agamemnon counts the '
+              'gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about '
+              'what the moment means. No interpretation in a scene row: never say what a '
+              'moment means or reveals, what a character feels underneath, or what the reader '
+              'should take from it, and no polished or quotable sentences. The drafter finds '
+              'the words; these notes give only the facts. The story architecture and the '
+              'character and world bibles are where a theme, a want, a need, a wound or a lie '
+              'belongs: write those plainly, as short notes too.')
 
 #: The craft-framework columns as notes, not requirements (#643, #644): what
 #: the architecture and map prompts say about them
@@ -564,7 +570,7 @@ id|status
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have its outcome and key_actions filled
-- Where a key_actions item does quote a line: {LABEL_RULE}
+- Where an existing `must:` key_actions item quotes a line, keep it labelled: {LABEL_RULE}
 - A key_actions item an existing brief starts with `must:` is the author's: copy it word for word, marker and all. Never add `must:` yourself
 - A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
 - Scenes with no continuity_deps can be drafted in parallel — maximize these

@@ -97,10 +97,13 @@ def test_extraction_phase_3_asks_for_labelled_lines():
 
 def test_the_briefs_stage_asks_for_labelled_lines(project_dir):
     """#644: the stage writes no key_dialogue, and key_actions are events, not
-    lines; a key_actions item that does quote one is labelled."""
+    lines; an existing must: item that quotes one keeps its label (its
+    review C9: never read as permission to quote)."""
     p = pe.build_briefs_prompt(project_dir, PLUGIN)
     assert '- **key_dialogue**' not in p
-    line = next(x for x in p.splitlines() if x.startswith('- Where a key_actions item'))
+    assert 'Where a key_actions item does quote a line' not in p
+    line = next(x for x in p.splitlines()
+                if x.startswith('- Where an existing `must:` key_actions item quotes a line'))
     assert LABEL_RULE in line
 
 
