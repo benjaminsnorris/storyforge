@@ -27,9 +27,11 @@ author then corrects. Everything lives in the author voice repo (plan B0):
   exemplars were chosen by (no author to pick them): every typical passage,
   topped up to `SHORTLIST_MIN` with the nearest of the rest.
 
-The two model calls share one cached system block (the sample and the
-fingerprint), so the second costs little more than its own answer. The
-sample is `SAMPLE_WINDOWS` runs of about `voiceprint.CHUNK_WORDS` words,
+The two model calls send the same system block (the sample and the
+fingerprint) but no cache mark: their structured-output schemas differ, and
+the schema is part of the cached prefix, so a cache written by one is never
+read by the other (measured on the first Austen recording: each call wrote
+the whole block, at 1.25 times the input price). The sample is `SAMPLE_WINDOWS` runs of about `voiceprint.CHUNK_WORDS` words,
 evenly spaced through the fingerprinted corpus (the pieces
 `fingerprint.json` names). Neither prompt names the author: the claims have
 to come from the text.
@@ -329,9 +331,9 @@ def render_fingerprint(fp: vp.Fingerprint, baseline: vp.Baseline | None = None) 
 
 def system_blocks(voice: Voice, sample: Sample,
                   baseline: vp.Baseline | None = None) -> list[dict]:
-    """The system block both calls share (cached): the sample, then the
-    fingerprint. No temp path, date or author name in it, so a recording
-    replays."""
+    """The system block both calls send: the sample, then the fingerprint.
+    No temp path, date or author name in it, so a recording replays. Not
+    marked for the cache (see the module docstring)."""
     text = (
         'You are helping a writer see their own prose voice. Below are a sample of '
         'their writing and the fingerprint measured over their corpus.\n\n'
@@ -340,7 +342,7 @@ def system_blocks(voice: Voice, sample: Sample,
         'sample, with its word count: [number, words].\n\n'
         f'{render_sample(sample)}\n\n'
         f'# The fingerprint\n\n{render_fingerprint(voice.fingerprint, baseline)}\n')
-    return [{'type': 'text', 'text': text, 'cache_control': {'type': 'ephemeral'}}]
+    return [{'type': 'text', 'text': text}]
 
 
 # ============================================================================
@@ -916,24 +918,26 @@ def accept_exemplars(voice_dir: str) -> Accepted:
 # The calls
 # ============================================================================
 
-#: rough tokens per character of English prose and markup, for the forecast
-_TOKENS_PER_CHAR = 0.27
+#: tokens per character of the prompt (the numbered sample and the
+#: fingerprint's figures): 66,804 tokens for 196,868 characters on Austen
+_TOKENS_PER_CHAR = 0.34
+#: output tokens per call, thinking included, for the forecast (Austen,
+#: 2026-11-08: 1,356 and 5,475)
+FORECAST_OUTPUT = {'description': 1500, 'shortlist': 5500}
 
 
 def forecast(system: Sequence[dict], model: str, calls: Sequence[str] = ('description',
                                                                           'shortlist')) -> float:
-    """What `calls` would cost, in US dollars: the first writes the shared
-    system block to the cache, later ones read it; each answer at its
-    budget's half (plus nothing for thinking: a forecast, not a bound)."""
+    """What `calls` would cost, in US dollars: each sends the whole system
+    block and its own prompt, and writes about `FORECAST_OUTPUT` tokens (a
+    forecast, not a bound: thinking varies)."""
     from storyforge.costs import calculate_cost
-    sys_tokens = int(sum(len(b['text']) for b in system) * _TOKENS_PER_CHAR)
+    sys_chars = sum(len(b['text']) for b in system)
     total = 0.0
-    for i, call in enumerate(calls):
+    for call in calls:
         prompt = description_prompt() if call == 'description' else shortlist_prompt()
-        answer = DESCRIPTION_TOKENS if call == 'description' else SHORTLIST_TOKENS
-        total += calculate_cost(model, int(len(prompt) * _TOKENS_PER_CHAR), answer // 2,
-                                cache_read=sys_tokens if i else 0,
-                                cache_create=0 if i else sys_tokens)
+        total += calculate_cost(model, int((sys_chars + len(prompt)) * _TOKENS_PER_CHAR),
+                                FORECAST_OUTPUT[call])
     return total
 
 
