@@ -46,8 +46,7 @@ Before doing anything else, orient yourself:
      craft-framework floor checks (`scene_id` and `quote` empty; `finding`
      names the rung, the check and the first scene; `command` is the
      `storyforge score --level N` that lists every scene) (#643: a missing value shift or turning
-     point, the action/sequel balance, a brief with no goal, conflict,
-     crisis or decision). They never keep a rung thin; mention them as
+     point, the action/sequel balance). They never keep a rung thin; mention them as
      observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
@@ -157,7 +156,7 @@ Check that scene files exist in `scenes/`. If ready, provide the command:
 Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
 For polish-only: `./storyforge revise --polish`
 
-**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — the briefs lack real dramatic conflict. Running `--polish --loop` will now detect this automatically and fix the briefs before polishing." Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
+**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — in the briefs." `--polish --loop` names those scenes in a NOTE but no longer rewrites their goal, conflict, crisis or decision (the author's notes, plan decision 9): suggest a change to the brief's events (`storyforge hone`) or a note the author writes. Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
 
 **"Score" / "Score my scenes":**
 Invoke the `score` skill.

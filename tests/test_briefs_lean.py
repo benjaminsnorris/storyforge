@@ -85,11 +85,10 @@ def test_value_shifts_and_turns_are_notes_not_rules(project_dir, build):
 
 def test_the_briefs_prompt_names_the_authors_notes_as_not_its_own(project_dir):
     prompt = pe.build_briefs_prompt(project_dir, PLUGIN)
-    assert ('Not yours to write: key_dialogue, subtext, emotions, motifs, motif_details. '
-            'They are the '
+    assert ('Not yours to write: goal, conflict, crisis, decision, key_dialogue, subtext, '
+            'emotions, motifs, motif_details. They are the '
             "author's optional notes") in prompt
     assert 'A motif is noticed in the draft and recorded after' in prompt
-    assert 'optional notes. Fill one only when the scene plainly has it' in prompt
 
 
 # -- drafting with the optional columns empty ---------------------------------
@@ -190,7 +189,8 @@ def test_a_fact_only_brief_is_complete(project_dir):
     """#644's review T1, CR-5, TD-5, C3: structural completeness counts the
     brief's facts. A brief the briefs stage writes (no author notes, no craft
     notes) has no "Missing required fields" finding; its empty craft notes
-    are one advisory finding that carries no weight."""
+    are one advisory finding that carries no weight, and its empty author
+    notes (goal, conflict, crisis, decision since plan decision 9) none."""
     from storyforge import structural
     from storyforge.elaborate import BRIEF_FACT_COLUMNS, _read_csv_as_map
     _fact_only(project_dir)
@@ -202,7 +202,8 @@ def test_a_fact_only_brief_is_complete(project_dir):
     assert not [f for f in mine if f['message'].startswith('Missing required fields')]
     [craft] = [f for f in mine if f.get('advisory')]
     assert craft['severity'] == 'minor'
-    assert set(craft['fields']) >= {'goal', 'conflict', 'crisis', 'decision', 'value_shift'}
+    assert 'value_shift' in craft['fields']
+    assert not set(craft['fields']) & {'goal', 'conflict', 'crisis', 'decision'}
     for col in AUTHOR_NOTE_COLUMNS:
         assert col not in structural.ENRICHMENT_FIELDS + structural.REQUIRED_FIELDS
     assert set(BRIEF_FACT_COLUMNS) <= set(structural.REQUIRED_FIELDS)
@@ -215,21 +216,21 @@ def test_a_fact_only_brief_is_complete(project_dir):
 
 
 def test_the_outcome_is_worded_for_a_scene_without_a_goal(project_dir):
-    """#644's review CR-6 (and #643's CR-3): outcome stays required, and its
-    values are defined against a goal; a scene with none is judged by what
-    the POV character is trying to do."""
+    """#644's review CR-6 (and #643's CR-3), plan decision 9: outcome stays
+    required, and is judged by what the POV character is trying to do, never
+    against a goal (the briefs stage writes none)."""
     prompt = pe.build_briefs_prompt(project_dir, PLUGIN)
-    assert ('in a scene with no goal, against what the POV character is trying to do or '
-            'hoping for, and never fill goal just to judge the outcome by it') in prompt
+    assert 'judged by what they are trying to do or hoping for in the scene' in prompt
+    assert 'yes (it goes their way)' in prompt
 
 
 def test_gap_fill_may_leave_a_craft_note_empty(project_dir):
     """#644's review CR-5: gap-fill no longer forces a value into a craft
     note the scene doesn't have; a fact field gets no such allowance."""
-    p = pe.build_gap_fill_prompt('act1-sc01', 'g', ['value_shift', 'crisis', 'location'],
+    p = pe.build_gap_fill_prompt('act1-sc01', 'g', ['value_shift', 'turning_point', 'location'],
                                  project_dir, os.path.join(project_dir, 'scenes'))
-    assert ('value_shift, crisis: craft-framework notes, not requirements. Fill one only '
-            'when the scene plainly has it; otherwise leave its cell empty') in p
+    assert ('value_shift, turning_point: craft-framework notes, not requirements. Fill one '
+            'only when the scene plainly has it; otherwise leave its cell empty') in p
     p = pe.build_gap_fill_prompt('act1-sc01', 'g', ['location'], project_dir,
                                  os.path.join(project_dir, 'scenes'))
     assert 'craft-framework notes' not in p

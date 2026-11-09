@@ -1948,15 +1948,26 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
     return cycle_dir, diag_rows
 
 
-def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str]:
-    """Identify scenes needing upstream fixes based on diagnosis root_cause.
+#: Why a scene whose brief the diagnosis blames gets no brief fix (plan
+#: decision 9): the fix rewrote goal, conflict, crisis and decision, which
+#: are now the author's notes, never generated
+NO_BRIEF_FIX = ('goal, conflict, crisis and decision are the author\'s notes (plan '
+                'decision 9), never rewritten; amend the brief by hand, or `storyforge hone` '
+                'for its events')
 
-    Returns sorted list of scene IDs where root_cause is 'brief' and score is low.
-    Scene IDs are drawn from the worst_items field of matching diagnosis rows.
-    An adaptation's scenes with source drift are upstream too (#477; see
-    `_source_drift_scenes`); without a `source:` block there are none.
+
+def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str]:
+    """The scenes whose briefs `_fix_upstream_briefs` fixes before a
+    redraft: an adaptation's scenes with source drift (#477; see
+    `_source_drift_scenes`; without a `source:` block there are none).
+
+    The scenes the diagnosis gives a `brief` root cause (the worst_items of
+    its rows) are no longer fixed: the fix rewrote goal, conflict, crisis
+    and decision, the author's notes since plan decision 9. They are listed
+    for the author in a NOTE (`NO_BRIEF_FIX`) and left to the craft passes.
     """
     upstream = set(_source_drift_scenes(project_dir))
+    blamed: set[str] = set()
     for row in diag_rows:
         if row.get('root_cause') != 'brief':
             continue
@@ -1966,7 +1977,10 @@ def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str
         for sid in worst.split(';'):
             sid = sid.strip()
             if sid:
-                upstream.add(sid)
+                blamed.add(sid)
+    if blamed - upstream:
+        log(f'  NOTE: the diagnosis blames the briefs of {", ".join(sorted(blamed - upstream))}; '
+            f'not rewritten: {NO_BRIEF_FIX}')
     return sorted(upstream)
 
 
@@ -1975,15 +1989,22 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
     (`source_fidelity.drift_state`) on a brief or prose unchanged since it was
     scored. Says what it can't see: no results yet, and results scored on a
     brief or prose since changed. In `free` mode drift is listed for the
-    author and nothing is returned: free mode doesn't undo departures."""
+    author and nothing is returned: free mode doesn't undo departures. A
+    scene whose only drift is in the brief's author notes (goal,
+    key_dialogue...: `_split_note_drift`) is listed for the author and not
+    returned: no fix rewrites those (#644, plan decision 9), so it is no
+    upstream work, no forecast, and no "drift fixed" (PR #675's review SF-1,
+    SF-2, CR-1)."""
     from storyforge import source
     from storyforge.source_fidelity import drift_state
     cfg = source.read_config(project_dir)
     if cfg is None:
         return {}
     state = drift_state(project_dir)
+    fixable = {sid: lines for sid, lines in state.drift.items()
+               if _split_note_drift(lines)[0]}
     if quiet:
-        return {} if cfg.mode == 'free' else state.drift
+        return {} if cfg.mode == 'free' else fixable
     if not state.checked:
         log('  Source fidelity: no results yet, so source drift is not checked; run '
             '`storyforge score --source-fidelity briefs` (or a full score for the prose)')
@@ -1997,27 +2018,30 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
         log(f'  Source drift in {len(state.drift)} scene(s), left as it is (mode: free): '
             f'{", ".join(sorted(state.drift))}')
         return {}
-    return state.drift
+    notes_only = sorted(set(state.drift) - set(fixable))
+    if notes_only:
+        log(f'  NOTE: source drift only in the author\'s notes, not rewritten (#644, plan '
+            f'decision 9); amend them by hand if they should follow the source: '
+            + '; '.join(f'{sid} ({" / ".join(state.drift[sid])})' for sid in notes_only))
+    return fixable
 
 
 _PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
 
 
-# The fields the brief fix rewrites; their current text does not vouch for a
-# name (an earlier fix may have invented it).
-_BRIEF_FIX_FIELDS = ('goal', 'conflict', 'crisis', 'decision')
-# What a source-drift fix rewrites (#477): drift is in events, outcomes and
-# lines as well as in the dramatic four. Drift in on_stage or knowledge_out
-# is shown to the fix but those are not rewritten here (they belong to the
-# intent and the ledger); the fix can only bring the events back. Never
-# key_dialogue (#644): it's one of the author's notes (`AUTHOR_NOTE_COLUMNS`),
-# shown to the fix as it stands; drift in it is reported for the author.
-_SOURCE_FIX_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
-                      'key_actions')
+# What a source-drift fix rewrites (#477): the brief's facts, its events and
+# outcome. Their current text does not vouch for a name (an earlier fix may
+# have invented it). Drift in on_stage or knowledge_out is shown to the fix
+# but those are not rewritten here (they belong to the intent and the
+# ledger); the fix can only bring the events back. Never the author's notes
+# (`elaborate.AUTHOR_NOTE_COLUMNS`: goal, conflict, crisis, decision,
+# key_dialogue...; #644, plan decision 9): shown to the fix as they stand,
+# and drift in one is reported for the author.
+_SOURCE_FIX_FIELDS = ('outcome', 'key_actions')
 
 
 def _book_text(known_text: str, prose: str, brief: dict,
-               fixed: tuple[str, ...] = _BRIEF_FIX_FIELDS) -> str:
+               fixed: tuple[str, ...] = _SOURCE_FIX_FIELDS) -> str:
     """What a rewrite of one scene's brief may name: the reference text, the
     scene's prose, and the brief fields the fix leaves alone."""
     kept = ' '.join(str(v) for k, v in brief.items() if k not in fixed)
@@ -2040,24 +2064,26 @@ def _brief_field_re(names: tuple[str, ...]) -> re.Pattern:
     return re.compile(rf'^[\s*_#>-]*({alternation})[*_]*\s*:[*_]*\s*(.*?)\s*$')
 
 
-_BRIEF_FIELD_RE = _brief_field_re(_BRIEF_FIX_FIELDS)
-
-
-def _split_dialogue_drift(lines: list[str]) -> tuple[list[str], list[str]]:
-    """(drift the source-drift fix rewrites, drift in key_dialogue) of one
-    scene's drift lines (`source_fidelity.drift_state`: "{target} {element}:
-    {evidence}"). key_dialogue is the author's (#644), so its drift is
-    reported, never rewritten."""
-    fix, dialogue = [], []
+def _split_note_drift(lines: list[str]) -> tuple[list[str], list[str]]:
+    """(drift the source-drift fix works from, drift in the brief's author
+    notes) of one scene's drift lines (`source_fidelity.drift_state`:
+    "{target} {element}: {evidence}"). The author's notes
+    (`elaborate.AUTHOR_NOTE_COLUMNS`: goal, key_dialogue...; #644, plan
+    decision 9) are reported, never rewritten. Drift the prose has stays the
+    fix's: it brings the events back."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    fix, notes = [], []
     for line in lines:
-        (dialogue if line.startswith('brief key_dialogue') else fix).append(line)
-    return fix, dialogue
+        head = line.split(':', 1)[0].split()
+        is_note = len(head) == 2 and head[0] == 'brief' and head[1] in AUTHOR_NOTE_COLUMNS
+        (notes if is_note else fix).append(line)
+    return fix, notes
 
 
 def _parse_brief_fix(response: str,
-                     names: tuple[str, ...] = _BRIEF_FIX_FIELDS) -> dict[str, str]:
+                     names: tuple[str, ...] = _SOURCE_FIX_FIELDS) -> dict[str, str]:
     """The fields of a brief-fix reply, tolerating markdown bold."""
-    pattern = _BRIEF_FIELD_RE if names == _BRIEF_FIX_FIELDS else _brief_field_re(names)
+    pattern = _brief_field_re(names)
     fields = {}
     for line in response.splitlines():
         m = pattern.match(line)
@@ -2109,10 +2135,13 @@ def _source_drift_fix(project_dir: str, scene_id: str, scene: dict, intent: dict
                                                   tables=ctx.tables)
                                for slug, sid in refs)
     rules = ctx.rules
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
     current = '\n'.join(f'{k.upper()}: {brief.get(k, "")}' for k in _SOURCE_FIX_FIELDS)
-    if (brief.get('key_dialogue') or '').strip():
-        current += (f'\n\nThe author\'s key dialogue notes (theirs, not yours to rewrite or '
-                    f'repeat): {brief["key_dialogue"]}')
+    notes = [f'{k}: {brief[k].strip()}' for k in AUTHOR_NOTE_COLUMNS
+             if (brief.get(k) or '').strip()]
+    if notes:
+        current += ('\n\nThe author\'s notes (theirs, not yours to rewrite or repeat):\n'
+                    + '\n'.join(notes))
     drift_lines = '\n'.join(f'- {d}' for d in drift)
     reply_format = '\n'.join(f'{k.upper()}: [rewritten {k}]' for k in _SOURCE_FIX_FIELDS)
     prompt = f"""You are a story editor bringing a scene's brief back to the source it adapts.
@@ -2153,22 +2182,26 @@ Respond ONLY with the {len(_SOURCE_FIX_FIELDS)} fields in this exact format (no 
 
 def _fix_upstream_briefs(project_dir: str,
                          scene_ids: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Rewrite goal/conflict/crisis/decision for scenes with upstream issues.
+    """Fix the briefs of an adaptation's scenes with source drift
+    (`_source_drift_scenes`, #477): shown the drift, its source scenes and
+    the version rules, the fix rewrites `_SOURCE_FIX_FIELDS` (outcome and
+    key_actions), may also name what its source scenes name, and is refused
+    on an outcome outside `schema.VALID_OUTCOMES`, when its map row or source
+    scenes are gone, when the reply lacks a field, or when it names a
+    capitalized word found nowhere in the reference files, this scene's
+    prose, its source scenes or the brief fields the fix keeps (a WARNING,
+    and the brief left as it was). Drift in the author's notes is reported,
+    never rewritten.
 
-    Uses API to generate briefs with genuine dramatic opposition, from the
-    scene's own characters, place, plan and prose. A rewrite is rejected with
-    a WARNING, and the brief left as it was, when it lacks one of the four
-    fields or names a capitalized word found nowhere in the reference files,
-    this scene's prose or the brief fields the fix keeps. An adaptation's
-    scene with source drift (`_source_drift_scenes`) gets the source-drift fix
-    instead: shown the drift, its source scenes and the version rules, it
-    rewrites `_SOURCE_FIX_FIELDS`, may also name what its source scenes name,
-    and is refused on an outcome outside `schema.VALID_OUTCOMES` or when its
-    map row or source scenes are gone. Returns the ids of
-    the scenes whose briefs were rewritten (only those need a redraft) and,
-    for each scene left unchanged, why.
+    A scene without source drift is left alone, with a NOTE saying why
+    (`NO_BRIEF_FIX`): the dramatic
+    opposition rewrite of goal, conflict, crisis and decision is gone (plan
+    decision 9: they are the author's notes, never generated; see
+    `_detect_upstream_scenes`). Returns the ids of the scenes whose briefs
+    were rewritten (only those need a redraft) and, for each scene left
+    unchanged, why.
     """
-    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _read_csv
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
     ref_dir = os.path.join(project_dir, 'reference')
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
@@ -2186,6 +2219,11 @@ def _fix_upstream_briefs(project_dir: str,
     ctx = _SourceFixContext(project_dir) if drift else None
 
     for scene_id in scene_ids:
+        if scene_id not in drift:
+            skipped[scene_id] = NO_BRIEF_FIX
+            log(f'  NOTE: {scene_id}: no source drift to fix; its brief is left as it is '
+                f'({NO_BRIEF_FIX})')
+            continue
         brief = briefs_map.get(scene_id, {})
         prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
         prose_notes: list[str] = []
@@ -2194,81 +2232,25 @@ def _fix_upstream_briefs(project_dir: str,
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
 
-        title = scene.get('title', scene_id)
-        pov = scene.get('pov', '')
-        outcome = brief.get('outcome', '')
-        value_at_stake = intent.get('value_at_stake', '')
-        emotional_arc = intent.get('emotional_arc', '')
-        current_goal = brief.get('goal', '')
-        current_conflict = brief.get('conflict', '')
-        current_crisis = brief.get('crisis', '')
-        current_decision = brief.get('decision', '')
-
-        prompt = f"""You are a story editor rewriting scene briefs to introduce genuine dramatic opposition.
-
-Scene: {title}
-POV: {pov}
-Location: {scene.get('location', '')}
-Characters: {intent.get('characters', '')}
-On stage: {intent.get('on_stage', '')}
-Function: {intent.get('function', '')}
-Outcome: {outcome}
-Value at stake: {value_at_stake}
-Emotional arc: {emotional_arc}
-Key actions: {brief.get('key_actions', '')}
-
-Current brief:
-GOAL: {current_goal}
-CONFLICT: {current_conflict}
-CRISIS: {current_crisis}
-DECISION: {current_decision}
-
-The scene as written:
-<scene>
-{_scene_prose_excerpt(scene_id, prose)}
-</scene>
-
-The current brief lacks genuine opposition — the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.
-
-Rewrite all four fields to introduce genuine opposition while:
-- Preserving the existing emotional arc and value at stake
-- Making the conflict a concrete, specific obstacle with a clear opposing force
-- Making the goal something the POV character actively wants and must fight for
-- Making the crisis a specific moment where the worst happens or the hardest choice appears
-- Making the decision a concrete choice with real cost on both sides
-
-Find the opposition inside this scene: its characters, its place, and what already happens in it. Do not introduce any person, place, organization or event that is not named above; the brief must still describe this book's scene.
-
-Respond ONLY with the four fields in this exact format (no preamble, no explanation):
-GOAL: [rewritten goal]
-CONFLICT: [rewritten conflict]
-CRISIS: [rewritten crisis]
-DECISION: [rewritten decision]"""
-        fix_fields = _BRIEF_FIX_FIELDS
-        extra_known = ''
-        if scene_id in drift:
-            lines, dialogue = _split_dialogue_drift(drift[scene_id])
-            if dialogue:
-                log(f'  NOTE: {scene_id}: source drift in key_dialogue, the author\'s notes, '
-                    f'is not rewritten (#644); amend it by hand if it should follow the '
-                    f'source: ' + ' / '.join(dialogue))
-            if not lines:
-                skipped[scene_id] = 'its only source drift is in key_dialogue, the author\'s'
-                continue
-            fix = _source_drift_fix(project_dir, scene_id, scene, intent, brief, prose,
-                                    lines, ctx)
-            if isinstance(fix, str):
-                skipped[scene_id] = fix
-                log(f'  WARNING: Not fixing the source drift of {scene_id}: {fix}. '
-                    f'Its brief is unchanged.')
-                continue
-            prompt, extra_known = fix
-            fix_fields = _SOURCE_FIX_FIELDS
-            log(f'  {scene_id}: fixing its source drift (this replaces the '
-                f'dramatic-opposition fix: the source sets the opposition)')
+        lines, notes = _split_note_drift(drift[scene_id])
+        if notes:
+            log(f'  NOTE: {scene_id}: source drift in the author\'s notes is not rewritten '
+                f'(#644, plan decision 9); amend them by hand if they should follow the '
+                f'source: ' + ' / '.join(notes))
+        if not lines:
+            skipped[scene_id] = 'its only source drift is in the author\'s notes'
+            continue
+        fix = _source_drift_fix(project_dir, scene_id, scene, intent, brief, prose,
+                                lines, ctx)
+        if isinstance(fix, str):
+            skipped[scene_id] = fix
+            log(f'  WARNING: Not fixing the source drift of {scene_id}: {fix}. '
+                f'Its brief is unchanged.')
+            continue
+        prompt, extra_known = fix
 
         model = select_model('creative')
-        log(f'  Fixing upstream brief: {scene_id}')
+        log(f'  Fixing the source drift of {scene_id}\'s brief')
         response = invoke_api(prompt, model, max_tokens=1024)
 
         if not response:
@@ -2276,27 +2258,26 @@ DECISION: [rewritten decision]"""
             log(f'  WARNING: No response for {scene_id} upstream fix. Its brief is unchanged.')
             continue
 
-        fields = _parse_brief_fix(response, fix_fields)
-        missing = [k.upper() for k in fix_fields if k not in fields]
+        fields = _parse_brief_fix(response)
+        missing = [k.upper() for k in _SOURCE_FIX_FIELDS if k not in fields]
         if missing:
             skipped[scene_id] = f'reply lacked {", ".join(missing)}'
             log(f'  WARNING: Not rewriting the brief of {scene_id}: the reply has no '
                 f'{", ".join(missing)}. Its brief is unchanged.')
             continue
 
-        if fix_fields is _SOURCE_FIX_FIELDS:
-            fields = {k: csv_safe(v) for k, v in fields.items()}
-            from storyforge.schema import VALID_OUTCOMES
-            if fields['outcome'] not in VALID_OUTCOMES:
-                skipped[scene_id] = f'outcome {fields["outcome"]!r}'
-                log(f'  WARNING: Not rewriting the brief of {scene_id}: the outcome '
-                    f'{fields["outcome"]!r} is not one of {", ".join(sorted(VALID_OUTCOMES))}. '
-                    f'Its brief is unchanged.')
-                continue
+        fields = {k: csv_safe(v) for k, v in fields.items()}
+        from storyforge.schema import VALID_OUTCOMES
+        if fields['outcome'] not in VALID_OUTCOMES:
+            skipped[scene_id] = f'outcome {fields["outcome"]!r}'
+            log(f'  WARNING: Not rewriting the brief of {scene_id}: the outcome '
+                f'{fields["outcome"]!r} is not one of {", ".join(sorted(VALID_OUTCOMES))}. '
+                f'Its brief is unchanged.')
+            continue
 
         invented = invented_names(list(fields.values()),
                                    _book_text(known_text + '\n' + extra_known, prose or '',
-                                              brief, fix_fields))
+                                              brief))
         if invented:
             skipped[scene_id] = f'named {", ".join(invented)}'
             from storyforge.hone import _unread_note
@@ -2738,7 +2719,8 @@ def _polish_loop(project_dir: str, max_loops: int,
                                 ['reference/', 'scenes/', 'working/'])
 
         if craft_converged:
-            log('  No high or medium priority issues; source drift fixed — converged')
+            log('  No high or medium priority issues; source drift '
+                + ('fixed' if fixed else 'left as it is (see above)') + ' — converged')
             _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
                                       converged=True)
             break

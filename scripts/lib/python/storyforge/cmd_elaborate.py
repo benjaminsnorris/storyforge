@@ -1869,23 +1869,21 @@ def _drop_unasked_columns(rows: list[dict]) -> tuple[list[str], list[str]]:
     return ([c for c in AUTHOR_NOTE_COLUMNS if c in notes], sorted(other))
 
 
-def _kept_notes(existing: dict, row: dict, sid: str) -> None:
-    """Log what a regenerated brief keeps that the reply didn't write (#644):
-    the author's note columns already filled (an earlier briefs stage wrote
-    them before #644, so they may be model staging the drafter now reads as
-    the author's; nothing can tell which), and craft notes the reply left
-    empty over an earlier value (an empty cell never clears one)."""
-    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
-    filled = [c for c in AUTHOR_NOTE_COLUMNS if (existing.get(c) or '').strip()]
-    if filled:
-        log(f'  WARNING: {sid}: kept its {", ".join(filled)} as the author\'s notes; if an '
-            f'earlier briefs stage wrote them, they are model staging that drafting reads '
-            f'as yours: clear them or keep them (#644)')
-    kept = [c for c in ('goal', 'conflict', 'crisis', 'decision')
-            if c in row and not (row.get(c) or '').strip() and (existing.get(c) or '').strip()]
-    if kept:
-        log(f'  NOTE: {sid}: the reply left {", ".join(kept)} empty; the brief\'s earlier '
-            f'value is kept (clear it by hand if the scene has none)')
+def _kept_notes(kept: dict[str, list[str]]) -> None:
+    """One WARNING for the author's note columns the regenerated briefs keep
+    already filled, `kept` scene id -> columns (#644, plan decision 9): an
+    earlier briefs stage wrote them (goal, conflict, crisis and decision until
+    decision 9, the staging before #644), so they may be model staging the
+    drafter now reads as the author's; nothing can tell which. One line a run,
+    not one a scene (PR #675's review SF-5): an existing book has them on
+    every scene."""
+    if not kept:
+        return
+    shown = '; '.join(f'{sid} ({", ".join(cols)})' for sid, cols in sorted(kept.items())[:10])
+    more = f'; and {len(kept) - 10} more' if len(kept) > 10 else ''
+    log(f'  WARNING: kept the filled author\'s notes of {len(kept)} scene(s): {shown}{more}. '
+        f'If an earlier briefs stage wrote them, they are model staging that drafting reads '
+        f'as yours: clear them or keep them (#644, plan decision 9)')
 
 
 def _keep_must(existing: dict, row: dict, sid: str) -> dict:
@@ -2253,19 +2251,25 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     if unasked:
                         log(f'  NOTE: left out the reply\'s {", ".join(unasked)}: not '
                             f'columns the briefs stage writes')
+                    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+                    kept_notes: dict[str, list[str]] = {}
                     for row in rows:
                         normalize_fields(row, alias_maps)
                         sid = row.get('id', '')
                         if not sid:
                             continue
                         if sid in existing:
-                            _kept_notes(existing[sid], row, sid)
+                            filled = [c for c in AUTHOR_NOTE_COLUMNS
+                                      if (existing[sid].get(c) or '').strip()]
+                            if filled:
+                                kept_notes[sid] = filled
                             existing[sid].update(_keep_must(existing[sid], row, sid))
                         else:
                             # a must: item the model added is dropped here too
                             new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
                             new.update(_keep_must({}, row, sid))
                             existing[sid] = new
+                    _kept_notes(kept_notes)
                     ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
                     _write_csv(path, ordered, _FILE_MAP['scene-briefs.csv'])
                     written.append(f'scene-briefs.csv ({len(rows)} rows)')

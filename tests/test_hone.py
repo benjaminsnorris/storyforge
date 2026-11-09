@@ -93,8 +93,9 @@ class TestDetectGaps:
                              'value_shift': '+/-', 'emotional_arc': 'calm to tense'}}
         results = detect_gaps(scenes_map, intent_map, briefs_map)
         fields = [r['field'] for r in results if r['scene_id'] == 's1']
-        assert 'conflict' in fields
-        assert 'crisis' in fields
+        assert 'value_at_stake' in fields and 'key_actions' in fields
+        # the author's notes are never a gap (plan decision 9)
+        assert 'conflict' not in fields and 'crisis' not in fields
 
     def test_no_gaps_for_complete(self):
         from storyforge.hone import detect_gaps

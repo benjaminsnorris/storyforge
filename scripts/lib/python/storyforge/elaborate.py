@@ -539,27 +539,16 @@ def score_structure(ref_dir: str) -> list[dict]:
         issues = []
         score = 5  # Start perfect, deduct for problems
 
-        # No brief at all
-        if not brief or not brief.get('goal', '').strip():
+        # No brief at all: none of its facts (goal, conflict, crisis and
+        # decision are the author's optional notes, plan decision 9)
+        if not any((brief.get(c) or '').strip() for c in BRIEF_FACT_COLUMNS):
             results.append({'scene_id': sid, 'score': 0, 'issues': ['No brief data']})
             continue
 
-        # Goal/conflict/outcome chain
-        if not brief.get('goal', '').strip():
-            issues.append('Missing goal')
-            score -= 1
-        if not brief.get('conflict', '').strip():
-            issues.append('Missing conflict')
-            score -= 1
-        if not brief.get('outcome', '').strip():
-            issues.append('Missing outcome')
-            score -= 1
-
-        # Crisis should be a genuine dilemma
-        crisis = brief.get('crisis', '').strip()
-        if not crisis:
-            issues.append('Missing crisis')
-            score -= 1
+        for col in BRIEF_FACT_COLUMNS:
+            if not brief.get(col, '').strip():
+                issues.append(f'Missing {col}')
+                score -= 1
 
         # Value shift should not be flat
         vs = intent.get('value_shift', '').strip()
@@ -601,44 +590,52 @@ _REQUIRED_BY_STATUS = {
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
-                'goal', 'conflict', 'outcome', 'key_actions'],
+                'outcome', 'key_actions'],
     'drafted': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
-                'goal', 'conflict', 'outcome', 'key_actions'],
+                'outcome', 'key_actions'],
     'polished': ['id', 'seq', 'title', 'act', 'pov', 'location',
                  'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
                  'turning_point', 'characters', 'on_stage',
-                 'goal', 'conflict', 'outcome', 'key_actions'],
+                 'outcome', 'key_actions'],
 }
 
 
 #: Columns that record a scene's place in a craft framework: Swain's
-#: action/sequel and goal/conflict, McKee's value at stake and its shift, the
-#: turning point, the emotional arc, the Story Grid's crisis and decision
-#: (#643, plan D6). They're useful notes, but requiring them on every scene
-#: presses every book toward one shape (each scene a closed unit with a turn
-#: and a landing), so a missing one is advisory everywhere: validate's
-#: `craft-columns-{id}`, the status floors, hone's gaps. `elaborate
-#: --gap-fill` still fills them.
+#: action/sequel, McKee's value at stake and its shift, the turning point, the
+#: emotional arc (#643, plan D6). They're useful notes, but requiring them on
+#: every scene presses every book toward one shape (each scene a closed unit
+#: with a turn and a landing), so a missing one is advisory everywhere:
+#: validate's `craft-columns-{id}`, the status floors, hone's gaps. `elaborate
+#: --gap-fill` still fills them. The brief's goal, conflict, crisis and
+#: decision were here too until plan decision 9 made them the author's notes
+#: (`AUTHOR_NOTE_COLUMNS`): nothing reports one empty.
 CRAFT_FRAMEWORK_COLUMNS = ('action_sequel', 'emotional_arc', 'value_at_stake',
-                           'value_shift', 'turning_point', 'goal', 'conflict',
-                           'crisis', 'decision')
+                           'value_shift', 'turning_point')
 
-#: Brief columns that stage the scene rather than state its facts: what is
-#: said, what lies under it, the feelings in order, the images and how they
-#: appear (#644, plan D3). They stay as optional columns the author fills by hand, and nothing
-#: requires them: the briefs stage never generates them (a model's value is
-#: dropped, `cmd_elaborate`; nor does revise's source-drift fix or hone's
-#: rewrites), drafting and the gate read them only when filled.
-#: Model-written staging was the route by which the plan's phrasing leaked
-#: into the prose. Extraction still records them from prose that exists (a
-#: motif is noticed in the draft and recorded after; `motif_details` is how it
-#: appears). A prose book's only: a graphic novel's briefs stage writes
-#: key_dialogue as the balloon text the panel script carries.
-AUTHOR_NOTE_COLUMNS = ('key_dialogue', 'subtext', 'emotions', 'motifs', 'motif_details')
+#: Brief columns that aren't the scene's facts: the craft framework's goal,
+#: conflict, crisis and decision (plan decision 9: a brief is events, the
+#: turn, POV, the outcome, and the knowledge and physical state in and out),
+#: and the staging: what is said, what lies under it, the feelings in order,
+#: the images and how they appear (#644, plan D3). They stay as optional
+#: columns the author fills by hand, and nothing requires them or reports one
+#: empty: the briefs stage never generates them (a model's value is dropped,
+#: `cmd_elaborate`; nor do revise's source-drift fix or hone's rewrites,
+#: though a revise plan's CSV blocks, `cmd_revise._apply_upstream_blocks`,
+#: still can), and
+#: drafting, the gate and scoring read them only when filled. Model-written
+#: staging was the route by which the plan's phrasing leaked into the prose.
+#: Extraction still records them from prose that exists (a motif is noticed
+#: in the draft and recorded after; `motif_details` is how it appears). A
+#: prose book's only: a graphic novel's briefs stage writes key_dialogue as
+#: the balloon text the panel script carries, and its goal; a GN reader that
+#: keys on this set (hone reports rather than rewrites them; validate and
+#: hone's gaps don't list an empty goal) treats those as notes too.
+AUTHOR_NOTE_COLUMNS = ('goal', 'conflict', 'crisis', 'decision', 'key_dialogue',
+                       'subtext', 'emotions', 'motifs', 'motif_details')
 
 #: The brief facts every briefed scene has (#644): how the scene ends and its
 #: events in order. The briefs prompt asks for them, validate requires them
@@ -646,6 +643,26 @@ AUTHOR_NOTE_COLUMNS = ('key_dialogue', 'subtext', 'emotions', 'motifs', 'motif_d
 #: brief with no key_actions gives drafting and the gate nothing to hold the
 #: scene to.
 BRIEF_FACT_COLUMNS = ('outcome', 'key_actions')
+
+#: How many events a brief's key_actions lists, and how long it runs (#644's
+#: review SF-5; plan D3: a brief is terse notes, and the drafter finds the
+#: rest). The briefs prompt asks for this much and hone flags more
+#: (`detect_overspecified`, `detect_verbose_fields`, its trims), so the stage
+#: never writes what hone then reports. Never more than `MAX_BRIEF_EVENTS`,
+#: and no more than `BRIEF_EVENTS_PER_1K` for each 1,000 of the scene's
+#: target_words (never fewer than 2): `brief_event_limit`. The whole cell
+#: (every event, `must:` beats included) runs to `KEY_ACTIONS_MAX_CHARS`.
+MAX_BRIEF_EVENTS = 6
+BRIEF_EVENTS_PER_1K = 2.5
+KEY_ACTIONS_MAX_CHARS = 200
+
+
+def brief_event_limit(target_words: int) -> int:
+    """The most events a brief's key_actions may list for a scene of
+    `target_words` (0 or less: unknown, so `MAX_BRIEF_EVENTS`)."""
+    if target_words <= 0:
+        return MAX_BRIEF_EVENTS
+    return max(2, min(MAX_BRIEF_EVENTS, int(BRIEF_EVENTS_PER_1K * target_words / 1000)))
 
 
 def split_failures(failures: list[dict]) -> tuple[list[dict], list[dict]]:

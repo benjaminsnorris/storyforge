@@ -25,7 +25,7 @@ Read the following files to understand the full context:
 
 - `storyforge.yaml` — project configuration, coaching level
 - `reference/scenes.csv` — scene metadata (status, seq, part, target_words)
-- `reference/scene-briefs.csv` — briefs: the facts (outcome, key_actions, knowledge_in/out), optional craft notes (goal, conflict, crisis, decision) and the author's notes (key_dialogue, subtext, emotions, motifs, motif_details; #644)
+- `reference/scene-briefs.csv` — briefs: the facts (outcome, key_actions, knowledge_in/out, physical_state_in/out) and the author's optional notes (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs, motif_details; #644, plan decision 9)
 - `reference/scene-intent.csv` — narrative dynamics (function, value_at_stake, value_shift, emotional_arc)
 - `working/scores/latest/scene-scores.csv` — latest scoring (if exists, check prose_naturalness)
 - `working/scores/structural-proposals.csv` — structural proposals (if exists)
@@ -97,7 +97,7 @@ For dimensions below target (pacing, function variety, character presence, MICE 
 
 For all creative dimensions: **bring analysis and a point of view.** The author decides, but they need a partner who thinks, not a tool that reports.
 
-**Craft frameworks advise; they never gate** (#643). Pacing shape, function variety, MICE health, a flat emotional arc, a value shift that disagrees with the outcome, a conflict-free brief, an empty value_shift, turning_point, goal, conflict, crisis or decision: these measure a book against a craft framework, and a book may depart from one on purpose (scene endings that don't land, scenes with no turn). hone reports them tagged `(craft framework, advisory)` and never rewrites them on its own; `--diagnose` lists the empty craft fields apart from the gaps. Offer a change with your reasoning; don't treat one as a problem to clear.
+**Craft frameworks advise; they never gate** (#643). Pacing shape, function variety, MICE health, a flat emotional arc, a value shift that disagrees with the outcome, a conflict-free brief, an empty value_shift or turning_point: these measure a book against a craft framework, and a book may depart from one on purpose (scene endings that don't land, scenes with no turn). hone reports them tagged `(craft framework, advisory)` and never rewrites them on its own; `--diagnose` lists the empty craft fields apart from the gaps. Offer a change with your reasoning; don't treat one as a problem to clear.
 
 ## Step 4: Assess Domain Needs
 
@@ -120,13 +120,13 @@ briefs_map = _read_csv_as_map('reference/scene-briefs.csv')
 flagged = detect_abstract_fields(briefs_map)
 ```
 
-**Over-specified beats** — too many key_actions for the scene's word count. A 2,500-word scene with 5 key_actions forces one mandatory beat every 500 words, leaving no room for atmosphere, interiority, or organic pacing. Rule of thumb: 2-3 key_actions per 2,500 words. Flag scenes where `len(key_actions.split(';')) > target_words / 800`.
+**Over-specified beats** — too many key_actions for the scene's word count. Each event is a mandatory beat, and too many leave no room for atmosphere, interiority, or organic pacing. The limit is the one the briefs stage writes to (`elaborate.brief_event_limit`): never more than 6 events, and no more than 2.5 for each 1,000 target words (2 in a 1,000-word scene, 5 in a 2,000-word one), with the whole key_actions cell under 200 characters. hone flags past that, and a trim aims at it.
 
 **Prescriptive dialogue** — `key_dialogue` is the author's note (#644), filled by hand, so report on it; never rewrite it. Exact quotes make surrounding prose contort to deliver specific lines, so tell the author when a scene's unmarked lines are many or scripted, and leave the choice (cut them, keep them as notes, or mark one `must:`) to them. A quoted line in `key_actions` is the brief's own: there, dialogue direction ("Dorren rationalizes the anomaly using institutional language") beats an exact line. When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
 
 **`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. Trimming an over-specified brief keeps every `must:` beat; it still counts toward the beats-per-words threshold.
 
-**Procedural goals** — goals framed as tasks ("Complete the quarterly audit") instead of dramatic questions ("Prove the maps are accurate before the review deadline"). The goal shapes how the drafter opens the scene — procedural goals produce bureaucratic openings.
+**Procedural goals** — goals framed as tasks ("Complete the quarterly audit") instead of dramatic questions ("Prove the maps are accurate before the review deadline"). The goal shapes how the drafter opens the scene — procedural goals produce bureaucratic openings. `goal`, `conflict`, `crisis` and `decision` are the author's optional notes (plan decision 9): an empty one is fine and never a gap, and hone reports findings on a filled one without rewriting it; suggest the change to the author.
 
 **Emotional arc granularity** — 4+ beat emotional arcs (e.g., "competence;unease;self-doubt;resolve") force artificial escalation-and-recovery. 2-beat arcs (start state → end state) let the drafter find the middle ground organically. Flag scenes where `len(emotions.split(';')) > 3`. `emotions` and `subtext` are the author's notes (#644): `hone --domain briefs` reports these findings and never rewrites them (`hone._report_author_notes`); suggest the trim to the author.
 
@@ -141,7 +141,7 @@ Present all findings together — abstract detection is one signal among several
 
 **Score trends (when history data exists):**
 
-9. **Naturalness stalls detected** → Scenes stuck at low naturalness for 2+ cycles need upstream fixes (brief rewrite), not more prose revision. The `--polish --loop` command now auto-detects this and fixes briefs first.
+9. **Naturalness stalls detected** → Scenes stuck at low naturalness for 2+ cycles need upstream fixes (a brief change), not more prose revision. `--polish --loop` names the scenes whose brief the diagnosis blames in a NOTE; it no longer rewrites goal, conflict, crisis or decision (the author's notes, plan decision 9), so suggest the change to the author, or work the events here.
 
 10. **Regressions detected** → A scene's naturalness score dropped after revision. The brief needs to change so re-draft produces fundamentally different prose.
 

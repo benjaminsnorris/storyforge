@@ -458,12 +458,18 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 # Stage 4: Briefs
 # ============================================================================
 
-#: The briefs stage's reply columns: the facts, and the craft notes the
-#: author may leave empty. Never the author's notes (`AUTHOR_NOTE_COLUMNS`,
-#: #644) or a graphic novel's columns (its own handler)
+#: The briefs stage's reply columns: the facts (plan decision 9: events and
+#: the turn in key_actions, the outcome, the knowledge and physical state in
+#: and out; POV is scenes.csv's) and what the ledger and parallel drafting
+#: need. Never the author's notes (`AUTHOR_NOTE_COLUMNS`: goal, conflict,
+#: crisis, decision, key_dialogue...; #644) or a graphic novel's columns (its
+#: own handler)
 BRIEFS_OUTPUT_HEADER = ('id|outcome|key_actions|knowledge_in|knowledge_out|physical_state_in|'
-                        'physical_state_out|goal|conflict|crisis|decision|continuity_deps|'
-                        'has_overflow')
+                        'physical_state_out|continuity_deps|has_overflow')
+
+#: The briefs prompt's example of one terse key_actions event; it fits the
+#: per-event length the prompt asks for (tests/test_briefs_decision9.py)
+EVENT_EXAMPLE = 'Tessa finds the straight edge'
 
 
 def build_briefs_prompt(project_dir: str, plugin_dir: str,
@@ -503,8 +509,12 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
 
     from .schema import OUTCOME_GUIDE   # schema imports elaborate
     from .speaker_labels import LABEL_RULE
-    from .elaborate import AUTHOR_NOTE_COLUMNS
+    from .elaborate import (AUTHOR_NOTE_COLUMNS, BRIEF_EVENTS_PER_1K, KEY_ACTIONS_MAX_CHARS,
+                            MAX_BRIEF_EVENTS, brief_event_limit)
     notes = ', '.join(AUTHOR_NOTE_COLUMNS)
+    # #675's review C-2, TD-6: a per-event length the cap allows at the most
+    # events (rounded down to 5)
+    EVENT_CHARS = KEY_ACTIONS_MAX_CHARS // MAX_BRIEF_EVENTS // 5 * 5
     return f"""You are writing the scene briefs for a novel: the facts of what happens in each scene, as terse notes, so that scenes can be drafted independently and still cohere.
 
 A brief is a plan of events, not a script. It keeps every fact the scene must honour or establish, and it drops the staging: how the scene is played, what is said, what it means. The drafter finds the gesture, the line and the image.
@@ -533,13 +543,12 @@ A brief is a plan of events, not a script. It keeps every fact the scene must ho
 
 For each scene that needs a brief, write its facts:
 
-- **outcome**: How the scene ends for the POV character — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles). Judge it against the goal when the scene has one; in a scene with no goal, against what the POV character is trying to do or hoping for, and never fill goal just to judge the outcome by it
-- **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning.
+- **outcome**: How the scene ends for the POV character — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles), judged by what they are trying to do or hoping for in the scene
+- **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning. List only the events the scene turns on: usually 3 to {MAX_BRIEF_EVENTS}, fewer in a short scene. Never more than {MAX_BRIEF_EVENTS}, and no more than {BRIEF_EVENTS_PER_1K:g} for each 1,000 of the scene's target_words ({brief_event_limit(1000)} in a 1,000-word scene, {brief_event_limit(2000)} in a 2,000-word one). Keep each event to about {EVENT_CHARS} characters ("{EVENT_EXAMPLE}"), so the whole cell, semicolons and any `must:` beats included, stays under {KEY_ACTIONS_MAX_CHARS} characters: cut a clause before you add an event. The drafter fills in everything between them.
 - **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
 - **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
 - **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
-- **goal**, **conflict**, **crisis**, **decision**: optional notes. Fill one only when the scene plainly has it, as a fact in a few words (goal: "buy back Hector's body"; decision: "Achilles gives up the body"), and leave it empty otherwise. Not every scene has a goal, an opponent or a dilemma.
 - **continuity_deps**: Semicolon-separated scene IDs this scene depends on (for parallel drafting)
 - **has_overflow**: false (unless you indicate a scene needs extended brief)
 

@@ -123,17 +123,15 @@ _ARCH_REQUIRED_CHECK = 'all required columns populated (act, pov)'
 _ARCH_CRAFT_CHECK = ('craft-framework columns populated (action_sequel, emotional_arc, '
                      'value_at_stake, value_shift, turning_point)')
 _BRIEF_REQUIRED_CHECK = 'outcome populated'
-_BRIEF_CRAFT_CHECK = 'craft-framework fields populated (goal, conflict, crisis, decision)'
 
 #: check name -> the name it had before, whose override still applies to it.
 #: #643 split one check each at L4 and L6 into a blocking and an advisory
-#: half; an acceptance recorded on the old check covered both, so it carries
+#: half (L6's advisory half went with plan decision 9); an acceptance recorded on the old check covered both, so it carries
 #: to both (#643's review C4, CR-2, TD-1)
 _FORMER_CHECK_NAMES = {
     _ARCH_REQUIRED_CHECK: 'all required columns populated',
     _ARCH_CRAFT_CHECK: 'all required columns populated',
     _BRIEF_REQUIRED_CHECK: 'goal/conflict/outcome/crisis/decision populated',
-    _BRIEF_CRAFT_CHECK: 'goal/conflict/outcome/crisis/decision populated',
 }
 
 
@@ -446,8 +444,10 @@ def _summary_checks(
 #: advisory, #643)
 _ARCHITECTURE_COLUMNS = ('act', 'pov', 'action_sequel', 'emotional_arc',
                          'value_at_stake', 'value_shift', 'turning_point')
-#: The columns a brief must have at the brief stage (likewise)
-_BRIEF_COLUMNS = ('goal', 'conflict', 'outcome', 'crisis', 'decision')
+#: The columns a brief must have at the brief stage. Not goal, conflict,
+#: crisis or decision: the author's optional notes (plan decision 9), which
+#: no floor checks
+_BRIEF_COLUMNS = ('outcome',)
 
 
 def _split_craft(columns: tuple[str, ...]) -> tuple[list[str], list[str]]:
@@ -750,14 +750,12 @@ def score_briefs(project_dir: str) -> dict:
     ))
 
     # Required at brief stage: outcome, because the gate reads it (it's
-    # one of `checker.PROMISE_FIELDS`) and a
-    # promise the gate can't read can't be kept. Goal, conflict, crisis and
-    # decision place the scene in a craft framework (Swain, the Story Grid),
-    # so they're advisory (#643)
-    required, craft = _split_craft(_BRIEF_COLUMNS)
-    checks.append(_missing_columns_check(rows, required, _BRIEF_REQUIRED_CHECK, 'brief'))
-    checks.append(_missing_columns_check(rows, craft, _BRIEF_CRAFT_CHECK, 'brief',
-                                         advisory=True))
+    # one of `checker.PROMISE_FIELDS`) and a promise the gate can't read
+    # can't be kept. Goal, conflict, crisis and decision are the author's
+    # optional notes (plan decision 9; advisory craft columns from #643 until
+    # then), so nothing here checks them
+    checks.append(_missing_columns_check(rows, list(_BRIEF_COLUMNS),
+                                         _BRIEF_REQUIRED_CHECK, 'brief'))
 
     return _result(6, 'briefs', checks)
 

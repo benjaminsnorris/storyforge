@@ -795,9 +795,10 @@ compression) are left to the LLM.
 
 When `reference/scene-briefs.csv` exists and has at least one populated
 row, the scorecard runs in **briefs mode**. A brief is the drafting
-contract for one scene — the scene-engine fields (goal, conflict,
-outcome, crisis, decision) plus information state (knowledge_in /
-knowledge_out), execution beats (key_actions, key_dialogue, emotions),
+contract for one scene — its facts (outcome, key_actions) plus
+information state (knowledge_in / knowledge_out); goal, conflict,
+crisis, decision, key_dialogue and emotions are optional notes the author
+writes by hand (plan decision 9), and an empty one is not a fault
 recurring vehicles (motifs), under-the-line direction (subtext), and
 the scene-graph edge (continuity_deps).
 
@@ -958,8 +959,10 @@ per-brief blanks + 5 whole-briefs axis blanks.
 Five high-confidence checks the pre-pass runs against the briefs
 corpus (parallel to scene-map's continuity pre-pass):
 
-1. **Missing required field:** any of `goal`, `conflict`, `outcome`,
-   `crisis`, `decision` is empty: high severity per missing field.
+1. **Missing required field:** `outcome` or `key_actions` (the brief's
+   facts) is empty: high severity per missing field. `goal`, `conflict`,
+   `crisis` and `decision` are the author's optional notes (plan decision
+   9): an empty one is no finding.
 2. **Invalid outcome:** `outcome` is non-empty but not in
    `{yes, no, yes-but, no-and, no-but}`: high severity.
 3. **Knowledge orphan:** a scene's `knowledge_in` ∋ a fact that no

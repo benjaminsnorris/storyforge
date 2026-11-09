@@ -12,7 +12,7 @@ You are evaluating whether a scene's prose delivers what its brief promised. Thi
 
 ## Instructions
 
-For each brief element, score how faithfully the prose delivers it on a 1-5 scale:
+For each element the brief above lists, score how faithfully the prose delivers it on a 1-5 scale. An element the brief doesn't list (goal, conflict, crisis, decision, key_dialogue and emotions are optional notes the author may leave out, and a brief may have no knowledge): leave its score empty (nothing between the pipes) and write no rationale row for it. Its absence is not a gap in the prose.
 
 - **1 (Missing):** The brief element is absent from the prose
 - **2 (Gestured):** The element is hinted at but not substantively present
@@ -28,7 +28,7 @@ SCORES
 id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|emotions|knowledge
 {SCENE_ID}|score|score|score|score|score|score|score|score|score
 
-RATIONALE
+RATIONALE (one row for each element you scored)
 id|element|score|evidence
 {SCENE_ID}|goal|N|one sentence explaining the score
 {SCENE_ID}|conflict|N|one sentence explaining the score

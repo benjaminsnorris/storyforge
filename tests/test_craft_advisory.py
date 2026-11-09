@@ -1,9 +1,10 @@
 """#643 (plan D6): checks of conformity to a craft framework (value shift,
-turning point, action/sequel, emotional arc, goal/conflict/crisis/decision,
-MICE nesting, scene-type rhythm, action/sequel balance) are advisory
-everywhere: validate, the elaborate stage gates, status's ladder, `score
---level`, hone. Errors (a missing required column, duplicate seqs, a broken
-told_by chain) still block."""
+turning point, action/sequel, emotional arc, MICE nesting, scene-type rhythm,
+action/sequel balance) are advisory everywhere: validate, the elaborate stage
+gates, status's ladder, `score --level`, hone. Errors (a missing required
+column, duplicate seqs, a broken told_by chain) still block. A brief's goal,
+conflict, crisis and decision were craft columns too until plan decision 9
+made them the author's notes, which nothing checks."""
 
 import os
 
@@ -77,7 +78,8 @@ class TestValidateCraftColumns:
         ok = validate_structure(_ref(tmp_path / 'ok', [scene], [intent],
                                      ['a-scene-happens-here|||yes|||k|k|she goes']))
         assert ok['passed'] is True
-        assert _failures(ok, 'craft-columns-')[0]['fields'] == ['goal', 'conflict']
+        # plan decision 9: goal and conflict are the author's notes, not checked
+        assert not _failures(ok, 'craft-columns-')
 
         bad = validate_structure(_ref(tmp_path / 'bad', [scene], [intent],
                                       ['a-scene-happens-here|g|c||||k|k|']))
@@ -257,7 +259,9 @@ class TestFloorChecks:
         ref.mkdir()
         (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|||yes||||\n')
         result = score_briefs(str(tmp_path))
-        assert blocking_failed(result) == 0 and result['advisory'] == 1
+        # plan decision 9: no check of goal/conflict/crisis/decision at all
+        assert blocking_failed(result) == 0 and result['advisory'] == 0
+        assert not [c for c in result['checks'] if not c['passed']]
         (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|g|c||cr|d||\n')
         assert blocking_failed(score_briefs(str(tmp_path))) == 1
 
@@ -272,18 +276,18 @@ class TestFloorChecks:
     def test_accepting_an_advisory_check_recomputes_its_count(self, tmp_path):
         """#643's review T3: through `score_level`, so `_apply_overrides`
         recomputes `advisory` (left alone it would make blocking_failed -1)."""
-        from storyforge.scoring_levels import _BRIEF_CRAFT_CHECK, blocking_failed, score_level
+        from storyforge.scoring_levels import _ARCH_CRAFT_CHECK, blocking_failed, score_level
         from storyforge.scoring_state import append_override
-        ref = tmp_path / 'reference'
-        ref.mkdir()
-        (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|||yes||||\n')
-        before = score_level(str(tmp_path), 6)
-        assert (before['accepted'], before['advisory']) == (0, 1)
-        append_override('level-6', 'level-quality', _BRIEF_CRAFT_CHECK, 'accepted',
-                        'no goals on purpose', '2026-11-09', project_dir=str(tmp_path))
-        after = score_level(str(tmp_path), 6)
-        assert (after['failed'], after['accepted'], after['advisory']) == (1, 1, 0)
-        assert blocking_failed(after) == 0
+        _architecture(str(tmp_path), [
+            f'anchor-number-{i}-here|{i}|T|s|1|hero||{"action" if i % 2 else "sequel"}'
+            f'||||' for i in range(1, 17)])
+        before = score_level(str(tmp_path), 4)
+        assert before['accepted'] == 0 and before['advisory'] >= 1
+        append_override('level-4', 'level-quality', _ARCH_CRAFT_CHECK, 'accepted',
+                        'no value shifts on purpose', '2026-11-09', project_dir=str(tmp_path))
+        after = score_level(str(tmp_path), 4)
+        assert after['accepted'] == 1 and after['advisory'] == before['advisory'] - 1
+        assert blocking_failed(after) == blocking_failed(before)
 
     @pytest.mark.parametrize('level,old,rows', [
         (4, 'all required columns populated',
@@ -311,19 +315,20 @@ class TestFloorChecks:
         after = score_level(str(tmp_path), level)
         split = [c for c in after['checks']
                  if c['check'].startswith(('all required', 'outcome', 'craft-framework'))]
-        assert len(split) == 2 and all(c['accepted'] for c in split)
+        # L6's advisory half went with plan decision 9: outcome alone is left
+        assert len(split) == (2 if level == 4 else 1) and all(c['accepted'] for c in split)
         assert blocking_failed(after) == blocking_failed(before) - 1
 
     def test_each_split_checks_name_lists_its_columns(self):
         """#643's review TD-3: the names are fixed strings, the split comes
         from CRAFT_FRAMEWORK_COLUMNS; they must agree."""
         from storyforge import scoring_levels as sl
-        for columns, required_name, craft_name in (
-                (sl._ARCHITECTURE_COLUMNS, sl._ARCH_REQUIRED_CHECK, sl._ARCH_CRAFT_CHECK),
-                (sl._BRIEF_COLUMNS, sl._BRIEF_REQUIRED_CHECK, sl._BRIEF_CRAFT_CHECK)):
-            required, craft = sl._split_craft(columns)
-            assert craft_name.endswith(f"({', '.join(craft)})")
-            assert all(c in required_name for c in required)
+        required, craft = sl._split_craft(sl._ARCHITECTURE_COLUMNS)
+        assert sl._ARCH_CRAFT_CHECK.endswith(f"({', '.join(craft)})")
+        assert all(c in sl._ARCH_REQUIRED_CHECK for c in required)
+        # L6 checks the brief's facts only (plan decision 9)
+        assert sl._split_craft(sl._BRIEF_COLUMNS) == (['outcome'], [])
+        assert 'outcome' in sl._BRIEF_REQUIRED_CHECK
 
     def test_score_level_prints_advisory_apart(self, capsys):
         from storyforge.cmd_score import _print_level_result
@@ -356,22 +361,26 @@ class TestStatus:
 
     def test_craft_failures_are_advisory_lines_not_blockers(self, project_dir, monkeypatch):
         from storyforge import cmd_status, status
+        _architecture(project_dir, [
+            f'anchor-number-{i}-here|{i}|T|s|1|hero||{"action" if i % 2 else "sequel"}'
+            f'||||' for i in range(1, 17)])
         verdict = status.build_status(project_dir)
         craft = [a for a in verdict['advisory'] if a['source'] == status.CRAFT_ADVISORY_SOURCE]
         # #643's review TD-2: records in gate.read_advisory's shape, not prefixed strings
         assert craft == [{
-            'scene_id': '', 'command': 'storyforge score --level 6',
+            'scene_id': '', 'command': 'storyforge score --level 4',
             'source': status.CRAFT_ADVISORY_SOURCE, 'quote': '', 'stale': '',
-            'finding': ('L6 briefs: craft-framework fields populated (goal, conflict, '
-                        'crisis, decision) (1 brief(s) missing fields; first: new-x1 missing '
-                        'goal, conflict, crisis, decision)')}]
+            'finding': ('L4 architecture: craft-framework columns populated (action_sequel, '
+                        'emotional_arc, value_at_stake, value_shift, turning_point) (16 row(s) '
+                        'missing fields; first: anchor-number-1-here missing emotional_arc, '
+                        'value_at_stake, value_shift, turning_point)')}]
         assert not any('craft-framework' in b['detail'] for b in verdict['blockers'])
-        l6 = next(r for r in verdict['ladder'] if r['level'] == 6)
-        assert 'goal' not in l6['detail']   # the rung's detail is its blocking failure
+        # plan decision 9: a brief's empty goal/crisis/decision is no advisory at L6
+        assert not any(a['finding'].startswith('L6 ') for a in craft)
         out = cmd_status.render_human(verdict)
         assert "ADVISORY: 1 craft-framework check(s) not met" in out
-        assert '  L6 briefs: craft-framework fields populated' in out
-        assert '[storyforge score --level 6]' in out
+        assert '  L4 architecture: craft-framework columns populated' in out
+        assert '[storyforge score --level 4]' in out
         assert 'broken promise' not in out
 
     def test_craft_advisory_lists_only_failed_unaccepted_checks(self):
@@ -386,12 +395,15 @@ class TestStatus:
     def test_an_absent_rungs_craft_checks_are_not_listed(self, project_dir, monkeypatch):
         """#643's review T6: build_status filters by artifact_present."""
         from storyforge import status
+        _architecture(project_dir, [
+            f'anchor-number-{i}-here|{i}|T|s|1|hero||{"action" if i % 2 else "sequel"}'
+            f'||||' for i in range(1, 17)])
         real = status.artifact_present
-        assert any(a['finding'].startswith('L6 ')
+        assert any(a['finding'].startswith('L4 ')
                    for a in status.build_status(project_dir)['advisory'])
         monkeypatch.setattr(status, 'artifact_present',
-                            lambda pd, level: level != 6 and real(pd, level))
-        assert not any(a['finding'].startswith('L6 ')
+                            lambda pd, level: level != 4 and real(pd, level))
+        assert not any(a['finding'].startswith('L4 ')
                        for a in status.build_status(project_dir)['advisory'])
 
 
@@ -405,8 +417,9 @@ class TestHone:
         gaps = detect_gaps({'s': {'id': 's', 'status': 'briefed'}}, {}, {})
         by_field = {g['field']: g['advisory'] for g in gaps}
         assert by_field['function'] is False and by_field['outcome'] is False
-        assert all(by_field[f] for f in ('value_at_stake', 'value_shift', 'emotional_arc',
-                                         'goal', 'conflict', 'crisis', 'decision'))
+        assert all(by_field[f] for f in ('value_at_stake', 'value_shift', 'emotional_arc'))
+        # the author's notes are never a gap (plan decision 9)
+        assert not {'goal', 'conflict', 'crisis', 'decision'} & set(by_field)
 
     def test_hone_intent_reports_a_flat_arc_without_rewriting_it(
             self, tmp_path, monkeypatch, capsys):
@@ -506,22 +519,27 @@ class TestHone:
         ref = os.path.join(project_dir, 'reference')
         for field in ('goal', 'crisis'):
             update_field(os.path.join(ref, 'scene-briefs.csv'), 'act1-sc01', field, '')
+        update_field(os.path.join(ref, 'scene-intent.csv'), 'act1-sc01', 'value_shift', '')
         _run_gaps_domain(ref, project_dir, ['act1-sc01'], dry_run=True)
         out = capsys.readouterr().out
         assert 'Gaps found: 0 empty fields across 0 scenes' in out
-        assert 'Craft-framework fields empty (advisory, not gaps): 2 across 1 scenes' in out
+        # goal and crisis are the author's notes (plan decision 9): not counted
+        assert 'Craft-framework fields empty (advisory, not gaps): 1 across 1 scenes' in out
 
     def test_diagnose_lists_craft_fields_apart_from_gaps(self, project_dir, capsys):
         from storyforge.cmd_hone import _run_diagnose
         briefs = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
         for field in ('goal', 'outcome', 'crisis'):
             update_field(briefs, 'act1-sc01', field, '')
+        update_field(os.path.join(project_dir, 'reference', 'scene-intent.csv'), 'act1-sc01',
+                     'value_shift', '')
         _run_diagnose(os.path.join(project_dir, 'reference'), project_dir, None)
         gaps = capsys.readouterr().out.split('=== Gaps ===')[1].split('===')[0]
         required, craft = gaps.split('Craft-framework fields empty (advisory, not gaps')
         assert 'act1-sc01: missing outcome' in required
         assert 'goal' not in required
-        assert 'act1-sc01: goal, crisis' in craft
+        assert 'act1-sc01: value_shift' in craft
+        assert 'goal' not in craft and 'crisis' not in craft
 
 
 # ============================================================================

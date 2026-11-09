@@ -20,6 +20,7 @@ from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, CRAFT_FRAMEWORK_COLUMNS, DELIMITER,
+    KEY_ACTIONS_MAX_CHARS, brief_event_limit,
 )
 from storyforge import mice
 from storyforge.enrich import (
@@ -1184,13 +1185,10 @@ def detect_abstract_fields(
 # Briefs domain: over-specification detection
 # ============================================================================
 
-# Beats per 1000 words — above this threshold the scene is over-specified.
-# 3 beats in 1500 words = 2.0/1k is fine. 5 in 1500 = 3.3/1k is tight.
-# We flag above 2.5/1k, which catches 5+ beats in short scenes.
-_BEATS_PER_1K_THRESHOLD = 2.5
-
-# Absolute beat count threshold — flag regardless of word count.
-_MAX_BEATS_ABSOLUTE = 6
+# How many key_actions events a scene may list: `elaborate.brief_event_limit`
+# (never more than `MAX_BRIEF_EVENTS`, and no more than `BRIEF_EVENTS_PER_1K`
+# for each 1,000 target words; 3 in 1,500 words is the most), the
+# limit the briefs prompt asks for (#644's review SF-5).
 
 # Max emotional beats before arc feels mechanical.
 _MAX_EMOTION_BEATS = 3
@@ -1229,13 +1227,7 @@ def detect_overspecified(
             beat_count = len(beats)
             beats_per_1k = (beat_count / target_words * 1000) if target_words else 0
 
-            flagged = False
-            if beat_count >= _MAX_BEATS_ABSOLUTE:
-                flagged = True
-            elif target_words and beat_count > 2 and beats_per_1k > _BEATS_PER_1K_THRESHOLD:
-                flagged = True
-
-            if flagged:
+            if beat_count > brief_event_limit(target_words):
                 results.append({
                     'scene_id': sid,
                     'field': 'key_actions',
@@ -1271,7 +1263,7 @@ def detect_overspecified(
 
 # Fields that should be terse (beat lists or short phrases).
 _TERSE_FIELDS = {
-    'key_actions': 200,    # max chars — beats should be verb phrases
+    'key_actions': KEY_ACTIONS_MAX_CHARS,   # the briefs prompt's limit too
     'emotions': 60,        # max chars — short labels
     'goal': 80,            # max chars — one dramatic question
     'conflict': 80,        # max chars — one tension statement
@@ -1658,12 +1650,14 @@ def build_trim_prompt(
                     f"The drafter finds the middle ground."
                 )
             else:
-                max_beats = max(2, int(target_words / 800)) if target_words else 3
+                # the limit hone flags past and the briefs prompt asks for
+                max_beats = brief_event_limit(target_words)
                 field_blocks.append(
-                    f"**{field}** (overspecified: {beats} beats, target {max_beats} for {target_words}w scene):\n"
+                    f"**{field}** (overspecified: {beats} events, at most {max_beats} for "
+                    f"{target_words or 'a'}{'w' if target_words else ''} scene):\n"
                     f"{value}\n"
-                    f"→ Reduce to {max_beats} beats. Keep only the structurally essential "
-                    f"events. Cut beats that the drafter can infer from context."
+                    f"→ Reduce to {max_beats} events or fewer. Keep only the structurally "
+                    f"essential events. Cut beats that the drafter can infer from context."
                 )
         elif issue['issue'] == 'verbose':
             max_chars = issue.get('max_chars', 80)
@@ -2065,7 +2059,13 @@ def hone_briefs(
         if eval_issues and coaching_level == 'full':
             eval_fields = list(set(i['field'] for i in eval_issues if i['field']))
             if not eval_fields:
-                eval_fields = [f for f in briefs_map[sid].keys() if f != 'id' and briefs_map[sid].get(f, '')]
+                # a finding naming no field (revise --scores' brief pass) never
+                # reaches the author's notes; one naming a note is the author's
+                # own ask (#644; PR #675's review CR-3)
+                from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+                eval_fields = [f for f in briefs_map[sid].keys()
+                               if f != 'id' and f not in AUTHOR_NOTE_COLUMNS
+                               and briefs_map[sid].get(f, '')]
             current_values = {f: briefs_map[sid].get(f, '') for f in eval_fields}
             guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
 
@@ -2130,14 +2130,16 @@ def hone_briefs(
 # Gaps domain: detect missing fields
 # ============================================================================
 
+# Never the author's notes (`elaborate.AUTHOR_NOTE_COLUMNS`: goal, conflict,
+# crisis, decision, key_dialogue...; plan decision 9): an empty one isn't a gap
 _GAPS_REQUIRED = {
     'briefed': [
         'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-        'goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions',
+        'outcome', 'key_actions',
     ],
     'drafted': [
         'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-        'goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions',
+        'outcome', 'key_actions',
     ],
 }
 
@@ -2151,8 +2153,8 @@ def detect_gaps(
     """Scan for empty required fields given each scene's status.
 
     A craft-framework field (``elaborate.CRAFT_FRAMEWORK_COLUMNS``: value
-    shift, emotional arc, goal, conflict, crisis, decision...) is listed
-    with ``advisory`` True (#643): a scene needn't fit a framework.
+    shift, emotional arc...) is listed with ``advisory`` True (#643): a
+    scene needn't fit a framework. The author's notes are never listed.
 
     Returns:
         List of dicts: {scene_id, field, status, file, advisory}.
@@ -2546,7 +2548,7 @@ def _report_craft(issues: list[dict]) -> list[dict]:
 
 def _report_author_notes(issues: list[dict]) -> list[dict]:
     """Log the issues on the author's note columns (`elaborate.AUTHOR_NOTE_COLUMNS`:
-    emotions, subtext, key_dialogue...) as reported, not rewritten, and
+    goal, conflict, crisis, decision, emotions, subtext, key_dialogue...) as reported, not rewritten, and
     return the rest (#644's review TD-2: those columns are filled by hand,
     so a detector may say an emotions list is long, but no model rewrites
     it). An evaluation finding the author sends is still rewritten."""
@@ -3179,8 +3181,11 @@ def build_mice_fill_prompt(
     Returns:
         Prompt string for Claude.
     """
+    # goal is an optional note (plan decision 9): shown only when filled
     scene_block = '\n'.join(
-        f"- **{s['id']}** ({s.get('title', '')}): goal: {s.get('goal', 'unknown')}; function: {s.get('function', 'unknown')}"
+        f"- **{s['id']}** ({s.get('title', '')}): "
+        + (f"goal: {s['goal'].strip()}; " if (s.get('goal') or '').strip() else '')
+        + f"function: {s.get('function') or 'unknown'}"
         for s in gap_scenes
     )
 
