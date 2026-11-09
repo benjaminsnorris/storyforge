@@ -3836,6 +3836,36 @@ class TestAdvisoryPromises:
                          f'— not delivered']
         assert gate.advisory_lines(project_dir, ['act1-sc01']) == []
 
+    def test_a_gate_run_stamps_its_rows_with_what_it_read(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
+        [row] = gate.advisories(project_dir)[SCENE]
+        assert row['paragraphs'].startswith('prose=') and ';brief=' in row['paragraphs']
+        assert [r['stale'] for r in gate.read_advisory(project_dir).rows] == ['']
+
+    def test_an_unreadable_list_is_a_warning_not_a_promise(self, project_dir):
+        # CR-4, SF-5, TD-2
+        os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+        with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
+            f.write('not|the|header\n')
+        found = gate.read_advisory(project_dir)
+        assert found.rows == [] and len(found.problems) == 1
+        assert gate.advisory_lines(project_dir) == []
+        [line] = gate.advisory_summary(project_dir)
+        assert line.startswith(f'WARNING: {gate.ADVISORY_PATH} could not be read')
+        assert 'broken promise' not in line
+
+    def test_an_unreadable_reading_order_is_said(self, project_dir, tmp_path):
+        # SF-8: listed unordered, and said
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_promise('Finds nothing')])
+        with patch('storyforge.ledger.scene_order', side_effect=ValueError('no seq')):
+            found = gate.read_advisory(project_dir)
+            summary = gate.advisory_summary(project_dir)
+        assert len(found.rows) == 1
+        assert found.problems == [f'{gate.ADVISORY_PATH}: listed unordered, the reading '
+                                  f'order could not be read: no seq']
+        assert summary[0] == f'WARNING: {found.problems[0]}'
+        assert summary[1].startswith('WARNING: 1 broken promise(s)')
+
     def test_gate_and_fix_does_not_fix_an_advisory_promise(self, project_dir, tmp_path):
         calls = []
 

@@ -57,8 +57,9 @@ def render_human(verdict: dict) -> str:
         lines.append(f'ADVISORY: {len(advisory)} broken promise(s) the gate reported but did '
                      f'not stop on (working/gate-advisory.csv); the prose stands. Amend the '
                      f'brief, or mark the beat `must:` to require it:')
-        for line in advisory:
-            lines.append(f'  {line}')
+        from storyforge.gate import advisory_line
+        for row in advisory:
+            lines.append(f'  {advisory_line(row)}')
     return '\n'.join(lines)
 
 

@@ -34,8 +34,12 @@ Before doing anything else, orient yourself:
      `gate` blocker per scene waiting on the gate; surface these before
      advancing.
    - `advisory` — broken promises the gate reported but didn't stop on
-     (`working/gate-advisory.csv`, one line each): a brief item the prose
-     doesn't deliver. Not blockers: the prose stands. Mention them, and
+     (`working/gate-advisory.csv`), one record each: `scene_id`, `source`
+     (the brief field or registry id), `quote` (the promised item),
+     `finding`, `command`, and `stale` (empty, or why the row may no
+     longer hold: the scene or its brief changed since; suggest
+     `storyforge check <scene>`). A brief item the prose doesn't deliver.
+     An advisory file that can't be read is a `gate` blocker, not a record. Not blockers: the prose stands. Mention them, and
      offer to amend the brief, or to mark the beat `must:` (in
      `key_actions` or `key_dialogue`) if the author wants the gate to
      require it.

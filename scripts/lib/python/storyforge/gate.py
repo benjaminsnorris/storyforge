@@ -1628,7 +1628,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                                  names, name_notes, order, prose, command)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
                   extract_model or select_model('evaluation'), old_rows)
-    _note_advisory(project_dir, scene_id, command, result)
+    _note_advisory(project_dir, scene_id, command, result, prose=prose)
     if not result.passed:
         _note_blocked(project_dir, scene_id, command, result)
         return result
@@ -3327,7 +3327,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 # the blocked list is the kept run's, for `check --accept`
                 blocked_stale = _note_blocked(project_dir, scene_id, command, result)
                 # and so is the advisory list (#642)
-                _note_advisory(project_dir, scene_id, command, result)
+                _note_advisory(project_dir, scene_id, command, result, prose=current)
                 if blocked_stale:
                     notes.append(f'WARNING: {blocked_stale}; it lists the discarded fix\'s '
                                  f'contradictions, which `check --accept` refuses')
@@ -4017,11 +4017,14 @@ def record_blocked(project_dir: str, scene_id: str, command: str,
 # ============================================================================
 
 #: The advisory broken promises of each scene's last gate run (#642):
-#: `REPORTED_PATH`'s columns, `source` the brief field (or registry id) and
-#: `quote` the promised item. Replaced by each gate run of the scene that
-#: gets to the check, pass or not, and put back to the kept run's when
-#: `gate_and_fix` discards a fix. `status` lists them, and so do `write`
-#: and `revise` at the end of a run (`advisory_lines`).
+#: `REPORTED_PATH`'s columns, `source` the brief field (or registry id),
+#: `quote` the promised item, and `paragraphs` what the run read
+#: (`_advisory_stamp`: `prose=<key>;brief=<key>`), so a row the scene or its
+#: brief has since moved past can be told (`read_advisory`). Replaced by
+#: each gate run of the scene that gets to the check, pass or not, and put
+#: back to the kept run's when `gate_and_fix` discards a fix. `status`
+#: lists them, and so do `check`, `write` and `revise` at the end of a run
+#: (`advisory_summary`).
 ADVISORY_PATH = 'working/gate-advisory.csv'
 
 
@@ -4030,29 +4033,52 @@ def advisories(project_dir: str) -> dict[str, list[dict[str, str]]]:
     return _read_rows(project_dir, ADVISORY_PATH)
 
 
+def _brief_key(project_dir: str, scene_id: str) -> str:
+    """A key of the scene's brief promises (`_paragraph_key` of their words):
+    the same key, the same promises."""
+    from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    scene = _brief_row(project_dir, scene_id)
+    cells = [f'{c}={scene.get(c) or ""}' for c in (*PROMISE_FIELDS, *REGISTRY_PROMISE_FIELDS)]
+    return _paragraph_key(_words(' | '.join(cells)).split())
+
+
+def _prose_key(prose: str) -> str:
+    return _paragraph_key(_words(prose).split())
+
+
+def _advisory_stamp(project_dir: str, scene_id: str, prose: str) -> str:
+    """`ADVISORY_PATH`'s `paragraphs` for a run that read `prose`."""
+    return f'prose={_prose_key(prose)};brief={_brief_key(project_dir, scene_id)}'
+
+
 def record_advisory(project_dir: str, scene_id: str, command: str,
-                    findings: list[Finding]) -> None:
+                    findings: list[Finding], prose: str = '') -> None:
     """Replace `scene_id`'s rows in `ADVISORY_PATH` with `findings` (none:
-    its rows go; the file goes when it has no rows)."""
+    its rows go; the file goes when it has no rows). `prose`: what the run
+    read, stamped on each row (`_advisory_stamp`)."""
     from storyforge.common import csv_safe
     rows = advisories(project_dir)
     rows.pop(scene_id, None)
     if findings:
+        stamp = _advisory_stamp(project_dir, scene_id, prose) if prose else ''
         rows[scene_id] = [{'scene_id': scene_id, 'command': command,
                            'source': csv_safe(f.fact_id or ''),
                            'quote': csv_safe(_one_line(f.established_quote)),
                            'finding': csv_safe(_one_line(_advisory_message(f))),
-                           'paragraphs': ''} for f in findings]
+                           'paragraphs': stamp} for f in findings]
     _write_rows(project_dir, ADVISORY_PATH, rows)
 
 
 def _note_advisory(project_dir: str, scene_id: str, command: str,
-                   result: 'GateResult') -> str:
-    """Record `result.advisory` (`record_advisory`). A file that can't be
+                   result: 'GateResult', prose: str = '') -> str:
+    """Record `result.advisory` (`record_advisory`), stamped with `prose`
+    (the run's, `result._ctx.prose`, when not given). A file that can't be
     read or written is said, the gate's verdict unchanged (its report lines
     still name each one), and returned ('' when written)."""
+    if not prose and getattr(result, '_ctx', None) is not None:
+        prose = result._ctx.prose
     try:
-        record_advisory(project_dir, scene_id, command, result.advisory)
+        record_advisory(project_dir, scene_id, command, result.advisory, prose=prose)
     except (GateError, OSError) as e:
         from storyforge.common import log
         why = f'{ADVISORY_PATH} could not be updated: {e}'
@@ -4061,37 +4087,96 @@ def _note_advisory(project_dir: str, scene_id: str, command: str,
     return ''
 
 
-def advisory_lines(project_dir: str, scene_ids=None) -> list[str]:
-    """The advisory broken promises in `ADVISORY_PATH` (of `scene_ids`
-    only, when given), one line each (`scene: finding`), in reading order
-    where known; a file that can't be read is one line saying so."""
+#: `read_advisory`'s `stale` for a row whose scene or brief changed since
+#: its gate run
+STALE_PROSE = 'the scene has changed since this was found; re-check it'
+STALE_BRIEF = 'the brief has changed since this was found; re-check the scene'
+
+
+class Advisory(NamedTuple):
+    """`read_advisory`'s answer (#642's review TD-2, TD-3, CR-4, SF-5)."""
+    #: one per advisory broken promise, in reading order where known:
+    #: `{scene_id, command, source, quote, finding, stale}`, `stale` '' or
+    #: why the row may no longer hold (`STALE_PROSE`, `STALE_BRIEF`)
+    rows: list[dict[str, str]]
+    #: what couldn't be read (the file, the reading order), one line each:
+    #: never a promise, and never silent
+    problems: list[str]
+
+
+def _stale(project_dir: str, row: dict[str, str]) -> str:
+    stamp = dict(part.split('=', 1) for part in (row.get('paragraphs') or '').split(';')
+                 if '=' in part)
+    if not stamp:
+        return ''
+    from storyforge.illustrations import read_scene_raw
+    try:   # the bytes the gate reads (`gate_scene`), markers and all; None: no file
+        prose = read_scene_raw(project_dir, row['scene_id'])
+    except (OSError, UnicodeDecodeError):
+        prose = None
+    if prose is None or ('prose' in stamp and _prose_key(prose) != stamp['prose']):
+        return STALE_PROSE
+    if 'brief' in stamp and _brief_key(project_dir, row['scene_id']) != stamp['brief']:
+        return STALE_BRIEF
+    return ''
+
+
+def read_advisory(project_dir: str, scene_ids=None) -> Advisory:
+    """The advisory broken promises in `ADVISORY_PATH` (of `scene_ids` only,
+    when given). A file that can't be read gives no rows and one problem; a
+    reading order that can't be read leaves the rows unordered and says so."""
     try:
-        rows = advisories(project_dir)
+        by_scene = advisories(project_dir)
     except GateError as e:
-        return [f'{ADVISORY_PATH} could not be read: {e}']
+        return Advisory([], [f'{ADVISORY_PATH} could not be read: {e}'])
+    problems = []
     try:
         order = ledger.scene_order(project_dir)
-    except Exception:   # the list is still worth showing, unordered
+    except (ledger.LedgerError, ValueError, OSError) as e:
         order = {}
+        problems.append(f'{ADVISORY_PATH}: listed unordered, the reading order could not be '
+                        f'read: {e}')
     wanted = None if scene_ids is None else set(scene_ids)
-    return [f'{sid}: {row["finding"]}'
-            for sid in sorted(rows, key=lambda s: (order.get(s, 10**9), s))
-            if wanted is None or sid in wanted for row in rows[sid]]
+    rows = []
+    for sid in sorted(by_scene, key=lambda s: (order.get(s, 10**9), s)):
+        if wanted is not None and sid not in wanted:
+            continue
+        for row in by_scene[sid]:
+            rows.append({'scene_id': sid, 'command': row['command'],
+                         'source': row['source'], 'quote': row['quote'],
+                         'finding': row['finding'], 'stale': _stale(project_dir, row)})
+    return Advisory(rows, problems)
+
+
+def advisory_line(row: dict[str, str]) -> str:
+    """One `read_advisory` row in words: `scene: finding`, and why it may be
+    stale."""
+    return (f'{row["scene_id"]}: {row["finding"]}'
+            + (f' ({row["stale"]})' if row.get('stale') else ''))
+
+
+def advisory_lines(project_dir: str, scene_ids=None) -> list[str]:
+    """`read_advisory`'s rows, one line each (`advisory_line`); its
+    problems are not among them (`advisory_summary` says those)."""
+    return [advisory_line(r) for r in read_advisory(project_dir, scene_ids).rows]
 
 
 def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
     """The advisory broken promises of `scene_ids` (every scene when None)
-    in `ADVISORY_PATH` as a WARNING line and one line each; none: []. They
-    don't stop a scene (the brief is a plan and the prose stands); `check`,
+    in `ADVISORY_PATH` as a WARNING line and one line each, after a WARNING
+    for each thing that couldn't be read; none of either: []. They don't
+    stop a scene (the brief is a plan and the prose stands); `check`,
     `write` and `revise` list them at the end of a run so the author can
     amend a brief or mark a beat `must:`."""
-    lines = advisory_lines(project_dir, scene_ids)
-    if not lines:
-        return []
-    return ([f'WARNING: {len(lines)} broken promise(s) the gate reported but did not stop '
-             f'on (advisory, {ADVISORY_PATH}): the prose stands. Amend the brief, or mark '
-             f'the beat `must:` in key_actions or key_dialogue to require it:']
-            + [f'  {line}' for line in lines])
+    found = read_advisory(project_dir, scene_ids)
+    lines = [f'WARNING: {p}' for p in found.problems]
+    if found.rows:
+        lines += ([f'WARNING: {len(found.rows)} broken promise(s) the gate reported but did '
+                   f'not stop on (advisory, {ADVISORY_PATH}, as of each scene\'s last gate '
+                   f'run): the prose stands. Amend the brief, or mark the beat `must:` in '
+                   f'key_actions or key_dialogue to require it:']
+                  + [f'  {advisory_line(r)}' for r in found.rows])
+    return lines
 
 
 def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> str:

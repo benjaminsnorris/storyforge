@@ -264,13 +264,16 @@ def gate_waiting(project_dir: str) -> list[dict[str, str]]:
     return out
 
 
-def gate_advisory(project_dir: str) -> list[str]:
+def gate_advisory(project_dir: str) -> tuple[list[dict[str, str]], list[str]]:
     """#642: the broken promises the gate reported but didn't stop on
-    (`gate.advisory_lines`, working/gate-advisory.csv), one line each;
-    an unreadable file is one line saying so. Not blockers: the prose
-    stands unless the author marks the beat `must:`."""
+    (`gate.read_advisory`, working/gate-advisory.csv), one record each
+    (`{scene_id, command, source, quote, finding, stale}`), and what
+    couldn't be read, one line each (a `gate` blocker, never a promise).
+    Not blockers: the prose stands unless the author marks the beat
+    `must:`."""
     from storyforge import gate
-    return gate.advisory_lines(project_dir)
+    found = gate.read_advisory(project_dir)
+    return found.rows, found.problems
 
 
 def free_to_draft(project_dir: str) -> tuple[int, int, list[str]]:
@@ -405,6 +408,9 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
                                             f'scene(s) left to draft waits on one of them, '
                                             f'so write would draft nothing'))
             then, nxt = nxt, check
+    advisory, unread = gate_advisory(project_dir)
+    for note in unread:   # a file that can't be read is said, not listed as a promise
+        blockers.append({'source': 'gate', 'level': -1, 'detail': note})
     return {
         'phase': phase,
         'phase_declared': declared,
@@ -413,5 +419,5 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'next': nxt,
         'then': then,
         'blockers': blockers,
-        'advisory': gate_advisory(project_dir),
+        'advisory': advisory,
     }
