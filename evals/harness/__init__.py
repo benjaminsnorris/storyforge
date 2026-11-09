@@ -6,10 +6,19 @@ breakdown) and gates. The harness adds provenance, cost, timing, and status,
 and the runner turns the set into one JSON report and an exit code — so an
 agent can run the suite and read pass/fail without a person.
 
-Status is one of three values, and they are not interchangeable:
-``pass`` (every gate held), ``fail`` (the suite ran and a gate did not), and
-``error`` (the suite could not produce a measurement). A baseline is refused
+Status is one of four values, and they are not interchangeable:
+``pass`` (every gate held), ``fail`` (the suite ran and a gate did not),
+``error`` (the suite could not produce a measurement), and ``stale`` (a
+frozen suite whose recordings no longer match today's requests: no
+measurement, and by policy nothing spent to get one). A baseline is refused
 over an ``error`` result, because a missing number is not a low one.
+
+A **frozen** suite (``Suite(frozen=True)``: E4 and E8, #645) is expensive and
+end to end, so a prompt change anywhere misses its cassette. It is never
+recorded by default: ``auto`` replays it, and ``record`` replays it unless the
+caller passes ``record_frozen`` (``run.py`` does only for a suite named with
+``--suite`` and recorded as ``--runs 3``). A frozen suite replayed whose only
+cassette failures are misses is ``stale``, not ``error``.
 
 A suite is ``error`` — whatever it returned — when it declares no gates (it
 measured nothing anyone could fail), or when the cassette logged a failure
@@ -69,7 +78,9 @@ def migrate_tree(project_dir: str, label: str) -> None:
 ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
 
 Mode = Literal['replay', 'record', 'auto']
-Status = Literal['pass', 'fail', 'error']
+Status = Literal['pass', 'fail', 'error', 'stale']
+#: Worst first: a run's overall status is its worst suite's
+STATUS_ORDER = ('error', 'fail', 'stale', 'pass')
 
 _OPS = {'>=': operator.ge, '>': operator.gt, '<=': operator.le,
         '<': operator.lt, '==': operator.eq}
@@ -129,6 +140,15 @@ class Suite:
     name: str
     description: str
     run: Callable[[SuiteContext], SuiteOutput]
+    #: Recorded only on purpose, three runs at a time; a miss is ``stale`` (#645)
+    frozen: bool = False
+
+
+def stale_reason(suite_name: str, misses: int) -> str:
+    return (f'{misses} cassette miss(es): a request changed since this frozen suite '
+            f'was recorded, so it is stale and nothing was spent. Re-record it only '
+            f'when a decision depends on it: python3 evals/run.py --mode record '
+            f'--suite {suite_name} --runs 3')
 
 
 def discover(suites_dir: str) -> list[Suite]:
@@ -169,7 +189,8 @@ def read_cassette_log(log_file: str) -> tuple[dict, list[str]]:
     An unreadable line is itself reported as a failure rather than skipped,
     since it most likely belongs to a call that was then not counted.
     """
-    from storyforge.costs import PRICING, calculate_cost
+    from storyforge.costs import PRICING
+    from storyforge.eval_spend import usage_cost
     totals = dict.fromkeys(COST_KEYS, 0)
     totals['usd_if_live'] = totals['usd_spent'] = 0.0
     failures = []
@@ -199,10 +220,7 @@ def read_cassette_log(log_file: str) -> tuple[dict, list[str]]:
                 continue
             if not any(model == k or model.startswith(k + '-') for k in PRICING):
                 totals['unpriced_calls'] += 1  # costs.py prices it at its tier's newest rates
-            usd = calculate_cost(
-                model, _tokens(usage, 'input_tokens'), _tokens(usage, 'output_tokens'),
-                cache_read=_tokens(usage, 'cache_read_input_tokens'),
-                cache_create=_tokens(usage, 'cache_creation_input_tokens'))
+            usd = usage_cost(model, usage)
             totals['calls'] += 1
             totals['input_tokens'] += _tokens(usage, 'input_tokens')
             totals['output_tokens'] += _tokens(usage, 'output_tokens')
@@ -230,16 +248,24 @@ def provenance() -> dict:
     }
 
 
-def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
-    """Run one suite with its cassette active; never raises, except on Ctrl-C."""
+def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
+              record_frozen: bool = False) -> dict:
+    """Run one suite with its cassette active; never raises, except on Ctrl-C.
+
+    A frozen suite runs in ``replay`` whatever ``mode`` asks, unless ``mode`` is
+    ``record`` and ``record_frozen`` is set."""
     cassette_dir = os.path.join(cassettes_root, suite.name)
+    requested = mode
+    if suite.frozen and mode != 'replay' and not (mode == 'record' and record_frozen):
+        mode = 'replay'
     saved = {k: os.environ.get(k) for k in
              ('STORYFORGE_CASSETTE', 'STORYFORGE_CASSETTE_MODE', 'STORYFORGE_CASSETTE_LOG')}
     started = time.time()
     result = {'suite': suite.name, 'description': suite.description, 'mode': mode,
+              'frozen': suite.frozen,
               'started_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
               'status': 'error', 'metrics': {}, 'by_code': {}, 'gates': [],
-              'notes': [], 'error': None}
+              'notes': [], 'error': None, 'stale': None}
     _MIGRATION_NOTES.clear()
     with tempfile.TemporaryDirectory(prefix=f'eval-{suite.name}-') as work_dir:
         log_file = os.path.join(work_dir, '.cassette-log.jsonl')
@@ -272,7 +298,16 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
             result['cost'], failures = read_cassette_log(log_file)
         except OSError as e:
             result['cost'], failures = dict.fromkeys(COST_KEYS, 0), [f'cassette log unreadable: {e}']
-        if failures:
+        if requested != mode:
+            result['notes'].insert(0, f'frozen suite: replayed, not run in {requested} mode (#645)')
+        misses = [f for f in failures if f.startswith('CassetteMiss')]
+        if suite.frozen and mode == 'replay' and failures and len(misses) == len(failures):
+            # The miss came first; an exception after it is its consequence
+            result.update(status='stale', stale=stale_reason(suite.name, len(misses)),
+                          error=None, metrics={}, by_code={}, gates=[],
+                          cassette_failures=failures)
+            result.pop('traceback', None)
+        elif failures:
             result['status'] = 'error'
             result['cassette_failures'] = failures
             result['error'] = result['error'] or (
@@ -283,10 +318,18 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
     return result
 
 
-def run_all(suites: list[Suite], mode: Mode, cassettes_root: str) -> dict:
-    results = [run_suite(s, mode, cassettes_root) for s in suites]
-    statuses = {r['status'] for r in results}
-    overall: Status = 'error' if 'error' in statuses else 'fail' if 'fail' in statuses else 'pass'
+def overall_status(statuses) -> Status:
+    statuses = set(statuses)
+    return next((s for s in STATUS_ORDER if s in statuses), 'pass')
+
+
+def run_all(suites: list[Suite], mode: Mode, cassettes_root: str,
+            record_frozen: frozenset[str] | set[str] = frozenset()) -> dict:
+    """Run ``suites``; ``record_frozen`` names the frozen suites ``record``
+    mode may re-record (the others are replayed)."""
+    results = [run_suite(s, mode, cassettes_root, record_frozen=s.name in record_frozen)
+               for s in suites]
+    overall = overall_status(r['status'] for r in results)
     return {
         'schema_version': SCHEMA_VERSION,
         **provenance(),
@@ -313,8 +356,12 @@ def compare(report: dict, baseline: dict) -> dict[str, dict[str, dict]]:
                 flat[f'{code}.{name}'] = value
         return flat
 
-    base_by_suite = {r['suite']: flatten(r) for r in baseline.get('results', [])}
-    current_by_suite = {r['suite']: flatten(r) for r in report['results']}
+    # A stale suite measured nothing this run: no delta, and not "missing"
+    stale = {r['suite'] for r in report['results'] if r['status'] == 'stale'}
+    base_by_suite = {r['suite']: flatten(r) for r in baseline.get('results', [])
+                     if r['suite'] not in stale}
+    current_by_suite = {r['suite']: flatten(r) for r in report['results']
+                        if r['suite'] not in stale}
     out = {}
     for suite in sorted(set(current_by_suite) | set(base_by_suite)):
         current = current_by_suite.get(suite, {})

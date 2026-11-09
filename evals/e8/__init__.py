@@ -68,6 +68,11 @@ unreplayable. Scenes renamed after the introducing commit are found through
 E1's id-maps.
 
 Needs the book repos cloned under ``STORYFORGE_CORPUS_DIR`` (see ``evals/e1``).
+
+**Frozen** (#645): ``run.py`` never re-records this suite on a prompt change;
+a miss reports it ``stale`` and spends nothing. Re-record it only when a
+decision depends on it, as three runs:
+``python3 evals/run.py --mode record --suite e8-revision-safety --runs 3``.
 """
 
 from __future__ import annotations
