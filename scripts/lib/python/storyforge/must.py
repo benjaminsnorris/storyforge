@@ -72,6 +72,12 @@ def must_items(cell: str) -> list[Item]:
     return [i for i in items(cell) if i.must and i.text]
 
 
+def unmarked(cell: str) -> str:
+    """The cell without its `must` items (the rest, `; `-joined): what a
+    rewrite wrote, once `keep_must` has put back the author's."""
+    return '; '.join(i.raw for i in items(cell) if not i.must)
+
+
 def bare_markers(cell: str) -> int:
     """How many items of the cell are only the marker."""
     return sum(1 for i in items(cell) if i.must and not i.text)

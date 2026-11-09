@@ -2267,6 +2267,12 @@ DECISION: [rewritten decision]"""
                 f'or this scene{_unread_note(prose_notes)}. Its brief is unchanged.')
             continue
 
+        # #642: a `must` beat is the author's; the rewrite never drops or rewords one
+        from storyforge.must import keep_must_fields
+        fields, must_notes = keep_must_fields(brief, fields)
+        for note in must_notes:
+            log(f'  NOTE: {scene_id}: {note}')
+
         briefs_map.setdefault(scene_id, {'id': scene_id})
         briefs_map[scene_id].update(fields)
         rewritten.append(scene_id)

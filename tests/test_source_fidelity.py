@@ -323,6 +323,30 @@ class TestReviseHook:
         assert row['key_actions'] == 'Athena arrives as Mentes;the assembly meets'
         assert row['conflict'] == 'The suitors / jeer'           # no | reaches the CSV
 
+    def test_drift_fix_keeps_the_authors_must_beats(self, adapted, fake_api, monkeypatch,
+                                                    capsys):
+        """#642: a `must` beat is the author's; the source-drift fix that
+        rewrites key_actions and key_dialogue never drops or rewords one."""
+        path = os.path.join(adapted, 'reference', 'scene-briefs.csv')
+        text = open(path).read().replace(
+            'athena-at-the-door|Athena wants to rouse him|suitors|yes|c|d|she knocks|"Go"|',
+            'athena-at-the-door|Athena wants to rouse him|suitors|yes|c|d|she knocks;must: '
+            'Athena takes the shape of Mentes|must: Athena: "Go"|')
+        _write(adapted, {'reference/scene-briefs.csv': text})
+        _run(adapted)
+        (fixed, _), _ = self._fix(adapted, monkeypatch, self.FIX.replace(
+            'KEY_ACTIONS: Athena arrives as Mentes;the assembly meets',
+            'KEY_ACTIONS: must: Athena arrives as Mentes;the assembly meets'))
+        assert fixed == ['athena-at-the-door']
+        from storyforge.elaborate import _read_csv_as_map
+        row = _read_csv_as_map(path)['athena-at-the-door']
+        assert row['key_actions'] == ('the assembly meets; must: Athena takes the shape of '
+                                      'Mentes')
+        assert row['key_dialogue'] == 'must: Athena: "Go"; "Leave my house"'
+        out = capsys.readouterr().out
+        assert 'put back the author\'s must item(s)' in out
+        assert 'left out must: item(s) the author did not write: must: Athena arrives' in out
+
     def test_drift_fix_with_a_bad_outcome_is_refused(self, adapted, fake_api, monkeypatch):
         _run(adapted)
         (fixed, skipped), _ = self._fix(adapted, monkeypatch,

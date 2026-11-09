@@ -861,6 +861,14 @@ class TestMergeFields:
         assert _merge_fields(row, {'value_at_stake': 'truth'}, force=True)
         assert row['value_at_stake'] == 'truth'
 
+    def test_force_keeps_the_authors_must_beats(self):
+        """#642: a forced re-extraction never drops or rewords a `must` beat."""
+        from storyforge.cmd_extract import _merge_fields
+        row = {'id': 's1', 'key_actions': 'Gatsby waves;must: the green light blinks'}
+        assert _merge_fields(row, {'key_actions': 'Gatsby reaches toward the water'},
+                             force=True)
+        assert row['key_actions'] == 'Gatsby reaches toward the water; must: the green light blinks'
+
     def test_identical_value_is_not_a_change(self):
         from storyforge.cmd_extract import _merge_fields
         row = {'id': 's1', 'value_at_stake': 'truth'}

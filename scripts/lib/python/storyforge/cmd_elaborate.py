@@ -757,7 +757,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
             normalize_fields(row, alias_maps)
             row_sid = row.get('id', sid)
             if row_sid in briefs_map:
-                briefs_map[row_sid].update({k: v for k, v in row.items() if v})
+                briefs_map[row_sid].update(_keep_must(briefs_map[row_sid], row, row_sid))
             else:
                 new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
                 new.update(row)
@@ -1793,6 +1793,18 @@ def _mark_artifacts(project_dir: str, written: list[str]) -> None:
                                   updated=date.today().isoformat())
 
 
+def _keep_must(existing: dict, row: dict, sid: str) -> dict:
+    """The non-empty values of a regenerated brief `row` to write over
+    `existing`, with every `must` item of `existing` kept word for word
+    (#642: a `must` beat is the author's; regenerating a brief never drops
+    or rewords one, `must.keep_must_fields`), each change logged."""
+    from storyforge.must import keep_must_fields
+    values, notes = keep_must_fields(existing, {k: v for k, v in row.items() if v})
+    for note in notes:
+        log(f'  NOTE: {sid}: {note}')
+    return values
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -2138,7 +2150,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                         if not sid:
                             continue
                         if sid in existing:
-                            existing[sid].update({k: v for k, v in row.items() if v})
+                            existing[sid].update(_keep_must(existing[sid], row, sid))
                         else:
                             new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
                             new.update(row)

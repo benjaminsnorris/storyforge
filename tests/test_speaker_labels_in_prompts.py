@@ -193,7 +193,8 @@ GRAPHIC_NOVEL = {   # key_dialogue is matched verbatim in the panel script
     'prompts_page_prompt.py', 'script_format.py',
 }
 NO_PROMPT_WRITES = {   # data, checks, scoring, or source text shown as context
-    'checker.py', 'brief_names.py', 'cmd_enrich.py', 'elaborate.py', 'gate.py',
+    'checker.py', 'brief_names.py', 'cmd_check.py', 'cmd_enrich.py', 'elaborate.py', 'gate.py',
+    'must.py',
     'prompts_source.py', 'schema.py', 'scoring_boundary.py', 'scoring.py',
     'scoring_story_power.py', 'source_fidelity.py', 'speaker_labels.py', 'structural.py',
     'scoring/brief-fidelity.md', 'scoring/source-fidelity.md',
