@@ -45,6 +45,11 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to fill it:** The telling scene's id. The told scene's `pov` is its teller, who is in the telling scene's cast; its `timeline_day` is when the told events happened, and `time_mode` is unchanged. A scene going on with the tale has the same `told_by` (all of Odysseus's tale is told in one scene at Alcinous's court); a tale inside a tale names the told scene it is told in. Extraction's phase 1 fills it.
 **How to check:** `./storyforge validate` lists a told scene set before the present as a told tale (a device, like a flashback, never an error), blocks a `told_by` naming an unknown scene, itself or a cycle, and warns when the teller isn't in the telling scene's cast. `./storyforge timeline --check` reads the step into a tale as a step back, and reports a told scene set after the scene that tells it (a told future is a `vision`).
 
+### frame — A Scene Off the Present
+**Why it matters:** A dead character may come back in a memory, a dream, a vision or as a ghost; anywhere else it's an error a reader notices. The continuity check (#648) reports a dead character in any scene not marked, rather than guessing it's a memory.
+**How to fill it:** `memory`, `dream`, `vision` or `ghost` when what the scene shows isn't the story's present action; blank otherwise. A flashback set on its own earlier day (`timeline_day`) needs no mark; neither does a scene where a character only remembers the dead. Extraction's phase 1 and the map stage fill it.
+**How to check:** `./storyforge validate` and `./storyforge cleanup` report a value outside the four; `./storyforge check` reports a dead character present in an unmarked scene.
+
 ### type — Narrative Purpose
 **Why it matters:** A balanced manuscript has a mix of types. Five consecutive plot scenes with no character development creates pace without depth. Five character scenes with no plot creates depth without momentum.
 **How to check:** Look at the Scene Type Sequence chart. Flag stretches of 4+ same type.

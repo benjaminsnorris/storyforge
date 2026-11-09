@@ -62,6 +62,11 @@ Part E):
   and evaluates against the frozen files, so a change to what judges them
   re-records only the cheap part. If the suite itself has to generate end to
   end, mark it `frozen=True`.
+- **The continuity checks (#648) are code**, tested in
+  `tests/test_continuity.py`, not a suite. The gate now reads each scene's
+  typed state (one more call), so E4's and E8's gate runs miss on it and stay
+  `stale` until Ben re-measures them for recall on KNO, PHY, TIM and WLD
+  (three runs, over the monthly budget: his decision).
 - **Monthly budget.** `evals/config.json` sets `monthly_budget_usd` ($25 when
   the file is absent; a file that doesn't give a non-negative number refuses
   the run). Every live call the cassette makes is appended to the eval spend

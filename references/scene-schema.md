@@ -60,9 +60,9 @@ print(dump_schema_markdown())
 | `motif-taxonomy.csv` | id, name, aliases, tier | motifs |
 | `mice-threads.csv` | id, name, type, aliases | mice_threads |
 
-### world.csv — directions, light and distances (optional)
+### world.csv — directions, light, distances and speeds (optional)
 
-`reference/world.csv` (`storyforge.world_table`, #647; shared with the geography and sky check) holds the few world facts the blocking checks need. Columns `kind|name|value|note`, one fact a row. Without the file the defaults apply; with it, a malformed row stops the stage sheet check and `storyforge cleanup` reports it (never repaired).
+`reference/world.csv` (`storyforge.world_table`, #647; shared with #648's continuity checks: geography and sky, and travel) holds the few world facts the blocking and continuity checks need. Columns `kind|name|value|note`, one fact a row. Without the file the defaults apply; with it, a malformed row stops the stage sheet check and `storyforge cleanup` reports it (never repaired).
 
 | kind | name | value | example |
 |------|------|-------|---------|
@@ -70,6 +70,7 @@ print(dump_schema_markdown())
 | `sun` | a time of day | where the sun is then: a compass direction, or `none` when it's down (replaces the default: dawn and morning east, noon south, afternoon southwest, evening and dusk west, night none) | `sun\|noon\|north\|southern hemisphere` |
 | `sight` | `face` or `figure` | the farthest, in metres, that detail can be made out (defaults: face 30, figure 300) | `sight\|face\|20\|` |
 | `distance` | two places, `A > B` (either order) | metres between them | `distance\|the wall > the ships\|2000\|` |
+| `speed` | a way of travelling | the farthest it goes in a day, in metres; the travel check holds a journey to the fastest row (without one it doesn't check travel, and says so) | `speed\|on foot\|40000\|` |
 
 Compass directions: north, northeast, east, southeast, south, southwest, west, northwest (or N, NE, ...).
 
@@ -83,6 +84,25 @@ The stage sheet (`storyforge.stage_sheet`, #647; plan A4) is each scene's blocki
 - `end`: the state after the last beat, which the next scene carries over.
 
 Fields: `posture` (standing, sitting, kneeling, lying, crouching, mounted, other), `hand_left`, `hand_right` (what the hand holds, or `empty`), `worn` (`on`/`off`), `present` (`here`/`gone`), `position`, `facing`, `light` (`lit`/`out`), `door` (`open`/`shut`), `time`, `sun` (a compass direction). Events also use `hand_either`, `sees`, `shadow` and `break`.
+
+### Typed state (`working/typed-state/<scene>.json`)
+
+Each scene's facts as typed records (`storyforge.typed_state`, #648; plan A1), read from its prose by the gate (one call on a small model, `STORYFORGE_TYPED_STATE_MODEL` or the extraction tier) and compared by code (`storyforge.continuity`). JSON, format 1: `format`, `scene_id`, `model`, `prose_sha256` (the prose it was read from; another scene's records are read only while its file still holds that prose, and a re-check of unchanged prose reads the file instead of calling again), `records`.
+
+Each record is `{"type", "who", "item", "value", "detail", "quote"}` (`"verified": false` when its quote isn't in the scene: it makes no finding). Types: `alive` (`dead`, or `alive` again), `at` (a living person present, `item` where), `holds` (`item` a particular object; `gets`, `has`, `gives` with `detail` who to, `loses`, `destroyed`), `knows` (the POV and a ledger fact id; `learns` or `uses`), `injury` (`item` the part, `detail` the side; `minor`, `serious`, `disabling`, `healed`), `uses` (an injured part; `full` or `impaired`), `named` (a proper name the scene uses), `elapsed` (`value` the phrase, `item` the scene the count runs from).
+
+They sit beside the ledger, not in it: `commitments.csv`'s header is exact, so a column would stop every book until migrated. `when` is scenes.csv's calendar, an author's death is characters.csv's `death_scene`, and what a character knows also comes from the ledger's `known_by` and the briefs' `knowledge_in`/`knowledge_out`.
+
+### Names a book rules out
+
+The names check (#648) reports a name the book rules out: an adaptation's name map's replaced source names (a `source_name` whose `target_name` differs), and the author's list in storyforge.yaml:
+
+```yaml
+continuity:
+  forbidden_names: "Jupiter; Juno; Ulysses"
+```
+
+A name that is also in characters.csv isn't checked (the note says so). A name no registry, ledger subject or name map knows is an advisory NOTE, never a stop.
 
 ### scenes.csv — structural identity
 
@@ -98,6 +118,7 @@ Fields: `posture` (standing, sitting, kneeling, lying, crouching, mounted, other
 | `timeline_day` | integer | map | Chronological position (day number within the story). |
 | `time_mode` | enum: frame, scene, summary, vision | map | How the scene sits in time: scene (its action plays out on its day; the default when empty), summary (it covers a stretch of time; timeline_day is where it starts), frame (narration from after the story, looking back; never the story's present), or vision (events a character is shown that the story doesn't treat as fixed, such as A Christmas Carol's future; timeline_day is the day shown if the text fixes one; never the story's present). |
 | `timeline_date` | edtf | map | The calendar date the scene's own text states, in EDTF; empty when it states none. Unknown digits are X and never filled in: `XXXX-07-04` (no year given), `1922-22` (summer 1922), `1917~` (around 1917), `1922-06/1922-09` (a stretch). |
+| `frame` | enum: memory, dream, vision, ghost | map | Whether what the scene shows is the story's present action: blank when it is (the default, and every scene of a book without the column), or memory (a past relived), dream, vision (something a character is shown) or ghost (the dead visit). Optional (#648): elaborate and extract add the column on their next write. `time_mode` places the scene on the calendar; `frame` says whether its events happen there. The continuity check reads both: a dead character in an unmarked scene is reported, never assumed to be a memory; a flashback (an earlier `timeline_day`) needs no mark. `storyforge cleanup` reports a value outside the four. |
 | `told_by` | scene_ids | map | For an embedded tale (a story, song or report a character gives inside another scene, such as Odysseus's tale to the Phaeacians or a digression the narrator makes from a scene), the id of the one scene that tells it; empty for a scene lived on the page. The told scene's pov is its teller, who is in the telling scene's cast. timeline_day is when the told events happened, and time_mode is unchanged: like a flashback, a told scene is a device, never an error. |
 | `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night, unstated | map | Time of day when the scene takes place; unstated when the scene's text gives none (blank means not filled in yet). |
 | `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |
