@@ -38,6 +38,7 @@ Read the following files to understand the full context:
   - `incomplete.txt` -- present only in a cycle with unscored parts (such a cycle never becomes `latest`). `./storyforge score --complete-cycle` re-scores just those parts into it (see "Filling in an incomplete cycle")
   - `readability.csv` -- reading level per scene (Flesch-Kincaid grade, words a sentence, narration grade) and an `ALL` row pooling the scenes scored; with `project.reading_level` set, each is below, within or above it. Not a principle. Prose only. `./storyforge score --readability` prints it free, with no cycle
   - `./storyforge score --register` (free, no cycle, nothing written): for a retelling, the source translation's archaic words, grammar and idiom left in the prose, and dialogue that copies the source scene's wording. The voice guide's `## Register exemptions` (quoted phrases, `scene: <id>`) are skipped. Revision prompts of an adaptation carry these findings.
+  - `./storyforge score --voice --voice-repo PATH` (or `--fingerprint PATH`; free, no cycle, nothing written): the voice meter. See "Voice drift" below.
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
 - `scenes/author-scores.csv` -- author's own scores (if exists)
@@ -392,6 +393,24 @@ overrides persist across runs.
 - Mid-project structural change: `--boundary` at the affected boundary, or
   `--all-boundaries` after a large rewrite.
 - After drafting completes (or any time the bibles change): `--bible-consistency`.
+
+---
+
+## Voice drift
+
+`./storyforge score --voice` measures how far the prose sits from an author's voiceprint fingerprint (plan B6). It's free: no model calls, no cycle, nothing written.
+
+- **Against what:** `--voice-repo PATH` (an author voice repo: its `fingerprint.json`, plus its corpus, which the constructions are measured against) or `--fingerprint PATH` (a `fingerprint.json` alone, so the constructions are measured against the general baseline). Storyforge's worked example is `references/voiceprints/austen/`.
+- **Which prose:** the book's scenes (`--scenes`, `--act`, `--from-seq` narrow them), or any files with `--prose FILE ...`, which needs no project. `--top N` sets how many measures, pieces and sentences are listed (default 10).
+- **What it reports:**
+  - the distance, with "close" or "far" for prose of that length. The limit loosens for shorter prose, and it was measured on Austen's held-out novels. For another writer, read it as a scale, not a verdict;
+  - each group's and each measure's distance from the fingerprint;
+  - the scenes furthest from the fingerprint. Scenes under 1,000 words count only in the pooled reading, and are named;
+  - the sentences furthest from the corpus, with why (a colon, contractions, a length the writer rarely uses);
+  - constructions the prose uses and the corpus doesn't, quoted with an example. AI tells show up here.
+- **Too short:** under 1,000 words of prose in scope, it says "too short to measure" and exits 1. It never reports a zero.
+
+**It measures drift, nothing more.** It can't tell good prose from bad. Show it to the author as a reading to think about, and point at the sentences and constructions, not the number. **Never use it as an optimisation target:** don't run a rewrite loop, automatic or by hand, that revises until the distance falls. A loop like that learns to game a few function words, not to write in the voice. When the meter flags a passage, the author decides what to do about it.
 
 ---
 

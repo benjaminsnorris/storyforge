@@ -289,3 +289,24 @@ Update
 the fingerprint changes, `voice judge` and `voice accept --auto-pick` bring
 the shortlist's figures and the exemplars up to date for free.
 
+
+## The voice meter (B6, #653)
+
+`storyforge score --voice` measures prose against a fingerprint (`storyforge.voiceprint_meter`). It's free, and it reports drift only: it is never an optimisation target for a rewrite loop. To try it on the reference:
+
+```
+./storyforge score --voice --voice-repo references/voiceprints/austen \
+    --prose references/voiceprints/austen/corpus/emma.md
+```
+
+Measured 2026-11-09 against the *Pride and Prejudice* fingerprint (`tests/test_voiceprint_meter.py`):
+
+| Prose | Words | Distance | Reading |
+|---|---|---|---|
+| *Emma* (held out) | 160,290 | 0.214 | close (limit 0.30) |
+| *Persuasion* (held out) | 83,265 | 0.225 | close (limit 0.30) |
+| *Self-Control*, Brunton, ten excerpts | 21,333 | 0.636 | far (limit 0.33) |
+| *The Great Gatsby*, ten excerpts | 19,757 | 1.473 | far (limit 0.33) |
+| `tests/fixtures/voiceprint/modern-draft.md` (synthetic, written for the test) | 1,277 | 1.300 | far (limit 0.80) |
+
+`CLOSE_LIMITS` (how far prose of a given length can sit and still read as the writer) is each length's furthest held-out Austen sample, rounded up: 0.80 from 1,000 words, 0.65 from 2,000, 0.52 from 5,000, 0.45 from 10,000, 0.33 from 20,000, and `SAME_VOICE_MAX` (0.30) from 40,000.
