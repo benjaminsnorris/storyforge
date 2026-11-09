@@ -101,7 +101,7 @@ def _real_failed(floor: dict) -> int:
 
 def craft_advisory(floors: list[dict]) -> list[dict[str, str]]:
     """#643: the failed craft-framework floor checks (value shift, turning
-    point, action/sequel balance, goal/conflict/crisis/decision) of the
+    point, action/sequel balance) of the
     rungs in `floors` (the caller passes those whose artifact is present),
     one record each, in `gate.read_advisory`'s shape: `scene_id` '' (a floor
     check is book-wide; its `finding` names the first scene), `command` the

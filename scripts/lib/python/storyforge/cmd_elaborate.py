@@ -1869,23 +1869,18 @@ def _drop_unasked_columns(rows: list[dict]) -> tuple[list[str], list[str]]:
     return ([c for c in AUTHOR_NOTE_COLUMNS if c in notes], sorted(other))
 
 
-def _kept_notes(existing: dict, row: dict, sid: str) -> None:
-    """Log what a regenerated brief keeps that the reply didn't write (#644):
-    the author's note columns already filled (an earlier briefs stage wrote
-    them before #644, so they may be model staging the drafter now reads as
-    the author's; nothing can tell which), and craft notes the reply left
-    empty over an earlier value (an empty cell never clears one)."""
+def _kept_notes(existing: dict, sid: str) -> None:
+    """Log the author's note columns a regenerated brief keeps already
+    filled (#644, plan decision 9): an earlier briefs stage wrote them (goal,
+    conflict, crisis and decision until decision 9, the staging before
+    #644), so they may be model staging the drafter now reads as the
+    author's; nothing can tell which."""
     from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
     filled = [c for c in AUTHOR_NOTE_COLUMNS if (existing.get(c) or '').strip()]
     if filled:
         log(f'  WARNING: {sid}: kept its {", ".join(filled)} as the author\'s notes; if an '
             f'earlier briefs stage wrote them, they are model staging that drafting reads '
             f'as yours: clear them or keep them (#644)')
-    kept = [c for c in ('goal', 'conflict', 'crisis', 'decision')
-            if c in row and not (row.get(c) or '').strip() and (existing.get(c) or '').strip()]
-    if kept:
-        log(f'  NOTE: {sid}: the reply left {", ".join(kept)} empty; the brief\'s earlier '
-            f'value is kept (clear it by hand if the scene has none)')
 
 
 def _keep_must(existing: dict, row: dict, sid: str) -> dict:
@@ -2259,7 +2254,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                         if not sid:
                             continue
                         if sid in existing:
-                            _kept_notes(existing[sid], row, sid)
+                            _kept_notes(existing[sid], sid)
                             existing[sid].update(_keep_must(existing[sid], row, sid))
                         else:
                             # a must: item the model added is dropped here too

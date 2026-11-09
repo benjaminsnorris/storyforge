@@ -188,14 +188,17 @@ class TestDetectOverspecified:
     def test_too_many_beats_absolute(self):
         briefs = {
             'scene-1': {
-                'key_actions': 'a; b; c; d; e; f',
+                'key_actions': 'a; b; c; d; e; f; g',
             },
         }
         scenes = {'scene-1': {'target_words': '3000'}}
         results = detect_overspecified(briefs, scenes)
         assert len(results) >= 1
         assert results[0]['issue'] == 'overspecified'
-        assert results[0]['beat_count'] == 6
+        assert results[0]['beat_count'] == 7
+        # six is the limit the briefs prompt asks for (#668's SF-5): not flagged
+        briefs['scene-1']['key_actions'] = 'a; b; c; d; e; f'
+        assert detect_overspecified(briefs, {'scene-1': {'target_words': '3000'}}) == []
 
     def test_beats_per_1k_too_high(self):
         """5 beats in 1500 words = 3.3/1k, above the 2.5 threshold."""
@@ -579,9 +582,10 @@ class TestDetectGaps:
         results = detect_gaps(scenes, intent, briefs)
         missing_fields = {r['field'] for r in results}
         assert 'function' in missing_fields
-        assert 'conflict' in missing_fields
-        assert 'crisis' in missing_fields
         assert 'value_shift' in missing_fields
+        assert 'key_actions' in missing_fields
+        # the author's notes are never a gap (plan decision 9)
+        assert 'conflict' not in missing_fields and 'crisis' not in missing_fields
 
     def test_no_gaps_when_all_filled(self):
         scenes = {'scene-1': {'status': 'briefed'}}

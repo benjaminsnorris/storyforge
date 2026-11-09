@@ -55,18 +55,17 @@ REQUIRED_FIELDS = [
 ]
 
 # Craft-framework notes (#643, #644): value_at_stake, value_shift,
-# emotional_arc, goal, conflict, crisis, decision. Optional: the briefs and
-# map prompts leave them empty where a scene doesn't have one, so they carry
-# no weight. Empty ones are one advisory finding per scene, never "missing
-# required fields".
+# emotional_arc. Optional: the map prompt leaves them empty where a scene
+# doesn't have one, so they carry no weight. Empty ones are one advisory
+# finding per scene, never "missing required fields".
 CRAFT_NOTE_FIELDS = [
     'value_at_stake', 'value_shift', 'emotional_arc',
-    'goal', 'conflict', 'crisis', 'decision',
 ]
 
 # Enrichment fields — weight 0.5 each (from briefs). Not the author's notes
-# (key_dialogue, subtext, emotions, motifs: `elaborate.AUTHOR_NOTE_COLUMNS`,
-# #644): optional, filled by hand, and they carry no weight
+# (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs:
+# `elaborate.AUTHOR_NOTE_COLUMNS`, #644 and plan decision 9): optional, filled
+# by hand, and they carry no weight and no finding
 ENRICHMENT_FIELDS = [
     'knowledge_in', 'knowledge_out',
     'continuity_deps', 'mice_threads',
@@ -2136,8 +2135,9 @@ _PRESCRIPTIONS_FULL = {
         'Scenes missing required fields (function, outcome, key_actions) need '
         'attention before other structural scores are reliable: run `storyforge '
         'elaborate --stage gap-fill` or fill them by hand. Empty craft-framework '
-        'notes (goal, crisis, value shift and the like) are advisory: leave them '
-        'empty where the scene has none.'
+        'notes (value shift, emotional arc and the like) are advisory: leave them '
+        'empty where the scene has none. Goal, conflict, crisis and decision are '
+        'the author\'s optional notes.'
     ),
 }
 

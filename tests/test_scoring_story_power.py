@@ -4935,18 +4935,21 @@ def test_parse_scene_briefs_splits_array_cells(tmp_path):
 
 
 def test_check_briefs_deterministic_flags_missing_required_fields():
+    """A missing brief fact (outcome, key_actions) is high; an empty goal is
+    the author's note (plan decision 9) and no finding."""
     from storyforge.scoring_story_power import (
         _check_briefs_deterministic, Brief,
     )
     briefs = [
-        Brief('s1', '', 'conflict', 'yes', 'crisis', 'decision',
-              (), (), '', '', '', (), '', ()),
+        Brief('s1', '', 'conflict', '', 'crisis', 'decision',
+              (), (), 'she acts', '', '', (), '', ()),
     ]
     findings = _check_briefs_deterministic(briefs, [])
-    goal_finding = next(
-        f for f in findings if f['scene_id'] == 's1' and f['field'] == 'goal'
+    outcome_finding = next(
+        f for f in findings if f['scene_id'] == 's1' and f['field'] == 'outcome'
     )
-    assert goal_finding['severity'] == 'high'
+    assert outcome_finding['severity'] == 'high'
+    assert not [f for f in findings if f['field'] == 'goal']
 
 
 def test_check_briefs_deterministic_flags_invalid_outcome():
@@ -5906,31 +5909,26 @@ def test_check_briefs_deterministic_mixed_streak_no_flag():
     )
 
 
-def test_check_briefs_deterministic_half_filled_row_fires_four_findings():
-    """A brief row with only one scene-engine field populated produces
-    exactly 4 high-severity findings (one per empty required field).
-    Locks the missing-field contract in place against a regression
-    that early-returns on the first empty field. (PR #244 code
-    review S1.)"""
+def test_check_briefs_deterministic_half_filled_row_fires_one_finding():
+    """A brief row with only outcome populated produces exactly one
+    high-severity missing-field finding, for key_actions: goal, conflict,
+    crisis and decision are the author's optional notes (plan decision 9).
+    Locks the missing-field contract in place against a regression that
+    early-returns on the first empty field (PR #244 code review S1)."""
     from storyforge.scoring_story_power import (
         _check_briefs_deterministic, Brief,
     )
     briefs = [
-        # Only outcome populated; goal/conflict/crisis/decision empty.
+        # Only outcome populated
         Brief('s1', '', '', 'yes', '', '',
               (), (), '', '', '', (), '', ()),
     ]
     findings = _check_briefs_deterministic(briefs, ['s1'])
     high_missing = [
         f for f in findings
-        if f['scene_id'] == 's1' and f['severity'] == 'high'
-        and f['field'] in {'goal', 'conflict', 'crisis', 'decision'}
-        and 'is empty' in f['issue']
+        if f['scene_id'] == 's1' and f['severity'] == 'high' and 'is empty' in f['issue']
     ]
-    fields_seen = {f['field'] for f in high_missing}
-    assert fields_seen == {'goal', 'conflict', 'crisis', 'decision'}, (
-        f'expected all four empty required fields flagged; got {fields_seen}'
-    )
+    assert {f['field'] for f in high_missing} == {'key_actions'}
 
 
 def test_briefs_skipped_when_csv_contains_only_scaffold_rows(tmp_path,

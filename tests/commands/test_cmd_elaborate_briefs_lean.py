@@ -18,7 +18,7 @@ from storyforge.prompts_elaborate import BRIEFS_OUTPUT_HEADER, NOTES_RULE
 
 SCENE = 'new-x1'
 FACTS = ('new-x1|yes-but|Kael opens the sealed drawer;Kael finds the census roll torn out;'
-         'Kael pockets the stub||archivist-knows-village||torn-sleeve-kael|||||||false')
+         'Kael pockets the stub||archivist-knows-village||torn-sleeve-kael||false')
 OLD_HEADER = ('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|'
               'key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|'
               'physical_state_in|physical_state_out')
@@ -120,8 +120,8 @@ class TestAFactOnlyRun:
             assert row[col] == '', col
         assert row['key_actions'] == 'Asks;Listens'
         out = capsys.readouterr().out
-        assert ("left out the reply's key_dialogue, subtext, emotions, motifs: the "
-                "author's notes, never generated (#644)") in out
+        assert ("left out the reply's goal, conflict, crisis, decision, key_dialogue, "
+                "subtext, emotions, motifs: the author's notes, never generated (#644)") in out
 
     def test_the_authors_notes_are_kept(self, novel, mock_api):
         """An existing brief's hand-written notes survive a regeneration, even
@@ -272,18 +272,16 @@ class TestWhatTheWriterKeeps:
                 f'earlier briefs stage wrote them') in out
         assert _brief(novel)['subtext'] == 'let the list grow, and never call it pride'
 
-    def test_a_craft_note_the_reply_leaves_empty_is_kept_and_said(self, novel, mock_api,
-                                                                  capsys):
-        """SF-6: an empty cell never clears an earlier value; the run says
-        which it kept."""
+    def test_a_crisis_the_author_wrote_is_kept_and_said(self, novel, mock_api, capsys):
+        """SF-6, plan decision 9: crisis is the author's note now; a
+        regeneration keeps it and names it among the notes it kept."""
         path = os.path.join(novel, 'reference', 'scene-briefs.csv')
         _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
         update_csv_field(path, SCENE, 'crisis', 'Burn it or keep it')
         capsys.readouterr()
         _run(mock_api, _reply(BRIEFS_OUTPUT_HEADER, FACTS))
         out = capsys.readouterr().out
-        assert (f'NOTE: {SCENE}: the reply left crisis empty; the brief\'s earlier value '
-                f'is kept') in out
+        assert f"WARNING: {SCENE}: kept its crisis as the author's notes" in out
         assert _brief(novel)['crisis'] == 'Burn it or keep it'
 
 

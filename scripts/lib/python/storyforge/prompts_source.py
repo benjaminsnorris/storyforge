@@ -293,8 +293,11 @@ def _scenes_to_brief(project_dir: str, scene_ids: list[str] | None) -> list[str]
             log(f'WARNING: not scenes in scenes.csv, so not briefed: {", ".join(unknown)}')
         wanted = set(scene_ids)
         return [s['id'] for s in scenes if s.get('id') in wanted]
+    # briefed: a brief with any of its facts (goal is an optional note since
+    # plan decision 9, so a fact-only brief was re-briefed on every run)
+    from storyforge.elaborate import BRIEF_FACT_COLUMNS
     briefed = {r.get('id', '') for r in _read_csv(os.path.join(ref, 'scene-briefs.csv'))
-               if r.get('goal', '').strip()}
+               if any((r.get(c) or '').strip() for c in BRIEF_FACT_COLUMNS)}
     return [s['id'] for s in scenes if s.get('id') and s['id'] not in briefed]
 
 

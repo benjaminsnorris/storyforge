@@ -1093,8 +1093,8 @@ def parse_scene_briefs(project_dir: str) -> list[Brief]:
 
     Returns [] when the file is missing, empty, or lacks the required
     `id` column. Briefs with empty `id` are dropped with a WARNING.
-    Briefs with all five scene-engine fields empty are dropped with an
-    INFO log — they're scaffolding rows from migration, expected
+    Briefs with all five scene-engine fields and key_actions empty are
+    dropped with an INFO log — they're scaffolding rows from migration, expected
     during elaboration. (WARNING would be misleading since this is the
     intended steady-state for pre-briefed scenes; if the parent scene
     declares status>=briefed, the right escalation is in upstream
@@ -1149,7 +1149,7 @@ def parse_scene_briefs(project_dir: str) -> list[Brief]:
             row.get('crisis', '').strip(),
             row.get('decision', '').strip(),
         )
-        if not any(engine_fields):
+        if not any(engine_fields) and not row.get('key_actions', '').strip():
             # Migration scaffolding — empty placeholder row for a scene
             # that hasn't been briefed yet. The deterministic pre-pass
             # would otherwise emit five high-severity findings per row
@@ -5221,8 +5221,10 @@ def _check_briefs_deterministic(
     """Five high-confidence checks the briefs pre-pass runs against the
     corpus:
 
-    1. Missing required scene-engine field (goal/conflict/outcome/
-       crisis/decision): high per missing field.
+    1. Missing brief fact (`elaborate.BRIEF_FACT_COLUMNS`: outcome,
+       key_actions): high per missing field. goal, conflict, crisis and
+       decision are the author's optional notes (plan decision 9): an
+       empty one is no finding.
     2. Invalid outcome enum: high.
     3. Knowledge orphan: knowledge_in fact has no upstream knowledge_out
        (walking continuity_deps transitively when present, falling back
@@ -5241,9 +5243,7 @@ def _check_briefs_deterministic(
 
     for b in briefs:
         for field_name, value in (
-            ('goal', b.goal), ('conflict', b.conflict),
-            ('outcome', b.outcome), ('crisis', b.crisis),
-            ('decision', b.decision),
+            ('outcome', b.outcome), ('key_actions', b.key_actions),
         ):
             if not value:
                 findings.append({
@@ -5460,7 +5460,11 @@ def _build_briefs_prompt(briefs: list[Brief],
 contract for one scene: scene-engine fields (goal, conflict, outcome,
 crisis, decision), information state (knowledge_in / knowledge_out),
 execution beats (key_actions, key_dialogue, emotions, motifs, subtext),
-and scene-graph edges (continuity_deps).
+and scene-graph edges (continuity_deps). Its facts are outcome,
+key_actions and the knowledge state; goal, conflict, crisis, decision,
+key_dialogue, emotions, motifs and subtext are optional notes the author
+writes by hand. An empty note is not a fault: don't score a brief down
+for one, and never propose a value for one.
 
 Your job:
 

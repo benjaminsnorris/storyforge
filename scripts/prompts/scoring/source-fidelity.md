@@ -45,6 +45,8 @@ For each element, compare the adaptation's {TARGET_KIND} with the source scenes'
 - **on_stage:** who is present
 - **knowledge_out:** what characters learn in the scene. Both sides show only the facts each scene adds (`knowledge_out (new in this scene)`); facts carried in from earlier scenes are left out, so a fact missing here is not a departure
 
+An adaptation's brief may leave goal and key_dialogue out: they are optional notes its author writes by hand, never its facts. One left out is not a departure (score it 5); compare what the brief does give.
+
 List every departure: something the source has that the adaptation drops or changes, or something the adaptation adds that the source doesn't have. Tag each one:
 
 - `deliberate`: the treatment or its note explains it, or a version rule calls for it. Name which in `authority` (e.g. `treatment: compress`, `note`, `rule: the YA version softens the killing`)

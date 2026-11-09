@@ -150,8 +150,11 @@ class TestWithSource:
 
     def test_briefs_skip_scenes_already_briefed(self, adapted):
         _write(adapted, {'reference/scene-briefs.csv':
-                         'id|goal\nathena-at-the-door|She knocks\n'})
+                         'id|goal|outcome|key_actions\nathena-at-the-door||yes|She knocks\n'
+                         'olympus-council-meets|The gods argue||\n'})
         p = pe.build_briefs_prompt(adapted, PLUGIN, system_context=True)
+        # briefed: any of its facts; a goal alone (the author's note, plan
+        # decision 9) doesn't make a brief, and a fact-only one is briefed
         assert '### olympus-council-meets' in p and '### athena-at-the-door' not in p
 
     def test_source_prose_over_budget_is_named(self, adapted, monkeypatch):
