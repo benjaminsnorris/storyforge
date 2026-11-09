@@ -39,6 +39,12 @@ OTHERS_TO_AUSTEN_MAX = 2
 #: other authors' (AUC 1.000), and ahead of Brunton's, her contemporary (1.000)
 RANKING_AUC_FLOOR = 0.97
 BRUNTON_AUC_FLOOR = 0.95
+#: the first test again with Austen fingerprinted from ten chunks of Pride
+#: and Prejudice, as many as each other author has (a center from more
+#: chunks is steadier, which would favour her): ten spread through the
+#: novel (0.983, 115/117) or its first ten (0.932, 109/117)
+EQUAL_SIZE_ATTRIBUTION_FLOOR = 0.93
+EQUAL_SIZE_CONTIGUOUS_FLOOR = 0.85
 
 # Test 3, mixed voices
 #: of the 21 seeded corpora (16 Austen chunks + 4 of one other author's), the
@@ -150,6 +156,22 @@ def test_attribution_held_out_austen_is_nearest_austen(chunk_values, austen):
     assert to_austen <= OTHERS_TO_AUSTEN_MAX
 
 
+def test_attribution_with_equal_corpus_sizes(chunk_values):
+    """Attribution with every candidate fingerprinted from ten chunks, so
+    Austen's margin isn't her larger corpus (#662 review CR-4)."""
+    pp = chunk_values['pride-and-prejudice']
+    held = chunk_values['emma'] + chunk_values['persuasion']
+    others = {a: vp.profile(chunk_values[a]) for a in OTHERS}
+    for label, sample, floor in (
+            ('spread', [pp[i] for i in vp._spaced(len(pp), 10)], EQUAL_SIZE_ATTRIBUTION_FLOOR),
+            ('first ten', pp[:10], EQUAL_SIZE_CONTIGUOUS_FLOOR)):
+        candidates = {'austen': vp.profile(sample), **others}
+        wins = sum(min(candidates, key=lambda a: vp.compare_values(candidates[a], v).distance)
+                   == 'austen' for v in held)
+        print(f'equal sizes, {label}: {wins}/{len(held)} = {wins / len(held):.3f}')
+        assert wins / len(held) >= floor, label
+
+
 def test_attribution_ranking_against_austen_alone(chunk_values, austen):
     """Ranked by distance from Austen's fingerprint alone, the held-out
     chunks come ahead of every other author's, Brunton's (1811) included."""
@@ -178,39 +200,47 @@ def test_stability_halves_agree(chunk_values):
     assert m.same
 
 
-def _sample_pairs(pool, words, windows=6):
-    """Pairs of disjoint samples of `words` words: in each of `windows`
-    windows spaced through the pool, the even chunks against the odd."""
+#: the corpus sizes the stability test tries, in words
+STABILITY_SIZES = (10_000, 25_000, 50_000, 75_000, 100_000)
+
+
+def _sample_distances(pool, words):
+    """The distances between disjoint contiguous samples of `words` words
+    from the pool: every pair of non-overlapping windows starting on a grid
+    of half a window. A real corpus is a contiguous stretch of writing, and
+    windows far apart come from different novels, so drift between books
+    counts."""
     k = -(-words // vp.CHUNK_WORDS)
-    span = 2 * k
-    step = max(1, (len(pool) - span) // (windows - 1))
-    out = []
-    for start in range(0, len(pool) - span + 1, step)[:windows]:
-        window = pool[start:start + span]
-        out.append((window[0::2], window[1::2]))
-    return out
+    starts = range(0, len(pool) - k + 1, max(1, k // 2))
+    profiles = {a: vp.profile(pool[a:a + k]) for a in starts}
+    return [vp.compare(profiles[a], profiles[b]).distance
+            for a in starts for b in starts if b >= a + k]
 
 
 def test_stability_sets_the_minimum_corpus(chunk_values):
-    """Samples of 10k, 25k and 50k words from the whole Austen corpus (her
-    three novels, so drift between books counts), paired with disjoint
-    samples of the same size: the smallest size at which every pair shares a
-    voice is `MIN_CORPUS_WORDS`, `voice import`'s minimum-corpus warning.
-    Measured: 10k pairs up to 0.351 apart (median 0.274), 25k up to 0.221
-    (0.165), 50k up to 0.121 (0.090), against SAME_VOICE_MAX 0.30."""
+    """Contiguous samples of 10k to 100k words from the whole Austen corpus
+    (her three novels in a row), each paired with every disjoint sample of
+    the same size: the smallest size at which every pair shares a voice is
+    `MIN_CORPUS_WORDS`, `voice import`'s minimum-corpus warning. Measured
+    (worst pair, median, pairs): 10k 0.799 (0.415, 3486), 25k 0.501 (0.301,
+    325), 50k 0.362 (0.240, 55), 75k 0.257 (0.212, 21), 100k 0.207 (0.160,
+    10), against SAME_VOICE_MAX 0.30. (Interleaved samples, the even chunks
+    of a window against its odd ones, cover the same scenes and gave 25k:
+    #662 review CR-1.)"""
     pool = (chunk_values['pride-and-prejudice'] + chunk_values['emma']
             + chunk_values['persuasion'])
     worst, medians, enough = {}, {}, None
-    for words in (10_000, 25_000, 50_000):
-        ds = [vp.compare(vp.profile(a), vp.profile(b)).distance
-              for a, b in _sample_pairs(pool, words)]
+    for words in STABILITY_SIZES:
+        ds = _sample_distances(pool, words)
+        assert len(ds) >= 10, words
         worst[words], medians[words] = max(ds), statistics.median(ds)
         if enough is None and worst[words] <= vp.SAME_VOICE_MAX:
             enough = words
     print(f'worst pair by size {worst}; medians {medians}')
     assert enough == vp.MIN_CORPUS_WORDS
     # more corpus, steadier fingerprint
-    assert medians[10_000] > medians[25_000] > medians[50_000]
+    ms = [medians[w] for w in STABILITY_SIZES]
+    assert ms == sorted(ms, reverse=True)
 
 
 # ============================================================================
@@ -280,6 +310,15 @@ def test_mixed_voices_seeded_corpus_is_inconsistent(texts, chunk_values):
         group, separation = vp._minority(values, base)
         print(f'pure {slug}: separation {separation:.3f}')
         assert separation <= vp.OUTLIER_SEPARATION, slug
+
+    # pieces of MIN_PIECE_WORDS: shorter pure-Austen pieces split as if two
+    # voices (1,000-word pieces of Pride and Prejudice up to 0.906, 1,500 up
+    # to 0.759 over four samples of each novel: #662 review CR-2)
+    for slug in ('emma', 'pride-and-prejudice', 'persuasion'):
+        cs = vp.chunks(texts[slug], vp.MIN_PIECE_WORDS)
+        result = vp.consistency(cs[::max(1, len(cs) // 20)][:20])
+        print(f'pure {slug}, {vp.MIN_PIECE_WORDS}-word pieces: {result.separation:.3f}')
+        assert result.consistent, (slug, result.separation)
 
     # end to end on texts: Persuasion seeded with Gatsby, the pieces named
     pieces = {f'persuasion-{i:02d}': c

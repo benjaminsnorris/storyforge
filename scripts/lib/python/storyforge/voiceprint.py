@@ -106,11 +106,11 @@ SAME_VOICE_MAX = 0.30
 #: corpora 0.59-0.62; Austen seeded with 20% of another author 0.74-1.47
 #: (18 of 21 above it)
 OUTLIER_SEPARATION = 0.85
-#: the least corpus whose fingerprint is stable: two disjoint samples of
-#: this size from the same writer always share a voice (Austen: 10k words
-#: up to 0.351 apart, 25k up to 0.221). `voice import`'s minimum-corpus
-#: warning (#652)
-MIN_CORPUS_WORDS = 25000
+#: the least corpus whose fingerprint is stable: any two disjoint
+#: contiguous samples of this size from the same writer share a voice
+#: (Austen, across her three novels: 25k words up to 0.501 apart, 50k up to
+#: 0.362, 75k up to 0.257). `voice import`'s minimum-corpus warning (#652)
+MIN_CORPUS_WORDS = 75000
 
 GROUPS = ('sentences', 'paragraphs', 'function_words', 'punctuation',
           'readability', 'vocabulary', 'openings')
@@ -1063,8 +1063,10 @@ class Consistency:
         return not self.outliers
 
 
-#: a piece shorter than this is too noisy to judge
-MIN_PIECE_WORDS = 1000
+#: a piece shorter than this is too noisy to judge: twenty pure-Austen
+#: pieces of 1,000 words split as two voices (separation up to 0.91), of
+#: 1,500 up to 0.76, against `OUTLIER_SEPARATION`
+MIN_PIECE_WORDS = 1500
 #: consistency needs at least this many pieces to find a typical one
 MIN_PIECES = 5
 
