@@ -27,6 +27,10 @@ that turns an API failure into a skipped scene, so the exception alone cannot
 be trusted to reach the harness — the log line can, and the harness treats a
 logged failure as an errored suite whatever the suite returned.
 
+A miss names the request's key and the opening of its prompt, unless
+``STORYFORGE_CASSETTE_PRIVATE`` is set (a suite on private inputs, #646):
+then the opening is withheld, since it could be the private prose.
+
 The Batch API is refused under a cassette: its ids and polling sequence are
 not reproducible, so a recording of one could never replay.
 
@@ -194,7 +198,15 @@ def _fail(error: CassetteError) -> CassetteError:
     return error
 
 
+#: Set (to anything) when the requests carry private inputs (a private
+#: eval set, #646): a miss then names the request's key, not its opening
+#: words, so the prose never reaches a log, a report or a terminal
+PRIVATE_ENV = 'STORYFORGE_CASSETTE_PRIVATE'
+
+
 def _prompt_preview(body: dict | None) -> str:
+    if os.environ.get(PRIVATE_ENV):
+        return '(withheld: the inputs are private)'
     try:
         content = body['messages'][-1]['content']
     except (KeyError, IndexError, TypeError):

@@ -22,7 +22,10 @@ VALID_TYPES = frozenset({
     'plot', 'revelation', 'transition', 'world',
 })
 
-VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
+#: memory, dream and ghost (#648) are `elaborate.INNER_MODES`: on the
+#: calendar as a scene, off the present for the continuity checks
+VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision', 'memory', 'dream',
+                              'ghost'})
 
 #: characters.csv `pronouns`: a subject pronoun alone (`she`), or a slash
 #: form of that pronoun's own forms (`she/her`, `they/them/theirs`). The
@@ -206,7 +209,15 @@ COLUMN_SCHEMA = {
                        'timeline_day is where the stretch starts), frame (narration from '
                        'after the story, looking back; never the story\'s present), or '
                        'vision (events that have not happened or may not happen, such as a '
-                       'future a character is shown; never the story\'s present).',
+                       'future a character is shown; timeline_day is the day shown if the text '
+                       'fixes one; never the story\'s present). Three more keep the scene on '
+                       'its day but say its events aren\'t the present\'s action: memory (a '
+                       'past relived on the day of remembering), dream (the night it is '
+                       'dreamt) and ghost (the day the dead visit). A flashback set on its own '
+                       'earlier timeline_day needs none of these. The continuity check reads '
+                       'frame, vision, memory, dream and ghost as off the present, so a dead '
+                       'character may appear there; in any other scene that is reported, '
+                       'never assumed to be a memory.',
     },
     'timeline_date': {
         'type': 'edtf', 'file': 'scenes.csv', 'stage': 'map',

@@ -9,9 +9,18 @@ agent can run the suite and read pass/fail without a person.
 Status is one of four values, and they are not interchangeable:
 ``pass`` (every gate held), ``fail`` (the suite ran and a gate did not),
 ``error`` (the suite could not produce a measurement), and ``stale`` (a
-frozen suite whose recordings no longer match today's requests: no
-measurement, and by policy nothing spent to get one). A baseline is refused
+frozen suite whose recordings no longer match today's requests, or a suite
+whose inputs aren't on this machine: no measurement, and by policy nothing
+spent to get one; ``stale`` says which, and why). A baseline is refused
 over an ``error`` result, because a missing number is not a low one.
+
+A suite on **private** inputs (``Suite(cassettes=...)``: the blocking set,
+#646, whose scenes are unpublished prose) keeps its set and recordings out
+of this public repo. On a machine without them it raises
+``SuiteUnavailable`` and is reported ``stale`` with the reason (``unavailable``
+set), so a public clone or CI isn't turned red by data it can't have; and
+while it runs, a cassette miss withholds the prompt's opening
+(``STORYFORGE_CASSETTE_PRIVATE``).
 
 A **frozen** suite (``Suite(frozen=True)``: E4 and E8, #645) is expensive and
 end to end, so a prompt change anywhere misses its cassette. It is never
@@ -80,6 +89,13 @@ def migrate_tree(project_dir: str, label: str) -> None:
             + (f' (and {len(result.problems) - 5} more)' if len(result.problems) > 5 else ''))
 ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
 
+class SuiteUnavailable(RuntimeError):
+    """A suite's inputs aren't on this machine (a private set that lives
+    outside this repo). Raised from ``Suite.cassettes`` or ``run``; the suite
+    is ``stale`` with this message as the reason, never ``error``: a clone
+    without the private repo has nothing to measure, and nothing is wrong."""
+
+
 Mode = Literal['replay', 'record', 'auto']
 Status = Literal['pass', 'fail', 'error', 'stale']
 #: Worst first: a run's overall status is its worst suite's
@@ -145,6 +161,17 @@ class Suite:
     run: Callable[[SuiteContext], SuiteOutput]
     #: Recorded only on purpose, three runs at a time; a miss is ``stale`` (#645)
     frozen: bool = False
+    #: Where the suite's recordings live when they can't be in this public
+    #: repo (a recording holds the request, so the inputs): called before
+    #: the run with the run's label ('' for the main run, ``run2``... for
+    #: ``--runs N``'s others, each of which needs its own recordings), it
+    #: returns the directory, or raises ``SuiteUnavailable`` when the inputs
+    #: aren't on this machine (``stale``) or anything else (``error``).
+    #: ``None``: ``<cassettes_root>/<name>``. Setting it marks the suite's
+    #: inputs private: a cassette miss withholds the prompt's opening. A
+    #: private suite's recordings are its own, so ``--cassettes-dir``
+    #: doesn't move them (#646)
+    cassettes: Callable[[str], str] | None = None
 
 
 def stale_reason(suite_name: str, misses: int) -> str:
@@ -259,18 +286,24 @@ def provenance() -> dict:
     }
 
 
+def unavailable_reason(why: str) -> str:
+    return f'unavailable on this machine, so nothing was measured or spent: {why}'
+
+
 def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
-              record_frozen: bool = False) -> dict:
+              record_frozen: bool = False, run: str = '') -> dict:
     """Run one suite with its cassette active; never raises, except on Ctrl-C.
 
     A frozen suite runs in ``replay`` whatever ``mode`` asks, unless ``mode`` is
-    ``record`` and ``record_frozen`` is set."""
-    cassette_dir = os.path.join(cassettes_root, suite.name)
+    ``record`` and ``record_frozen`` is set. ``run`` labels which of
+    ``--runs N``'s runs this is ('' the main one), for ``Suite.cassettes``."""
     requested = mode
     if suite.frozen and mode != 'replay' and not (mode == 'record' and record_frozen):
         mode = 'replay'
+    from storyforge.cassette import PRIVATE_ENV
     saved = {k: os.environ.get(k) for k in
-             ('STORYFORGE_CASSETTE', 'STORYFORGE_CASSETTE_MODE', 'STORYFORGE_CASSETTE_LOG')}
+             ('STORYFORGE_CASSETTE', 'STORYFORGE_CASSETTE_MODE', 'STORYFORGE_CASSETTE_LOG',
+              PRIVATE_ENV)}
     started = time.time()
     result = {'suite': suite.name, 'description': suite.description, 'mode': mode,
               'frozen': suite.frozen,
@@ -280,10 +313,16 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
     _MIGRATION_NOTES.clear()
     with tempfile.TemporaryDirectory(prefix=f'eval-{suite.name}-') as work_dir:
         log_file = os.path.join(work_dir, '.cassette-log.jsonl')
-        os.environ['STORYFORGE_CASSETTE'] = cassette_dir
-        os.environ['STORYFORGE_CASSETTE_MODE'] = mode
-        os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
         try:
+            if suite.cassettes is not None:
+                os.environ[PRIVATE_ENV] = '1'
+                cassette_dir = suite.cassettes(run)
+            else:
+                os.environ.pop(PRIVATE_ENV, None)
+                cassette_dir = os.path.join(cassettes_root, suite.name)
+            os.environ['STORYFORGE_CASSETTE'] = cassette_dir
+            os.environ['STORYFORGE_CASSETTE_MODE'] = mode
+            os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
             output = suite.run(SuiteContext(suite.name, mode, cassette_dir, work_dir))
             if not isinstance(output, SuiteOutput):
                 raise TypeError(f'run() returned {type(output).__name__}, not SuiteOutput')
@@ -295,6 +334,9 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
                 result['error'] = 'suite declared no gates, so it measured nothing that could fail'
             else:
                 result['status'] = 'pass' if all(g.passed for g in output.gates) else 'fail'
+        except SuiteUnavailable as e:
+            result.update(status='stale', stale=unavailable_reason(str(e)), unavailable=True,
+                          metrics={}, by_code={}, gates=[], notes=[])
         except (Exception, SystemExit) as e:  # a command calling sys.exit must not kill the run
             result['error'] = f'{type(e).__name__}: {e}'
             result['traceback'] = traceback.format_exc()
@@ -349,10 +391,12 @@ def overall_status(statuses) -> Status:
 
 
 def run_all(suites: list[Suite], mode: Mode, cassettes_root: str,
-            record_frozen: frozenset[str] | set[str] = frozenset()) -> dict:
+            record_frozen: frozenset[str] | set[str] = frozenset(), run: str = '') -> dict:
     """Run ``suites``; ``record_frozen`` names the frozen suites ``record``
-    mode may re-record (the others are replayed)."""
-    results = [run_suite(s, mode, cassettes_root, record_frozen=s.name in record_frozen)
+    mode may re-record (the others are replayed); ``run`` labels which of
+    ``--runs N``'s runs this is ('' the main one)."""
+    results = [run_suite(s, mode, cassettes_root, record_frozen=s.name in record_frozen,
+                         run=run)
                for s in suites]
     overall = overall_status(r['status'] for r in results)
     return {

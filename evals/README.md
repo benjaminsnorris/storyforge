@@ -66,6 +66,11 @@ replays them. At about
   and evaluates against the frozen files, so a change to what judges them
   re-records only the cheap part. If the suite itself has to generate end to
   end, mark it `frozen=True`.
+- **The continuity checks (#648) are code**, tested in
+  `tests/test_continuity.py`, not a suite. The gate now reads each scene's
+  typed state (one more call), so E4's and E8's gate runs miss on it and stay
+  `stale` until Ben re-measures them for recall on KNO, PHY, TIM and WLD
+  (three runs, over the monthly budget: his decision).
 - **Monthly budget.** `evals/config.json` sets `monthly_budget_usd` ($25 when
   the file is absent; a file that doesn't give a non-negative number refuses
   the run). Every live call the cassette makes is appended to the eval spend
@@ -114,6 +119,150 @@ A gate no run passes says nothing, so a failing suite stops meaning
 anything. Gate on what the suite records today (E7's `NOISE_CEILING`, E2's
 `e2.FLOORS`: the value must equal it, so a gain moves it in the same commit)
 and give the plan's target as a note (#488).
+
+## Private suites: the blocking set (#646)
+
+Some labelled sets are the author's unpublished prose, and this repo is
+public. Such a set lives in the private storyforge-evals repo
+(benjaminsnorris/storyforge-evals), cloned at `STORYFORGE_PRIVATE_EVALS_DIR`
+(default `~/Developer/evals`), and so do its recordings, since a recording
+holds the request: `Suite(..., cassettes=fn)` names the directory. `fn(run)`
+gets the run's label (`''`, or `run2`, `run3` for `--runs 3`, each recorded
+on its own) and raises `harness.SuiteUnavailable` when the private repo isn't
+on this machine: the suite is then `stale` with the reason (exit code
+unaffected, listed as "unavailable here"), so CI and every public clone stay
+green, and `--baseline` keeps the old baseline's measurement of it (or writes
+it as unavailable when there is none). `--cassettes-dir` doesn't move a
+private suite's recordings, and while it runs a cassette miss withholds the
+prompt's opening. The suite's notes and metrics reach `baseline.json`, so
+they carry counts and case ids, never a quote; per-case outcomes and findings
+go to the private repo (gitignored there).
+
+`blocking-set` measures today's blocking read (`storyforge.blocking`, #626,
+two readings per scene) against 118 known blocking slips (34 that gawain's
+readers and Ben found, 10 from gawain's blocking run, 74 from Wrath's last gate
+run, each with its fix verdict), 13 readings people judged plausible and left
+alone, and 14 clean scenes (`evals/blocking_set`; how each case was found:
+`blocking-set/README.md` in storyforge-evals). It reports recall overall, per
+category (`recall_hands`, `_posture`, `_sightline`, `_worn`, `_position`,
+`_light`, `_other`), per book (`recall_book_gawain`, `_wrath`) and per finder
+(`recall_found_by_readers` is the independent measure; the `tool` cases were
+found by the same read), false alarms per 10,000 words of clean prose, and
+`left_flagged` (left readings a verified finding lands on). Each of those is
+gated on its recorded value (`FLOORS` in the suite, #488); `unlabelled_flags`
+and the counts are reported, not gated. A finding catches at most one case,
+matched by place (whole words, a `...` quote's parts in order), so a short or
+shared line can't inflate recall. The clean scenes are all gawain's (no Wrath
+scene has had a human read), so the false-alarm rate is one book's. The #647
+stage sheet is measured on the same set before the whole-scene read is
+retired (plan A4;
+`blocking-set-sheet` below). The two suites share `evals/blocking_set/runner.py`.
+
+The suite is **frozen** (#645): `auto` and `record` replay it, and a miss is
+`stale`. **Not recorded yet** (forecast about $6.60 a run; needs Ben's
+approval). To record:
+
+1. Check out the evals PR's branch (`blocking-set-646`) at `~/Developer/evals`,
+   or point `STORYFORGE_PRIVATE_EVALS_DIR` at a checkout of it.
+2. `python3 evals/run.py --mode record --suite blocking-set --runs 3` (three
+   runs, about $20, so the spread is known: `cassettes/blocking-set/` and
+   `cassettes/run2/`, `run3/` beside the set). Commit the cassettes there.
+3. Replay run 1 (`python3 evals/run.py --suite blocking-set`), copy the
+   private `results/latest.json` to `baseline-cases.json` there and commit it
+   (the frozen per-case outcomes), and set `FLOORS` in
+   `evals/suites/blocking_set.py` from the report.
+4. `python3 evals/run.py --baseline` writes `baseline.json`. It needs a full
+   run with no suite in `error`; on this branch's base E3, E5 and the re-check
+   set error in replay, so that waits for them.
+
+### The stage sheet on the set (#647)
+
+`blocking-set-sheet` runs the stage sheet (`storyforge.stage_sheet`: a small
+model records each scene's physical action as transitions, code checks them,
+a yes/no question asked twice covers the rest) on the same scenes and scores
+it the same way, gating on its own recorded values (`FLOORS` in
+`evals/suites/blocking_set_sheet.py`). It also reports `events`,
+`questions_asked` and `scenes_with_unchecked` (scenes where something
+couldn't be checked; per-scene counts in the private outcomes file). Its
+recordings are in `blocking-set/cassettes/blocking-set-sheet/` and its
+per-case outcomes in `blocking-set/results/latest-stage-sheet.json`, both in
+storyforge-evals (benjaminsnorris/storyforge-evals#78, stacked on #77;
+first recorded 2026-11-09 for $0.49 on haiku 5.5, re-recorded after #671's
+review fixes for $0.85).
+
+**Side by side:** `python3 evals/run.py --suite blocking-set --suite
+blocking-set-sheet`. The read runs first and writes `results/latest.json`;
+the sheet's notes then compare the two case by case (caught by both, only
+by one, the case ids each alone caught, and left readings flagged). The gate
+keeps the read (`gate.GATE_BLOCKING_METHOD = 'read'`) until the sheet's
+recall is at least the read's with no more false alarms (plan A4).
+
+The model is the stage sheet's default (the extraction tier);
+`STORYFORGE_STAGE_SHEET_MODEL` runs another, which is a different request:
+recorded on purpose beside the default's, and a replay without the
+variable replays the default's.
+
+Like `blocking-set`, the suite is **frozen** (#645; `auto` and `record`
+replay it, a miss is `stale`, recording takes `--mode record --suite
+blocking-set-sheet --runs 3`), and without the private checkout it is
+`stale` (unavailable), not an error. Its harness (`check_all`,
+`floor_gates`, the outcomes file) is `blocking-set`'s, in
+`evals/blocking_set/runner.py`, so the two suites score, match and gate
+identically. The recordings so far are the main run only (made before the
+suite was frozen).
+
+## The question set (#649)
+
+`question-set` measures the gate's question layer (`storyforge.questions`,
+plan A3): narrow yes/no questions from the ledger, each asked twice, a
+finding only when both answers say yes and the quote is in the scene. The
+cases are *A Christmas Carol* (public domain, the E2 book) and facts Dickens
+establishes, written as ledger facts of the types the layer asks about
+(`evals/fixtures/question-set/cases.json`): 17 of E2's injected errors that
+break a trait, relationship, physical or world fact, the 13 scenes they are
+in as Dickens wrote them, and E2's 8 benign rewordings, so 38 scene variants
+and 96 questions with known answers (17 `yes`). Each scene is asked about
+the same facts in every variant, so a fact that is true of the scene is
+asked beside the one an injection breaks. It reports `recall` (a finding
+on the injected words), `recall_any` (a finding on the broken fact, quoting
+anywhere in the scene), `false_alarms` (broken down into controls, benign
+edits and the other facts of an error variant), `split` and `misquoted`, by
+code (3 to 6 cases a code: too few to compare codes), and gates each of
+`FLOORS` on its recorded value.
+
+`recall` asks every labelled fact, so it measures the questions, the prompt
+and the model. The gate asks only what its selection picks, so the suite
+also runs that selection on each variant, free (#673's review): each
+scene's labelled `cast` (who a perfect typed state would put there) as `at`
+records, its scenes.csv locations and the registry names in its prose,
+through `questions.present_subjects` and `facts_to_ask`.
+`selection_lost` counts the `yes` facts the gate would not ask (1:
+qs-018, Belle's scene never names Marley) and `recall_selected` the
+recall the gate would get (caught and selected). The brief's promise
+questions and disputes have no cases yet.
+
+The model is the layer's default (the extraction tier).
+`STORYFORGE_QUESTIONS_MODEL` (or `STORYFORGE_MODEL`) runs another, a
+different request: record it with `--cassettes-dir
+evals/fixtures/tier-comparison/<model>` so the default's recordings stay
+the baseline's. A recording costs cents on haiku.
+
+Recorded 2026-11-09 on haiku 5.5 ($0.04): recall 0.47 (8 of 17; PHY 0.8,
+TRT 0.5, REL 0.4, WLD 0.0), no false alarm on 79 questions whose answer is
+`no`, 3 split answers. Sonnet 5.5 on the same set (replay it with
+`STORYFORGE_MODEL=claude-sonnet-5-5 ... --cassettes-dir
+evals/fixtures/tier-comparison/claude-sonnet-5-5`, $0.54) caught one more
+(0.53), with no false alarms and no splits, at 13 times the price, so haiku
+stays the default. The misses are mostly the prompt's caution (an injected
+wrong name read as "a character's mistake", a denial of kinship read as
+"self-deprecating") and split answers, not the model. The open checker's
+"about 12 of 17" (`e2-carol-checker`) is scored by scene, any code, any
+words, from one opus reading per edited scene (the gate makes two); the
+layer's 8 count only a finding on the injected words. Two cases only the
+layer caught (qs-017, qs-021), so the two together caught 14. Its
+`baseline.json` entry was added by hand from the replay (`--baseline` is refused while E3,
+E5 and recheck-set error on this base); the next full `--baseline` rewrites
+it the same.
 
 ## Recorded API calls
 

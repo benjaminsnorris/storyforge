@@ -1427,6 +1427,16 @@ def gate_advisory_path() -> str:
     return ADVISORY_PATH
 
 
+def gate_state_paths() -> list[str]:
+    """What the gate saves beside the ledger: each scene's typed state
+    (#648) and stage sheet (#647), committed with the scene so another
+    clone doesn't pay for them again or check without them (#648's review,
+    CR-7)."""
+    from storyforge.stage_sheet import SHEETS_DIR
+    from storyforge.typed_state import STATE_DIR
+    return [STATE_DIR.replace(os.sep, '/') + '/', SHEETS_DIR.replace(os.sep, '/') + '/']
+
+
 from storyforge.git import CommitError  # noqa: E402  (raised by `_commit`)
 
 
@@ -1489,7 +1499,7 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
             paths = [f'scenes/{scene_id}.md', 'reference/', 'working/logs/',
                      'working/audit-log.csv', 'working/.audit-snapshot.csv',
                      gate_pending_path(), gate_prose_path(), gate_source_fix_path(),
-                     gate_advisory_path()]
+                     gate_advisory_path(), *gate_state_paths()]
             msg = f'Draft scene {scene_id}'
         if written_by:
             msg += f' (refusal fallback: written by {written_by})'
@@ -1505,7 +1515,7 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         _commit(project_dir, f'Gate scene {scene_id}',
                 [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
                  'working/.audit-snapshot.csv', gate_pending_path(), gate_prose_path(),
-                 gate_source_fix_path(), gate_advisory_path()])
+                 gate_source_fix_path(), gate_advisory_path(), *gate_state_paths()])
 
     # Push
     from storyforge.git import _push
@@ -1986,7 +1996,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                             ['reference/', 'working/logs/', 'working/audit-log.csv',
                              'working/.audit-snapshot.csv', gate_pending_path(),
                              gate_prose_path(), gate_source_fix_path(),
-                             gate_advisory_path()])
+                             gate_advisory_path(), *gate_state_paths()])
                 except CommitError as e:
                     log(f'ERROR: the re-checks after {scene_id} ran, but {e}.')
                     log('Stopping: commit them by hand, then run again.')

@@ -33,6 +33,24 @@ def time_mode(row: dict) -> str:
     return (row.get('time_mode') or '').strip().lower() or 'scene'
 
 
+# Time modes whose scene sits on its day in the story's present (the
+# remembering, the night of the dream, the ghost's visit) but whose events
+# aren't the present's action (#648): a memory relived, a dream, the dead
+# visiting. The calendar reads them as `scene` (each keeps its day, time and
+# duration); the continuity checks read them as off the present
+# (`off_present`), so a dead character may appear there. A flashback set on
+# its own earlier `timeline_day` needs no mode
+INNER_MODES = frozenset({'memory', 'dream', 'ghost'})
+
+
+def off_present(row: dict) -> bool:
+    """Whether what the scene shows isn't the story's present action: a
+    `time_mode` in `OFF_PRESENT_MODES` (frame narration, a vision) or
+    `INNER_MODES` (a memory, a dream, a ghost). A scene with no `time_mode`
+    (or a book without the column) is the present."""
+    return time_mode(row) in OFF_PRESENT_MODES | INNER_MODES
+
+
 def told_by(row: dict) -> str:
     """A scenes.csv row's `told_by`, stripped: the id of the scene that
     tells this one (an embedded tale), or '' for a scene lived on the page.
@@ -54,8 +72,8 @@ _SCENES_COLS = [
     'id', 'seq', 'title', 'summary', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
-    # How the scene sits in time (scene | summary | frame | vision) and the calendar
-    # date its own text states, in EDTF (docs/plans/timeline-pass.md)
+    # How the scene sits in time (scene | summary | frame | vision | memory |
+    # dream | ghost) and the calendar date its own text states, in EDTF (docs/plans/timeline-pass.md)
     'time_mode', 'timeline_date',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
     'target_pages', 'panel_count', 'page_count',

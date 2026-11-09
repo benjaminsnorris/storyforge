@@ -56,6 +56,17 @@ def _gate_blocking_off(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _gate_continuity_off(request, monkeypatch):
+    """The gate's continuity checks (`gate.GATE_CONTINUITY`, #648) read each
+    scene's typed state with one more API call, which the gate tests' API
+    fakes don't answer. They are off except in tests marked `continuity`."""
+    if request.node.get_closest_marker('continuity'):
+        return
+    import storyforge.gate as gate
+    monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
+
+
+@pytest.fixture(autouse=True)
 def _stub_model_catalog(monkeypatch):
     import storyforge.common as common
     monkeypatch.setattr(common, '_catalog', [dict(m) for m in STUB_MODEL_CATALOG])
