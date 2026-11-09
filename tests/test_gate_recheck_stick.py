@@ -592,3 +592,15 @@ class TestNarrowDependents:
         assert found.scenes == ['s2', 's3', 's5']
         assert found.why == {'s5': 'f (it ends it)', 's2': 'f (a links to it)',
                              's3': 'g (no subject, same type: world)'}
+
+    def test_without_the_guess_a_subjectless_fact_keeps_links_and_mentions(self):
+        """#641's review, TD-2 (`GateBlockers` weighing briefs' facts): no
+        type guess, but a link and its statement naming a subject still count."""
+        rows = [_row('g', 's1', '', type_='knowledge', statement='Zed saw the map'),
+                _row('w', 's2', 'yan', type_='knowledge'),
+                _row('z', 's3', 'zed', type_='physical'),
+                _row('l', 's4', 'yan', type_='knowledge', depends_on='g')]
+        found = ledger.dependents(rows, ['g'], ORDER, names={}, guess=False)
+        assert found.scenes == ['s3', 's4']
+        assert 'only its links' in found.unrelated['g']
+        assert ledger.dependents(rows, ['g'], ORDER, names={}).scenes == ['s2', 's3', 's4']

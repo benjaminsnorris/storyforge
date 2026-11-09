@@ -2093,22 +2093,33 @@ def _run_cleanup(ref_dir: str, project_dir: str) -> None:
 
     if coaching == 'strict':
         log('  Coaching level: strict — reporting issues only')
-        from storyforge.elaborate import validate_structure, finding_scene_list
+        from storyforge.elaborate import (
+            finding_scene_list, split_failures, validate_structure,
+        )
         report = validate_structure(ref_dir)
-        categories = {}
-        for f in report['failures']:
-            cat = f['category']
-            categories.setdefault(cat, []).append(f)
-        for cat, failures in sorted(categories.items()):
-            log(f'  {cat}: {len(failures)} issue(s)')
-            for fail in failures[:3]:
-                scene = fail.get('scene_id', '')
-                log(f'    [{scene}] {fail["message"][:100]}')
-                if finding_scene_list(fail):
-                    log(f'      {finding_scene_list(fail)}')
-            if len(failures) > 3:
-                log(f'    ... and {len(failures) - 3} more')
-        log(f'  Total: {len(report["failures"])} issues for author to review')
+        # blocking errors, then advisory diagnostics (#643's review SF-4):
+        # every craft-framework check is advisory and mustn't read as an error
+        blocking, advisory = split_failures(report['failures'])
+        for heading, group in (('Blocking (errors to fix)', blocking),
+                               ('Advisory (craft-framework diagnostics and notes; '
+                                'never block)', advisory)):
+            if not group:
+                continue
+            log(f'  {heading}:')
+            categories = {}
+            for f in group:
+                categories.setdefault(f['category'], []).append(f)
+            for cat, failures in sorted(categories.items()):
+                log(f'    {cat}: {len(failures)} issue(s)')
+                for fail in failures[:3]:
+                    scene = fail.get('scene_id', '')
+                    log(f'      [{scene}] {fail["message"][:100]}')
+                    if finding_scene_list(fail):
+                        log(f'        {finding_scene_list(fail)}')
+                if len(failures) > 3:
+                    log(f'      ... and {len(failures) - 3} more')
+        log(f'  Total: {len(blocking)} blocking, {len(advisory)} advisory, for the author '
+            f'to review')
     else:
         from storyforge.extract import run_cleanup
         result = run_cleanup(ref_dir)

@@ -16,7 +16,11 @@ another, which is a different request and so a re-record.
 Private like `blocking-set`: its recordings live beside the set in the
 storyforge-evals repo (`blocking-set/cassettes/blocking-set-sheet/`), and
 its per-case outcomes go to `blocking-set/results/latest-stage-sheet.json`
-there; notes carry counts and case ids only.
+there; notes carry counts and case ids only. Without that checkout the
+suite is reported unavailable (``stale``, exit code unaffected). Frozen
+like it too (#645): recorded on purpose, as three runs (``--mode record
+--suite blocking-set-sheet --runs 3``); a miss is ``stale``. (The
+recordings so far are the main run only, made before it was frozen.)
 """
 
 from __future__ import annotations
@@ -42,6 +46,11 @@ FLOORS: dict[str, float | None] = {
     'recall_hands': 0.4412, 'recall_posture': 0.2727, 'recall_sightline': 0.0,
     'recall_worn': 0.2727, 'recall_position': 0.129, 'recall_light': 0.0,
     'recall_other': 0.0833,
+    # read from a free replay after porting #670's matching (each finding
+    # catches at most one case, whole-word places), which left the values
+    # above unchanged
+    'recall_book_gawain': 0.2273, 'recall_book_wrath': 0.2192,
+    'recall_found_by_readers': 0.2353, 'recall_found_by_tool': 0.2169,
     'false_alarms_per_10k': 15.65,
     'left_flagged': 2,
     'flags': 288,
@@ -54,4 +63,4 @@ def run(ctx):
 
 SUITE = Suite(NAME, 'Stage sheet (#647) vs the known blocking slips and clean scenes of the '
                     'blocking set; private set', run,
-              cassettes=lambda: blocking_set.cassettes_dir(NAME))
+              frozen=True, cassettes=lambda run: blocking_set.cassettes_dir(NAME, run=run))

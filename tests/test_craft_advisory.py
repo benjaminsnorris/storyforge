@@ -17,7 +17,7 @@ SCENES_HEADER = ('id|seq|title|act|pov|location|timeline_day|time_of_day|duratio
                  'status')
 INTENT_HEADER = ('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
                  'turning_point|characters|on_stage|mice_threads')
-BRIEFS_HEADER = 'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out'
+BRIEFS_HEADER = 'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions'
 
 
 def _ref(tmp_path, scenes, intent, briefs=()):
@@ -53,20 +53,38 @@ class TestValidateCraftColumns:
         assert "needn't fit a framework" in craft['message']
         assert not _failures(report, 'required-columns-')
 
+    def test_strict_extraction_cleanup_groups_advisory_apart(self, tmp_path, monkeypatch,
+                                                             capsys):
+        """#643's review SF-4: strict extraction's report says which findings
+        block, not one undifferentiated total."""
+        from storyforge import cmd_extract
+        ref = _ref(tmp_path,
+                   ['a-scene-happens-here|1|T|1|hero||1|morning|1h|mapped'],
+                   ['a-scene-happens-here|does a thing||||||hero|hero|'])
+        monkeypatch.setattr(cmd_extract, 'get_coaching_level', lambda pd: 'strict')
+        cmd_extract._run_cleanup(ref, str(tmp_path))
+        out = capsys.readouterr().out
+        blocking, advisory = out.split('Advisory (craft-framework')
+        assert 'Blocking (errors to fix):' in blocking and 'location' in blocking
+        assert 'craft-framework' not in blocking.split('Blocking (errors to fix):')[1]
+        assert 'no craft-framework notes' in advisory
+        assert 'Total: 1 blocking, ' in out
+
     def test_a_briefed_scene_needs_its_outcome_not_its_goal_or_conflict(self, tmp_path):
         from storyforge.elaborate import validate_structure
         scene = 'a-scene-happens-here|1|T|1|hero|loc|1|morning|1h|briefed'
         intent = 'a-scene-happens-here|does a thing|action|calm to fear|truth|+/-|action|hero|hero|'
         ok = validate_structure(_ref(tmp_path / 'ok', [scene], [intent],
-                                     ['a-scene-happens-here|||yes|||k|k']))
+                                     ['a-scene-happens-here|||yes|||k|k|she goes']))
         assert ok['passed'] is True
         assert _failures(ok, 'craft-columns-')[0]['fields'] == ['goal', 'conflict']
 
         bad = validate_structure(_ref(tmp_path / 'bad', [scene], [intent],
-                                      ['a-scene-happens-here|g|c||||k|k']))
+                                      ['a-scene-happens-here|g|c||||k|k|']))
         assert bad['passed'] is False
         [missing] = _failures(bad, 'required-columns-')
-        assert missing['fields'] == ['outcome']
+        # #644: key_actions is a brief fact, required like outcome
+        assert missing['fields'] == ['outcome', 'key_actions']
         assert missing['severity'] == 'blocking'
 
     def test_a_missing_required_column_still_blocks(self, tmp_path):
@@ -251,6 +269,62 @@ class TestFloorChecks:
         assert (result['failed'], result['accepted'], result['advisory']) == (1, 1, 0)
         assert blocking_failed(result) == 0
 
+    def test_accepting_an_advisory_check_recomputes_its_count(self, tmp_path):
+        """#643's review T3: through `score_level`, so `_apply_overrides`
+        recomputes `advisory` (left alone it would make blocking_failed -1)."""
+        from storyforge.scoring_levels import _BRIEF_CRAFT_CHECK, blocking_failed, score_level
+        from storyforge.scoring_state import append_override
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|||yes||||\n')
+        before = score_level(str(tmp_path), 6)
+        assert (before['accepted'], before['advisory']) == (0, 1)
+        append_override('level-6', 'level-quality', _BRIEF_CRAFT_CHECK, 'accepted',
+                        'no goals on purpose', '2026-11-09', project_dir=str(tmp_path))
+        after = score_level(str(tmp_path), 6)
+        assert (after['failed'], after['accepted'], after['advisory']) == (1, 1, 0)
+        assert blocking_failed(after) == 0
+
+    @pytest.mark.parametrize('level,old,rows', [
+        (4, 'all required columns populated',
+         [f'anchor-number-{i}-here|{i}|T|s|1|||{"action" if i % 2 else "sequel"}||||'
+          for i in range(1, 17)]),
+        (6, 'goal/conflict/outcome/crisis/decision populated', None),
+    ])
+    def test_an_override_on_a_checks_former_name_still_applies(self, tmp_path, level, old,
+                                                                 rows):
+        """#643's review C4, CR-2, TD-1: #643 split one check at L4 and at L6
+        into a blocking and an advisory half; an author's acceptance of the
+        old check still covers both."""
+        from storyforge.scoring_levels import blocking_failed, score_level
+        from storyforge.scoring_state import append_override
+        if rows is None:
+            ref = tmp_path / 'reference'
+            ref.mkdir()
+            (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns||||||||\n')
+        else:
+            _architecture(str(tmp_path), rows)
+        before = score_level(str(tmp_path), level)
+        assert blocking_failed(before) >= 1
+        append_override(f'level-{level}', 'level-quality', old, 'accepted', 'on purpose',
+                        '2026-11-09', project_dir=str(tmp_path))
+        after = score_level(str(tmp_path), level)
+        split = [c for c in after['checks']
+                 if c['check'].startswith(('all required', 'outcome', 'craft-framework'))]
+        assert len(split) == 2 and all(c['accepted'] for c in split)
+        assert blocking_failed(after) == blocking_failed(before) - 1
+
+    def test_each_split_checks_name_lists_its_columns(self):
+        """#643's review TD-3: the names are fixed strings, the split comes
+        from CRAFT_FRAMEWORK_COLUMNS; they must agree."""
+        from storyforge import scoring_levels as sl
+        for columns, required_name, craft_name in (
+                (sl._ARCHITECTURE_COLUMNS, sl._ARCH_REQUIRED_CHECK, sl._ARCH_CRAFT_CHECK),
+                (sl._BRIEF_COLUMNS, sl._BRIEF_REQUIRED_CHECK, sl._BRIEF_CRAFT_CHECK)):
+            required, craft = sl._split_craft(columns)
+            assert craft_name.endswith(f"({', '.join(craft)})")
+            assert all(c in required_name for c in required)
+
     def test_score_level_prints_advisory_apart(self, capsys):
         from storyforge.cmd_score import _print_level_result
         _print_level_result({'level': 6, 'name': 'briefs', 'passed': 1, 'failed': 1,
@@ -283,25 +357,42 @@ class TestStatus:
     def test_craft_failures_are_advisory_lines_not_blockers(self, project_dir, monkeypatch):
         from storyforge import cmd_status, status
         verdict = status.build_status(project_dir)
-        craft = [a for a in verdict['advisory'] if a.startswith(status.CRAFT_ADVISORY_PREFIX)]
-        assert craft == [
-            'craft framework: L6 briefs: craft-framework fields populated (goal, conflict, '
-            'crisis, decision) (1 brief(s) missing fields; first: new-x1 missing goal, '
-            'conflict, crisis, decision)']
+        craft = [a for a in verdict['advisory'] if a['source'] == status.CRAFT_ADVISORY_SOURCE]
+        # #643's review TD-2: records in gate.read_advisory's shape, not prefixed strings
+        assert craft == [{
+            'scene_id': '', 'command': 'storyforge score --level 6',
+            'source': status.CRAFT_ADVISORY_SOURCE, 'quote': '', 'stale': '',
+            'finding': ('L6 briefs: craft-framework fields populated (goal, conflict, '
+                        'crisis, decision) (1 brief(s) missing fields; first: new-x1 missing '
+                        'goal, conflict, crisis, decision)')}]
         assert not any('craft-framework' in b['detail'] for b in verdict['blockers'])
         l6 = next(r for r in verdict['ladder'] if r['level'] == 6)
         assert 'goal' not in l6['detail']   # the rung's detail is its blocking failure
         out = cmd_status.render_human(verdict)
         assert "ADVISORY: 1 craft-framework check(s) not met" in out
         assert '  L6 briefs: craft-framework fields populated' in out
+        assert '[storyforge score --level 6]' in out
         assert 'broken promise' not in out
 
-    def test_an_absent_rungs_craft_checks_are_not_listed(self, tmp_path):
+    def test_craft_advisory_lists_only_failed_unaccepted_checks(self):
         from storyforge import status
         assert status.craft_advisory([]) == []
         floors = self._floors(False)
         assert len(status.craft_advisory(floors)) == len(floors)
         assert status.craft_advisory(self._floors(True)) == []
+        floors[0]['checks'][1]['accepted'] = True
+        assert len(status.craft_advisory(floors)) == len(floors) - 1
+
+    def test_an_absent_rungs_craft_checks_are_not_listed(self, project_dir, monkeypatch):
+        """#643's review T6: build_status filters by artifact_present."""
+        from storyforge import status
+        real = status.artifact_present
+        assert any(a['finding'].startswith('L6 ')
+                   for a in status.build_status(project_dir)['advisory'])
+        monkeypatch.setattr(status, 'artifact_present',
+                            lambda pd, level: level != 6 and real(pd, level))
+        assert not any(a['finding'].startswith('L6 ')
+                       for a in status.build_status(project_dir)['advisory'])
 
 
 # ============================================================================
@@ -343,6 +434,82 @@ class TestHone:
         out = capsys.readouterr().out
         assert 'craft-framework finding(s) reported, not rewritten' in out
         assert 's.emotional_arc (flat)' in out
+        assert 's.value_shift (outcome_mismatch)' in out   # T5
+
+    def _flat_arc_scene(self, tmp_path):
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'scene-intent.csv').write_text(
+            f'{INTENT_HEADER}\n'
+            's|Kael reads the letter and refuses|action|static dread|truth|-/-|action|'
+            'kael|kael|\n')
+        (ref / 'scenes.csv').write_text(f'{SCENES_HEADER}\ns|1|T|1|kael|here|1|morning|1h|drafted\n')
+        (ref / 'scene-briefs.csv').write_text(f'{BRIEFS_HEADER}\ns|g|c|yes|||k|k\n')
+        return ref
+
+    def test_an_evaluation_finding_on_a_flat_arc_is_still_rewritten(
+            self, tmp_path, monkeypatch, capsys):
+        """#643's review CR-4, T4: the author's finding replaces the detected
+        `flat` issue for (scene, field), so hone rewrites what was sent."""
+        from storyforge import api, hone
+        from storyforge.elaborate import _read_csv_as_map
+        ref = self._flat_arc_scene(tmp_path)
+        findings = tmp_path / 'findings.csv'
+        findings.write_text('scene_id|target_file|fields|guidance\n'
+                            's|scene-intent.csv|emotional_arc|let the dread turn to resolve\n')
+        calls = []
+
+        def reply(prompt, model, log_file, **kw):
+            calls.append(log_file)
+        monkeypatch.setattr(api, 'invoke_to_file', reply)
+        monkeypatch.setattr(api, 'extract_text_from_file',
+                            lambda path: 'emotional_arc: dread to resolve\n')
+        hone.hone_intent(str(ref), str(tmp_path), model='m', log_dir=str(tmp_path / 'logs'),
+                         coaching_level='full', findings_file=str(findings))
+        assert len(calls) == 1 and 'hone-intent-eval-s' in calls[0]
+        assert _read_csv_as_map(str(ref / 'scene-intent.csv'))['s']['emotional_arc'] \
+            == 'dread to resolve'
+        assert 's.emotional_arc (flat)' not in capsys.readouterr().out
+
+    def test_strict_analysis_files_tag_craft_issues(self, tmp_path):
+        """#643's review SF-6"""
+        from storyforge.hone import hone_intent
+        ref = self._flat_arc_scene(tmp_path)
+        hone_intent(str(ref), str(tmp_path), model='m', log_dir=str(tmp_path / 'logs'),
+                    coaching_level='strict')
+        text = (tmp_path / 'working' / 'hone' / 'intent-analysis-s.md').read_text()
+        assert '**emotional_arc:** flat (craft framework, advisory)' in text
+        assert '**value_shift:** outcome_mismatch (craft framework, advisory)' in text
+
+    def test_hone_briefs_never_rewrites_a_craft_issue(self, tmp_path, monkeypatch, capsys):
+        """#643's review TD-5: CRAFT_ADVISORY_ISSUES holds in hone_briefs
+        too, not only by its allowlist of issue types."""
+        from storyforge import api, hone
+
+        def no_call(*a, **kw):
+            raise AssertionError('hone rewrote a craft-framework diagnostic')
+        monkeypatch.setattr(api, 'invoke_to_file', no_call)
+        ref = self._flat_arc_scene(tmp_path)
+        monkeypatch.setattr(hone, 'detect_brief_issues', lambda *a, **kw: [
+            {'scene_id': 's', 'field': 'conflict', 'value': 'c', 'issue': 'conflict_free'}])
+        result = hone.hone_briefs(str(ref), str(tmp_path), model='m',
+                                  log_dir=str(tmp_path / 'logs'), coaching_level='full')
+        assert result['fields_rewritten'] == 0
+        out = capsys.readouterr().out
+        assert '1 craft-framework finding(s) reported, not rewritten' in out
+        assert '[1/' not in out   # no scene was worked on
+
+    def test_the_gaps_domain_counts_craft_fields_apart(self, project_dir, capsys):
+        """#643's review T7: the convergence loop's gap count leaves craft
+        fields out, and says how many there are."""
+        from storyforge.cmd_hone import _run_gaps_domain
+        ref = os.path.join(project_dir, 'reference')
+        for field in ('goal', 'crisis'):
+            update_field(os.path.join(ref, 'scene-briefs.csv'), 'act1-sc01', field, '')
+        _run_gaps_domain(ref, project_dir, ['act1-sc01'], dry_run=True)
+        out = capsys.readouterr().out
+        assert 'Gaps found: 0 empty fields across 0 scenes' in out
+        assert 'Craft-framework fields empty (advisory, not gaps): 2 across 1 scenes' in out
 
     def test_diagnose_lists_craft_fields_apart_from_gaps(self, project_dir, capsys):
         from storyforge.cmd_hone import _run_diagnose
@@ -355,3 +522,48 @@ class TestHone:
         assert 'act1-sc01: missing outcome' in required
         assert 'goal' not in required
         assert 'act1-sc01: goal, crisis' in craft
+
+
+# ============================================================================
+# the interactive path: skills and help text (#643's review)
+# ============================================================================
+
+_PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _skill(name):
+    with open(os.path.join(_PLUGIN, 'skills', name, 'SKILL.md'), encoding='utf-8') as f:
+        return f.read()
+
+
+class TestSkillsDontGateOnCraft:
+    def test_forge_routes_gap_fill_on_blocking_failures(self):
+        """C2, SF-1: advisory findings alone never send a book to gap-fill."""
+        step = next(line for line in _skill('forge').splitlines()
+                    if line.startswith('**1.6.'))
+        assert 'failures > 0' not in step and '`passed` False' in step
+
+    def test_forge_structural_scoring_never_holds_drafting(self):
+        """C1, SF-2"""
+        step = next(line for line in _skill('forge').splitlines()
+                    if line.startswith('**1.7.'))
+        assert 'before drafting' not in step and 'never hold drafting' in step
+
+    def test_elaborate_gap_fill_routes_on_blocking_failures(self):
+        """C2: the stage tables, and full coaching asks before craft fields."""
+        text = _skill('elaborate')
+        assert '| failures > 0 |' not in text
+        assert 'Drafted with validation failures > 0' not in text
+        assert "I'll fill them all" not in text
+
+    def test_score_floor_gating_excludes_advisory(self):
+        """C3"""
+        assert 'non-advisory checks' in _skill('score')
+
+    def test_validate_help_says_advisory_never_fails(self, capsys):
+        """C5"""
+        from storyforge.cmd_validate import parse_args
+        with pytest.raises(SystemExit):
+            parse_args(['--help'])
+        out = ' '.join(capsys.readouterr().out.split())
+        assert 'advisory diagnostics' in out and 'never fail' in out
