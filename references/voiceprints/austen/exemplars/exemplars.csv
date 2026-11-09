@@ -1,28 +1,28 @@
 id|job|source|paragraphs|words|why
-s01|description|corpus/pride-and-prejudice.md|67-68|316|Character is sketched through public opinion, which swings in one long periodic sentence from admiration to 'disgust' and turns the crowd's verdict into irony.
-s02|description|corpus/pride-and-prejudice.md|93-94|265|The Bingley sisters are catalogued in balanced, semicolon-linked clauses that end on the sly sting of a fortune 'acquired by trade'.
-s03|description|corpus/pride-and-prejudice.md|454-455|182|Collins is introduced in brisk factual sentences ('tall, heavy looking young man of five and twenty') and then given away by his own clumsy gallantry.
-s04|description|corpus/pride-and-prejudice.md|800-801|206|The Gardiners are drawn in measured Latinate praise, then the passage slides into free indirect complaint as Mrs. Bennet's grievances take over.
-s06|argument|corpus/pride-and-prejudice.md|267-276|312|A drawing-room debate on accomplishment escalates through stacked lists and qualifications until Elizabeth's italicised retort lands the point.
-s07|argument|corpus/pride-and-prejudice.md|804-808|335|Aunt and niece weigh the phrase 'violently in love' with dry precision, showing reasoning conducted as witty conversation.
-s08|argument|corpus/pride-and-prejudice.md|1068-1069|247|Accusation meets self-justification in rhetorical triads and pointed questions, at the height of the proposal quarrel.
-s09|argument|corpus/pride-and-prejudice.md|1394-1394|273|The narrator steps forward with a conditional, essayistic defence of Elizabeth's change of heart, then shades back into her troubled reasoning.
-s10|argument|corpus/pride-and-prejudice.md|1854-1857|319|Lady Catherine's appeal to birth and duty is met by Elizabeth's cool logic, a contest of rhetorical questions and abstract nouns.
-s11|turn|corpus/pride-and-prejudice.md|562-562|223|Elizabeth realises Collins means to court her, and the dashes and exclamation mark the shock inside otherwise composed narration.
-s12|turn|corpus/pride-and-prejudice.md|564-566|309|Her high hopes for the ball collapse into resentment of Darcy, with expectation built through long clauses and undone by one piece of news.
-s13|turn|corpus/pride-and-prejudice.md|1070-1077|277|The refusal reaches its climax in formal, devastating speech and ends in Darcy's abrupt exit.
-s14|turn|corpus/pride-and-prejudice.md|1314-1315|283|Darcy's unexpected civility to the Gardiners triggers Elizabeth's astonished inner questions ('Why is he so altered?').
-s15|turn|corpus/pride-and-prejudice.md|1389-1390|277|In the moment of Lydia's disgrace Elizabeth recognises her love, voiced through the paradox 'never had she so honestly felt… as now, when all love must be vain.'
-s16|humour|corpus/pride-and-prejudice.md|78-82|383|Mrs. Bennet's breathless catalogue of dance partners runs into Mr. Bennet's deadpan interruptions, comedy made of rhythm and repetition.
-s17|humour|corpus/pride-and-prejudice.md|446-452|263|The family's responses to Collins's letter each reveal the reader, and Mr. Bennet's 'mixture of servility and self-importance… which promises well' sets the ironic key.
-s18|humour|corpus/pride-and-prejudice.md|690-691|245|Mrs. Bennet's dash-strewn self-pitying tirade is capped by the narrator's calm summary of her daughters' silent endurance.
-s19|humour|corpus/pride-and-prejudice.md|1554-1555|241|A sober narrative judgement ('disturbed by no fear for her felicity') is set beside Mrs. Bennet's exclamatory raptures over wedding clothes.
-s20|humour|corpus/pride-and-prejudice.md|2001-2002|216|Stunned silence gives way to a torrent of exclamation in which the mother's priorities ('pin-money, what jewels') expose her.
-s21|quiet|corpus/pride-and-prejudice.md|934-934|214|Domestic routine at Hunsford unfolds in an unhurried, closely observed sentence that quietly credits Charlotte's management of her husband.
-s23|quiet|corpus/pride-and-prejudice.md|1188-1188|113|Jane's hidden grief is analysed with tender, abstract precision ('the warmth of first attachment').
-s24|quiet|corpus/pride-and-prejudice.md|1310-1311|213|Elizabeth is absorbed in speculation about Darcy amid Pemberley's grounds, an inward moment framed by scenery she cannot see.
-s25|quiet|corpus/pride-and-prejudice.md|1562-1565|335|Reflection on the family finances turns into Mr. Bennet's rueful hindsight, with gentle irony about the son who never came.
-s26|dialogue|corpus/pride-and-prejudice.md|70-75|259|Bingley's enthusiasm and Darcy's cold disdain play off each other, and 'tolerable; but not handsome enough to tempt _me_' shows character carried entirely by speech.
-s27|dialogue|corpus/pride-and-prejudice.md|84-91|310|The sisters talk at night, Jane's candour against Elizabeth's teasing, with italics stressing the contrast.
-s28|dialogue|corpus/pride-and-prejudice.md|572-580|253|At the dance Elizabeth and Darcy fence in short, arch exchanges about the rules of conversation itself.
-s29|dialogue|corpus/pride-and-prejudice.md|1171-1175|310|Elizabeth jokes Jane out of her distress over Wickham and Darcy ('just enough to make one good sort of man').
+pride-and-prejudice-67-68|description|corpus/pride-and-prejudice.md|67-68|316|Character is sketched through public opinion, which swings in one long periodic sentence from admiration to 'disgust' and turns the crowd's verdict into irony.
+pride-and-prejudice-93-94|description|corpus/pride-and-prejudice.md|93-94|265|The Bingley sisters are catalogued in balanced, semicolon-linked clauses that end on the sly sting of a fortune 'acquired by trade'.
+pride-and-prejudice-454-455|description|corpus/pride-and-prejudice.md|454-455|182|Collins is introduced in brisk factual sentences ('tall, heavy looking young man of five and twenty') and then given away by his own clumsy gallantry.
+pride-and-prejudice-800-801|description|corpus/pride-and-prejudice.md|800-801|206|The Gardiners are drawn in measured Latinate praise, then the passage slides into free indirect complaint as Mrs. Bennet's grievances take over.
+pride-and-prejudice-267-276|argument|corpus/pride-and-prejudice.md|267-276|312|A drawing-room debate on accomplishment escalates through stacked lists and qualifications until Elizabeth's italicised retort lands the point.
+pride-and-prejudice-804-808|argument|corpus/pride-and-prejudice.md|804-808|335|Aunt and niece weigh the phrase 'violently in love' with dry precision, showing reasoning conducted as witty conversation.
+pride-and-prejudice-1068-1069|argument|corpus/pride-and-prejudice.md|1068-1069|247|Accusation meets self-justification in rhetorical triads and pointed questions, at the height of the proposal quarrel.
+pride-and-prejudice-1394-1394|argument|corpus/pride-and-prejudice.md|1394-1394|273|The narrator steps forward with a conditional, essayistic defence of Elizabeth's change of heart, then shades back into her troubled reasoning.
+pride-and-prejudice-1854-1857|argument|corpus/pride-and-prejudice.md|1854-1857|319|Lady Catherine's appeal to birth and duty is met by Elizabeth's cool logic, a contest of rhetorical questions and abstract nouns.
+pride-and-prejudice-562-562|turn|corpus/pride-and-prejudice.md|562-562|223|Elizabeth realises Collins means to court her, and the dashes and exclamation mark the shock inside otherwise composed narration.
+pride-and-prejudice-564-566|turn|corpus/pride-and-prejudice.md|564-566|309|Her high hopes for the ball collapse into resentment of Darcy, with expectation built through long clauses and undone by one piece of news.
+pride-and-prejudice-1070-1077|turn|corpus/pride-and-prejudice.md|1070-1077|277|The refusal reaches its climax in formal, devastating speech and ends in Darcy's abrupt exit.
+pride-and-prejudice-1314-1315|turn|corpus/pride-and-prejudice.md|1314-1315|283|Darcy's unexpected civility to the Gardiners triggers Elizabeth's astonished inner questions ('Why is he so altered?').
+pride-and-prejudice-1389-1390|turn|corpus/pride-and-prejudice.md|1389-1390|277|In the moment of Lydia's disgrace Elizabeth recognises her love, voiced through the paradox 'never had she so honestly felt… as now, when all love must be vain.'
+pride-and-prejudice-78-82|humour|corpus/pride-and-prejudice.md|78-82|383|Mrs. Bennet's breathless catalogue of dance partners runs into Mr. Bennet's deadpan interruptions, comedy made of rhythm and repetition.
+pride-and-prejudice-446-452|humour|corpus/pride-and-prejudice.md|446-452|263|The family's responses to Collins's letter each reveal the reader, and Mr. Bennet's 'mixture of servility and self-importance… which promises well' sets the ironic key.
+pride-and-prejudice-690-691|humour|corpus/pride-and-prejudice.md|690-691|245|Mrs. Bennet's dash-strewn self-pitying tirade is capped by the narrator's calm summary of her daughters' silent endurance.
+pride-and-prejudice-1554-1555|humour|corpus/pride-and-prejudice.md|1554-1555|241|A sober narrative judgement ('disturbed by no fear for her felicity') is set beside Mrs. Bennet's exclamatory raptures over wedding clothes.
+pride-and-prejudice-2001-2002|humour|corpus/pride-and-prejudice.md|2001-2002|216|Stunned silence gives way to a torrent of exclamation in which the mother's priorities ('pin-money, what jewels') expose her.
+pride-and-prejudice-934-934|quiet|corpus/pride-and-prejudice.md|934-934|214|Domestic routine at Hunsford unfolds in an unhurried, closely observed sentence that quietly credits Charlotte's management of her husband.
+pride-and-prejudice-1188-1188|quiet|corpus/pride-and-prejudice.md|1188-1188|113|Jane's hidden grief is analysed with tender, abstract precision ('the warmth of first attachment').
+pride-and-prejudice-1310-1311|quiet|corpus/pride-and-prejudice.md|1310-1311|213|Elizabeth is absorbed in speculation about Darcy amid Pemberley's grounds, an inward moment framed by scenery she cannot see.
+pride-and-prejudice-1562-1565|quiet|corpus/pride-and-prejudice.md|1562-1565|335|Reflection on the family finances turns into Mr. Bennet's rueful hindsight, with gentle irony about the son who never came.
+pride-and-prejudice-70-75|dialogue|corpus/pride-and-prejudice.md|70-75|259|Bingley's enthusiasm and Darcy's cold disdain play off each other, and 'tolerable; but not handsome enough to tempt _me_' shows character carried entirely by speech.
+pride-and-prejudice-84-91|dialogue|corpus/pride-and-prejudice.md|84-91|310|The sisters talk at night, Jane's candour against Elizabeth's teasing, with italics stressing the contrast.
+pride-and-prejudice-572-580|dialogue|corpus/pride-and-prejudice.md|572-580|253|At the dance Elizabeth and Darcy fence in short, arch exchanges about the rules of conversation itself.
+pride-and-prejudice-1171-1175|dialogue|corpus/pride-and-prejudice.md|1171-1175|310|Elizabeth jokes Jane out of her distress over Wickham and Darcy ('just enough to make one good sort of man').

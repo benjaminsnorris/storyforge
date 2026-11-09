@@ -478,12 +478,15 @@ def parse_claims(reply: str) -> tuple[list[Claim], list[str]]:
         if not isinstance(item, dict) or item.get('section') not in SECTIONS:
             problems.append(f'claim {i} has no known section; left out')
             continue
-        text = ' '.join(str(item.get('claim', '')).split())
+        text = _text(item.get('claim'))
         if not text:
             problems.append(f'claim {i} ({item["section"]}) is empty; left out')
             continue
-        by_section[item['section']].append(
-            (text, ' '.join(str(item.get('example', '')).split())))
+        example = item.get('example', '')
+        if not isinstance(example, str):
+            problems.append(f'claim {i} ({item["section"]}) has an example that isn\'t text; '
+                            f'left without one')
+        by_section[item['section']].append((text, _text(example)))
     claims = []
     for s in SECTIONS:
         if not by_section[s]:
@@ -547,10 +550,11 @@ def shortlist_prompt() -> str:
 
 @dataclass(frozen=True)
 class Passage:
-    """A shortlisted passage: `paragraphs` is its first and last paragraph
-    within its piece ("412-415"), `text` its paragraphs as written, joined
-    by blank lines. `distance`, `limit` and `typical` are from
-    `PassageRange.judge` (None before)."""
+    """A shortlisted passage: `id` is where it is (`passage_id`),
+    `paragraphs` its first and last paragraph within its piece ("412-415"),
+    `text` its paragraphs as written, joined by blank lines. `distance`,
+    `limit` and `typical` are from `PassageRange.judge`: all three set, or
+    all three None (not judged, or judged on text since trimmed)."""
     id: str
     job: str
     source: str
@@ -563,13 +567,41 @@ class Passage:
     typical: bool | None = None
     pick: str = ''
 
+    def __post_init__(self):
+        judged = [self.distance is not None, self.limit is not None, self.typical is not None]
+        if any(judged) and not all(judged):
+            raise ValueError(f'passage {self.id}: distance, limit and typical are set '
+                             f'together or not at all')
+
+
+def passage_id(source: str, paragraphs: str) -> str:
+    """A passage's id from where it is: its piece's name (without a leading
+    `corpus/` or the extension, as a slug) and its paragraphs, such as
+    `pride-and-prejudice-67-68`. A passage keeps its id across proposals, so
+    an exemplar's id names the same prose after another round."""
+    stem = source[len('corpus/'):] if source.startswith('corpus/') else source
+    slug = re.sub(r'[^a-z0-9]+', '-', os.path.splitext(stem)[0].lower()).strip('-')
+    return f'{slug or "passage"}-{paragraphs}'
+
+
+def _text(value) -> str:
+    """A reply's string field, whitespace collapsed; '' for anything that
+    isn't a string (a null isn't the text "None")."""
+    return ' '.join(value.split()) if isinstance(value, str) else ''
+
+
+def _is_int(value) -> bool:
+    return type(value) is int        # not bool, which isinstance(int) lets through
+
 
 def parse_shortlist(reply: str, sample: Sample) -> tuple[list[Passage], list[str]]:
-    """The passages a reply names, cut from the sample, numbered `s01`..
-    in the reply's order, and the refusals: a run outside the sample,
-    backwards, across a passage break, overlapping an earlier passage, with
-    an unknown job or outside `PASSAGE_MIN`..`PASSAGE_MAX` words, each
-    named. Raises ProposalError for a reply that isn't the schema's shape."""
+    """The passages a reply names, cut from the sample, in the reply's
+    order, each with its `passage_id`, and the refusals: a run outside the
+    sample, backwards, across a passage break, overlapping an earlier
+    passage, with an unknown job, outside `PASSAGE_MIN`..`PASSAGE_MAX` words
+    or with another passage's id (two pieces whose names make the same
+    slug), each named. Raises ProposalError for a reply that isn't the
+    schema's shape."""
     data = _json_reply(reply, 'shortlist')
     items = data.get('passages')
     if not isinstance(items, list):
@@ -581,7 +613,7 @@ def parse_shortlist(reply: str, sample: Sample) -> tuple[list[Passage], list[str
             continue
         first, last, job = item.get('first'), item.get('last'), item.get('job')
         where = f'passage {i} ([{first}]-[{last}], {job})'
-        if not isinstance(first, int) or not isinstance(last, int):
+        if not _is_int(first) or not _is_int(last):
             refused.append(f'{where}: no paragraph numbers')
             continue
         if job not in JOBS:
@@ -606,10 +638,13 @@ def parse_shortlist(reply: str, sample: Sample) -> tuple[list[Passage], list[str
         if not PASSAGE_MIN <= words <= PASSAGE_MAX:
             refused.append(f'{where}: {words} words, not {PASSAGE_MIN}-{PASSAGE_MAX}')
             continue
+        pid = passage_id(a.source, f'{a.index}-{b.index}')
+        if any(p.id == pid for p in out):
+            refused.append(f'{where}: its id {pid} is another passage\'s (rename a piece)')
+            continue
         used |= span
-        out.append(Passage(f's{len(out) + 1:02d}', job, a.source, f'{a.index}-{b.index}',
-                           words, '\n\n'.join(p.text for p in paras),
-                           ' '.join(str(item.get('why', '')).split())))
+        out.append(Passage(pid, job, a.source, f'{a.index}-{b.index}', words,
+                           '\n\n'.join(p.text for p in paras), _text(item.get('why'))))
     return out, refused
 
 
@@ -866,8 +901,12 @@ def _opt_float(s: str) -> float | None:
 def read_shortlist(voice_dir: str) -> list[Passage]:
     """The shortlist as the author left it, each passage's text read from
     its file (which the author may have trimmed; its words are counted
-    again). Raises ProposalError (as `_read_rows`), or for an unknown job,
-    a missing or unreadable passage file, or a figure that isn't a number."""
+    again, and a passage whose count no longer matches the row's `words` is
+    read unjudged: its figures were measured on the text before the trim).
+    Raises ProposalError (as `_read_rows`), or for an unknown job, a
+    missing or unreadable passage file, a figure that isn't a number, a
+    `typical` that isn't yes, no or blank, or a row with some of `distance`,
+    `limit` and `typical` but not all."""
     path = os.path.join(voice_dir, SHORTLIST_FILE)
     out = []
     for r in _read_rows(path, SHORTLIST_COLUMNS):
@@ -881,13 +920,22 @@ def read_shortlist(voice_dir: str) -> list[Passage]:
             raise ProposalError(f'{r["id"]}\'s passage {ppath} can\'t be read ({e})') from e
         try:
             distance, limit = _opt_float(r['distance']), _opt_float(r['limit'])
+            judged_words = int(r['words']) if r['words'] else None
         except ValueError as e:
-            raise ProposalError(f'{path}: {r["id"]} has a distance or limit that isn\'t a '
-                                f'number') from e
-        typical = {'yes': True, 'no': False}.get(r['typical'])
-        out.append(Passage(r['id'], r['job'], r['source'], r['paragraphs'],
-                           len(vp.words(text)), text, r['why'], distance, limit,
-                           typical, r['pick']))
+            raise ProposalError(f'{path}: {r["id"]} has a words, distance or limit that '
+                                f'isn\'t a number') from e
+        if r['typical'].lower() not in ('yes', 'no', ''):
+            raise ProposalError(f'{path}: {r["id"]} has typical {r["typical"]!r}, not yes, no '
+                                f'or blank (`storyforge voice judge` fills it)')
+        typical = {'yes': True, 'no': False}.get(r['typical'].lower())
+        if len({distance is None, limit is None, typical is None}) > 1:
+            raise ProposalError(f'{path}: {r["id"]} has some of distance, limit and typical '
+                                f'but not all; run `storyforge voice judge`')
+        words = len(vp.words(text))
+        if words != judged_words:
+            distance = limit = typical = None
+        out.append(Passage(r['id'], r['job'], r['source'], r['paragraphs'], words, text,
+                           r['why'], distance, limit, typical, r['pick']))
     return out
 
 
@@ -920,13 +968,15 @@ def rejudge(voice_dir: str) -> tuple[PassageRange, list[Passage]]:
 # ============================================================================
 
 def render_description(claims: Sequence[Claim], author: str = '') -> str:
-    """description.md from the claims marked yes, by section."""
+    """description.md from the claims marked yes, by section. Where it came
+    from is an HTML comment under the title, which `read_description`
+    leaves out (it isn't part of the voice a drafting prompt is shown)."""
     kept = [c for c in claims if c.mark.lower() == 'yes']
     title = f'# The described voice: {author}' if author else '# The described voice'
     lines = [title, '',
-             f'Written by `storyforge voice accept` from {CLAIMS_FILE}: the claims the '
-             f'author marked yes ({len(kept)} of {len(claims)}). To change it, edit and '
-             f'mark the claims there and accept again.']
+             f'<!-- Written by `storyforge voice accept` from {CLAIMS_FILE}: the claims '
+             f'marked yes there ({len(kept)} of {len(claims)}). To change it, edit and mark '
+             f'the claims there and accept again. -->']
     for s in SECTIONS:
         items = [c for c in kept if c.section == s]
         if items:
@@ -1052,6 +1102,79 @@ def accept_exemplars(voice_dir: str, picks: Sequence[str] | None = None) -> Acce
     if missing:
         notes.append(f'NOTE: no exemplar for the job(s) {", ".join(missing)}')
     return Accepted(index, len(picked), len(passages), tuple(notes))
+
+
+# ============================================================================
+# Reading the voice: the description and the exemplar bank
+# ============================================================================
+
+_COMMENT_RE = re.compile(r'<!--.*?-->\n?', re.DOTALL)
+
+
+def read_description(voice_dir: str) -> str:
+    """description.md as the voice to show a model: HTML comments (the
+    provenance line `render_description` writes) left out. Raises
+    ProposalError when it's missing or can't be read."""
+    path = os.path.join(voice_dir, DESCRIPTION_FILE)
+    try:
+        text = _read(path)
+    except FileNotFoundError as e:
+        raise ProposalError(f'{path} doesn\'t exist: `storyforge voice accept` writes it') from e
+    except (OSError, UnicodeDecodeError) as e:
+        raise ProposalError(f'{path} can\'t be read ({e})') from e
+    return re.sub(r'\n{3,}', '\n\n', _COMMENT_RE.sub('', text)).strip() + '\n'
+
+
+@dataclass(frozen=True)
+class Exemplar:
+    """One passage of the exemplar bank (an `exemplars/exemplars.csv` row
+    and its file): `paragraphs` is where it is in `source`, `why` what it
+    shows (the model's note, or the author's)."""
+    id: str
+    job: str
+    source: str
+    paragraphs: str
+    words: int
+    why: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ExemplarBank:
+    """The bank, in index order, and the files in exemplars/ its index
+    doesn't name (left out of `exemplars`)."""
+    exemplars: tuple[Exemplar, ...]
+    unlisted: tuple[str, ...] = ()
+
+
+def load_exemplars(voice_dir: str) -> ExemplarBank:
+    """The exemplar bank. Raises ProposalError (as `_read_rows`), or for a
+    row whose job isn't one of `JOBS`, whose `words` isn't a number, or
+    whose file is missing or can't be read."""
+    index = os.path.join(voice_dir, EXEMPLARS_INDEX)
+    folder = os.path.join(voice_dir, EXEMPLARS_DIR)
+    out = []
+    for r in _read_rows(index, EXEMPLAR_COLUMNS):
+        if r['job'] not in JOBS:
+            raise ProposalError(f'{index}: {r["id"]} has job {r["job"]!r}, not one of '
+                                f'{", ".join(JOBS)}')
+        try:
+            words = int(r['words'])
+        except ValueError as e:
+            raise ProposalError(f'{index}: {r["id"]} has words {r["words"]!r}, not a '
+                                f'number') from e
+        path = os.path.join(folder, f'{r["id"]}.md')
+        try:
+            text = _read(path).strip()
+        except (OSError, UnicodeDecodeError) as e:
+            raise ProposalError(f'{index} names {r["id"]}, but {path} can\'t be read '
+                                f'({e})') from e
+        out.append(Exemplar(r['id'], r['job'], r['source'], r['paragraphs'], words,
+                            r['why'], text))
+    named = {e.id for e in out}
+    unlisted = tuple(sorted(n for n in os.listdir(folder)
+                            if n.endswith('.md') and n[:-3] not in named))
+    return ExemplarBank(tuple(out), unlisted)
 
 
 # ============================================================================

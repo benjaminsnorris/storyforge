@@ -212,23 +212,27 @@ def test_parse_shortlist_cuts_text_and_refuses_bad_runs(voice_dir):
     reply = {'passages': [
         {'first': a, 'last': b, 'job': 'humour', 'why': 'good'},
         {'first': a, 'last': b, 'job': 'quiet', 'why': 'overlap'},
-        {'first': b, 'last': a - 1 if a > 1 else 0, 'job': 'quiet', 'why': 'backwards'},
+        {'first': d, 'last': c - 1, 'job': 'quiet', 'why': 'backwards'},
         {'first': w1_last, 'last': w1_last + 1, 'job': 'quiet', 'why': 'crosses'},
         {'first': n, 'last': n + 5, 'job': 'quiet', 'why': 'outside'},
         {'first': c, 'last': c, 'job': 'quiet', 'why': 'short'},
         {'first': c, 'last': d, 'job': 'singing', 'why': 'job'},
         {'first': 'x', 'last': d, 'job': 'quiet', 'why': 'numbers'},
+        {'first': True, 'last': d, 'job': 'quiet', 'why': 'a bool is no number'},
+        'a string',
     ]}
+    assert c > 1
     passages, refused = vpp.parse_shortlist(json.dumps(reply), sample)
-    assert [p.id for p in passages] == ['s01']
+    assert [p.id for p in passages] == [
+        f'persuasion-{sample.get(a).index}-{sample.get(b).index}']
     p = passages[0]
     assert p.text == '\n\n'.join(sample.get(i).text for i in range(a, b + 1))
     assert p.paragraphs == f'{sample.get(a).index}-{sample.get(b).index}'
     assert p.source == 'corpus/persuasion.md' and p.why == 'good'
-    assert len(refused) == 7
+    assert len(refused) == 9
     joined = ' '.join(refused)
-    for word in ('overlaps', 'outside the sample', 'crosses', 'words, not', 'unknown job',
-                 'no paragraph numbers'):
+    for word in ('overlaps', 'ends before it starts', 'outside the sample', 'crosses',
+                 'words, not', 'unknown job', 'no paragraph numbers', 'not an object'):
         assert word in joined, word
     with pytest.raises(vpp.ProposalError):
         vpp.parse_shortlist('{"x": 1}', sample)
@@ -288,6 +292,8 @@ def test_passage_range_leaves_a_thin_band_unjudged(voice_dir):
 
 
 def _p(pid, typical, distance=0.5, limit=0.8, job='quiet'):
+    if typical is None:
+        distance = limit = None
     return vpp.Passage(pid, job, 'c.md', '1-2', 150, 'text', '', distance, limit, typical)
 
 
@@ -388,16 +394,16 @@ def test_shortlist_round_trip_and_stale_passage_files_go(voice_dir):
     back = vpp.read_shortlist(voice_dir)
     assert [(p.id, p.text, p.words, p.typical, p.distance) for p in back] == [
         (p.id, p.text, p.words, p.typical, p.distance) for p in passages]
-    _shortlisted(voice_dir, k=20)
+    twenty = _shortlisted(voice_dir, k=20)
     files = sorted(os.listdir(os.path.join(voice_dir, vpp.SHORTLIST_DIR)))
-    assert files == [f's{i:02d}.md' for i in range(1, 21)]
+    assert files == sorted(f'{p.id}.md' for p in twenty)
 
 
 def test_accept_exemplars_copies_the_picks_and_counts_trimmed_words(voice_dir):
     passages = _shortlisted(voice_dir, k=24)
     ids = [p.id for p in passages[:21]]
     vpp.set_picks(voice_dir, ids)
-    trimmed = os.path.join(voice_dir, vpp.SHORTLIST_DIR, 's01.md')
+    trimmed = os.path.join(voice_dir, vpp.SHORTLIST_DIR, f'{ids[0]}.md')
     with open(trimmed, encoding='utf-8') as f:
         words = f.read().split()
     with open(trimmed, 'w', encoding='utf-8') as f:
@@ -407,7 +413,8 @@ def test_accept_exemplars_copies_the_picks_and_counts_trimmed_words(voice_dir):
     index = vpp._read_rows(os.path.join(voice_dir, vpp.EXEMPLARS_INDEX), vpp.EXEMPLAR_COLUMNS)
     assert [r['id'] for r in index] == ids
     assert index[0]['words'] == str(len(vp.words(' '.join(words[:110]))))
-    with open(os.path.join(voice_dir, vpp.EXEMPLARS_DIR, 's01.md'), encoding='utf-8') as f:
+    with open(os.path.join(voice_dir, vpp.EXEMPLARS_DIR, f'{ids[0]}.md'),
+              encoding='utf-8') as f:
         assert f.read().split() == words[:110]
     assert not done.notes
 
@@ -417,9 +424,9 @@ def test_accept_exemplars_refuses_bad_picks_and_lengths(voice_dir):
     with pytest.raises(vpp.ProposalError, match='no passage has'):
         vpp.accept_exemplars(voice_dir)
     vpp.set_picks(voice_dir, [passages[0].id])
-    with open(os.path.join(voice_dir, vpp.SHORTLIST_DIR, 's01.md'), 'w') as f:
+    with open(os.path.join(voice_dir, vpp.SHORTLIST_DIR, f'{passages[0].id}.md'), 'w') as f:
         f.write('Too short now.\n')
-    with pytest.raises(vpp.ProposalError, match='s01'):
+    with pytest.raises(vpp.ProposalError, match=passages[0].id):
         vpp.accept_exemplars(voice_dir)
     path = os.path.join(voice_dir, vpp.SHORTLIST_FILE)
     with open(path, encoding='utf-8') as f:
@@ -443,7 +450,7 @@ def test_accept_exemplars_replaces_its_own_files_and_notes_others(voice_dir):
     vpp.set_picks(voice_dir, [p.id for p in passages[1:22]])
     done = vpp.accept_exemplars(voice_dir)
     folder = os.path.join(voice_dir, vpp.EXEMPLARS_DIR)
-    assert not os.path.exists(os.path.join(folder, 's01.md'))
+    assert not os.path.exists(os.path.join(folder, f'{passages[0].id}.md'))
     assert os.path.exists(hand)
     assert any('mine.md' in n for n in done.notes)
     assert not any('WARNING' in n for n in done.notes)
@@ -775,3 +782,110 @@ def test_writes_go_through_a_temporary_file(voice_dir, monkeypatch):
     with open(path) as f:
         assert f.read() == 'old\n'
     assert not os.path.exists(path + '.tmp')
+
+
+# ============================================================================
+# Review fixes (#665): the types and their files
+# ============================================================================
+
+def test_passage_id_is_where_the_passage_is():
+    """TD5: an id names the same prose after another proposal."""
+    assert vpp.passage_id('corpus/pride-and-prejudice.md', '67-68') == 'pride-and-prejudice-67-68'
+    assert vpp.passage_id('posts/2024/On Writing.md', '3-5') == 'posts-2024-on-writing-3-5'
+
+
+def test_parse_shortlist_refuses_two_passages_with_one_id():
+    text = ' '.join(['word'] * 150)
+    sample = vpp.Sample((vpp.Paragraph(1, 'corpus/a-b.md', 1, 1, text, 150),
+                         vpp.Paragraph(2, 'corpus/a b.md', 1, 2, text, 150)), 2)
+    reply = {'passages': [{'first': 1, 'last': 1, 'job': 'quiet', 'why': ''},
+                          {'first': 2, 'last': 2, 'job': 'quiet', 'why': ''}]}
+    passages, refused = vpp.parse_shortlist(json.dumps(reply), sample)
+    assert [p.id for p in passages] == ['a-b-1-1'] and "another passage's" in refused[0]
+
+
+def test_passage_judgement_is_all_or_nothing():
+    """TD4."""
+    with pytest.raises(ValueError):
+        vpp.Passage('x', 'quiet', 'c.md', '1-2', 150, 't', '', 0.5, None, True)
+
+
+@pytest.mark.parametrize('edit,match', [
+    (lambda row: row[:7] + ['maybe'] + row[8:], "typical 'maybe'"),       # SF-6
+    (lambda row: row[:5] + [''] + row[6:], 'some of distance'),            # TD4
+    (lambda row: row[:4] + ['many'] + row[5:], "words, distance or limit"),
+])
+def test_read_shortlist_refuses_a_broken_judgement(voice_dir, edit, match):
+    _shortlisted(voice_dir, k=21)
+    path = os.path.join(voice_dir, vpp.SHORTLIST_FILE)
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().split('\n')
+    lines[1] = '|'.join(edit(lines[1].split('|')))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+    with pytest.raises(vpp.ProposalError, match=match):
+        vpp.read_shortlist(voice_dir)
+
+
+def test_a_trimmed_passage_is_read_unjudged_until_judged_again(voice_dir):
+    """TD3: its figures were measured on the text before the trim."""
+    passages = _shortlisted(voice_dir, k=21)
+    path = os.path.join(voice_dir, vpp.SHORTLIST_DIR, f'{passages[0].id}.md')
+    with open(path, encoding='utf-8') as f:
+        words = f.read().split()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(' '.join(words[:105]) + '\n')
+    back = vpp.read_shortlist(voice_dir)
+    assert back[0].typical is None and back[0].distance is None
+    assert all(p.typical is not None for p in back[1:])
+    with pytest.raises(vpp.ProposalError, match=f'not judged: {passages[0].id}'):
+        vpp.auto_picks(back)
+    _, judged = vpp.rejudge(voice_dir)
+    assert judged[0].typical is not None and judged[0].words == len(vp.words(' '.join(words[:105])))
+    assert vpp.read_shortlist(voice_dir)[0].typical is not None
+
+
+def test_parse_replies_dont_turn_nulls_into_text():
+    """T5: a null claim is empty, not the claim "None"; a null example is
+    named and left out."""
+    reply = {'claims': [{'section': 'does', 'claim': None, 'example': ''},
+                        {'section': 'does', 'claim': 'Real.', 'example': None},
+                        {'section': 'never', 'claim': 'Never.', 'example': ''}]}
+    claims, problems = vpp.parse_claims(json.dumps(reply))
+    assert [c.claim for c in claims] == ['Real.', 'Never.'] and claims[0].example == ''
+    assert any('claim 1 (does) is empty' in p for p in problems)
+    assert any("example that isn't text" in p for p in problems)
+
+
+def test_description_provenance_is_a_comment_the_reader_leaves_out(voice_dir):
+    """TD8/C1: description.md's provenance line is an HTML comment that
+    claims no author, and read_description drops it."""
+    _marked(voice_dir, ['yes'] * 6)
+    vpp.accept_description(voice_dir)
+    with open(os.path.join(voice_dir, vpp.DESCRIPTION_FILE), encoding='utf-8') as f:
+        raw = f.read()
+    assert '<!-- Written by `storyforge voice accept`' in raw and 'the author marked' not in raw
+    text = vpp.read_description(voice_dir)
+    assert 'storyforge voice accept' not in text and '<!--' not in text
+    assert text.startswith('# The described voice: Test Author\n\n## What the voice does')
+    os.remove(os.path.join(voice_dir, vpp.DESCRIPTION_FILE))
+    with pytest.raises(vpp.ProposalError, match="doesn't exist"):
+        vpp.read_description(voice_dir)
+
+
+def test_load_exemplars_reads_the_bank_and_names_what_it_cant(voice_dir):
+    """TD6: one reader of the bank for drafting (#652, #655)."""
+    passages = _shortlisted(voice_dir, k=21)
+    vpp.accept_exemplars(voice_dir, [p.id for p in passages])
+    folder = os.path.join(voice_dir, vpp.EXEMPLARS_DIR)
+    with open(os.path.join(folder, 'stray.md'), 'w') as f:
+        f.write('x\n')
+    bank = vpp.load_exemplars(voice_dir)
+    assert [e.id for e in bank.exemplars] == [p.id for p in passages]
+    first = bank.exemplars[0]
+    assert (first.job, first.why, first.text) == (passages[0].job, passages[0].why,
+                                                  passages[0].text.strip())
+    assert bank.unlisted == ('stray.md',)
+    os.remove(os.path.join(folder, f'{passages[1].id}.md'))
+    with pytest.raises(vpp.ProposalError, match=passages[1].id):
+        vpp.load_exemplars(voice_dir)
