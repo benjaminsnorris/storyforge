@@ -3,8 +3,8 @@
 
     python3 evals/run.py                      # all suites, replay recorded calls (free)
     python3 evals/run.py --suite e2-detection # one suite (repeatable)
-    python3 evals/run.py --mode auto          # replay what exists, record the rest (spends)
-    python3 evals/run.py --mode record        # re-record every call (spends)
+    python3 evals/run.py --mode auto          # replay what exists, record the rest (spends; frozen suites replay)
+    python3 evals/run.py --mode record        # re-record every call (spends; frozen suites replay)
     python3 evals/run.py --mode record --suite e4-generation --runs 3   # a frozen suite
     python3 evals/run.py --baseline           # also write evals/baseline.json
     python3 evals/run.py --list
@@ -13,18 +13,21 @@ Writes the full report to evals/results/latest.json and prints a summary; when
 evals/baseline.json exists the summary includes per-metric deltas against it.
 
 E4 and E8 are frozen (#645): auto and record replay them, and a miss makes
-them stale rather than errored. Live calls count against a monthly eval
+them stale rather than errored (naming one with --mode auto is refused). Live calls count against a monthly eval
 budget (evals/config.json) kept in the eval spend ledger
 (storyforge.eval_spend); --over-budget REASON is the only way past it.
 
 Exit code: 0 pass (stale suites included: stale is not a failure), 1 a gate
-failed, 2 a suite errored (no measurement) or the run was refused.
+failed, 2 a suite errored (no measurement) or the run was refused. With
+--baseline the exit code is what this run measured, never a carried-over
+entry's status.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -80,15 +83,16 @@ def parse_args(argv):
 
 def monthly_budget(config_file: str) -> float:
     """The monthly eval budget in USD: ``monthly_budget_usd`` in
-    evals/config.json, $25 when the file is absent. A file that exists but
-    doesn't give a non-negative number refuses the run: a guessed budget is
-    no guard."""
-    if not os.path.isfile(config_file):
+    evals/config.json, $25 when nothing exists at that path. Anything there
+    that doesn't give a finite, non-negative number (a directory, a dangling
+    symlink, NaN) refuses the run: a guessed budget is no guard."""
+    if not os.path.lexists(config_file):
         return DEFAULT_MONTHLY_BUDGET
     try:
         with open(config_file) as f:
             value = json.load(f)['monthly_budget_usd']
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value) or value < 0:
             raise ValueError(f'{value!r} is not a non-negative number')
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise Refused(f'{config_file}: monthly_budget_usd unreadable ({e})') from e
@@ -97,13 +101,31 @@ def monthly_budget(config_file: str) -> float:
 
 def _forecast(suites, baseline_file: str, runs: int) -> tuple[float, list[str]]:
     """What recording ``suites`` live costs, ``runs`` times, from each one's
-    ``usd_if_live`` in the baseline; and the suites it has no figure for."""
-    try:
-        with open(baseline_file) as f:
-            by_suite = {r['suite']: r['cost']['usd_if_live']
-                        for r in json.load(f).get('results', [])}
-    except (OSError, ValueError, KeyError, TypeError):
-        by_suite = {}
+    ``usd_if_live`` in the baseline; and the suites it has no figure for (no
+    entry, or one without a usable figure). No baseline file at all leaves
+    every suite without a figure.
+
+    Raises:
+        Refused: the baseline exists but can't be read, so no figure is known.
+    """
+    by_suite = {}
+    if os.path.lexists(baseline_file):
+        try:
+            with open(baseline_file) as f:
+                results = json.load(f).get('results', [])
+            if not isinstance(results, list):
+                raise TypeError('results is not a list')
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            raise Refused(f'the baseline {baseline_file} can\'t be read for the forecast '
+                          f'({type(e).__name__}: {e})') from e
+        for r in results:
+            try:
+                usd = r['cost']['usd_if_live']
+            except (KeyError, TypeError):
+                continue
+            if isinstance(usd, (int, float)) and not isinstance(usd, bool) \
+                    and math.isfinite(usd) and usd >= 0 and isinstance(r.get('suite'), str):
+                by_suite[r['suite']] = usd
     known = [by_suite[s.name] for s in suites if s.name in by_suite]
     return round(sum(known) * runs, 2), [s.name for s in suites if s.name not in by_suite]
 
@@ -117,9 +139,13 @@ def _plan_recording(args, suites) -> set[str]:
         raise Refused('--runs records independent runs, so it needs --mode record')
     if args.runs > 1 and args.baseline:
         raise Refused('--baseline takes one run; drop --runs')
+    named = {s.name for s in suites if s.frozen and s.name in args.suite}
+    if named and args.mode == 'auto':
+        raise Refused(f'{", ".join(sorted(named))} is frozen: auto would only replay it. '
+                      f'Replay it with the default mode, or re-record it on purpose with '
+                      f'--mode record --suite NAME --runs {FROZEN_RUNS}.')
     if args.mode != 'record':
         return set()
-    named = {s.name for s in suites if s.frozen and s.name in args.suite}
     if named and args.runs != FROZEN_RUNS:
         raise Refused(f'{", ".join(sorted(named))} is frozen: it is recorded only as '
                       f'--runs {FROZEN_RUNS} (one run can\'t separate a change from noise). '
@@ -134,7 +160,13 @@ def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
     recorded suite's ``usd_if_live`` in the baseline, times ``--runs``) passes
     the budget; ``auto`` records only misses, so it is refused only once the
     budget is spent. Either way the cassette refuses each live call once the
-    month reaches the budget."""
+    month reaches the budget.
+
+    A suite with no baseline figure adds $0 to the forecast, so for it the
+    forecast is a lower bound: named in a WARNING, and the cassette's
+    per-call check is its guard. A frozen suite recorded with no figure is
+    refused (a cut-off three-run recording leaves its cassettes mixed), as is
+    a baseline that can't be read; ``--over-budget`` lifts both."""
     from storyforge import eval_spend
     budget = monthly_budget(args.config_file)
     try:
@@ -145,19 +177,38 @@ def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
         print(f'WARNING: {e}', file=sys.stderr)
         spent = None
     recording = [s for s in suites if not s.frozen or s.name in record_frozen]
-    forecast, unknown = _forecast(recording, args.baseline_file, args.runs)
+    try:
+        forecast, unknown = _forecast(recording, args.baseline_file, args.runs)
+    except Refused as e:
+        if not args.over_budget:
+            raise
+        print(f'WARNING: {e}', file=sys.stderr)
+        forecast, unknown = 0.0, [s.name for s in recording]
+    source = args.config_file if os.path.lexists(args.config_file) else \
+        f'default; {args.config_file} absent'
     info = {'monthly_usd': budget, 'ledger': ledger, 'spent_before_usd': spent,
             'forecast_usd': forecast, 'forecast_unknown': unknown,
             'over_budget': args.over_budget or None}
     spent_text = 'unknown' if spent is None else f'${spent:.2f}'
     bound = 'at most ' if args.mode == 'auto' else ''
-    print(f'Eval budget: {spent_text} of ${budget:.2f} spent this month ({ledger}); '
-          f'this run, {bound}${forecast:.2f} if every call goes live'
+    print(f'Eval budget: {spent_text} of ${budget:.2f} ({source}) spent this month '
+          f'({ledger}); this run, {bound}${forecast:.2f} if every call goes live'
           + (f' (no figure for {", ".join(unknown)}: not in the baseline)' if unknown else ''))
+    if unknown and args.mode == 'record':
+        print(f'WARNING: no baseline figure for {", ".join(unknown)}, so the forecast counts '
+              f'it as $0 and is a lower bound; the per-call budget check still applies.',
+              file=sys.stderr)
     if args.over_budget:
         print(f'WARNING: --over-budget: the monthly eval budget is not enforced for this run. '
               f'Reason: {args.over_budget}', file=sys.stderr)
         return info
+    unforecast_frozen = sorted(set(unknown) & record_frozen)
+    if unforecast_frozen:
+        raise Refused(
+            f'{", ".join(unforecast_frozen)} has no usd_if_live in the baseline, so its '
+            f'{args.runs}-run recording can\'t be forecast, and a recording the budget cuts '
+            f'off partway leaves its cassettes mixed. Ask Ben; with his approval re-run with '
+            f'--over-budget "<who approved, why>".')
     over = spent >= budget if args.mode == 'auto' else spent + forecast > budget
     if over:
         raise Refused(
@@ -191,6 +242,13 @@ def _summary(report: dict, deltas: dict | None, notes: bool = False) -> str:
             lines.append(f"      error: {r['error']}")
         if r.get('stale'):
             lines.append(f"      stale: {r['stale']}")
+            first_miss = next((f for f in r.get('cassette_failures', [])
+                               if f.startswith('CassetteMiss')), '')
+            if first_miss:
+                lines.append(f"      first miss: {first_miss}")
+            if r.get('stale_exception'):
+                lines.append(f"      raised after the miss (kept, assumed its consequence): "
+                             f"{r['stale_exception']}")
         for g in r['gates']:
             mark = 'ok  ' if g['passed'] else 'FAIL'
             lines.append(f"      {mark} {g['name']}: {g['actual']} {g['op']} {g['threshold']}")
@@ -275,6 +333,13 @@ def _main(args) -> int:
         report['extra_runs'] = extra
         report['status'] = overall_status([report['status']]
                                           + [r['status'] for r in extra.values()])
+    if record_frozen and report['status'] == 'error':
+        dirs = [os.path.join(args.cassettes_dir, name) for name in sorted(record_frozen)]
+        dirs += [os.path.join(args.runs_dir, f'run{k}', name)
+                 for k in range(2, args.runs + 1) for name in sorted(record_frozen)]
+        print('WARNING: a run of this frozen recording errored, so these cassettes may now '
+              'mix new and old recordings: ' + ', '.join(dirs) + '. Re-record all '
+              f'{args.runs} runs, or restore them with git checkout.', file=sys.stderr)
     if budget:
         try:
             budget['spent_after_usd'] = eval_spend.month_spend(ledger)
@@ -303,6 +368,8 @@ def _main(args) -> int:
               + (f" (over budget: {budget['over_budget']})" if budget['over_budget'] else ''))
     print(f'Report: {args.results_file}')
 
+    #: What this run measured; a carried-over baseline entry never changes it
+    exit_code = EXIT_CODES[report['status']]
     if args.baseline:
         if report['status'] == 'error':
             print('ERROR: not writing a baseline over a suite that errored — '
@@ -318,22 +385,27 @@ def _main(args) -> int:
             return 2
         _write_json(args.baseline_file, report)
         print(f'Baseline: {args.baseline_file}')
-    return EXIT_CODES[report['status']]
+    return exit_code
 
 
 def _carry_stale(report: dict, baseline_file: str) -> str:
     """Put the old baseline's entry in place of each stale suite's result
     (marked ``carried_over``): a frozen suite keeps its last measurement
     until it is re-recorded on purpose. Returns why it can't ('' when it
-    can): a stale suite the old baseline has no measurement of."""
+    can): a stale suite the old baseline has no measurement of, or an old
+    baseline that can't be read. The run's exit code is not recomputed from
+    the carried entries: it reports what this run measured."""
     stale = [r['suite'] for r in report['results'] if r['status'] == 'stale']
     if not stale:
         return ''
     try:
         with open(baseline_file) as f:
             old = {r['suite']: r for r in json.load(f).get('results', [])}
-    except (OSError, ValueError, TypeError, AttributeError):
+    except FileNotFoundError:
         old = {}
+    except (OSError, ValueError, TypeError, AttributeError, KeyError) as e:
+        return (f'{", ".join(stale)} is stale and the old baseline {baseline_file} can\'t be '
+                f'read to keep its measurement ({type(e).__name__}: {e})')
     missing = [s for s in stale if s not in old or old[s].get('status') not in ('pass', 'fail')]
     if missing:
         return (f'{", ".join(missing)} is stale and the old baseline has no measurement '

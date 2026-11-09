@@ -18,7 +18,10 @@ end to end, so a prompt change anywhere misses its cassette. It is never
 recorded by default: ``auto`` replays it, and ``record`` replays it unless the
 caller passes ``record_frozen`` (``run.py`` does only for a suite named with
 ``--suite`` and recorded as ``--runs 3``). A frozen suite replayed whose only
-cassette failures are misses is ``stale``, not ``error``.
+cassette failures are misses is ``stale``, not ``error`` — unless its
+cassette directory holds no recordings at all, which is a missing fixture
+(``error``). An exception the suite raised after a miss is kept on the stale
+result as ``stale_exception`` (and ``stale_traceback``), never dropped.
 
 A suite is ``error`` — whatever it returned — when it declares no gates (it
 measured nothing anyone could fail), or when the cassette logged a failure
@@ -149,6 +152,14 @@ def stale_reason(suite_name: str, misses: int) -> str:
             f'was recorded, so it is stale and nothing was spent. Re-record it only '
             f'when a decision depends on it: python3 evals/run.py --mode record '
             f'--suite {suite_name} --runs 3')
+
+
+def has_recordings(cassette_dir: str) -> bool:
+    """Whether ``cassette_dir`` holds at least one recording."""
+    for _root, _dirs, files in os.walk(cassette_dir):
+        if any(f.endswith(('.json.gz', '.json')) for f in files):
+            return True
+    return False
 
 
 def discover(suites_dir: str) -> list[Suite]:
@@ -301,12 +312,26 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
         if requested != mode:
             result['notes'].insert(0, f'frozen suite: replayed, not run in {requested} mode (#645)')
         misses = [f for f in failures if f.startswith('CassetteMiss')]
-        if suite.frozen and mode == 'replay' and failures and len(misses) == len(failures):
-            # The miss came first; an exception after it is its consequence
+        only_misses = suite.frozen and mode == 'replay' and failures \
+            and len(misses) == len(failures)
+        if only_misses and not has_recordings(cassette_dir):
+            # Nothing to replay at all is a missing fixture, not a prompt change:
+            # a re-record can't be what fixes it
+            result['status'] = 'error'
+            result['cassette_failures'] = failures
+            result['error'] = (
+                f'frozen suite has no recordings at {cassette_dir}, so every call missed '
+                f'(a missing or misplaced cassette directory, not a prompt change)')
+        elif only_misses:
+            # Assumed to be the miss's consequence: an exception raised after a
+            # miss is kept as evidence (``stale_exception``), not reported as
+            # the verdict, since a re-record is what would show it again
+            if result['error']:
+                result['stale_exception'] = result['error']
+                result['stale_traceback'] = result.pop('traceback', None)
             result.update(status='stale', stale=stale_reason(suite.name, len(misses)),
                           error=None, metrics={}, by_code={}, gates=[],
                           cassette_failures=failures)
-            result.pop('traceback', None)
         elif failures:
             result['status'] = 'error'
             result['cassette_failures'] = failures
