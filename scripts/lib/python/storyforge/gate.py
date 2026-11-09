@@ -24,6 +24,11 @@ For one scene's prose, `gate_scene` runs:
    another finds. Measured (E8, E4, 2026-11-01): stricter, not more
    convergent (a re-check after the fix still finds things neither first
    reading did), and no gain yet in E4's errors committed.
+   A broken promise is `advisory` (#642): reported, kept in
+   working/gate-advisory.csv, never fixed or blocking, since a brief is a
+   plan and the prose wins. One of a beat the brief marks `must:`
+   (`storyforge.must`) still blocks, and a `must` beat's quoted words are
+   checked word for word by code (`_verbatim_findings`).
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
@@ -195,6 +200,15 @@ class GateResult:
     #: (plan conflict, whether its speaker was checked and why not), for
     #: the report (`_plan_conflict`)
     speaker_notes: list[tuple[Finding, str]] = field(default_factory=list)
+    #: broken promises that don't stop the scene (#642): every broken
+    #: promise, verified or not, except one of a beat the brief marks
+    #: `must:` (`storyforge.must`). A brief is a plan, and the prose wins.
+    #: Reported (`ADVISORY`), kept in `ADVISORY_PATH`, never sent to the
+    #: fix. Set by `_classify`; disjoint from `findings` and `unverified`
+    advisory: list[Finding] = field(default_factory=list)
+    #: brief items that are only the `must:` marker (`field (n)`): they
+    #: mark nothing, and are reported
+    bare_must: list[str] = field(default_factory=list)
     #: on commit: (statement, inherited finding) for each extracted
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
@@ -240,12 +254,14 @@ class GateResult:
 
     @property
     def findings(self) -> list[Finding]:
-        """The check's verified findings, less `inherited` and `source_backed`."""
+        """The check's verified findings, less `inherited`, `source_backed`
+        and `advisory`."""
         if not self.check:
             return []
         backed = [f for f, _ in self.source_backed]
         return [f for f in self.check.findings
-                if not _among(f, self.inherited) and not _among(f, backed)]
+                if not _among(f, self.inherited) and not _among(f, backed)
+                and not _among(f, self.advisory)]
 
     @property
     def fixable(self) -> list[Finding]:
@@ -255,8 +271,11 @@ class GateResult:
     @property
     def unverified(self) -> list[Finding]:
         """Findings whose quotes didn't hold up: not shown to be wrong, so
-        they block the commit like any other finding."""
-        return self.check.unverified if self.check else []
+        they block the commit like any other finding. Less `advisory`: a
+        broken promise that wouldn't block verified doesn't block unverified."""
+        if not self.check:
+            return []
+        return [f for f in self.check.unverified if not _among(f, self.advisory)]
 
     @property
     def unresolved(self) -> list[str]:
@@ -673,33 +692,47 @@ def _brief_lines(project_dir: str, scene_id: str, cast: Cast | None = None) -> l
     (a `Name:` label naming a character is taken off, so the phrase can
     match the prose, but not read as its speaker: quote the line to label
     it). An unquoted action or outcome is a paraphrase, not words
-    the prose must use, so it isn't one. Phrases under `_MIN_BRIEF_WORDS`
-    words are left out. A scene with no brief row scripts nothing."""
-    from storyforge.checker import PROMISE_FIELDS, _split_cell
+    the prose must use, so it isn't one. A `must:` marker (#642) is not
+    part of an item. Phrases under `_MIN_BRIEF_WORDS` words are left out.
+    A scene with no brief row scripts nothing."""
+    from storyforge.checker import PROMISE_FIELDS
     from storyforge.elaborate import get_scene
+    from storyforge.must import items
     scene = get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
     lines: list[Scripted] = []
+    holder = [cast]
     for col in PROMISE_FIELDS:
-        for item in _split_cell(scene.get(col) or ''):
-            spans = list(re.finditer(r'"([^"]+)"|“([^”]+)”', item))
-            if not spans:
-                if col == 'key_dialogue':
-                    label = re.match(r'\s*([^:]{1,80}):\s*(\S.*)$', item, re.S)
-                    if label:
-                        if cast is None:
-                            cast = _cast(project_dir)
-                        if _named(label.group(1), cast)[0]:
-                            item = label.group(2)
-                    lines.append(Scripted(item, None, _NO_QUOTES))
-                continue
-            if cast is None:
-                cast = _cast(project_dir)
-            for i, m in enumerate(spans):
-                before = item[spans[i - 1].end() if i else 0:m.start()]
-                after = item[m.end():spans[i + 1].start() if i + 1 < len(spans) else len(item)]
-                who, why = _label_speaker(before, after, cast)
-                lines.append(Scripted(m.group(1) or m.group(2), who, why))
+        for item in items(scene.get(col) or ''):
+            lines += _item_lines(project_dir, col, item.text, holder)
     return [p for p in lines if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
+
+
+def _item_lines(project_dir: str, col: str, item: str,
+                holder: list['Cast | None']) -> list[Scripted]:
+    """`_brief_lines` for one item of `col` (its marker already off), short
+    phrases included. `holder[0]` is the cast, read into it when first
+    needed."""
+    def cast() -> Cast:
+        if holder[0] is None:
+            holder[0] = _cast(project_dir)
+        return holder[0]
+    if not item:
+        return []
+    spans = list(re.finditer(r'"([^"]+)"|“([^”]+)”', item))
+    if not spans:
+        if col != 'key_dialogue':
+            return []
+        label = re.match(r'\s*([^:]{1,80}):\s*(\S.*)$', item, re.S)
+        if label and _named(label.group(1), cast())[0]:
+            item = label.group(2)
+        return [Scripted(item, None, _NO_QUOTES)]
+    out = []
+    for i, m in enumerate(spans):
+        before = item[spans[i - 1].end() if i else 0:m.start()]
+        after = item[m.end():spans[i + 1].start() if i + 1 < len(spans) else len(item)]
+        who, why = _label_speaker(before, after, cast())
+        out.append(Scripted(m.group(1) or m.group(2), who, why))
+    return out
 
 
 def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
@@ -968,6 +1001,125 @@ def _unchanged_since(project_dir: str, snap: Snapshot, source: str, scene_id: st
     return len(found) == 1 and _sha1(found[0]) == old
 
 
+# ============================================================================
+# Advisory promises and `must` beats (#642)
+# ============================================================================
+
+def _brief_row(project_dir: str, scene_id: str) -> dict[str, str]:
+    from storyforge.elaborate import get_scene
+    return get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
+
+
+def _must_beats(scene: dict[str, str]) -> dict[str, list]:
+    """The brief's `must` items (`must.Item`s that name a beat), by field."""
+    from storyforge.must import MUST_FIELDS, must_items
+    return {col: must_items(scene.get(col) or '') for col in MUST_FIELDS}
+
+
+def _bare_must(scene: dict[str, str]) -> list[str]:
+    """`GateResult.bare_must` for the brief row `scene`."""
+    from storyforge.must import MUST_FIELDS, bare_markers
+    return [f'{col} ({n})' for col in MUST_FIELDS
+            for n in [bare_markers(scene.get(col) or '')] if n]
+
+
+def _names_beat(quote: str, text: str) -> bool:
+    """Whether a broken promise quoting `quote` is about the beat `text`:
+    the same words (the marker, case and punctuation aside), or one inside
+    the other (`_quoted_in`: four words or more)."""
+    from storyforge.must import strip_marker
+    quote = strip_marker(quote)
+    if not _words(quote).strip():
+        return False
+    return (_words(quote) == _words(text) or _quoted_in(text, quote)
+            or _quoted_in(quote, text))
+
+
+def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
+    """Whether the broken promise `f` is of a `must` beat. A quote that is
+    one whole item of the brief's field is that item, marked or not;
+    otherwise it is a `must` beat's when it names one (`_names_beat`) in
+    its field, or in any field when `f` names one without `must` beats (an
+    unverified finding's made-up id). In doubt it is a `must` beat's: a
+    wrong stop costs a look, a wrong pass loses the author's beat."""
+    from storyforge.must import items, strip_marker
+    if not any(beats.values()):
+        return False
+    quote = _words(strip_marker(f.established_quote))
+    fields = [f.fact_id] if f.fact_id in beats and beats[f.fact_id] else list(beats)
+    for col in fields:
+        for item in items(scene.get(col) or ''):
+            if quote.strip() and _words(item.text) == quote:
+                return item.must and bool(item.text)
+    return any(_names_beat(f.established_quote, b.text)
+               for col in fields for b in beats[col])
+
+
+#: How many words a speech tag between two parts of a `must` line may take
+#: (`_verbatim_in`: `"Sing," he said, "goddess"`)
+_TAG_GAP = 6
+
+
+def _verbatim_in(line: str, prose: str) -> bool:
+    """Whether the brief's `line` is in `prose` word for word (case,
+    punctuation and spacing aside, `_found_in`), or split by speech tags:
+    its parts between punctuation in order, at most `_TAG_GAP` words
+    apart."""
+    if _found_in(line, prose):
+        return True
+    parts = [p for p in (_words(x) for x in re.split(r'[,;:.!?—–]+|--', line)) if p.strip()]
+    if len(parts) < 2:
+        return False
+    words = _words(prose)
+    start = words.find(parts[0])
+    while start >= 0:
+        at, ok = start + len(parts[0]) - 1, True
+        for p in parts[1:]:
+            found = words.find(p, at)
+            if found < 0 or _count(words[at:found + 1]) > _TAG_GAP:
+                ok = False
+                break
+            at = found + len(p) - 1
+        if ok:
+            return True
+        start = words.find(parts[0], start + 1)
+    return False
+
+
+def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
+                       check: CheckResult) -> list[Finding]:
+    """A broken promise, found by code, for each `must` item of the brief
+    whose scripted words (`_item_lines`: its quoted spans, or a
+    `key_dialogue` line that quotes nothing; `_MIN_BRIEF_WORDS` words or
+    more) aren't in `prose` word for word (`_verbatim_in`), unless the
+    check already reported a broken promise of that item. A faithful
+    adaptation marks the source lines it keeps verbatim this way (#642).
+    An unquoted action is a paraphrase: the check judges whether it is
+    kept."""
+    scene = _brief_row(project_dir, scene_id)
+    beats = _must_beats(scene)
+    if not any(beats.values()):
+        return []
+    reported = [f for f in check.findings + check.unverified if f.kind == 'broken-promise']
+    holder: list[Cast | None] = [None]
+    out = []
+    for col, items_ in beats.items():
+        for item in items_:
+            lines = [p.text for p in _item_lines(project_dir, col, item.text, holder)
+                     if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
+            missing = [line for line in lines if not _verbatim_in(line, prose)]
+            if not missing or any(_names_beat(f.established_quote, item.text)
+                                  for f in reported):
+                continue
+            out.append(Finding(
+                'broken-promise', 'PRM', '', '', item.raw, col,
+                'the brief marks this beat must:, and the scene does not have its words '
+                'word for word: ' + '; '.join(f'"{line}"' for line in missing)))
+    if holder[0] is not None:
+        _warn_once(holder[0].warnings)
+    return out
+
+
 def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
               reported: list[dict[str, str]], prose: str = '') -> None:
     """Sort the check's verified contradictions into `inherited` and
@@ -986,10 +1138,18 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
     Plan conflict: its words are the brief's own (`_is_plan_conflict`;
     a split line's speech tags must fit the speaker the brief names).
 
-    Broken promises and unverified findings are neither."""
+    Broken promises and unverified findings are neither. A broken promise,
+    verified or not, is `advisory` (#642) unless it is of a beat the brief
+    marks `must:` (`_is_must`)."""
     result.inherited, result.plan_conflicts, result.speaker_notes = [], [], []
+    result.advisory, result.bare_must = [], []
     if not result.check:
         return
+    scene = _brief_row(project_dir, result.scene_id)
+    beats = _must_beats(scene)
+    result.bare_must = _bare_must(scene)
+    result.advisory = [f for f in result.check.findings + result.check.unverified
+                       if f.kind == 'broken-promise' and not _is_must(f, scene, beats)]
     old = before.scenes.get(result.scene_id) if before else None
     known = {(r['source'], _words(r['quote'])) for r in reported}
     phrases = None
@@ -1380,11 +1540,14 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     if result.blocking_note:
         from storyforge.common import log
         log(f'  {scene_id}: {result.blocking_note}')
+    # #642: a `must` line's words, checked by code
+    result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check))
     _classify(result, project_dir, before, already_reported, prose=prose)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
                   extract_model or select_model('evaluation'), old_rows)
+    _note_advisory(project_dir, scene_id, command, result)
     if not result.passed:
         _note_blocked(project_dir, scene_id, command, result)
         return result
@@ -2349,8 +2512,9 @@ def problems_to_fix(result: GateResult) -> list[str]:
     unverified findings, marked as such with why their quotes failed. An
     extraction problem isn't a prose problem, so it isn't here: the re-check
     extracts again. Neither is a plan conflict (the brief's own words: an
-    edit would break the promise) or an inherited contradiction (the
-    author's, from before the pass)."""
+    edit would break the promise), an inherited contradiction (the
+    author's, from before the pass) or an advisory broken promise (#642:
+    the prose wins over a beat the brief doesn't mark `must:`)."""
     proposed = {r['id']: r for r in result.proposed}
     lines = []
     for h in result.halts:
@@ -3081,6 +3245,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                     notes.append(loose)
                 # the blocked list is the kept run's, for `check --accept`
                 blocked_stale = _note_blocked(project_dir, scene_id, command, result)
+                # and so is the advisory list (#642)
+                _note_advisory(project_dir, scene_id, command, result)
                 if blocked_stale:
                     notes.append(f'WARNING: {blocked_stale}; it lists the discarded fix\'s '
                                  f'contradictions, which `check --accept` refuses')
@@ -3319,7 +3485,8 @@ def _one_line(text: str) -> str:
 
 #: `report_lines`' prefixes for what is reported either way, not what
 #: stopped the commit
-_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE', 'SOURCE BACKS THIS SCENE')
+_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE', 'SOURCE BACKS THIS SCENE',
+                 'ADVISORY')
 
 
 def blocking_lines(lines: list[str]) -> list[str]:
@@ -3349,6 +3516,27 @@ def reread_lines(result: GateResult) -> list[str]:
     lines += [f'NOTE (recorded as a new fact, but reads much like {rid}; check it is not a '
               f'copy): {_one_line(st)}' for st, rid in result.restates]
     return lines
+
+
+#: What an `ADVISORY` line says (#642)
+ADVISORY_LABEL = ('a broken promise; not blocking: the brief is a plan and the prose stands. '
+                  'Amend the brief, or mark the beat `must:` to require it')
+
+
+def _advisory_message(f: Finding) -> str:
+    """An advisory broken promise in words: the promised item first (a
+    broken promise's scene quote is often empty)."""
+    what = f'the brief\'s {f.fact_id}' if f.fact_id else 'the brief'
+    promised = f' "{f.established_quote}"' if f.established_quote else ''
+    near = f'; nearest words: "{f.scene_quote}"' if f.scene_quote else ''
+    return (f'{f.code} {what} promises{promised}{near} — {f.explanation}'
+            + (f' (unverified: {f.problem})' if f.problem else ''))
+
+
+def advisory_report_lines(result: GateResult) -> list[str]:
+    """The `ADVISORY` lines for `result.advisory`, as `report_lines` words them."""
+    return [f'ADVISORY ({ADVISORY_LABEL}; listed in {ADVISORY_PATH}){_from_reading(f)}: '
+            f'{_one_line(_advisory_message(f))}' for f in result.advisory]
 
 
 def report_lines(result: GateResult) -> list[str]:
@@ -3388,6 +3576,10 @@ def report_lines(result: GateResult) -> list[str]:
                                  for st, why in result.source_dropped))
     for note in result.source_notes:
         lines.append(f'NOTE (source): {_one_line(note)}')
+    lines += advisory_report_lines(result)
+    if result.bare_must:
+        lines.append('NOTE (brief items that are only the must: marker; they mark nothing): '
+                     + ', '.join(result.bare_must))
     for f in result.inherited:
         lines.append(f'ALREADY IN THE SCENE (before this pass, or reported before; not '
                      f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '
@@ -3726,6 +3918,88 @@ def record_blocked(project_dir: str, scene_id: str, command: str,
     if findings:
         rows[scene_id] = _finding_rows(scene_id, command, findings, prose)
     _write_rows(project_dir, BLOCKED_PATH, rows)
+
+
+# ============================================================================
+# Broken promises that don't block: working/gate-advisory.csv (#642)
+# ============================================================================
+
+#: The advisory broken promises of each scene's last gate run (#642):
+#: `REPORTED_PATH`'s columns, `source` the brief field (or registry id) and
+#: `quote` the promised item. Replaced by each gate run of the scene that
+#: gets to the check, pass or not, and put back to the kept run's when
+#: `gate_and_fix` discards a fix. `status` lists them, and so do `write`
+#: and `revise` at the end of a run (`advisory_lines`).
+ADVISORY_PATH = 'working/gate-advisory.csv'
+
+
+def advisories(project_dir: str) -> dict[str, list[dict[str, str]]]:
+    """Scene id → its rows in `ADVISORY_PATH` (`GateError` as `reported`)."""
+    return _read_rows(project_dir, ADVISORY_PATH)
+
+
+def record_advisory(project_dir: str, scene_id: str, command: str,
+                    findings: list[Finding]) -> None:
+    """Replace `scene_id`'s rows in `ADVISORY_PATH` with `findings` (none:
+    its rows go; the file goes when it has no rows)."""
+    from storyforge.common import csv_safe
+    rows = advisories(project_dir)
+    rows.pop(scene_id, None)
+    if findings:
+        rows[scene_id] = [{'scene_id': scene_id, 'command': command,
+                           'source': csv_safe(f.fact_id or ''),
+                           'quote': csv_safe(_one_line(f.established_quote)),
+                           'finding': csv_safe(_one_line(_advisory_message(f))),
+                           'paragraphs': ''} for f in findings]
+    _write_rows(project_dir, ADVISORY_PATH, rows)
+
+
+def _note_advisory(project_dir: str, scene_id: str, command: str,
+                   result: 'GateResult') -> str:
+    """Record `result.advisory` (`record_advisory`). A file that can't be
+    read or written is said, the gate's verdict unchanged (its report lines
+    still name each one), and returned ('' when written)."""
+    try:
+        record_advisory(project_dir, scene_id, command, result.advisory)
+    except (GateError, OSError) as e:
+        from storyforge.common import log
+        why = f'{ADVISORY_PATH} could not be updated: {e}'
+        log(f'WARNING: {scene_id}: {why}. Its advisory broken promises are only in this log.')
+        return why
+    return ''
+
+
+def advisory_lines(project_dir: str, scene_ids=None) -> list[str]:
+    """The advisory broken promises in `ADVISORY_PATH` (of `scene_ids`
+    only, when given), one line each (`scene: finding`), in reading order
+    where known; a file that can't be read is one line saying so."""
+    try:
+        rows = advisories(project_dir)
+    except GateError as e:
+        return [f'{ADVISORY_PATH} could not be read: {e}']
+    try:
+        order = ledger.scene_order(project_dir)
+    except Exception:   # the list is still worth showing, unordered
+        order = {}
+    wanted = None if scene_ids is None else set(scene_ids)
+    return [f'{sid}: {row["finding"]}'
+            for sid in sorted(rows, key=lambda s: (order.get(s, 10**9), s))
+            if wanted is None or sid in wanted for row in rows[sid]]
+
+
+def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
+    """The advisory broken promises of `scene_ids` (every scene when None)
+    in `ADVISORY_PATH` as a WARNING line and one line each; none: []. They
+    don't stop a scene (the brief is a plan and the prose stands); `check`,
+    `write` and `revise` list them at the end of a run so the author can
+    amend a brief or mark a beat `must:`."""
+    lines = advisory_lines(project_dir, scene_ids)
+    if not lines:
+        return []
+    return ([f'WARNING: {len(lines)} broken promise(s) the gate reported but did not stop '
+             f'on (advisory, {ADVISORY_PATH}): the prose stands. Amend the brief, or mark '
+             f'the beat `must:` in key_actions or key_dialogue to require it:']
+            + [f'  {line}' for line in lines])
 
 
 def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> str:

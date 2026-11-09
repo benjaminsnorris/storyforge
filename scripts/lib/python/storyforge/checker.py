@@ -829,8 +829,11 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
 
 def _whole_item(item: str, quote: str) -> bool:
     """Whether `quote` is the brief item `item` (normalized), not a word or
-    two found inside it."""
-    return bool(quote.strip()) and normalize(item).strip(' .;') == normalize(quote).strip(' .;')
+    two found inside it. A `must:` marker (#642) on either is not part of
+    the item: the check may quote a marked beat with or without it."""
+    from storyforge.must import strip_marker
+    quote, item = strip_marker(quote), strip_marker(item)
+    return bool(quote) and normalize(item).strip(' .;') == normalize(quote).strip(' .;')
 
 
 #: readings the gate takes of each scene (`check_scene(readings=)`)
