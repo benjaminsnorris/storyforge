@@ -2142,12 +2142,12 @@ MIXED = 'changed-within-cycle'
 
 #: What `--complete-cycle` can't be combined with: each would be dropped.
 #: (Checked by identity with None and False: `--level 0` is a level.)
-_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'deterministic',
+_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'voice', 'deterministic',
                        'principles',
                        'diagnosis_only', 'scenes', 'act', 'from_seq', 'direct', 'deep',
                        'interactive', 'no_apply', 'level', 'all_levels', 'compare', 'drift',
                        'boundary', 'all_boundaries', 'scope', 'semantic', 'bible_consistency',
-                       'story_power', 'text_fidelity')
+                       'story_power', 'text_fidelity') + _VOICE_ONLY
 
 _NOVEL_SECTION_NAMES = ('character', 'genre')
 

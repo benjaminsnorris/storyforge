@@ -426,6 +426,9 @@ def test_score_voice_prose_file_that_cant_be_read(tmp_path, monkeypatch, capsys)
     ['--fingerprint', AUSTEN_FP],                                  # without --voice
     ['--deterministic', '--voice-repo', AUSTEN],
     ['--prose', MODERN],
+    # CR-1: --complete-cycle refuses the free meter instead of spending
+    ['--complete-cycle', '--voice', '--fingerprint', AUSTEN_FP],
+    ['--complete-cycle', '--top', '5'],
 ])
 def test_score_voice_refusals(project_dir, monkeypatch, capsys, argv):
     from storyforge import cmd_score
@@ -438,6 +441,25 @@ def test_score_voice_refusals(project_dir, monkeypatch, capsys, argv):
     out = capsys.readouterr()
     assert 'ERROR' in out.out + out.err
     assert _tree(project_dir) == before
+
+
+@pytest.mark.parametrize('argv,named', [
+    (['--complete-cycle', '--voice', '--fingerprint', AUSTEN_FP], '--voice, --fingerprint'),
+    (['--complete-cycle', '--top', '5'], '--top'),
+])
+def test_complete_cycle_refuses_the_meters_flags(project_dir, monkeypatch, capsys, argv, named):
+    # CR-1: refused by name before any cycle is looked for, never dropped
+    from storyforge import cmd_score
+    monkeypatch.chdir(project_dir)
+    _forbid_spending(monkeypatch)
+    monkeypatch.setattr(cmd_score, '_find_incomplete_cycle',
+                        lambda *a: pytest.fail('looked for a cycle to re-score'))
+    with pytest.raises(SystemExit) as e:
+        cmd_score.main(argv)
+    assert e.value.code == 1
+    out = capsys.readouterr()
+    assert f"--complete-cycle fills in what a cycle is missing; it can't be combined with " \
+        f'{named}' in out.out + out.err
 
 
 def test_gn_score_voice_is_an_error(project_dir_gn, monkeypatch, capsys):
