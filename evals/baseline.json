@@ -1222,6 +1222,93 @@
     },
     {
       "by_code": {
+        "PHY": {
+          "cases": 5,
+          "recall": 0.8
+        },
+        "REL": {
+          "cases": 5,
+          "recall": 0.4
+        },
+        "TRT": {
+          "cases": 4,
+          "recall": 0.5
+        },
+        "WLD": {
+          "cases": 3,
+          "recall": 0.0
+        }
+      },
+      "cost": {
+        "calls": 77,
+        "input_tokens": 191328,
+        "output_tokens": 45293,
+        "replayed_calls": 77,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0418,
+        "usd_spent": 0.0
+      },
+      "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
+      "duration_s": 0.06,
+      "error": null,
+      "frozen": false,
+      "gates": [
+        {
+          "actual": 0.4706,
+          "name": "recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.4706
+        },
+        {
+          "actual": 0.4706,
+          "name": "recall_any",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.4706
+        },
+        {
+          "actual": 0,
+          "name": "false_alarms",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 3,
+          "name": "split",
+          "op": "==",
+          "passed": true,
+          "threshold": 3
+        }
+      ],
+      "metrics": {
+        "false_alarms": 0,
+        "false_alarms_benign": 0,
+        "false_alarms_control": 0,
+        "false_alarms_other_facts": 0,
+        "misquoted": 0,
+        "questions": 96,
+        "recall": 0.4706,
+        "recall_any": 0.4706,
+        "split": 3,
+        "variants": 38,
+        "yes_questions": 17
+      },
+      "mode": "replay",
+      "notes": [
+        "model: claude-haiku-5-5",
+        "missed 9 of 17: qs-009, qs-013, qs-016, qs-018, qs-019, qs-022, qs-033, qs-034, qs-035",
+        "false alarms (0): ",
+        "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
+      ],
+      "stale": null,
+      "started_at": "2026-11-09T09:40:23+00:00",
+      "status": "pass",
+      "suite": "question-set"
+    },
+    {
+      "by_code": {
         "KNO": {
           "captured": 3,
           "cases": 3,
@@ -1361,5 +1448,5 @@
   "schema_version": 1,
   "status": "pass",
   "storyforge_version": "1.161.1",
-  "suite_count": 12
+  "suite_count": 13
 }

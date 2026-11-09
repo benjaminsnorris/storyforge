@@ -62,6 +62,19 @@ class TestFixture:
         assert any(problem in p for p in m['validate'](data, BOOK, INJECTIONS))
 
 
+class TestLandsOn:
+    @pytest.mark.parametrize('quote,where,lands', [
+        ('in a handsome new great-coat', 'a handsome new great-coat with a fur collar', True),
+        ('his uncle Bob loved him so', 'his uncle Bob', True),
+        ('Bob', 'his uncle Bob', False),
+        ('"Frank!" said Scrooge.', '"Frank!" said Scrooge', True),
+        ('loved him so', 'his uncle Bob', False),
+        ('', 'his uncle Bob', False),
+    ])
+    def test_three_words_in_a_row(self, quote, where, lands):
+        assert _module()['lands_on'](quote, where) is lands
+
+
 class TestScore:
     DATA = {'facts': {'a': {'type': 'trait'}, 'b': {'type': 'world'}},
             'scenes': {'s': ['a', 'b']},

@@ -18,8 +18,9 @@ The suite asks each variant's questions the way the gate does
 only when both say yes and the quote is in the scene), so what it measures
 is the questions, the prompt and the model, not the selection of facts
 (that is code, in `tests/test_questions.py`). A `yes` is caught when its
-finding's quote lands on the injected words (overlaps a `contradicted`
-quote); `recall_any` counts a finding anywhere in the scene.
+finding's quote lands on the injected words (`lands_on` a `contradicted`
+quote: three words in a row in common); `recall_any` counts a finding
+anywhere in the scene.
 
 The model is the question layer's default (the extraction tier) unless
 `STORYFORGE_QUESTIONS_MODEL` (or `STORYFORGE_MODEL`) names another, which is
@@ -43,10 +44,13 @@ CASES_FILE = os.path.join(EVALS_DIR, 'fixtures', 'question-set', 'cases.json')
 #: the same commit; a loss is a decision). The plan's targets are notes:
 #: recall at least the open checker's on the frozen E4/E8, no false alarms
 FLOORS: dict[str, float | None] = {
-    'recall': None,
-    'recall_any': None,
-    'false_alarms': None,
-    'split': None,
+    # recorded 2026-11-09 (haiku 5.5, $0.04 for the set). Sonnet 5.5 on the
+    # same set (fixtures/tier-comparison/claude-sonnet-5-5, $0.54): recall
+    # 0.5294 (one case more), no false alarms, no split answers
+    'recall': 0.4706,
+    'recall_any': 0.4706,
+    'false_alarms': 0,
+    'split': 3,
 }
 
 
@@ -122,12 +126,32 @@ def questions_for(data: dict, scene: str) -> list:
     return out
 
 
+#: Words a finding's quote must share in a row with the injected quote to
+#: be on its words (all of them, when it has fewer)
+SHARED_RUN = 3
+
+
+def lands_on(quote: str, where: str) -> bool:
+    """Whether a finding's quote is on the injected words: the two share a
+    run of `SHARED_RUN` words (all of the injected quote's, when it has
+    fewer), case and punctuation aside. A finding quoting more or less of the
+    sentence than the injection's quote still lands."""
+    import re
+
+    from storyforge.quotes import normalize
+    a, b = (re.findall(r"[\w'-]+", normalize(t).lower()) for t in (quote, where))
+    n = min(SHARED_RUN, len(b))
+    if not n or len(a) < n:
+        return False
+    runs = {tuple(b[i:i + n]) for i in range(len(b) - n + 1)}
+    return any(tuple(a[i:i + n]) in runs for i in range(len(a) - n + 1))
+
+
 def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) -> dict:
     """`outcomes`: variant id → {'findings': {fact id: scene quote},
     'split': n, 'misquoted': n}. Returns metrics, by_code and the missed /
     false-alarm lists."""
     from storyforge.checker import CODE_OF_TYPE
-    from storyforge.continuity import overlaps
     yes_total = caught = caught_any = 0
     false = {'control': 0, 'benign': 0, 'error': 0}
     by_code: dict[str, dict] = {}
@@ -144,7 +168,7 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
                 where = [c['quote'] for c in injections[v['injection']].get('contradicted', [])]
                 if quote is not None:
                     caught_any += 1
-                    if any(overlaps(quote, w) for w in where):
+                    if any(lands_on(quote, w) for w in where):
                         caught += 1
                         row['caught'] += 1
                         continue
