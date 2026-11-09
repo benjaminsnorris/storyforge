@@ -11,6 +11,7 @@ Usage:
     storyforge check --blocking                # only each scene's blocking, reported (#626)
     storyforge check --stage-sheet act1-sc03   # blocking by the stage sheet, not the read (#647)
     storyforge check --blocking --stage-sheet  # ... the stage sheet alone, reported
+    storyforge check --questions act1-sc03     # yes/no questions, not the open checker (#649)
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -92,6 +93,17 @@ calendar, an injured part at full strength, a name the book rules out, the
 sun against `reference/world.csv`. Its findings stop the scene like any
 contradiction (`--accept` takes them); what it couldn't check is a NOTE.
 
+Questions (#649): `--questions` checks each scene against the book with
+narrow yes/no questions instead of the open checker (`storyforge.questions`):
+for each ledger fact the typed checks can't compare (a trait, a
+relationship, a statement-only physical or world fact) whose subject is in
+the scene by its typed state, Storyforge writes a question, a small model
+answers each twice, and only two yeses with a quote in the scene make a
+finding. Model: STORYFORGE_QUESTIONS_MODEL (default the extraction tier). It
+checks no brief promises and fills no registry quotes (each scene's report
+says so); the open checker stays the default until the questions and the
+typed checks match its recall on E4 and E8.
+
 A broken promise (a brief item the prose doesn't deliver) doesn't stop a
 scene (#642): the brief is a plan and the prose stands. It is reported
 (ADVISORY), kept in `working/gate-advisory.csv`, and listed at the end of
@@ -157,6 +169,13 @@ def parse_args(argv):
                              'working/stage-sheets/. With --blocking, the stage sheet alone. '
                              'Model: STORYFORGE_STAGE_SHEET_MODEL (default the extraction '
                              'tier).')
+    parser.add_argument('--questions', action='store_true',
+                        help='Check each scene against the book with yes/no questions from '
+                             'the ledger (traits, relationships, statement-only facts about '
+                             'who is in the scene; each asked twice, a finding only when both '
+                             'say yes and the quote is in the scene) instead of the open '
+                             'checker. Checks no brief promises. Model: '
+                             'STORYFORGE_QUESTIONS_MODEL (default the extraction tier).')
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -182,15 +201,20 @@ def main(argv=None):
     ledger.exit_if_unordered(project_dir)
     if args.accept:
         if (args.positional or args.scenes or args.act or args.from_seq or args.pending
-                or args.keep_going or args.stop_at_first or args.stage_sheet):
+                or args.keep_going or args.stop_at_first or args.stage_sheet
+                or args.questions):
             log('ERROR: --accept takes its own scene list; name no others with it '
-                '(and no --stage-sheet: accepting reads nothing).')
+                '(and no --stage-sheet or --questions: accepting reads nothing).')
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
         return
     from storyforge.costs import exit_if_bad_threshold
     exit_if_bad_threshold()   # the re-checks and --pending's forecast check it
     if args.blocking:
+        if args.questions:
+            log('ERROR: --blocking reads only each scene\'s blocking; --questions checks a scene '
+                'against the book. Use one.')
+            sys.exit(1)
         if args.pending or args.keep_going or args.stop_at_first:
             log('ERROR: --blocking reads the scenes you name (or every scene); it takes no '
                 '--pending, --keep-going or --stop-at-first.')
@@ -198,6 +222,8 @@ def main(argv=None):
         sys.exit(_blocking_report(args, project_dir))
     if args.stage_sheet:
         gate.GATE_BLOCKING_METHOD = 'stage-sheet'
+    if args.questions:
+        gate.GATE_CHECK_METHOD = 'questions'
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')
