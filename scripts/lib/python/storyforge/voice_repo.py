@@ -13,7 +13,8 @@ The repo (`storyforge voice init` makes it; nothing in it is a book):
       fingerprint.json    # `voice fingerprint` (storyforge.voiceprint)
       description.md      # `voice propose` / `voice accept` (voiceprint_proposals)
       exemplars/          # likewise: exemplars.csv and one <id>.md per passage
-      fiction/            # fiction anchors, one folder per narrator stance (#654)
+      fiction/            # fiction anchors: per narrator stance, a folder of .md
+                          # files or one file (#654)
 
 `voice.yaml`:
 
@@ -38,13 +39,13 @@ A book names the repo in its `storyforge.yaml`:
       author: ../ben-voice          # the author voice repo, relative to the book
       narrator: fiction/close-third # optional: the fiction anchor, in the repo
 
-`book_voice` loads it: the description, the exemplar bank, the fiction anchor
-and the fingerprint's path, plus the book's own `reference/voice/book.md`
-when it has one. `author_voice_section` renders it for the drafting prompt; a
+`book_voice` loads it: the description, the exemplar bank and the fiction
+anchor (which must be under the repo's `fiction/`), plus the book's own
+`reference/voice/book.md` when it has one. `author_voice_section` renders it for the drafting prompt; a
 book without the block gets '' and its prompt is exactly what it was. A block
 that can't be used (a key it doesn't take, a repo that isn't there or isn't
-a voice repo, no description or exemplars yet, a narrator folder with no
-`.md` file) raises `VoiceError`, a `source.SourceError`, so the dispatcher
+a voice repo or is inside a book, no description or exemplars yet, a narrator
+outside `fiction/` or a folder with no `.md` file) raises `VoiceError`, a `source.SourceError`, so the dispatcher
 turns it into `ERROR: ...` and exit 1; `write` calls `require_voice` up
 front, before a branch or spend.
 
@@ -55,12 +56,17 @@ exemplars the author chose, never the corpus.
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from storyforge.common import parse_yaml_scalar
 from storyforge.source import SourceError
+
+if TYPE_CHECKING:
+    from storyforge.voiceprint_proposals import ExemplarBank
 
 VOICE_FILE = 'voice.yaml'
 CORPUS_DIR = 'corpus'
@@ -282,6 +288,30 @@ class IndexRow:
 _DATE_RE = re.compile(r'^\d{4}(?:-\d{2}(?:-\d{2})?)?$')
 
 
+def valid_date(date: str) -> bool:
+    """Whether `date` is a real `YYYY-MM-DD`, `YYYY-MM` or `YYYY` (a month
+    01-12, a day the month has)."""
+    if not _DATE_RE.match(date or ''):
+        return False
+    y, *rest = (int(x) for x in date.split('-'))
+    try:
+        datetime.date(y, rest[0] if rest else 1, rest[1] if len(rest) > 1 else 1)
+    except ValueError:
+        return False
+    return True
+
+
+def _row_problem(row: IndexRow) -> str:
+    """Why `row` can't be in the index (its file aside), or ''."""
+    if row.date and not valid_date(row.date):
+        return f'date {row.date!r} isn\'t YYYY-MM-DD, YYYY-MM, YYYY or blank'
+    if row.kind not in KINDS:
+        return f'kind {row.kind!r} isn\'t one of {", ".join(KINDS)}'
+    if row.use not in USES:
+        return f'use {row.use!r} isn\'t blank, in, out or held-out'
+    return ''
+
+
 def read_index(voice_dir: str) -> list[IndexRow]:
     """corpus/index.csv's rows, in order. Raises VoiceRepoError for a
     missing or unreadable file, another header, a row with the wrong number
@@ -311,13 +341,9 @@ def read_index(voice_dir: str) -> list[IndexRow]:
             raise VoiceRepoError(f'{where}: a blank or repeated file {row.file!r}')
         if not norm.startswith(CORPUS_DIR + os.sep) or os.path.isabs(row.file):
             raise VoiceRepoError(f'{where}: {row.file!r} isn\'t in {CORPUS_DIR}/')
-        if row.date and not _DATE_RE.match(row.date):
-            raise VoiceRepoError(f'{where}: date {row.date!r} isn\'t YYYY-MM-DD, YYYY-MM, '
-                                 f'YYYY or blank')
-        if row.kind not in KINDS:
-            raise VoiceRepoError(f'{where}: kind {row.kind!r} isn\'t one of {", ".join(KINDS)}')
-        if row.use not in USES:
-            raise VoiceRepoError(f'{where}: use {row.use!r} isn\'t blank, in, out or held-out')
+        problem = _row_problem(row)
+        if problem:
+            raise VoiceRepoError(f'{where}: {problem}')
         seen.add(norm)
         rows.append(row)
     return rows
@@ -325,8 +351,20 @@ def read_index(voice_dir: str) -> list[IndexRow]:
 
 def write_index(voice_dir: str, rows: list[IndexRow]) -> str:
     """Write corpus/index.csv (LF, every cell through csv_safe). Returns its
-    path."""
+    path. Raises VoiceRepoError, writing nothing, for a row `read_index`
+    would refuse (so what's written can always be read back)."""
     from storyforge.voiceprint_proposals import _write_rows
+    seen = set()
+    for r in rows:
+        norm = os.path.normpath(r.file) if r.file else ''
+        problem = _row_problem(r)
+        if not norm or norm in seen:
+            problem = f'a blank or repeated file {r.file!r}'
+        elif not norm.startswith(CORPUS_DIR + os.sep) or os.path.isabs(r.file):
+            problem = problem or f'{r.file!r} isn\'t in {CORPUS_DIR}/'
+        if problem:
+            raise VoiceRepoError(f'{INDEX_FILE} not written: {r.file or "a row"}: {problem}')
+        seen.add(norm)
     path = os.path.join(voice_dir, INDEX_FILE)
     _write_rows(path, INDEX_COLUMNS, [r.cells() for r in rows])
     return path
@@ -385,11 +423,15 @@ def corpus(voice_dir: str) -> tuple[list[CorpusPiece], dict[str, str]]:
     return pieces, texts
 
 
-def counted_pieces(voice_dir: str) -> dict[str, str]:
-    """The pieces that count, by file in index order: what the fingerprint
-    is made from."""
-    pieces, texts = corpus(voice_dir)
+def counted(pieces: list[CorpusPiece], texts: dict[str, str]) -> dict[str, str]:
+    """Of `corpus`'s result, the pieces that count, by file in index order:
+    what `voice fingerprint` measures."""
     return {p.row.file: texts[p.row.file] for p in pieces if p.counts}
+
+
+def counted_pieces(voice_dir: str) -> dict[str, str]:
+    """The pieces that count, by file in index order (`counted`)."""
+    return counted(*corpus(voice_dir))
 
 
 def corpus_summary(pieces: list[CorpusPiece]) -> list[str]:
@@ -500,15 +542,15 @@ def voice_ref(project_dir: str) -> VoiceRef | None:
 class BookVoice:
     """The voice a book is written in: the author repo's name, description
     (provenance comments left out), exemplar bank, fiction anchor (each
-    file as (path in the repo, text); empty without `narrator`), the
-    fingerprint's path (which may not exist yet: `score --voice` says so),
-    and the book's own `reference/voice/book.md` ('' without one)."""
+    file as (path in the repo, text); empty without `narrator`), and the
+    book's own `reference/voice/book.md` ('' without one). The fingerprint
+    isn't here: `score --voice` reads it from `ref.author_dir`
+    (`voiceprint_meter.load_source`)."""
     ref: VoiceRef
     author: str
     description: str
-    exemplars: object   # voiceprint_proposals.ExemplarBank
+    exemplars: ExemplarBank
     anchor: tuple[tuple[str, str], ...]
-    fingerprint_path: str
     book_notes: str
 
 
@@ -520,6 +562,13 @@ def _anchor(ref: VoiceRef) -> tuple[tuple[str, str], ...]:
     if full != root and not full.startswith(root + os.sep):
         raise VoiceError(f'voice.narrator: {ref.narrator} is outside the author voice repo; '
                          f'name a folder in it (fiction/<stance>)')
+    fiction = os.path.join(root, FICTION_DIR)
+    if full == fiction or not full.startswith(fiction + os.sep):
+        # the corpus (drafts among it) or the description would go into
+        # every drafting prompt as "the narrator"
+        raise VoiceError(f'voice.narrator: {ref.narrator} isn\'t in the repo\'s '
+                         f'{FICTION_DIR}/; name a stance\'s folder or file there '
+                         f'({FICTION_DIR}/<stance>)')
     if os.path.isdir(full):
         names = sorted(n for n in os.listdir(full) if n.lower().endswith('.md')
                        and os.path.isfile(os.path.join(full, n)))
@@ -549,11 +598,12 @@ def book_voice(project_dir: str) -> BookVoice | None:
 
     Raises:
         VoiceError: as `voice_ref`; the author dir isn't a voice repo (no
-            voice.yaml, or it's a book); description.md or the exemplar
+            voice.yaml, or it's in a book: `check_repo`), or its voice.yaml
+            can't be used (`read_settings`); description.md or the exemplar
             bank is missing, can't be read or is empty (they're the voice
             the drafting prompt carries: `voice propose` and `voice accept`
-            make them); the narrator is outside the repo, missing, empty
-            or unreadable; reference/voice/book.md can't be read.
+            make them); the narrator isn't under the repo's fiction/, is
+            missing, empty or unreadable; reference/voice/book.md can't be read.
     """
     from storyforge import voiceprint_proposals as vpp
     ref = voice_ref(project_dir)
@@ -561,9 +611,9 @@ def book_voice(project_dir: str) -> BookVoice | None:
         return None
     where = f'voice.author ({ref.author})'
     try:
-        vpp.check_voice_dir(ref.author_dir)
+        check_repo(ref.author_dir)
         settings = read_settings(ref.author_dir)
-    except (vpp.ProposalError, VoiceRepoError) as e:
+    except VoiceRepoError as e:
         raise VoiceError(f'{where}: {e}') from e
     try:
         description = vpp.read_description(ref.author_dir)
@@ -587,8 +637,7 @@ def book_voice(project_dir: str) -> BookVoice | None:
             notes = _read(notes_path).strip()
         except (OSError, UnicodeDecodeError) as e:
             raise VoiceError(f'{BOOK_NOTES} can\'t be read ({e})') from e
-    return BookVoice(ref, settings.author, description, bank, _anchor(ref),
-                     os.path.join(ref.author_dir, FINGERPRINT_FILE), notes)
+    return BookVoice(ref, settings.author, description, bank, _anchor(ref), notes)
 
 
 def require_voice(project_dir: str) -> list[str]:

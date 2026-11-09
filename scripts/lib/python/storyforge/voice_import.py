@@ -98,16 +98,23 @@ class Fetched:
 Fetch = Callable[[str], Fetched]
 
 
+#: how a piece's kind was found (`Piece.kind_from`)
+KIND_SAID = 'said'          # the piece said so (front matter, categories), or --kind
+KIND_GUESSED = 'guessed'    # nothing said: filed as an essay
+KIND_OFF_SITE = 'off-site'  # a feed item linking off the feed's site: filed as a link
+
+
 @dataclass
 class Piece:
     """One piece of writing, read and cleaned: its Markdown body has no
-    title heading (`markdown` adds it)."""
+    title heading (`markdown` adds it). `kind_from` says how its kind was
+    found, so the import can name the guesses."""
     title: str
     date: str
     kind: str
     body: str
     source: str
-    kind_found: bool = True
+    kind_from: str = KIND_SAID
 
     def markdown(self) -> str:
         head = f'# {self.title}\n\n' if self.title else ''
@@ -199,10 +206,11 @@ def _norm_date(raw: str) -> str:
         return ''
     m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', raw)
     if m:
-        return '-'.join(m.groups())
+        date = '-'.join(m.groups())
+        return date if vr.valid_date(date) else ''
     m = re.match(r'^(\d{4})(?:-(\d{2}))?$', raw)
     if m:
-        return raw
+        return raw if vr.valid_date(raw) else ''
     try:
         dt = email.utils.parsedate_to_datetime(raw)
     except (TypeError, ValueError, IndexError):
@@ -496,12 +504,14 @@ def markdown_piece(text: str, source: str, fallback_title: str = '') -> Piece:
     if not kind and any(meta.get(k) for k in LINK_KEYS):
         kind = 'link'
     date = _norm_date(str(meta.get('date') or meta.get('published') or meta.get('pubdate') or ''))
-    return Piece(title or fallback_title, date, kind or 'essay', body, source, bool(kind))
+    return Piece(title or fallback_title, date, kind or 'essay', body, source,
+                 KIND_SAID if kind else KIND_GUESSED)
 
 
 def html_piece(html: str, source: str, fallback_title: str = '') -> Piece:
     page = html_page(html)
-    return Piece(page.title or fallback_title, page.date, 'essay', page.body, source, False)
+    return Piece(page.title or fallback_title, page.date, 'essay', page.body, source,
+                 KIND_GUESSED)
 
 
 # ============================================================================
@@ -637,7 +647,7 @@ def _piece_name(path: str) -> str:
 
 def _date_from_name(path: str) -> str:
     m = re.match(r'^(\d{4}-\d{2}-\d{2})', os.path.basename(path))
-    return m.group(1) if m else ''
+    return m.group(1) if m and vr.valid_date(m.group(1)) else ''
 
 
 def _shown(names: list[str], most: int = 5) -> str:
@@ -764,6 +774,8 @@ class _Reader:
             source = item.link or _item_key(where, item)
             kind = kind_of(list(item.categories))
             off_site = bool(site_host and is_url(item.link) and _host(item.link) != site_host)
+            kind_from = KIND_SAID if kind or item.related else \
+                KIND_OFF_SITE if off_site else KIND_GUESSED
             if not kind and (item.related or off_site):
                 kind = 'link'
             if _truncated(item):
@@ -784,7 +796,7 @@ class _Reader:
                 body, title = html_page(item.html).body, item.title
             if body.lstrip('#').strip() == title:
                 body = ''
-            self.add(Piece(title, item.date, kind or 'essay', body, source, bool(kind)))
+            self.add(Piece(title, item.date, kind or 'essay', body, source, kind_from))
         if truncated:
             shown = _shown(truncated)
             self.report.warnings.append(
@@ -817,7 +829,7 @@ def read_sources(voice_dir: str, sources: list[str], fetch: Fetch | None = None,
             report.errors.append(f'{src}: not a folder, a file or an http(s) URL')
     if kind:
         for p in report.pieces:
-            p.kind, p.kind_found = kind, True
+            p.kind, p.kind_from = kind, KIND_SAID
     return report
 
 

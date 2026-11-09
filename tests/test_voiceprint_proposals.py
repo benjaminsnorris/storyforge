@@ -36,8 +36,10 @@ def voice_template(tmp_path_factory):
     os.makedirs(d / 'corpus')
     text = _head(24000)
     (d / 'corpus' / 'persuasion.md').write_text(text, encoding='utf-8')
-    (d / 'voice.yaml').write_text('author: Test Author\ncorpus:\n  - file: corpus/persuasion.md\n',
-                                  encoding='utf-8')
+    (d / 'voice.yaml').write_text('author: Test Author\n', encoding='utf-8')
+    (d / 'corpus' / 'index.csv').write_text('file|title|date|kind|source|use\n'
+                                            'corpus/persuasion.md|Persuasion||fiction||\n',
+                                            encoding='utf-8')
     vp.fingerprint({'corpus/persuasion.md': text}, ngrams=False).save(str(d / 'fingerprint.json'))
     return d
 

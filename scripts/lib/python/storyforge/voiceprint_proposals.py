@@ -149,19 +149,45 @@ def _read(path: str) -> str:
 
 
 def _author(voice_dir: str) -> str:
-    from storyforge.prompts import read_yaml_field   # (yaml_file, field)
-    return read_yaml_field(os.path.join(voice_dir, VOICE_FILE), 'author')
+    """voice.yaml's author, read by its one reader (`voice_repo.read_settings`)."""
+    from storyforge import voice_repo as vr
+    try:
+        return vr.read_settings(voice_dir).author
+    except vr.VoiceRepoError as e:
+        raise ProposalError(str(e)) from e
 
 
 def check_voice_dir(voice_dir: str) -> None:
-    """Raise ProposalError unless `voice_dir` is an author voice repo: it
-    has voice.yaml, and it isn't a book (no storyforge.yaml)."""
-    if os.path.isfile(os.path.join(voice_dir, 'storyforge.yaml')):
-        raise ProposalError(f'{voice_dir} is a book (it has storyforge.yaml); run this in '
-                            f'the author voice repo')
-    if not os.path.isfile(os.path.join(voice_dir, VOICE_FILE)):
-        raise ProposalError(f'{voice_dir} has no {VOICE_FILE}: run this in the author '
-                            f'voice repo')
+    """Raise ProposalError unless `voice_dir` is an author voice repo
+    (`voice_repo.check_repo`: it has voice.yaml and isn't in a book) whose
+    voice.yaml can be used (`voice_repo.read_settings`: the provisional
+    `corpus:` list is refused here too)."""
+    from storyforge import voice_repo as vr
+    try:
+        vr.check_repo(voice_dir)
+        vr.read_settings(voice_dir)
+    except vr.VoiceRepoError as e:
+        raise ProposalError(str(e)) from e
+
+
+def _check_current(voice_dir: str, fp: vp.Fingerprint, fp_path: str) -> None:
+    """Raise ProposalError unless the fingerprint was made from the pieces
+    that count now (`voice_repo.counted_pieces`): a piece imported, held
+    out or ruled out since would otherwise be measured against, or sampled
+    from, the old set without a word."""
+    from storyforge import voice_repo as vr
+    try:
+        now = set(vr.counted_pieces(voice_dir))
+    except vr.VoiceRepoError as e:
+        raise ProposalError(str(e)) from e
+    made = {p.get('name', '') for p in fp.pieces}
+    if now != made:
+        added, gone = sorted(now - made), sorted(made - now)
+        parts = ([f'counts now but isn\'t in it: {", ".join(added[:5])}'] if added else []) + \
+                ([f'is in it but doesn\'t count now: {", ".join(gone[:5])}'] if gone else [])
+        raise ProposalError(f'{fp_path} is out of date with {vr.INDEX_FILE} and '
+                            f'{VOICE_FILE} ({"; ".join(parts)}): run `storyforge voice '
+                            f'fingerprint`')
 
 
 def load_voice(voice_dir: str) -> Voice:
@@ -171,8 +197,8 @@ def load_voice(voice_dir: str) -> Voice:
     check_voice_dir(voice_dir)
     fp_path = os.path.join(voice_dir, FINGERPRINT_FILE)
     if not os.path.isfile(fp_path):
-        raise ProposalError(f'{voice_dir} has no {FINGERPRINT_FILE}: compute the fingerprint '
-                            f'first (references/voiceprints/README.md)')
+        raise ProposalError(f'{voice_dir} has no {FINGERPRINT_FILE}: compute it first '
+                            f'(`storyforge voice fingerprint`)')
     try:
         fp = vp.Fingerprint.load(fp_path)
     except vp.VoiceprintError as e:
@@ -180,8 +206,8 @@ def load_voice(voice_dir: str) -> Voice:
     names = [p.get('name', '') for p in fp.pieces]
     if not names or not all(names):
         raise ProposalError(f'{fp_path} names no corpus pieces, so the sample can\'t be '
-                            f'taken from what was fingerprinted; compute it again from '
-                            f'files by name (voiceprint.fingerprint({{path: text}}))')
+                            f'taken from what was fingerprinted; compute it again '
+                            f'(`storyforge voice fingerprint`)')
     texts = {}
     for name in names:
         path = os.path.join(voice_dir, name)
@@ -190,6 +216,7 @@ def load_voice(voice_dir: str) -> Voice:
         except (OSError, UnicodeDecodeError) as e:
             raise ProposalError(f'{FINGERPRINT_FILE} names {name}, which can\'t be read '
                                 f'({e})') from e
+    _check_current(voice_dir, fp, fp_path)
     return Voice(voice_dir, _author(voice_dir), fp, texts)
 
 

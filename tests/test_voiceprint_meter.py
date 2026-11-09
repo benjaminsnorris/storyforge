@@ -450,9 +450,7 @@ def test_only_the_reference_voice_is_calibrated(repo, fp_only, tmp_path):
 def test_a_corpus_that_changed_since_the_fingerprint_is_an_error(tmp_path):
     # SF-1: an emptied or cut corpus file must not become the reference
     voice = tmp_path / 'voice'
-    os.makedirs(voice / 'corpus')
-    for name in ('voice.yaml', 'fingerprint.json'):
-        shutil.copy(os.path.join(AUSTEN, name), voice / name)
+    shutil.copytree(AUSTEN, voice)
     text = _read(os.path.join(AUSTEN, 'corpus', 'pride-and-prejudice.md'))
     (voice / 'corpus' / 'pride-and-prejudice.md').write_text(text[:len(text) // 2],
                                                             encoding='utf-8')

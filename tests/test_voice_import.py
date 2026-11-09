@@ -49,7 +49,7 @@ class FakeWeb:
 
 def test_markdown_front_matter_gives_title_date_and_kind():
     p = vi.markdown_piece(_read('posts/2019-03-02-on-walking.md'), 'src')
-    assert (p.title, p.date, p.kind, p.kind_found) == ('On Walking', '2019-03-02', 'essay', True)
+    assert (p.title, p.date, p.kind, p.kind_from) == ('On Walking', '2019-03-02', 'essay', 'said')
     assert p.body.startswith('I walk most mornings') and '---' not in p.body
 
 
@@ -69,7 +69,7 @@ def test_markdown_loses_what_isnt_prose():
         assert gone not in body, gone
     assert 'with a link to the docs and an image:' in body
     assert 'The second is patience.' in body and 'Some inline HTML text stays.' in body
-    assert not p.kind_found and p.kind == 'essay'
+    assert p.kind_from == 'guessed' and p.kind == 'essay'
 
 
 def test_front_matter_lists_and_no_front_matter():
@@ -532,3 +532,25 @@ def test_an_atom_entry_without_a_link_takes_its_id():
            '<id>tag:e.com,2020:1</id><content type="html">x</content></entry></feed>')
     _, items, _ = vi.feed_items(xml, 'a.xml')
     assert items[0].link == 'tag:e.com,2020:1'
+
+
+def test_link_posts_guessed_from_the_host_are_named(repo, capsys):
+    """SF-5: an item filed as a link only because it links off the feed's
+    site is reported on its own line, not as if it said so."""
+    from storyforge import cmd_voice
+    r = vi.read_sources(repo, [os.path.join(FIX, 'feed.xml')], fetch=_no_network)
+    other = next(p for p in r.pieces if p.title == "Someone else's great essay")
+    assert other.kind == 'link' and other.kind_from == vi.KIND_OFF_SITE
+    assert cmd_voice.main(['import', os.path.join(FIX, 'feed.xml'), '--dir', repo]) == 0
+    out = capsys.readouterr().out
+    assert "1 filed as link posts only because they link off the feed's own site" in out
+    assert "Someone else's great essay" in out
+
+
+def test_an_atom_related_link_said_it_is_a_link_post():
+    xml = ('<feed xmlns="http://www.w3.org/2005/Atom"><link href="https://me.com/"/>'
+           '<entry><title>See this</title><link href="https://me.com/see"/>'
+           '<link rel="related" href="https://them.net/x"/>'
+           '<content type="html">&lt;p&gt;Worth a look.&lt;/p&gt;</content></entry></feed>')
+    _, items, _ = vi.feed_items(xml, 'a.xml')
+    assert items[0].related == 'https://them.net/x'

@@ -250,7 +250,7 @@ def test_no_block_is_no_voice(project_dir):
     assert vr.author_voice_section(project_dir) == ''
 
 
-def test_block_loads_description_exemplars_anchor_and_fingerprint_path(project_dir, voice):
+def test_block_loads_description_exemplars_and_anchor(project_dir, voice):
     rel = os.path.relpath(voice, project_dir)
     _yaml(project_dir, f'voice:\n  author: {rel}   # read in place\n'
                        f'  narrator: fiction/close-third\n')
@@ -261,7 +261,6 @@ def test_block_loads_description_exemplars_anchor_and_fingerprint_path(project_d
     assert [e.id for e in v.exemplars.exemplars] == ['walk-1-2', 'rain-3-3']
     assert v.anchor == (('fiction/close-third/opening.md',
                          '# Opening\n\nShe kept the light for eleven years.'),)
-    assert v.fingerprint_path == os.path.join(str(voice), 'fingerprint.json')
     assert v.book_notes == ''
 
 
@@ -306,6 +305,11 @@ def test_unlisted_exemplars_are_a_warning(project_dir, voice):
     ('project2:\n  voice:\n    author: {v}\n', 'indented'),
     ('voice:\n  author: {v}\n  narrator: fiction/missing\n', 'not in the author voice repo'),
     ('voice:\n  author: {v}\n  narrator: ../../elsewhere\n', 'outside the author voice repo'),
+    # T1: the corpus (drafts among it) or the repo itself is never "the narrator"
+    ('voice:\n  author: {v}\n  narrator: corpus\n', "isn't in the repo's fiction/"),
+    ('voice:\n  author: {v}\n  narrator: .\n', "isn't in the repo's fiction/"),
+    ('voice:\n  author: {v}\n  narrator: description.md\n', "isn't in the repo's fiction/"),
+    ('voice:\n  author: {v}\n  narrator: fiction\n', "isn't in the repo's fiction/"),
 ])
 def test_block_refuses_what_cant_be_used(project_dir, voice, block, match):
     _yaml(project_dir, block.format(v=voice))
@@ -476,3 +480,100 @@ def test_score_voice_flags_win_over_the_block(project_dir, monkeypatch, capsys):
     cmd_score.main(['--voice', '--fingerprint', os.path.join(AUSTEN, 'fingerprint.json'),
                     '--scenes', 'act1-sc01'])
     assert 'Distance: ' in capsys.readouterr().out
+
+
+# ============================================================================
+# Review fixes (#669)
+# ============================================================================
+
+def test_a_narrator_can_be_one_file_under_fiction(project_dir, voice):
+    _yaml(project_dir, f'voice:\n  author: {voice}\n  narrator: fiction/close-third/opening.md\n')
+    assert vr.book_voice(project_dir).anchor[0][0] == 'fiction/close-third/opening.md'
+
+
+def test_a_voice_repo_inside_the_book_is_refused(project_dir, voice):
+    """TD-4: `write` and `voice import` agree: a voice repo inside a book
+    isn't one (the corpus would be committed with the book)."""
+    inside = os.path.join(project_dir, 'voice')
+    shutil.copytree(voice, inside)
+    _yaml(project_dir, 'voice:\n  author: ./voice\n')
+    with pytest.raises(vr.VoiceError, match='is in a book'):
+        vr.book_voice(project_dir)
+
+
+def test_every_voice_command_refuses_the_old_corpus_list(tmp_path):
+    """CR-5: voice.yaml has one reader, so `voice propose/judge/accept` and
+    `score --voice-repo` refuse the provisional `corpus:` list too."""
+    from storyforge import voiceprint_meter as meter
+    from storyforge import voiceprint_proposals as vpp
+    d = tmp_path / 'old'
+    shutil.copytree(AUSTEN, d)
+    with open(d / 'voice.yaml', 'a', encoding='utf-8') as f:
+        f.write('corpus:\n  - file: corpus/emma.md\n')
+    with pytest.raises(vpp.ProposalError, match='lists no corpus'):
+        vpp.check_voice_dir(str(d))
+    with pytest.raises(vpp.ProposalError, match='lists no corpus'):
+        vpp.load_voice(str(d))
+    with pytest.raises(meter.MeterError, match='lists no corpus'):
+        meter.load_source(voice_repo=str(d))
+
+
+def _flip_use(d, file, use):
+    rows = [vr.IndexRow(r.file, r.title, r.date, r.kind, r.source, use if r.file == file else r.use)
+            for r in vr.read_index(str(d))]
+    vr.write_index(str(d), rows)
+
+
+def test_a_fingerprint_older_than_the_index_is_refused(tmp_path):
+    """TD-3: a piece held out (or newly counted) since the fingerprint was
+    made stops `voice propose` and `score --voice` until it's made again."""
+    from storyforge import cmd_voice
+    from storyforge import voiceprint_meter as meter
+    from storyforge import voiceprint_proposals as vpp
+    d = tmp_path / 'austen'
+    shutil.copytree(AUSTEN, d)
+    vpp.load_voice(str(d))                                  # current: fine
+    counted = list(vr.counted_pieces(str(d)))
+    _flip_use(d, counted[0], 'held-out')
+    with pytest.raises(vpp.ProposalError, match=f'doesn.t count now: {counted[0]}'):
+        vpp.load_voice(str(d))
+    with pytest.raises(meter.MeterError, match='storyforge voice fingerprint'):
+        meter.load_source(voice_repo=str(d))
+    _flip_use(d, counted[0], '')
+    held = next(r.file for r in vr.read_index(str(d)) if r.use == 'held-out')
+    _flip_use(d, held, 'in')
+    with pytest.raises(vpp.ProposalError, match=f'counts now but isn.t in it: {held}'):
+        vpp.load_voice(str(d))
+    assert cmd_voice.main(['fingerprint', '--dir', str(d)]) == 0
+    vpp.load_voice(str(d))
+
+
+@pytest.mark.parametrize('date, ok', [
+    ('2019-02-28', True), ('2020-02-29', True), ('2019', True), ('2019-12', True), ('', False),
+    ('2019-13-01', False), ('2019-02-30', False), ('2019-00', False), ('2019-13-99', False),
+])
+def test_valid_dates(date, ok):
+    assert vr.valid_date(date) is ok
+
+
+def test_index_refuses_an_impossible_date_and_write_index_refuses_what_read_would(tmp_path):
+    """TD-6: a date that matched the pattern but isn't a date is refused on
+    read; write_index refuses any row read_index would, writing nothing."""
+    from storyforge import voice_import as vi
+    d = tmp_path / 'v'
+    vr.init_repo(str(d))
+    _write(str(d / 'corpus' / 'index.csv'),
+           'file|title|date|kind|source|use\ncorpus/a.md|A|2019-13-99|essay||\n')
+    with pytest.raises(vr.VoiceRepoError, match="date '2019-13-99'"):
+        vr.read_index(str(d))
+    vr.init_repo(str(tmp_path / 'w'))
+    for bad, match in ((vr.IndexRow('corpus/a.md', date='2019-02-30'), 'date'),
+                       (vr.IndexRow('corpus/a.md', kind='poem'), 'kind'),
+                       (vr.IndexRow('elsewhere/a.md'), "isn't in corpus/"),
+                       (vr.IndexRow(''), 'blank')):
+        with pytest.raises(vr.VoiceRepoError, match=match):
+            vr.write_index(str(tmp_path / 'w'), [bad])
+        assert vr.read_index(str(tmp_path / 'w')) == []
+    with pytest.raises(vr.VoiceRepoError, match='repeated'):
+        vr.write_index(str(tmp_path / 'w'), [vr.IndexRow('corpus/a.md'), vr.IndexRow('corpus/a.md')])
+    assert vi._norm_date('2019-13-99') == '' and vi._date_from_name('2019-02-30-x.md') == ''

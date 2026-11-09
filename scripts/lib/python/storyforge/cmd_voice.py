@@ -189,10 +189,16 @@ def _import(voice_dir: str, args) -> int:
     if kinds:
         log('  by kind: ' + ', '.join(f'{n} {k}' for k, n in sorted(kinds.items())))
     new_sources = {r.source for r in plan.rows}
-    guessed = sum(1 for p in report.pieces if not p.kind_found and p.source in new_sources)
+    new = [p for p in report.pieces if p.source in new_sources]
+    guessed = sum(1 for p in new if p.kind_from == vi.KIND_GUESSED)
     if guessed:
         log(f'  {guessed} said nothing of their kind and were filed as essays: correct '
             f'{vr.INDEX_FILE}\'s kind column where that\'s wrong')
+    off_site = [p.title or p.source for p in new if p.kind_from == vi.KIND_OFF_SITE]
+    if off_site:
+        log(f'  {len(off_site)} filed as link posts only because they link off the feed\'s '
+            f'own site (a moved blog or a feed proxy does this too; link posts don\'t count '
+            f'by default): check {vr.INDEX_FILE}\'s kind column: {vi._shown(off_site)}')
     undated = sum(1 for r in plan.rows if not r.date)
     if undated:
         log(f'WARNING: {undated} piece(s) have no date; their date is blank in '
@@ -226,7 +232,7 @@ def _fingerprint(voice_dir: str) -> int:
     pieces, texts = vr.corpus(voice_dir)
     for line in vr.corpus_summary(pieces):
         log(line)
-    counted = {p.row.file: texts[p.row.file] for p in pieces if p.counts}
+    counted = vr.counted(pieces, texts)
     if not counted:
         log(f'ERROR: no piece counts toward the fingerprint; import some, or change '
             f'{vr.VOICE_FILE}\'s kinds or min_words')
