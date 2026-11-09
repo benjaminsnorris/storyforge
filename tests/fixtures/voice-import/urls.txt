@@ -1,0 +1,3 @@
+# posts to import
+https://www.example.com/why-i-still-write-letters
+https://www.example.com/feed.xml   # the feed too

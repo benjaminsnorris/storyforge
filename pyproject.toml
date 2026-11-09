@@ -8,6 +8,7 @@ tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
 markers = [
     "blocking_read: the gate's blocking read (#626) stays on; every other test turns it off (conftest)",
+    "continuity: the gate's continuity checks (#648) stay on; every other test turns them off (conftest)",
 ]
 
 [tool.coverage.run]

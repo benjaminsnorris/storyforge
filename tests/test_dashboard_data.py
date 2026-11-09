@@ -104,3 +104,22 @@ def test_contract_is_documented():
     assert f'schema version {DASHBOARD_SCHEMA_VERSION}' in section
     for key in V1_KEYS - {'schema_version', 'project'}:
         assert f'`{key}`' in section, key
+
+
+def test_an_empty_craft_field_is_not_a_gap(project_dir):
+    """#643's review SF-3, T1: hone calls an empty craft-framework field
+    advisory, so the dashboard doesn't list it as missing data. An empty
+    goal or crisis (the author's notes since plan decision 9) isn't listed
+    at all; an empty outcome (a brief fact) is a gap."""
+    from storyforge.csv_cli import update_field
+    from storyforge.visualize import CRAFT_GAP_ISSUE
+    briefs = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    intent = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    for field in ('goal', 'crisis', 'outcome'):
+        update_field(briefs, 'act1-sc01', field, '')
+    update_field(intent, 'act1-sc01', 'value_shift', '')
+    fields = ('goal', 'crisis', 'outcome', 'value_shift')
+    rows = [r for r in load_dashboard_data(project_dir)['brief_quality']
+            if r['scene_id'] == 'act1-sc01' and r['field'] in fields]
+    by_field = {r['field']: r['issue'] for r in rows}
+    assert by_field == {'value_shift': CRAFT_GAP_ISSUE, 'outcome': 'gap'}

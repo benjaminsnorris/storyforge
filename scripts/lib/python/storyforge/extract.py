@@ -259,7 +259,8 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - type: the scene's primary narrative purpose
 - target_words: current word count is a reasonable target — the approximate word count
 - act: which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading
-- told: true when this scene's events are a tale told inside the previous scene (a story, song or report a character gives there, or the narrator's digression from it), or go on with one; then pov is the teller. false for a scene lived on the page"""
+- told: true when this scene's events are a tale told inside the previous scene (a story, song or report a character gives there, or the narrator's digression from it), or go on with one; then pov is the teller. false for a scene lived on the page
+- time_mode: "memory" (a past the character relives, on the day of remembering), "dream" (dreamt that night) or "ghost" (the dead visit) when the scene sits on its day but what it shows isn't the story's present action; "" otherwise (a flashback, frame narration or a vision is the calendar's to say)"""
 
 
 def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
@@ -775,10 +776,11 @@ CAST_SCHEMA = _object({'characters': _STR_LIST, 'on_stage': _STR_LIST})
 
 
 _SKELETON_FIELDS = ('title', 'pov', 'location', 'time_of_day', 'duration', 'type',
-                    'target_words', 'act')
+                    'target_words', 'act', 'time_mode')
 
 
 def _skeleton_schema() -> dict:
+    from .elaborate import INNER_MODES
     from .schema import VALID_TIMES, VALID_TYPES
     from .timeline import CUE_FIELDS, RELATIONS
     cues = {label.lower(): _STR for label in CUE_FIELDS}
@@ -790,6 +792,9 @@ def _skeleton_schema() -> dict:
         'target_words': _STR, 'act': _STR,
         # An embedded tale (#548): code turns it into told_by
         'told': {'type': 'boolean'},
+        # On its day but not the story's present action (#648): blank
+        # otherwise (the timeline pass gives frame, vision and summary)
+        'time_mode': {'type': 'string', 'enum': [''] + sorted(INNER_MODES)},
     })
 
 

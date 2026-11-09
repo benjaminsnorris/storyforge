@@ -194,20 +194,27 @@ class TestGatePassScenes:
         assert _no_git == [('Revision: polish, before the gate',
                             ['scenes/', 'reference/', 'working/'])]
 
-    def test_the_first_failure_stops_and_lists_the_rest_pending(self, project_dir, monkeypatch):
+    def test_a_failure_holds_the_scenes_depending_on_it_pending(self, project_dir, monkeypatch):
+        """act2-sc01 has no brief and no facts, so it waits on act1-sc02 (#641)."""
         _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
         gated, _ = _stub_gate(monkeypatch, fails={'act1-sc02'})
         out = _gate_pass(project_dir, ['act1-sc01', 'act1-sc02', 'act2-sc01'])
         assert [s for s, _ in gated] == ['act1-sc01', 'act1-sc02']
         assert out[0].startswith('act1-sc02 (the gate did not pass it')
-        assert 'act2-sc01 (revised, not gated: the gate stopped at act1-sc02)' in out[1]
+        assert ('act2-sc01 (revised, not gated: an earlier scene waits on the gate: '
+                'act1-sc02)') in out[1]
         waiting = gate.pending(project_dir)
         assert set(waiting) == {'act1-sc02', 'act2-sc01'}
         assert waiting['act1-sc02']['reason'] == 'a contradiction'
         assert waiting['act2-sc01']['command'] == 'revise'
-        assert 'revised by pass polish but not gated: the gate' in waiting['act2-sc01']['reason']
+        assert 'revised by pass polish but not gated: an earlier' in \
+            waiting['act2-sc01']['reason']
 
-    def test_an_earlier_pending_scene_blocks_every_scene(self, project_dir, monkeypatch):
+    def test_an_earlier_pending_scene_holds_a_dependent_and_one_it_cannot_tell(
+            self, project_dir, monkeypatch, capsys):
+        """#641's review, T-4: act1-sc02's brief lists act1-sc01 in
+        continuity_deps; act2-sc01 has neither facts nor a brief, so what it
+        depends on can't be told."""
         _scenes(project_dir, 'act1-sc02', 'act2-sc01')
         gated, _ = _stub_gate(monkeypatch)
         gate.mark_pending(project_dir, 'act1-sc01', gate.RECHECK_FAILED, 'a contradiction')
@@ -215,6 +222,10 @@ class TestGatePassScenes:
         assert gated == []
         assert 'an earlier scene waits on the gate: act1-sc01' in out[0]
         assert {'act1-sc02', 'act2-sc01'} <= set(gate.pending(project_dir))
+        said = capsys.readouterr().out
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in said
+        assert ('act2-sc01 has no binding facts in the ledger and it has no row in '
+                'reference/scene-briefs.csv') in said
 
     def test_a_recheck_that_fails_mid_pass_blocks_the_scenes_after_it(
             self, project_dir, monkeypatch):
@@ -254,9 +265,9 @@ class TestGatePassScenes:
         _scenes(project_dir, 'act1-sc01', 'act1-sc02')
         gated, _ = _stub_gate(monkeypatch)
 
-        def bad(pd, sid, **kw):
+        def bad(*a, **kw):
             raise gate.GateError('bad header')
-        monkeypatch.setattr(cmd_write, '_gate_blockers', bad)
+        monkeypatch.setattr(cmd_write, 'GateBlockers', bad)
         out = _gate_pass(project_dir, ['act1-sc01', 'act1-sc02'])
         assert gated == []
         assert out == ['act1-sc01, act1-sc02 (revised, not gated: bad header)']
@@ -848,7 +859,8 @@ class TestDeferRechecksToLaterPasses:
     def test_a_deferred_recheck_does_not_block(self, project_dir, monkeypatch):
         gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
         gate.mark_pending(project_dir, 'new-x1', gate.RECHECK_FAILED, 'y')
-        lines = ['act1-sc02: x', 'new-x1: y']
+        lines = [cmd_write.Blocker('act1-sc02', 'act1-sc02: x'),
+                 cmd_write.Blocker('new-x1', 'new-x1: y')]
         assert cmd_revise._not_deferred(project_dir, lines, frozenset()) == lines
         # a failed re-check still blocks: the author acts on it
         assert cmd_revise._not_deferred(project_dir, lines,
@@ -939,6 +951,19 @@ class TestDeferralThroughMain:
         assert deferred == [frozenset({'act2-sc01'}), frozenset()]
         assert finals == [set()]   # the final re-check, nothing skipped
 
+    def test_a_plan_run_lists_the_advisory_promises_and_a_dry_run_does_not(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """T6 (#642's review): `main` calls `_log_advisory` after a plan run,
+        and not on a dry run."""
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        self._run(project_dir, monkeypatch, mock_git, None)
+        calls = []
+        monkeypatch.setattr(cmd_revise, '_log_advisory', lambda pd: calls.append(pd))
+        main(['--dry-run'])
+        assert calls == []
+        main([])
+        assert calls == [project_dir]
+
     def test_a_final_recheck_that_fails_exits_1(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
         mock_api.set_response('=== SCENE: act1-sc01 === ...')
@@ -950,3 +975,17 @@ class TestDeferralThroughMain:
         out = capsys.readouterr().out
         assert 'a re-check they owed did not finish: new-x1 (re-checked after the last' in out
         assert 'All revision passes are done' not in out
+
+
+def test_revise_lists_the_advisory_broken_promises(project_dir, capsys):
+    """#642: revise's end of run lists the gate's advisory broken promises."""
+    from storyforge import cmd_revise, gate
+    from storyforge.checker import Finding
+    cmd_revise._log_advisory(project_dir)
+    assert 'broken promise' not in capsys.readouterr().out      # none: nothing said
+    gate.record_advisory(project_dir, 'act1-sc02', 'revise', [Finding(
+        'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
+    cmd_revise._log_advisory(project_dir)
+    out = capsys.readouterr().out
+    assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+    assert 'act1-sc02: PRM the brief\'s key_actions promises "Finds nothing"' in out

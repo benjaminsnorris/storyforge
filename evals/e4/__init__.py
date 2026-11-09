@@ -18,7 +18,12 @@ Metrics (plan §4.2):
   drift check ``write`` runs after drafting (it only knows time).
 - **BPS** — broken promises per scene: brief items the scene fails to deliver
   (outcome, decision, key actions, required dialogue, knowledge out), by the
-  same judge call.
+  same judge call. Since #642 only a broken `must` beat (a key_actions or
+  key_dialogue item the brief marks `must:`) stops a scene at the gate; the
+  rest are advisory. ``mark_musts`` tags each of the judge's broken promises
+  that names a `must` beat (``broken_musts``); the shared-dark briefs mark
+  none, so it is 0 until a fixture does. ``gate_advisory`` counts the
+  advisory broken promises the gate reported on the kept runs.
 - **Length drift** — mean ``|words / target_words - 1|``.
 - **VOI** — mean of the deterministic prose scores (rhythm, economy, passive,
   adverbs; 1–5) over the drafts; ``voi_author`` is the same over the author's
@@ -40,6 +45,11 @@ stops ``write``; its fixed prose is judged and drafting goes on. The judge
 stands in
 for the plan's human spot-check, which is still owed. Act 2 onward keeps the
 author's prose; only Act 1 is drafted.
+
+**Frozen** (#645): ``run.py`` never re-records this suite on a prompt change;
+a miss reports it ``stale`` and spends nothing. Re-record it only when a
+decision depends on it, as three runs:
+``python3 evals/run.py --mode record --suite e4-generation --runs 3``.
 """
 
 from __future__ import annotations
@@ -296,6 +306,25 @@ def judge(project_dir: str, scene_ids: list[str], drafts: dict[str, str]) -> dic
     return results
 
 
+def mark_musts(project_dir: str, judged: dict[str, dict]) -> None:
+    """Tag each of the judge's broken promises (in place) with ``must``:
+    whether the gate would hold it to a beat the scene's brief marks
+    `must:` (#642, ``gate._is_must``, the one rule; its review CR-6).
+    Post-processing only: the judge's prompt and replies are unchanged, so
+    its recordings hold."""
+    from storyforge.checker import Finding
+    from storyforge.gate import _is_must, _must_beats
+    rows = {r['id']: r for r in _read_rows(os.path.join(project_dir, 'reference',
+                                                        'scene-briefs.csv'))}
+    for sid, found in judged.items():
+        row = rows.get(sid, {})
+        beats = _must_beats(row)
+        for p in found['broken_promises']:
+            f = Finding('broken-promise', '', '', '', p.get('promise') or '',
+                        p.get('field') or '', '')
+            p['must'] = _is_must(f, row, beats)
+
+
 def checker_flags(project_dir: str, scene_ids: list[str]) -> list[dict]:
     """The shipped checker ``write`` runs after drafting: the timeline drift check."""
     import e2
@@ -356,9 +385,11 @@ def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str,
     a scene the judge finds a contradiction in is ``caught`` when the gate
     failed it and ``missed`` when the gate passed it; a scene the gate failed
     but the judge found clean is a ``false_alarm`` (the gate also blocks on
-    broken promises and extraction problems, so not every false alarm is the
-    checker's error). Returns the metrics, a label per scene and the
-    headline's scene ids."""
+    broken `must` beats and extraction problems, so not every false alarm is the
+    checker's error). Since #642 a broken promise blocks only for a `must`
+    beat; ``broken_musts`` counts the judge's broken promises ``mark_musts``
+    tagged. Returns the metrics, a label per scene and the headline's scene
+    ids."""
     drafted = [s for s in scene_ids if s in drafts]
     headline = []
     for sid in scene_ids:
@@ -378,6 +409,9 @@ def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str,
     def promises(ids):
         return sum(len(judged[s]['broken_promises']) for s in ids)
 
+    def musts(ids):
+        return sum(1 for s in ids for p in judged[s]['broken_promises'] if p.get('must'))
+
     labels = {}
     for sid in drafted:
         flagged = bool(judged[sid]['contradictions'])
@@ -396,10 +430,12 @@ def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str,
             'cp10k': per_10k(contradictions(headline), words(headline)),
             'broken_promises': promises(headline),
             'bps': round(promises(headline) / len(headline), 3) if headline else 0.0,
+            'broken_musts': musts(headline),
             'words_all': words(drafted),
             'contradictions_all': contradictions(drafted),
             'cp10k_all': per_10k(contradictions(drafted), words(drafted)),
             'broken_promises_all': promises(drafted),
+            'broken_musts_all': musts(drafted),
             'bps_all': round(promises(drafted) / len(drafted), 3) if drafted else 0.0,
             'scenes_passed': len(passed),
             'contradictions_passed': contradictions(passed),

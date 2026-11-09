@@ -92,6 +92,7 @@ COMMANDS = {
     'status': 'storyforge.cmd_status',
     'publish': 'storyforge.cmd_publish',
     'propose-summaries': 'storyforge.cmd_propose_summaries',
+    'voice': 'storyforge.cmd_voice',
 }
 
 # Aliases
@@ -155,9 +156,12 @@ def main():
         )
         project_medium = None
         try:
-            from storyforge.common import detect_project_root, get_medium
-            project_dir = detect_project_root()
-            project_medium = get_medium(project_dir)
+            # find, not detect: outside a project (`score --voice --prose`)
+            # the command runs, rather than exiting here
+            from storyforge.common import find_project_root, get_medium
+            project_dir = find_project_root()
+            if project_dir is not None:
+                project_medium = get_medium(project_dir)
         except (FileNotFoundError, OSError):
             pass
         if project_medium == 'graphic-novel' and not is_elaboration_score:

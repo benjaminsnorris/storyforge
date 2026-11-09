@@ -517,6 +517,47 @@ class TestPolishLoopOrchestration:
         _run_polish_loop(project_dir, 3, None, skip_final_score=True)
         assert fixed_calls == []
 
+    def test_a_blamed_brief_with_craft_issues_left_is_named_not_fixed(
+            self, tmp_path, monkeypatch, capsys):
+        """Plan decision 9 (PR #675's review T-2): with craft issues left and
+        the diagnosis blaming a brief, the real `_detect_upstream_scenes`
+        names the scene for the author and nothing is sent to a brief fix;
+        the craft pass still runs."""
+        from storyforge.cmd_revise import NO_BRIEF_FIX, _run_polish_loop
+        project_dir = self._setup_project(tmp_path)
+        diag = self._make_diag(high=1)
+        diag[0]['root_cause'] = 'brief'
+        self._patch_loop(monkeypatch, diag)
+        fixed_calls, passes = [], []
+        monkeypatch.setattr('storyforge.cmd_revise._fix_and_redraft',
+                            lambda p, s: fixed_calls.append(s) or ([], {}))
+        monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass',
+                            lambda *a, **k: passes.append(a[3]))
+        _run_polish_loop(project_dir, 1, None, skip_final_score=True)
+        assert fixed_calls == [] and passes == [1]
+        out = capsys.readouterr().out
+        assert f'the diagnosis blames the briefs of s01; not rewritten: {NO_BRIEF_FIX}' in out
+
+    def test_drift_only_in_the_authors_notes_is_not_upstream(self, tmp_path, monkeypatch,
+                                                              capsys):
+        """PR #675's review SF-1, SF-2, CR-1: no fix rewrites an author's
+        note, so drift only there is no upstream work and no "drift fixed"."""
+        from storyforge import cmd_revise, source, source_fidelity
+        from types import SimpleNamespace
+        project_dir = self._setup_project(tmp_path)
+        monkeypatch.setattr(source, 'read_config',
+                            lambda p: SimpleNamespace(mode='faithful'))
+        monkeypatch.setattr(source_fidelity, 'drift_state', lambda p: SimpleNamespace(
+            drift={'s01': ['brief goal: the source wants the cup'],
+                   's02': ['brief outcome: drifted', 'brief key_dialogue: a line']},
+            checked=True, stale=[], pretag=None))
+        assert cmd_revise._detect_upstream_scenes(project_dir, []) == ['s02']
+        out = capsys.readouterr().out
+        assert 'source drift only in the author\'s notes, not rewritten' in out
+        assert 's01 (brief goal: the source wants the cup)' in out
+        assert cmd_revise._source_drift_scenes(project_dir, quiet=True) == {
+            's02': ['brief outcome: drifted', 'brief key_dialogue: a line']}
+
     def test_skip_final_score_skips_phase2(self, tmp_path, monkeypatch):
         """--skip-final-score should prevent _run_lightweight_score from being called."""
         from storyforge.cmd_revise import _run_polish_loop

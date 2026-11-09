@@ -93,18 +93,31 @@ class TestDetectGaps:
                              'value_shift': '+/-', 'emotional_arc': 'calm to tense'}}
         results = detect_gaps(scenes_map, intent_map, briefs_map)
         fields = [r['field'] for r in results if r['scene_id'] == 's1']
-        assert 'conflict' in fields
-        assert 'crisis' in fields
+        assert 'value_at_stake' in fields and 'key_actions' in fields
+        # the author's notes are never a gap (plan decision 9)
+        assert 'conflict' not in fields and 'crisis' not in fields
 
     def test_no_gaps_for_complete(self):
         from storyforge.hone import detect_gaps
         scenes_map = {'s1': {'id': 's1', 'status': 'briefed', 'seq': '1'}}
         briefs_map = {'s1': {'id': 's1', 'goal': 'Do it', 'conflict': 'Obstacle',
-                             'outcome': 'yes', 'crisis': 'Now or never', 'decision': 'Now'}}
+                             'outcome': 'yes', 'crisis': 'Now or never', 'decision': 'Now',
+                             'key_actions': 'She acts'}}
         intent_map = {'s1': {'id': 's1', 'function': 'Hook', 'value_at_stake': 'truth',
                              'value_shift': '+/-', 'emotional_arc': 'calm to tense'}}
         results = detect_gaps(scenes_map, intent_map, briefs_map)
         assert len(results) == 0
+
+    def test_an_empty_key_actions_is_a_gap(self):
+        """#644: key_actions is a brief fact (BRIEF_FACT_COLUMNS), so an
+        empty one is a blocking gap, not a craft note."""
+        from storyforge.hone import detect_gaps
+        scenes_map = {'s1': {'id': 's1', 'status': 'briefed', 'seq': '1'}}
+        briefs_map = {'s1': {'id': 's1', 'outcome': 'yes'}}
+        intent_map = {'s1': {'id': 's1', 'function': 'Hook'}}
+        [gap] = [r for r in detect_gaps(scenes_map, intent_map, briefs_map)
+                 if r['field'] == 'key_actions']
+        assert gap['advisory'] is False and gap['file'] == 'scene-briefs.csv'
 
     def test_skips_spine_scenes(self):
         from storyforge.hone import detect_gaps

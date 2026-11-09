@@ -6,7 +6,8 @@ Detective Ruzek, a custody hearing; the book's own Hank Voigt recast as a
 police sergeant). The redrafts then followed those briefs. The fix now sees
 the scene's characters, place, plan and prose, and a rewrite that names a
 capitalized word found nowhere in the reference files or the scene is
-rejected."""
+rejected. Since plan decision 9 the only brief fix is the source-drift fix
+(outcome and key_actions); these tests run its guard."""
 
 import os
 from unittest.mock import patch
@@ -61,7 +62,9 @@ class TestInventedNames:
         assert invented_names(['by Tuesday in March she asks Dr. Hank'], 'Hank') == []
 
 
-REPLY = 'GOAL: {g}\nCONFLICT: {c}\nCRISIS: the door locks\nDECISION: she stays'
+# The source-drift fix's reply (the only brief fix since plan decision 9):
+# outcome and key_actions
+REPLY = 'OUTCOME: no\nKEY_ACTIONS: {g};{c}'
 
 
 def _brief(project_dir, sid='act1-sc01'):
@@ -83,9 +86,21 @@ def _append_prose(project_dir, sid, text):
 
 
 def _fix(project_dir, reply, sids=('act1-sc01',)):
+    """The guard around a source-drift fix: every scene drifted, and the
+    fix's prompt (its source side stubbed: tests/test_source_fidelity.py
+    runs the real one) carries the scene's prose excerpt as the real one
+    does."""
     replies = reply if isinstance(reply, list) else [reply]
+
+    def drift_fix(project_dir, sid, scene, intent, brief, prose, lines, ctx):
+        return (f'Fix {sid}\n<scene>\n{cmd_revise._scene_prose_excerpt(sid, prose)}\n</scene>',
+                '')
     with patch('storyforge.cmd_revise.invoke_api', side_effect=replies) as api, \
-         patch('storyforge.cmd_revise.select_model', return_value='m'):
+         patch('storyforge.cmd_revise.select_model', return_value='m'), \
+         patch('storyforge.cmd_revise._source_drift_scenes',
+               return_value={sid: ['brief outcome: drifted'] for sid in sids}), \
+         patch('storyforge.cmd_revise._SourceFixContext'), \
+         patch('storyforge.cmd_revise._source_drift_fix', side_effect=drift_fix):
         result = _fix_upstream_briefs(project_dir, list(sids))
     return result, api.call_args[0][0]
 
@@ -114,21 +129,26 @@ class TestFixUpstreamBriefs:
         assert fixed == [] and skipped == {'act1-sc01': 'named Mallen'}
 
     def test_grounded_rewrite_is_written(self, project_dir):
+        before = _brief(project_dir)
         (fixed, skipped), _ = _fix(project_dir, REPLY.format(
-            g='keep the map hidden', c='the storm pins her in place'))
+            g='she hides the map', c='the storm pins her in place'))
         assert fixed == ['act1-sc01'] and skipped == {}
-        assert _brief(project_dir)['conflict'] == 'the storm pins her in place'
+        after = _brief(project_dir)
+        assert after['key_actions'] == 'she hides the map;the storm pins her in place'
+        assert after['outcome'] == 'no'
+        # the author's notes are never rewritten (plan decision 9)
+        for col in ('goal', 'conflict', 'crisis', 'decision'):
+            assert after[col] == before[col]
 
     def test_mixed_outcomes_write_only_the_accepted_scene(self, project_dir):
-        fields = ('goal', 'conflict', 'crisis', 'decision')
-        before = [_brief(project_dir, 'act1-sc02')[k] for k in fields]
+        before = _brief(project_dir, 'act1-sc02')['key_actions']
         (fixed, skipped), _ = _fix(project_dir, [
-            REPLY.format(g='keep the map hidden', c='the storm pins her'),
-            REPLY.format(g='find the village', c='Mallen burns the archive'),
+            REPLY.format(g='she hides the map', c='the storm pins her'),
+            REPLY.format(g='she finds the village', c='Mallen burns the archive'),
         ], sids=('act1-sc01', 'act1-sc02'))
         assert fixed == ['act1-sc01'] and list(skipped) == ['act1-sc02']
-        assert _brief(project_dir)['conflict'] == 'the storm pins her'
-        assert [_brief(project_dir, 'act1-sc02')[k] for k in fields] == before
+        assert _brief(project_dir)['key_actions'] == 'she hides the map;the storm pins her'
+        assert _brief(project_dir, 'act1-sc02')['key_actions'] == before
 
     def test_nothing_accepted_writes_nothing(self, project_dir):
         with patch('storyforge.elaborate._write_csv') as write:
@@ -138,8 +158,8 @@ class TestFixUpstreamBriefs:
 
     @pytest.mark.parametrize('reply, why', [
         ('', 'no reply'),
-        ('GOAL: keep the map\nCONFLICT: the storm', 'reply lacked CRISIS, DECISION'),
-        ('GOAL: keep the map\nCONFLICT:\nCRISIS: a\nDECISION: b', 'reply lacked CONFLICT'),
+        ('OUTCOME: no', 'reply lacked KEY_ACTIONS'),
+        ('OUTCOME:\nKEY_ACTIONS: she waits', 'reply lacked OUTCOME'),
     ])
     def test_empty_or_partial_reply_changes_nothing(self, project_dir, reply, why):
         before = _brief(project_dir)
@@ -148,19 +168,18 @@ class TestFixUpstreamBriefs:
         assert _brief(project_dir) == before
 
     def test_markdown_bold_fields_are_parsed(self, project_dir):
-        reply = ('**GOAL:** keep the map\n**CONFLICT:** the storm\n'
-                 '**CRISIS:** the door locks\n- **DECISION:** she stays')
+        reply = '**OUTCOME:** no-and\n- **KEY_ACTIONS:** she stays'
         (fixed, _), _ = _fix(project_dir, reply)
         assert fixed == ['act1-sc01']
-        assert _brief(project_dir)['decision'] == 'she stays'
+        assert _brief(project_dir)['key_actions'] == 'she stays'
 
-    def test_the_scenes_old_goal_does_not_vouch_for_a_name(self, project_dir):
-        _set_brief(project_dir, 'act1-sc01', conflict='the warden Ostrander blocks her')
+    def test_the_scenes_old_key_actions_do_not_vouch_for_a_name(self, project_dir):
+        _set_brief(project_dir, 'act1-sc01', key_actions='the warden Ostrander blocks her')
         (fixed, _), _ = _fix(project_dir, REPLY.format(g='x', c='Ostrander blocks her'))
         assert fixed == []
 
     def test_the_scenes_kept_fields_and_prose_vouch_for_a_name(self, project_dir):
-        _set_brief(project_dir, 'act1-sc01', key_actions='Meets Ostrander')
+        _set_brief(project_dir, 'act1-sc01', goal='Meet Ostrander')
         _append_prose(project_dir, 'act1-sc01', '\nVellstrom watched from the door.\n')
         (fixed, _), _ = _fix(project_dir, REPLY.format(
             g='x', c='Ostrander and Vellstrom block her'))
@@ -182,16 +201,6 @@ class TestFixUpstreamBriefs:
             g='x', c='Ostrander and Vellstrom block her'))
         assert skipped == {'act1-sc01': 'named Ostrander, Vellstrom'}
 
-    def test_prompt_carries_the_scene_and_forbids_inventing(self, project_dir):
-        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
-            opening = ' '.join(f.read().split()[:12])
-        _, prompt = _fix(project_dir, REPLY.format(g='x', c='y'))
-        assert opening in prompt
-        assert 'Location: Pressure Cartography Office' in prompt
-        assert 'Characters: Dorren Hayle;Tessa Merrin;Pell' in prompt
-        assert 'Key actions: Reviews maps;Finds anomaly' in prompt
-        assert 'Do not introduce any person, place, organization or event' in prompt
-
     def test_undrafted_scene_says_so(self, project_dir):
         os.remove(os.path.join(project_dir, 'scenes', 'act1-sc01.md'))
         _, prompt = _fix(project_dir, REPLY.format(g='x', c='y'))
@@ -207,7 +216,17 @@ class TestFixUpstreamBriefs:
         with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'ab') as f:
             f.write(b'\nthe caf\xe9 door\n')
         (fixed, _), prompt = _fix(project_dir, REPLY.format(g='x', c='y'))
-        assert fixed == ['act1-sc01'] and 'caf�' in prompt
+        assert fixed == ['act1-sc01'] and 'caf\ufffd' in prompt
+
+    def test_a_scene_without_drift_gets_no_call(self, project_dir, capsys):
+        """Plan decision 9: the dramatic-opposition rewrite of goal,
+        conflict, crisis and decision is gone."""
+        before = _brief(project_dir)
+        with patch('storyforge.cmd_revise.invoke_api') as api:
+            fixed, skipped = _fix_upstream_briefs(project_dir, ['act1-sc01'])
+        api.assert_not_called()
+        assert fixed == [] and skipped == {'act1-sc01': cmd_revise.NO_BRIEF_FIX}
+        assert _brief(project_dir) == before
 
 
 def test_only_rewritten_scenes_are_redrafted(project_dir, capsys):

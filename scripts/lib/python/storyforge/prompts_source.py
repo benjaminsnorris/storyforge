@@ -293,8 +293,11 @@ def _scenes_to_brief(project_dir: str, scene_ids: list[str] | None) -> list[str]
             log(f'WARNING: not scenes in scenes.csv, so not briefed: {", ".join(unknown)}')
         wanted = set(scene_ids)
         return [s['id'] for s in scenes if s.get('id') in wanted]
+    # briefed: a brief with any of its facts (goal is an optional note since
+    # plan decision 9, so a fact-only brief was re-briefed on every run)
+    from storyforge.elaborate import BRIEF_FACT_COLUMNS
     briefed = {r.get('id', '') for r in _read_csv(os.path.join(ref, 'scene-briefs.csv'))
-               if r.get('goal', '').strip()}
+               if any((r.get(c) or '').strip() for c in BRIEF_FACT_COLUMNS)}
     return [s['id'] for s in scenes if s.get('id') and s['id'] not in briefed]
 
 
@@ -377,12 +380,13 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
     spans = source.spans(project_dir, cfg)
     targets = _scenes_to_brief(project_dir, scene_ids)
 
+    # No dialogue (#644): a source line the author wants kept verbatim goes
+    # into key_dialogue by hand, marked must: (references/scene-schema.md)
     parts = [f'## Source\n\n{_header(cfg)}',
              'Write each brief while looking at the source text below: keep the source\'s '
              'events, outcomes and turns for what the treatment keeps, and make every '
-             'departure one the treatment, its note or the version rules call for. Key '
-             'dialogue keeps the substance of the source\'s lines in this novel\'s voice; '
-             'never copy the translation\'s wording.']
+             'departure one the treatment, its note or the version rules call for. Write '
+             'no dialogue, and never copy the translation\'s wording.']
     note = names_note(project_dir, cfg)
     if note:
         parts.append(note)

@@ -353,8 +353,16 @@ def _attribute_root_causes(diag_rows, diag_header, project_dir):
                 briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
                 scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
                 intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+                from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+                from storyforge.hone import CRAFT_ADVISORY_ISSUES
                 issues = detect_brief_issues(briefs, scenes, intent_map=intent)
-                brief_issue_scenes = {i['scene_id'] for i in issues}
+                # only issues a brief fix can act on: never the author's notes
+                # (goal, conflict, crisis, decision... plan decision 9) or a
+                # craft-framework advisory, which nothing rewrites (PR #675's
+                # review SF-3, CR-2)
+                brief_issue_scenes = {i['scene_id'] for i in issues
+                                      if i.get('field') not in AUTHOR_NOTE_COLUMNS
+                                      and i.get('issue') not in CRAFT_ADVISORY_ISSUES}
             except Exception:
                 brief_issue_scenes = set()
 
@@ -1472,6 +1480,29 @@ FIDELITY_ELEMENTS = [
 ]
 
 
+#: The brief columns each fidelity element scores
+_FIDELITY_COLUMNS = {'knowledge': ('knowledge_in', 'knowledge_out')}
+
+
+def unscored_elements(brief: dict, scores: dict) -> list[str]:
+    """The fidelity elements `brief` lists (a filled column) that `scores`
+    has no score for. The prompt asks for a score only on the elements the
+    brief lists, and the parser can't tell an empty cell from a garbled one,
+    so the caller says which listed elements were lost (PR #675's review
+    SF-6)."""
+    return [el for el in FIDELITY_ELEMENTS
+            if any((brief.get(c) or '').strip() for c in _FIDELITY_COLUMNS.get(el, (el,)))
+            and el not in scores]
+
+
+def has_brief_facts(brief: dict) -> bool:
+    """Whether a brief row has anything to hold prose to: a brief fact
+    (`elaborate.BRIEF_FACT_COLUMNS`) or a goal. goal is an optional note
+    since #644, so a fact-only brief without one is still a brief."""
+    from .elaborate import BRIEF_FACT_COLUMNS
+    return any((brief.get(c) or '').strip() for c in BRIEF_FACT_COLUMNS + ('goal',))
+
+
 def build_fidelity_prompt(scene_id: str, project_dir: str,
                           plugin_dir: str) -> str:
     """Build a brief fidelity evaluation prompt for a single scene.
@@ -1479,17 +1510,14 @@ def build_fidelity_prompt(scene_id: str, project_dir: str,
     Reads the scene's brief data and prose, formats them into the
     brief-fidelity prompt template.
 
-    Returns empty string if the scene has no brief or no prose.
+    Returns empty string if the scene has no brief (`has_brief_facts`) or no
+    prose of at least 100 characters.
     """
     from .elaborate import get_scene
 
     ref_dir = os.path.join(project_dir, 'reference')
     scene = get_scene(scene_id, ref_dir)
-    if not scene:
-        return ''
-
-    # Check that brief data exists
-    if not scene.get('goal', '').strip():
+    if not scene or not has_brief_facts(scene):
         return ''
 
     # Read prose

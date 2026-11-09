@@ -58,6 +58,13 @@ def parse_args(argv):
     parser.add_argument('--register', action='store_true',
                         help='Not for graphic novels: the register check reads '
                              'prose only (an ERROR here)')
+    parser.add_argument('--voice', action='store_true',
+                        help='Not for graphic novels: the voice meter measures prose '
+                             'only (an ERROR here)')
+    # accepted so --voice's ERROR is said, not argparse's "unrecognized arguments"
+    for flag in ('--fingerprint', '--voice-repo', '--top'):
+        parser.add_argument(flag, default=None, help=argparse.SUPPRESS)
+    parser.add_argument('--prose', nargs='+', default=None, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -318,6 +325,11 @@ def main(argv=None):
     if args.register:
         log('ERROR: score --register checks prose; a graphic-novel project has '
             'none to check.')
+        sys.exit(1)
+    if args.voice or args.fingerprint or args.voice_repo or args.prose or args.top:
+        log('ERROR: score --voice measures prose; a graphic-novel project has none to '
+            'measure (to measure other prose, run score --voice --prose FILE outside '
+            'the project).')
         sys.exit(1)
 
     install_signal_handlers()

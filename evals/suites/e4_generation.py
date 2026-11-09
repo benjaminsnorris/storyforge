@@ -25,6 +25,7 @@ def run(ctx):
     drafts, refused = e4.draft(project, scene_ids, gated=None if parallel else gated,
                                log_dir=os.path.join(ctx.work_dir, 'gate-logs'))
     judged = e4.judge(project, scene_ids, drafts)
+    e4.mark_musts(project, judged)
     flags = e4.checker_flags(project, scene_ids)
 
     target = sum(int(r['target_words']) for r in rows if r['id'] in drafts
@@ -49,7 +50,8 @@ def run(ctx):
                      + ('' if sid in headline else ' (after write would have stopped)')
                      + ''.join(f'\n    {c["code"]}: {c.get("fact", "")[:160]}'
                                for c in found['contradictions'])
-                     + ''.join(f'\n    PRM {p["field"]}: {p.get("why", "")[:160]}'
+                     + ''.join(f'\n    PRM {p["field"]}{" (must)" if p.get("must") else ""}: '
+                               f'{p.get("why", "")[:160]}'
                                for p in found['broken_promises']))
     notes += [f'checker {f["scene_id"]}: {f["message"][:160]}' for f in flags]
     gate_fixed = [s for s, g in gated.items() if g.fixed]
@@ -94,7 +96,10 @@ def run(ctx):
             'checker_flags': len(flags),
             'cp10k_checker_all': e4.per_10k(len(flags), m['words_all']),
             **({} if parallel else {'gate_fixed': len(gate_fixed),
-                                    'gate_failed': len(gate_failed)}),
+                                    'gate_failed': len(gate_failed),
+                                    # #642: reported, not blocking
+                                    'gate_advisory': sum(len(g.result.advisory)
+                                                         for g in gated.values())}),
             'length_drift': e4.length_drift(rows, drafts),
             'voi': e4.mean_voice(list(drafts.values())),
             'voi_author': e4.mean_voice([original[s] for s in scene_ids
@@ -107,4 +112,5 @@ def run(ctx):
     )
 
 
-SUITE = Suite('e4-generation', 'Draft shared-dark Act 1 with write; CP10k, BPS, length, voice', run)
+SUITE = Suite('e4-generation', 'Draft shared-dark Act 1 with write; CP10k, BPS, length, voice',
+              run, frozen=True)

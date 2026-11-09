@@ -92,7 +92,8 @@ def main(argv=None) -> int:
     reports = {}
     for run, parts in e6.RUN_DIRS.items():
         print(f'Replaying {run} ...', flush=True)
-        reports[run] = run_all(suites, 'replay', os.path.join(EVALS_DIR, *parts))
+        reports[run] = run_all(suites, 'replay', os.path.join(EVALS_DIR, *parts),
+                               run='' if run == 'run1' else run)
         if args.report:
             stem, _ = os.path.splitext(args.report)
             with open(f'{stem}-{run}.json', 'w') as f:

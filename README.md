@@ -62,7 +62,7 @@ Seed → Spine → Architecture → Scene Map → Briefs → Draft → Evaluate 
 
 **Scene Map** — full scene count (40-60). Locations, timeline, characters present, MICE thread tracking (Kowal FILO nesting).
 
-**Briefs** — the drafting contract per scene. Goal, conflict, outcome, crisis, decision (Story Grid Five Commandments). Knowledge entering and leaving. Key actions and dialogue. Continuity dependencies for parallel drafting.
+**Briefs** — the drafting contract per scene, as terse facts: the events (key actions, the turn included), the outcome, knowledge and physical state entering and leaving, and continuity dependencies for parallel drafting. Goal, conflict, crisis, decision, key dialogue and the like are optional notes the author writes by hand.
 
 **Validate** — structural checks run automatically: timeline consistency, knowledge flow, MICE nesting, pacing (flat polarity stretches, action/sequel rhythm, turning point variety), completeness.
 
@@ -131,7 +131,7 @@ Three pipe-delimited CSV files in `reference/`, joined by scene ID:
 |------|---------|-------------|
 | `scenes.csv` | Structural identity | id, seq, title, part, pov, location, timeline, type, status, word_count |
 | `scene-intent.csv` | Narrative dynamics | function, action_sequel (action/sequel), value_shift, turning_point, characters, MICE threads |
-| `scene-briefs.csv` | Drafting contracts | goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue |
+| `scene-briefs.csv` | Drafting contracts | outcome, key_actions, knowledge_in/out, physical_state_in/out; optional author notes (goal, conflict, crisis, decision, key_dialogue...) |
 
 Python helpers provide a unified interface:
 

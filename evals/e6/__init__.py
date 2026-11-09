@@ -60,8 +60,9 @@ def summarize(reports: dict[str, dict]) -> dict:
     """Per suite, per metric, the spread across runs.
 
     ``reports`` maps a run name to a ``run.py``-shaped report. A suite that
-    errored in any run is listed under ``errored`` with no spread, because a
-    missing measurement is not a low one. A metric missing from some runs (a
+    errored or was stale (a frozen suite's miss, #645) in any run is listed
+    under ``errored`` with no spread, because a missing measurement is not a
+    low one. A metric missing from some runs (a
     code that showed up in one run only) is spread over the runs that have it,
     with ``missing_in`` naming the others. For a count, a missing ``by_code``
     entry means zero, but this can't tell a count from a rate, so it says so
@@ -74,9 +75,11 @@ def summarize(reports: dict[str, dict]) -> dict:
     suites = sorted({s for results in by_run.values() for s in results})
     for suite in suites:
         bad = {run: ('suite not in this run' if suite not in by_run[run]
-                     else by_run[run][suite].get('error') or 'errored (no message)')
+                     else by_run[run][suite].get('error')
+                     or by_run[run][suite].get('stale') or 'errored (no message)')
                for run in runs
-               if suite not in by_run[run] or by_run[run][suite]['status'] == 'error'}
+               if suite not in by_run[run]
+               or by_run[run][suite]['status'] in ('error', 'stale')}
         if bad:
             out['errored'][suite] = bad
             continue

@@ -215,3 +215,33 @@ def test_parallel_rejects_other_values(monkeypatch):
     monkeypatch.setenv(e4.PARALLEL_ENV, 'yes')
     with pytest.raises(ValueError):
         e4.parallel()
+
+
+def test_mark_musts_tags_the_judges_broken_must_beats(tmp_path):
+    """#642: post-processing only; the judge's prompt is unchanged."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scene-briefs.csv').write_text(
+        'id|outcome|key_actions|key_dialogue\n'
+        'a|yes|Hector runs;must: Achilles chases him round the walls|must: Hector: "Let me not die"\n'
+        'b|no|Achilles chases him round the walls|\n')
+    judged = {
+        'a': {'contradictions': [], 'broken_promises': [
+            {'field': 'key_actions', 'promise': 'Achilles chases him round the walls'},
+            {'field': 'key_actions', 'promise': 'Hector runs'},
+            {'field': 'key_dialogue', 'promise': 'Hector: "Let me not die"'},
+            {'field': 'outcome', 'promise': 'yes'}]},
+        'b': {'contradictions': [], 'broken_promises': [
+            {'field': 'key_actions', 'promise': 'Achilles chases him round the walls'}]},
+    }
+    e4.mark_musts(str(tmp_path), judged)
+    assert [p['must'] for p in judged['a']['broken_promises']] == [True, False, True, False]
+    assert [p['must'] for p in judged['b']['broken_promises']] == [False]
+    # CR-6: the gate's rule, so a paraphrase of a must beat is one too
+    paraphrase = {'a': {'contradictions': [], 'broken_promises': [
+        {'field': 'key_actions', 'promise': 'Achilles pursues Hector around the city'}]}}
+    e4.mark_musts(str(tmp_path), paraphrase)
+    assert paraphrase['a']['broken_promises'][0]['must'] is True
+    m = e4.gate_measure(['a', 'b'], {'a': 'w', 'b': 'w'}, judged, failed=set())['metrics']
+    assert (m['broken_promises_all'], m['broken_musts_all']) == (5, 2)
+    assert m['broken_musts'] == 2

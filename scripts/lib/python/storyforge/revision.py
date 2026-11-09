@@ -586,9 +586,17 @@ def build_revision_prompt(
         for sid in scope_ids:
             beat_parts = []
             if os.path.isfile(briefs_path):
+                from storyforge.must import must_items
                 for field in ('key_actions', 'key_dialogue', 'outcome'):
                     val = get_field(briefs_path, sid, field).strip()
-                    if val:
+                    if field == 'key_dialogue':
+                        # #644: only a line the author marks must: is required
+                        # (as drafting's checklist); the others are notes
+                        musts = [i.raw for i in must_items(val) if i.text]
+                        if musts:
+                            beat_parts.append('  - **key_dialogue (marked must:, word for '
+                                              'word):** ' + '; '.join(musts))
+                    elif val:
                         beat_parts.append(f'  - **{field}:** {val}')
             if os.path.isfile(intent_path):
                 tp = get_field(intent_path, sid, 'turning_point').strip()

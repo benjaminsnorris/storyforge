@@ -358,8 +358,10 @@ class TestDiagnosisHelpers:
             {'root_cause': 'brief', 'worst_items': 'act1-sc01;act1-sc02'},
             {'root_cause': 'craft', 'worst_items': 'act2-sc01'},
         ]
+        # plan decision 9: a brief root cause is named for the author, never
+        # rewritten (the fix rewrote goal/conflict/crisis/decision)
         result = _detect_upstream_scenes('/tmp', rows)
-        assert result == ['act1-sc01', 'act1-sc02']
+        assert result == []
 
     def test_detect_upstream_scenes_no_brief(self):
         rows = [

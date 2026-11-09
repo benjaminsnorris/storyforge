@@ -86,10 +86,11 @@ class TestCheck:
 
     def test_the_first_failure_stops_the_run_and_lists_the_rest(self, project):
         """Review of #441 (H1): later scenes would be checked, and committed,
-        against a ledger without the failing scene's facts."""
+        against a ledger without the failing scene's facts. Since #641 only
+        with --stop-at-first."""
         project_dir, _ = project
         with _api([[BAD], []]) as api, pytest.raises(SystemExit) as e:
-            cmd_check.main(['--scenes', f'{SCENE},act2-sc01'])
+            cmd_check.main(['--stop-at-first', '--scenes', f'{SCENE},act2-sc01'])
         assert e.value.code == 1
         report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
         assert 'Not checked: act2-sc01' in report
@@ -103,7 +104,7 @@ class TestCheck:
             raise gate.GateError('extraction failed:\nHTTP 500')
         monkeypatch.setattr(gate, 'gate_scene', boom)
         with pytest.raises(SystemExit):
-            cmd_check.main(['--scenes', f'{SCENE},act2-sc01'])
+            cmd_check.main(['--stop-at-first', '--scenes', f'{SCENE},act2-sc01'])
         report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
         assert f'## {SCENE}: not checked' in report and 'failed: HTTP 500' in report
         assert 'Not checked: act2-sc01' in report
@@ -229,7 +230,7 @@ class TestPendingAndRecheck:
         monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: gate.Recheck(
             failed='new-x1', why='a contradiction', left=['new-x1']))
         with pytest.raises(SystemExit) as e:
-            cmd_check.main(['--scenes', f'{SCENE},act2-sc01'])
+            cmd_check.main(['--stop-at-first', '--scenes', f'{SCENE},act2-sc01'])
         assert e.value.code == 1 and seen == [SCENE]
         report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
         assert 're-check of new-x1 did not pass' in report and 'Not checked: act2-sc01' in report
@@ -279,7 +280,7 @@ class TestPendingAndRecheck:
         monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: gate.Recheck(
             over_budget=True, left=['new-x1'], forecast=200.0))
         with pytest.raises(SystemExit):
-            cmd_check.main(['--scenes', f'{SCENE},act2-sc01'])
+            cmd_check.main(['--stop-at-first', '--scenes', f'{SCENE},act2-sc01'])
         out = capsys.readouterr().out
         assert 'stopped at new-x1, which was not re-checked (over the cost threshold)' in out
 
@@ -359,6 +360,24 @@ class TestKeepGoing:
         assert 'Not checked' not in report
         assert commits and commits[-1][0] == 'Check: 1 of 3 scene(s) passed'
 
+    def test_the_advisory_broken_promises_are_listed(self, project, monkeypatch, capsys):
+        """#642: a broken promise doesn't stop a scene, but the run lists it."""
+        from storyforge.checker import Finding
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', SCENE)
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                          'not delivered')
+        gate.record_advisory(project_dir, SCENE, 'advisor', [promise])
+        gate.record_advisory(project_dir, 'act2-sc01', 'advisor', [promise])
+        _fake_gate(monkeypatch, {})
+        cmd_check.main(['--pending'])                          # all pass: exit 0
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+        assert f'{SCENE}: PRM the brief\'s key_actions promises "Finds nothing"' in out
+        assert 'act2-sc01' not in out.split('WARNING: 1 broken promise')[1]   # not checked
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert '## Advisory' in report and 'Finds nothing' in report
+
     def test_results_after_a_failure_are_provisional(self, project, monkeypatch, capsys):
         project_dir, _ = project
         self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
@@ -429,11 +448,21 @@ class TestKeepGoing:
         out = capsys.readouterr().out
         assert 'new-x1 (re-checked after act1-sc01 passed): a contradiction' in out
 
-    def test_keep_going_needs_pending(self, project):
-        for argv in (['--keep-going', SCENE], ['--keep-going']):
-            with pytest.raises(SystemExit) as e:
-                cmd_check.main(argv)
-            assert e.value.code == 1
+    @pytest.mark.parametrize('argv', [
+        ['--pending', '--keep-going', '--stop-at-first'],
+        ['--accept', 'act1-sc01', '--stop-at-first'],     # #641's review, T-8
+        ['--blocking', '--stop-at-first'],
+    ])
+    def test_keep_going_and_stop_at_first_together_are_an_error(self, project, argv, capsys):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(argv)
+        assert e.value.code == 1
+        assert 'ERROR' in capsys.readouterr().out
+
+    def test_keep_going_alone_still_needs_scenes(self, project):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--keep-going'])
+        assert e.value.code == 1
 
     def test_over_the_threshold_up_front_checks_nothing(self, project, monkeypatch):
         project_dir, _ = project
@@ -679,7 +708,7 @@ class TestCheckBudget:
         assert 'over the cost threshold ($1): nothing checked' in capsys.readouterr().out
 
     def test_pending_stopped_mid_run_by_the_budget(self, project, monkeypatch, capsys):
-        """T-1: without --keep-going too: exit 1, the rest still pending, no
+        """T-1: with --stop-at-first too: exit 1, the rest still pending, no
         --accept advice, and the report says what wasn't checked."""
         project_dir, _ = project
         monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
@@ -687,7 +716,7 @@ class TestCheckBudget:
             gate.mark_pending(project_dir, sid, 'draft', 'stale')
         seen = _fake_gate(monkeypatch, {}, spend=80_000)   # $2.00 a scene
         with pytest.raises(SystemExit) as e:
-            cmd_check.main(['--pending'])
+            cmd_check.main(['--pending', '--stop-at-first'])
         assert e.value.code == 1 and seen == ['act1-sc01']
         assert set(gate.pending(project_dir)) == {SCENE, 'act2-sc01'}
         out = capsys.readouterr().out

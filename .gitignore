@@ -15,3 +15,6 @@ evals/results/
 
 # Eval fixtures are projects; their working/ files are fixture data
 !evals/fixtures/**/working/
+# The blocking set's recordings hold private prose: they live in storyforge-evals (#646)
+evals/fixtures/cassettes/blocking-set/
+evals/blocking-set/

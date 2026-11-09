@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Atom</title>
+  <link href="https://example.com/" rel="alternate"/>
+  <entry>
+    <title>On Rain</title>
+    <link href="https://example.com/on-rain" rel="alternate"/>
+    <published>2017-04-02T12:00:00Z</published>
+    <category term="essay"/>
+    <content type="html">&lt;p&gt;It rained for nine days, and on the tenth we went out anyway.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>A short story</title>
+    <link href="https://example.com/a-short-story" rel="alternate"/>
+    <updated>2017-05-09T12:00:00Z</updated>
+    <category term="story"/>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>The boat came in at dusk, empty.</p></div></content>
+  </entry>
+</feed>

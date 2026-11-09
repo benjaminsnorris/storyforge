@@ -33,6 +33,18 @@ STUB_MODEL_CATALOG = [
 
 
 @pytest.fixture(autouse=True)
+def _eval_spend_ledger_off_home(tmp_path, monkeypatch):
+    """`evals/run.py` appends live eval calls to the eval spend ledger, by
+    default in the home directory; a test's never reach Ben's real one, each
+    test starts the month at $0 (its own ledger, so no test's spend pushes
+    another past the budget), and no test inherits a budget or an override
+    from the shell."""
+    monkeypatch.setenv('STORYFORGE_EVAL_SPEND_LOG', str(tmp_path / 'eval-spend.jsonl'))
+    monkeypatch.delenv('STORYFORGE_EVAL_BUDGET_USD', raising=False)
+    monkeypatch.delenv('STORYFORGE_EVAL_OVER_BUDGET', raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _gate_blocking_off(request, monkeypatch):
     """The gate's blocking read (`gate.GATE_BLOCKING`, #626) is one more API
     call per gated scene, which the gate tests' API fakes don't answer. It is
@@ -41,6 +53,17 @@ def _gate_blocking_off(request, monkeypatch):
         return
     import storyforge.gate as gate
     monkeypatch.setattr(gate, 'GATE_BLOCKING', False)
+
+
+@pytest.fixture(autouse=True)
+def _gate_continuity_off(request, monkeypatch):
+    """The gate's continuity checks (`gate.GATE_CONTINUITY`, #648) read each
+    scene's typed state with one more API call, which the gate tests' API
+    fakes don't answer. They are off except in tests marked `continuity`."""
+    if request.node.get_closest_marker('continuity'):
+        return
+    import storyforge.gate as gate
+    monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
 
 
 @pytest.fixture(autouse=True)

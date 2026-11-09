@@ -139,7 +139,9 @@ def target_text(project_dir: str, scene_id: str, target: str,
                 tables: dict | None = None) -> str | None:
     """What is scored for a scene: its brief (with on_stage and the facts its
     knowledge_out names), or its prose without illustration markers. None
-    when there is none (no brief goal, or no prose file)."""
+    when there is none (no brief field among `_SOURCE_FIELDS` filled, or no
+    prose file). A brief needn't have a goal: it's a craft-framework field,
+    optional since #643 (#643's review CR-1)."""
     if target == 'prose':
         from storyforge.illustrations import read_scene_prose
         path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
@@ -150,7 +152,7 @@ def target_text(project_dir: str, scene_id: str, target: str,
         return prose or None
     t = tables or _project_tables(project_dir)
     brief = t['scene-briefs.csv'].get(scene_id, {})
-    if not brief.get('goal', '').strip():
+    if not any(brief.get(k, '').strip() for k in _SOURCE_FIELDS):
         return None
     scene = t['scenes.csv'].get(scene_id, {})
     intent = t['scene-intent.csv'].get(scene_id, {})

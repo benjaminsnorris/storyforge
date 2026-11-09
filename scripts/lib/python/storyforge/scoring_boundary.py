@@ -325,6 +325,15 @@ def _collect_per_architecture_anchor(project_dir: str,
     return pairs
 
 
+def _brief_lines(brief: dict, cols: tuple[str, ...]) -> list[str]:
+    """`Label: value` for each of a brief's `cols` that is filled: goal,
+    conflict, crisis, decision and the staging columns are the author's
+    optional notes (plan decision 9, #644), and an empty label reads to the
+    judge as a gap the brief left."""
+    return [f'{c.replace("_", " ").capitalize()}: {brief[c].strip()}'
+            for c in cols if (brief.get(c) or '').strip()]
+
+
 def _collect_per_scene_intent_vs_brief(
     project_dir: str, scope: str | None
 ) -> list[tuple[str, str, str]]:
@@ -355,17 +364,9 @@ def _collect_per_scene_intent_vs_brief(
             f'Turning point: {intent.get("turning_point", "")}\n'
             f'On stage: {intent.get("on_stage", "")}'
         )
-        downstream = (
-            f'Brief for {sid}:\n'
-            f'Goal: {brief.get("goal", "")}\n'
-            f'Conflict: {brief.get("conflict", "")}\n'
-            f'Outcome: {brief.get("outcome", "")}\n'
-            f'Crisis: {brief.get("crisis", "")}\n'
-            f'Decision: {brief.get("decision", "")}\n'
-            f'Key actions: {brief.get("key_actions", "")}\n'
-            f'Key dialogue: {brief.get("key_dialogue", "")}\n'
-            f'Emotions: {brief.get("emotions", "")}'
-        )
+        downstream = '\n'.join([f'Brief for {sid}:'] + _brief_lines(
+            brief, ('goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions',
+                    'key_dialogue', 'emotions')))
         pairs.append((sid, upstream, downstream))
     return pairs
 
@@ -408,16 +409,10 @@ def _collect_per_brief_vs_draft(
         if summary:
             upstream_parts.append(f'Scene {sid} summary (the promise): {summary}')
             upstream_parts.append('')
-        upstream_parts.extend([
-            f'Brief for {sid}:',
-            f'Goal: {brief.get("goal", "")}',
-            f'Conflict: {brief.get("conflict", "")}',
-            f'Outcome: {brief.get("outcome", "")}',
-            f'Key actions: {brief.get("key_actions", "")}',
-            f'Key dialogue: {brief.get("key_dialogue", "")}',
-            f'Emotions: {brief.get("emotions", "")}',
-            f'Subtext: {brief.get("subtext", "")}',
-        ])
+        upstream_parts.append(f'Brief for {sid}:')
+        upstream_parts.extend(_brief_lines(
+            brief, ('goal', 'conflict', 'outcome', 'key_actions', 'key_dialogue',
+                    'emotions', 'subtext')))
         upstream = '\n'.join(upstream_parts)
         try:
             downstream = read_scene_prose(draft_path)

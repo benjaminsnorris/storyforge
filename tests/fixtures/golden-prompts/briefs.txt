@@ -1,4 +1,6 @@
-You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
+You are writing the scene briefs for a novel: the facts of what happens in each scene, as terse notes, so that scenes can be drafted independently and still cohere.
+
+A brief is a plan of events, not a script. It keeps every fact the scene must honour or establish, and it drops the staging: how the scene is played, what is said, what it means. The drafter finds the gesture, the line and the image.
 
 ## Project
 
@@ -60,29 +62,23 @@ REGISTRIES
 
 ## Instructions
 
-For each scene that needs a brief, define the complete drafting contract:
+For each scene that needs a brief, write its facts:
 
-- **goal**: The POV character's concrete objective entering the scene (Swain)
-- **conflict**: What specifically opposes the goal
-- **outcome**: How the scene ends — yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new complication or cost) / no-and (fails, and things get worse) / no-but (fails, but something genuinely goes their way) (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
-- **crisis**: The dilemma — best bad choice or irreconcilable goods (Story Grid)
-- **decision**: What the character actively chooses
+- **outcome**: How the scene ends for the POV character — yes (it goes their way) / no (it goes against them) / yes-but (it goes their way, with a new complication or cost) / no-and (it goes against them, and things get worse) / no-but (it goes against them, but something genuinely goes their way) (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles), judged by what they are trying to do or hoping for in the scene
+- **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning. List only the events the scene turns on: usually 3 to 6, fewer in a short scene. Never more than 6, and no more than 2.5 for each 1,000 of the scene's target_words (2 in a 1,000-word scene, 5 in a 2,000-word one). Keep each event to about 30 characters ("Tessa finds the straight edge"), so the whole cell, semicolons and any `must:` beats included, stays under 200 characters: cut a clause before you add an event. The drafter fills in everything between them.
 - **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
 - **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
 - **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
-- **key_actions**: Semicolon-separated concrete things that happen
-- **key_dialogue**: Specific lines or exchanges that must appear in the prose, semicolon-separated. Label every quoted line a character speaks, in key_dialogue or key_actions, as `Name: "line"`: start the label with the character's name, id or one of its aliases exactly as characters.csv writes it (nothing added before it, no possessive), one character per label, repeated for each line, even when the same character speaks again. Leave the label off only when it isn't clear who speaks.
-- **emotions**: Semicolon-separated emotional beats in sequence
-- **motifs**: Semicolon-separated recurring images/symbols deployed
-- **subtext**: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says A but means B; don't state B" or "The tension is Z; show through [behavior], never name it." NOT a paragraph. NOT multiple clauses chained with semicolons. If no meaningful subtext, leave empty.
 - **continuity_deps**: Semicolon-separated scene IDs this scene depends on (for parallel drafting)
 - **has_overflow**: false (unless you indicate a scene needs extended brief)
+
+Not yours to write: goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs, motif_details. They are the author's optional notes, filled by hand, and they are not in the output. A motif is noticed in the draft and recorded after, never placed in a brief.
 
 ### Output Format
 
 ```briefs-csv
-id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out
+id|outcome|key_actions|knowledge_in|knowledge_out|physical_state_in|physical_state_out|continuity_deps|has_overflow
 (one row per scene being briefed)
 ```
 
@@ -95,6 +91,7 @@ id|status
 
 ### Rules
 
+- Write every scene row's cells (the CSV blocks) as terse notes of what happens and what is true: who does what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about what the moment means. No interpretation in a scene row: never say what a moment means or reveals, what a character feels underneath, or what the reader should take from it, and no polished or quotable sentences. The drafter finds the words; these notes give only the facts. The story architecture and the character and world bibles are where a theme, a want, a need, a wound or a lie belongs: write those plainly, as short notes too.
 - knowledge_in uses the same fact ids as prior scenes' knowledge_out, never sentences — validation will check this
 - Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
@@ -102,8 +99,8 @@ id|status
 - Target 0-2 state changes per scene. A full novel should have 15-40 total state entries.
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
-- Every scene must have goal/conflict/outcome filled
+- Every scene must have its outcome and key_actions filled
+- Where an existing `must:` key_actions item quotes a line, keep it labelled: Label every quoted line a character speaks, in key_dialogue or key_actions, as `Name: "line"`: start the label with the character's name, id or one of its aliases exactly as characters.csv writes it (nothing added before it, no possessive), one character per label, repeated for each line, even when the same character speaks again. Leave the label off only when it isn't clear who speaks.
+- A key_actions item an existing brief starts with `must:` is the author's: copy it word for word, marker and all. Never add `must:` yourself
 - A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
-- Key dialogue should sound like the character, not the author
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
-- The crisis must be a genuine dilemma (two bad choices or two good choices that conflict), not "do the obvious thing or don't"

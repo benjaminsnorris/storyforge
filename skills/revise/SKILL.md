@@ -76,13 +76,13 @@ When the staleness check fires, present these options instead of the standard re
 
 ### Upstream Fix Routing (automatic in --polish --loop)
 
-When `--polish --loop` detects that a scene's naturalness is stalled because of a conflict-free or abstract brief, it automatically:
+When `--polish --loop` finds an adaptation's scene that drifted from its source, it automatically:
 
-1. **Rewrites the brief** — conflict, goal, crisis, and decision fields get genuine dramatic opposition
+1. **Rewrites the brief's facts** — outcome and key_actions, back toward the source (drift in the author's notes, goal, key_dialogue and the like, is reported, never rewritten)
 2. **Re-drafts the scene** — fresh draft using the new brief
 3. **Then polishes** — normal craft polish on the re-drafted scene
 
-The `--naturalness` mode also checks for upstream causes before running its 3-pass craft plan.
+A scene the scoring diagnosis blames on its brief is no longer rewritten (plan decision 9): the old fix gave goal, conflict, crisis and decision "genuine dramatic opposition", and those are now the author's optional notes. The loop names those scenes in a NOTE; suggest the author amend the brief by hand, or `storyforge hone` for its events. The `--naturalness` mode checks for the same upstream causes before running its 3-pass craft plan.
 
 ### "How did the revision go?" / "Review results"
 → Assessment mode: read the most recent revision results, compare before/after, identify remaining issues, recommend next steps.
@@ -121,18 +121,20 @@ Categorize each finding by where the fix belongs:
 |-------------|-------------|---------------|
 | `structural` | scenes.csv | POV, timeline, part structure, scene additions/removals |
 | `intent` | scene-intent.csv | Value shifts, scene type, character presence |
-| `brief` | scene-briefs.csv | Knowledge chain, goal/conflict/outcome, key actions |
+| `brief` | scene-briefs.csv | Knowledge chain, outcome, key actions (goal, conflict, crisis and decision are the author's notes: suggest, don't rewrite; a plan's CSV blocks can still write them, so leave them out of a plan unless the author asks) |
 | `craft` | Prose directly | Voice, rhythm, dialogue, naturalness |
 
 ### Registry-Backed Fields
 
 When fixing CSV fields interactively (upstream passes), all registry-backed fields must use canonical IDs from `reference/` registries (characters.csv, locations.csv, values.csv, motif-taxonomy.csv, mice-threads.csv, and the knowledge facts and physical states in commitments.csv, the commitments ledger). Read the registries before making CSV edits. If a fix introduces a new entity, add it to the appropriate registry first; a new knowledge fact is a row of `reference/commitments.csv`, the commitments ledger, with `type` `knowledge`: `id`, the `scene_id` that establishes it (blank for backstory), the fact as one sentence in `statement`, `origin` `author` (or `plan` for a brief), `status` `binding`, `mutable` `state`; leave the other columns empty.
 
+**`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. An advisory broken promise (listed at the end of a run, and in `storyforge status`) is fixed in the brief, not the prose, unless the author says otherwise.
+
 ### Ordering Principles (upstream first)
 
 1. **Structural passes first** — scene additions, removals, reordering. Reorder by changing `seq`; never rename a scene id. New scenes get a 3-5 word slug of their core event as id, never a positional one (see the elaborate skill's Scene IDs section).
 2. **Intent passes second** — value shift corrections, MICE thread management
-3. **Brief passes third** — knowledge chain fixes, goal/conflict/outcome
+3. **Brief passes third** — knowledge chain fixes, outcome and key actions
 4. **Craft passes last** — prose polish (only after all upstream changes settle)
 5. **Validate** after all passes
 

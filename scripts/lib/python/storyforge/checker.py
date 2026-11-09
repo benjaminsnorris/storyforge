@@ -632,15 +632,21 @@ class Brief:
 
 
 def _brief(book: Book, project_dir: str, at: str) -> Brief:
-    """The scene's brief: what holds entering it (not to be contradicted)
-    and what it promises (to be delivered). A registry item is matched
-    against every ledger fact, by id, statement or alias: a binding one is
-    a fact; one that isn't binding (rejected, superseded) is the author's to
-    fix and isn't checked (`stale`); none at all is an item in words."""
+    return brief_from(book.rows, project_dir, at)
+
+
+def brief_from(rows: list[dict[str, str]], project_dir: str, at: str) -> Brief:
+    """The scene's brief against the ledger `rows`: what holds entering it
+    (not to be contradicted) and what it promises (to be delivered). A
+    registry item is matched against every ledger fact, by id, statement or
+    alias: a binding one is a fact; one that isn't binding (rejected,
+    superseded) is the author's to fix and isn't checked (`stale`); none at
+    all is an item in words. The open checker and the question layer's
+    promise questions (#649, `questions.promises_for`) both read it."""
     from storyforge.elaborate import get_scene
     scene = get_scene(at, os.path.join(project_dir, 'reference')) or {}
     brief = Brief()
-    by_id = {r['id']: r for r in book.rows}
+    by_id = {r['id']: r for r in rows}
     entering, promises = [], []
     for col in PROMISE_FIELDS:
         if (scene.get(col) or '').strip():
@@ -648,14 +654,14 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
             brief.items[col] = _split_cell(scene[col]) or [scene[col].strip()]
             promises.append(f'- **{col}**: {brief.fields[col]}')
     from storyforge.prompts import carried_states, state_key
-    physical = ledger.alias_map(ledger.view(book.rows, 'physical'))
+    physical = ledger.alias_map(ledger.view(rows, 'physical'))
     # A state the brief carries in and out unchanged holds entering the scene;
     # it isn't a promise the scene must establish again (F-149)
     carried = carried_states(scene, physical)
     for fields, lines in ((REGISTRY_ENTERING_FIELDS, entering),
                           (REGISTRY_PROMISE_FIELDS, promises)):
         for col, type_ in fields.items():
-            aliases = ledger.alias_map(ledger.view(book.rows, type_))
+            aliases = ledger.alias_map(ledger.view(rows, type_))
             for item in _split_cell(scene.get(col, '')):
                 if col == 'physical_state_out' and state_key(item, physical) in carried:
                     continue
@@ -829,8 +835,11 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
 
 def _whole_item(item: str, quote: str) -> bool:
     """Whether `quote` is the brief item `item` (normalized), not a word or
-    two found inside it."""
-    return bool(quote.strip()) and normalize(item).strip(' .;') == normalize(quote).strip(' .;')
+    two found inside it. A `must:` marker (#642) on either is not part of
+    the item: the check may quote a marked beat with or without it."""
+    from storyforge.must import strip_marker
+    quote, item = strip_marker(quote), strip_marker(item)
+    return bool(quote) and normalize(item).strip(' .;') == normalize(quote).strip(' .;')
 
 
 #: readings the gate takes of each scene (`check_scene(readings=)`)

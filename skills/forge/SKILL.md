@@ -33,6 +33,21 @@ Before doing anything else, orient yourself:
      disagreement, a `voice` blocker (no voice guide to draft from) and a
      `gate` blocker per scene waiting on the gate; surface these before
      advancing.
+   - `advisory` — broken promises the gate reported but didn't stop on
+     (`working/gate-advisory.csv`), one record each: `scene_id`, `source`
+     (the brief field or registry id), `quote` (the promised item),
+     `finding`, `command`, and `stale` (empty, or why the row may no
+     longer hold: the scene or its brief changed since; suggest
+     `storyforge check <scene>`). A brief item the prose doesn't deliver.
+     An advisory file that can't be read is a `gate` blocker, not a record. Not blockers: the prose stands. Mention them, and
+     offer to amend the brief, or to mark the beat `must:` (in
+     `key_actions` or `key_dialogue`) if the author wants the gate to
+     require it. Records whose `source` is `craft framework` are the failed
+     craft-framework floor checks (`scene_id` and `quote` empty; `finding`
+     names the rung, the check and the first scene; `command` is the
+     `storyforge score --level N` that lists every scene) (#643: a missing value shift or turning
+     point, the action/sequel balance). They never keep a rung thin; mention them as
+     observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
      stage and blocker).
@@ -40,7 +55,12 @@ Before doing anything else, orient yourself:
    Two stages route the same in every phase, elaboration or not:
    - **`next.stage` is `check`**: scenes wait on the gate. Have the author run
      `next.command` (`storyforge check --pending`, see "Draft overnight"
-     below) before anything else; `then` is the work after it.
+     below) before anything else; `then` is the work after it. While `write`
+     can still draft a scene, scenes waiting on the gate don't take `next`:
+     drafting stays next (`write` drafts past them, holding back only the
+     scenes that depend on one) and `then.stage` is `check`. When every
+     scene left to draft depends on one of them, `check` is next again
+     (`write` would draft nothing). Surface the `gate` blockers either way.
    - **`next.stage` is `voice`** (or `then.stage` is, behind a `check`): the
      structure is built, but the voice guide is missing, init's template,
      empty, can't be read, or is only `reference/persistent-prompt.md`, which
@@ -123,7 +143,7 @@ Check that `reference/scenes.csv` exists with scenes, and that `storyforge statu
 ```bash
 ./storyforge write --keep-going [options]
 ```
-A full draft runs unattended, so pass `--keep-going` (Ben, 2026-11-04): a scene the gate can't pass after its fixes is committed provisionally for the author instead of ending the run (see "Draft overnight" below). Leave it off only when the author wants the run to stop at the first gate failure.
+A full draft runs unattended, so pass `--keep-going` (Ben, 2026-11-04): a scene the gate can't pass after its fixes is committed provisionally for the author, so the scenes that depend on it are drafted too (see "Draft overnight" below). Without it a failing scene still stops only itself: the later scenes that depend on it wait, and the rest are drafted.
 If prerequisites are missing, route to `elaborate` to build them.
 
 **"Evaluate" / "Run evaluation":**
@@ -136,7 +156,7 @@ Check that scene files exist in `scenes/`. If ready, provide the command:
 Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
 For polish-only: `./storyforge revise --polish`
 
-**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — the briefs lack real dramatic conflict. Running `--polish --loop` will now detect this automatically and fix the briefs before polishing." Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
+**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — in the briefs." `--polish --loop` names those scenes in a NOTE but no longer rewrites their goal, conflict, crisis or decision (the author's notes, plan decision 9): suggest a change to the brief's events (`storyforge hone`) or a note the author writes. Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
 
 **"Score" / "Score my scenes":**
 Invoke the `score` skill.
@@ -160,7 +180,7 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```bash
 ./storyforge validate --structural
 ```
-If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
+If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv` with the author: they measure the book against craft frameworks and are advisory, never a reason to hold drafting (#643). At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
 **"Is my elaboration on track?" / "Drift check" / "Are the levels consistent?":**
 Run the elaboration drift report — deterministic, no LLM, no cost:
@@ -229,14 +249,14 @@ Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke
 Provide `storyforge audit`: the per-act digest of new ledger facts (`reference/commitments.csv`) not yet reviewed, fixed facts first, then relationship and knowledge, then physical state. Scope it with `--act N`, `--character ID`, `--scenes A..B` or `--thread ID`. The author marks what they've read with `storyforge audit --mark seen all` (or named ids), and a wrong fact with `--mark rejected ID`: the scene whose prose states it is listed to revise (drafting won't pass it until `storyforge check` passes it), and once it does, the later scenes that depend on it are re-checked; a fact with no prose to revise has its dependents re-checked with `storyforge check --pending`. Every ledger change is also recorded in `working/audit-log.csv`, readable at any pace. Don't mark facts on the author's behalf: the marking is the audit.
 
 **"The gate stopped on an error" / "Accept this error" / "This contradiction is fine":**
-A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken promise, an unverified quote or a halt still has to be fixed.
+A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken `must` beat (or a registry fact the scene sets up and doesn't establish), an unverified quote or a halt still has to be fixed. Other broken promises don't stop a scene: they're advisory.
 
 In a faithful adaptation the gate also checks a scene against its source. A fact the source contradicts isn't recorded. When a scene contradicts an earlier one and the source backs the later scene, the later scene passes (`SOURCE BACKS THIS SCENE`). The earlier scene's wrong fact stops binding, so later scenes follow the source, and that scene is listed in `working/gate-source-fix.csv`. So is a scene a fact was dropped from. Tell the author each one is theirs to fix toward the source, then run `storyforge check --pending`. The row stays until that scene's prose changes; a passing re-check never clears it, and it doesn't stop drafting.
 
-With many scenes waiting (after a redraft early in the book, say), `storyforge check --pending --keep-going` checks them all in reading order instead of stopping at the first that fails, so the author decides once: it ends with every scene that didn't pass, its findings, and the exact `storyforge check --accept a,b,c` for those with contradictions to accept, and exits 1 if any failed. Tell the author that results for scenes after one that failed are provisional (they were checked without that scene's current facts in the ledger); once it passes, the later scenes depending on facts it changed are listed for a re-check, and its own check reads its new facts against them. Offer `--accept` only for the scenes the summary names in that command; the others have nothing to accept and must be fixed. The cost threshold (`STORYFORGE_COST_THRESHOLD`) is one budget for the whole run: it forecasts first, and stops with exit 1 (the rest still pending) when the run would go over.
+With many scenes waiting (after a redraft early in the book, say), `storyforge check --pending` checks them all in reading order instead of stopping at the first that fails (the default; `--stop-at-first` stops there, and `--keep-going` is still taken), so the author decides once: it ends with every scene that didn't pass, its findings, and the exact `storyforge check --accept a,b,c` for those with contradictions to accept, and exits 1 if any failed. Tell the author that results for scenes that depend on an earlier one that failed are provisional, and the summary names them (they were checked without that scene's current facts in the ledger); once it passes, the later scenes depending on facts it changed are listed for a re-check, and its own check reads its new facts against them. Offer `--accept` only for the scenes the summary names in that command; the others have nothing to accept and must be fixed. The cost threshold (`STORYFORGE_COST_THRESHOLD`) is one budget for the whole run: it forecasts first, and stops with exit 1 (the rest still pending) when the run would go over.
 
 **"Draft overnight" / "Don't stop at every gate failure":**
-Every unattended draft Storyforge recommends passes `--keep-going` (Ben, 2026-11-04); `write` without it still stops at the first gate failure. `storyforge write --keep-going` doesn't stop at a scene the gate still fails after its fixes, as long as only the check's findings stopped it (contradictions, broken promises, plan conflicts). It commits that scene **provisionally**: its facts go in the ledger, except those stating the findings, and it's listed `provisional` in `working/gate-pending.csv`. Then drafting goes on. A halt (a fixed fact changed), an extraction problem or a bad reply still stops the run. At the end, the run lists the provisional scenes and exits 1; `storyforge status` puts `storyforge check --pending` first while any scene waits, and `validate` warns. Tell the author each one is theirs to fix and run `storyforge check --pending`, or to accept a contradiction with `storyforge check --accept SCENE`. Without the flag, a provisional scene stops later drafting, as any pending scene does.
+Every unattended draft Storyforge recommends passes `--keep-going` (Ben, 2026-11-04). Without it, a scene the gate fails stops only itself: `write` drafts the later scenes that don't depend on it (warning that it drafted past it, with its findings) and holds back those that do (they depend on it when their brief's `continuity_deps` names it, or their `knowledge_in` or `physical_state_in` names a fact its brief adds, or their facts lean on its facts; for a scene not drafted yet, the facts its brief names stand in). `storyforge write --keep-going` doesn't stop at a scene the gate still fails after its fixes, as long as only the check's findings stopped it (contradictions, broken `must` beats, plan conflicts). It commits that scene **provisionally**: its facts go in the ledger, except those stating the findings, and it's listed `provisional` in `working/gate-pending.csv`. Then drafting goes on. A halt (a fixed fact changed), an extraction problem or a bad reply isn't committed provisionally: that scene stays pending and holds back the scenes that depend on it; the rest are drafted. Only an API failure, the cost threshold or a failed commit stop the run. At the end, the run lists the provisional scenes and exits 1; `storyforge status` lists each waiting scene as a `gate` blocker and puts `storyforge check --pending` next once every scene is drafted or every scene left depends on a waiting one (before that, drafting stays next), and `validate` warns. Tell the author each one is theirs to fix and run `storyforge check --pending`, or to accept a contradiction with `storyforge check --accept SCENE`. Without the flag there is no provisional commit: the failing scene holds back the later scenes that depend on it, as any pending scene does.
 
 **"What should I do next?":**
 Use the `storyforge status --json` verdict from Step 1 and recommend its `next.command`. Also: if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf; if scene metadata is sparse, `storyforge enrich` is high value.
@@ -304,9 +324,9 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1.5. Post-extraction reconciliation:** If `scenes.csv` has rows AND registries are missing or incomplete (no `characters.csv`, `values.csv`, etc.) → "Your data needs reconciliation to normalize cross-scene consistency." → Provide `./storyforge reconcile` command.
 
-**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
+**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns `passed` False (a **blocking** failure; `split_failures(report['failures'])[0]` is non-empty) → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state). Advisory findings alone (empty craft-framework columns, MICE or pacing runs; #643) never send the book to gap-fill: mention them as optional notes the author may fill.
 
-**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
+**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure." → Provide `./storyforge validate --structural`. Review scores and proposals with the author. They're advisory (#643) and never hold drafting: a below-target dimension is something the author may act on, not work to clear first.
 
 **2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --keep-going` command.
 
@@ -335,6 +355,7 @@ the source of truth for position and next step:
 - **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → voice → draft → evaluate (voice from the `voice` stage/blocker, not a rung).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
 - **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
+- **Advisory:** list `advisory` (broken promises the gate didn't stop on, then the records whose `source` is `craft framework`) apart from the blockers: for a promise the author amends the brief, marks the beat `must:`, or leaves it; a craft-framework line is a diagnostic the author can use or ignore.
 
 Then add the context the verdict doesn't carry:
 
@@ -352,7 +373,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; a voice guide with the author's text (no `voice` blocker in `storyforge status`; `write` refuses a missing, template or empty one) |
+| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; a voice guide with the author's text (no `voice` blocker in `storyforge status`; `write` refuses a missing, template or empty one). With a `voice:` block in `storyforge.yaml`, a usable author voice repo: `write` also stops on a block it can't use (the repo missing or inside the book, no `description.md` or exemplars yet, a narrator not under its `fiction/`) |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | Revision planning (`revise` skill) | Evaluation results in `working/evaluations/`, or scores |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |

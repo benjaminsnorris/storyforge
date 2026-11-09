@@ -19,7 +19,8 @@ from storyforge.narrator import NARRATOR_POV, is_narrator
 from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
-    _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
+    _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, CRAFT_FRAMEWORK_COLUMNS, DELIMITER,
+    KEY_ACTIONS_MAX_CHARS, brief_event_limit,
 )
 from storyforge import mice
 from storyforge.enrich import (
@@ -1184,13 +1185,10 @@ def detect_abstract_fields(
 # Briefs domain: over-specification detection
 # ============================================================================
 
-# Beats per 1000 words — above this threshold the scene is over-specified.
-# 3 beats in 1500 words = 2.0/1k is fine. 5 in 1500 = 3.3/1k is tight.
-# We flag above 2.5/1k, which catches 5+ beats in short scenes.
-_BEATS_PER_1K_THRESHOLD = 2.5
-
-# Absolute beat count threshold — flag regardless of word count.
-_MAX_BEATS_ABSOLUTE = 6
+# How many key_actions events a scene may list: `elaborate.brief_event_limit`
+# (never more than `MAX_BRIEF_EVENTS`, and no more than `BRIEF_EVENTS_PER_1K`
+# for each 1,000 target words; 3 in 1,500 words is the most), the
+# limit the briefs prompt asks for (#644's review SF-5).
 
 # Max emotional beats before arc feels mechanical.
 _MAX_EMOTION_BEATS = 3
@@ -1229,13 +1227,7 @@ def detect_overspecified(
             beat_count = len(beats)
             beats_per_1k = (beat_count / target_words * 1000) if target_words else 0
 
-            flagged = False
-            if beat_count >= _MAX_BEATS_ABSOLUTE:
-                flagged = True
-            elif target_words and beat_count > 2 and beats_per_1k > _BEATS_PER_1K_THRESHOLD:
-                flagged = True
-
-            if flagged:
+            if beat_count > brief_event_limit(target_words):
                 results.append({
                     'scene_id': sid,
                     'field': 'key_actions',
@@ -1271,7 +1263,7 @@ def detect_overspecified(
 
 # Fields that should be terse (beat lists or short phrases).
 _TERSE_FIELDS = {
-    'key_actions': 200,    # max chars — beats should be verb phrases
+    'key_actions': KEY_ACTIONS_MAX_CHARS,   # the briefs prompt's limit too
     'emotions': 60,        # max chars — short labels
     'goal': 80,            # max chars — one dramatic question
     'conflict': 80,        # max chars — one tension statement
@@ -1557,6 +1549,17 @@ def _labels_block(labels: str) -> str:
     return f'\n{labels}\n' if labels else ''
 
 
+def _must_block(current_values: dict[str, str], fields) -> str:
+    """A brief rewrite prompt's rule for the author's `must:` items (#642),
+    after its rules: '' when the fields it rewrites have none. The rewrite
+    is held to it in code too (`must.keep_must`)."""
+    from storyforge.must import MUST_FIELDS, must_items
+    if not any(must_items(current_values.get(f, '') or '') for f in fields if f in MUST_FIELDS):
+        return ''
+    return ('\nItems that start with `must:` are beats the author requires: copy each one '
+            'exactly as written, `must:` included, and never cut, merge or reword one.\n')
+
+
 def build_concretize_prompt(
     scene_id: str,
     fields: list[str],
@@ -1608,7 +1611,7 @@ def build_concretize_prompt(
 4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
 5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
 6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
-{_labels_block(labels)}
+{_labels_block(labels)}{_must_block(current_values, fields)}
 ## Output Format
 
 Return each field on its own labeled line, exactly like the input but rewritten:
@@ -1647,12 +1650,14 @@ def build_trim_prompt(
                     f"The drafter finds the middle ground."
                 )
             else:
-                max_beats = max(2, int(target_words / 800)) if target_words else 3
+                # the limit hone flags past and the briefs prompt asks for
+                max_beats = brief_event_limit(target_words)
                 field_blocks.append(
-                    f"**{field}** (overspecified: {beats} beats, target {max_beats} for {target_words}w scene):\n"
+                    f"**{field}** (overspecified: {beats} events, at most {max_beats} for "
+                    f"{target_words or 'a'}{'w' if target_words else ''} scene):\n"
                     f"{value}\n"
-                    f"→ Reduce to {max_beats} beats. Keep only the structurally essential "
-                    f"events. Cut beats that the drafter can infer from context."
+                    f"→ Reduce to {max_beats} events or fewer. Keep only the structurally "
+                    f"essential events. Cut beats that the drafter can infer from context."
                 )
         elif issue['issue'] == 'verbose':
             max_chars = issue.get('max_chars', 80)
@@ -1685,7 +1690,7 @@ def build_trim_prompt(
 2. For emotions: use 2 beats maximum (start → end). "resolve;bitter-defiance" not "resolve;frustration;bitter-resignation;quiet-defiance".
 3. For decision/crisis/goal/conflict: one clause. No sentences, no em-dashes, no elaboration.
 4. Preserve the MEANING — just say it in fewer words.
-{_labels_block(labels)}
+{_labels_block(labels)}{_must_block(current_values, [i['field'] for i in issues])}
 ## Output Format
 
 Return each field on its own labeled line:
@@ -1825,7 +1830,7 @@ def build_evaluation_fix_prompt(
 2. Every action must be something the POV character physically does or perceives. No thematic descriptions, no narrator interpretations.
 3. Do not invent characters, locations, or events not implied by the existing fields.
 4. Keep each field concise — brief contract language, not prose.
-{_labels_block(labels)}
+{_labels_block(labels)}{_must_block(current_values, fields)}
 ## Output Format
 
 Return each field on its own labeled line:
@@ -1858,14 +1863,22 @@ def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values:
     number of fields changed."""
     from storyforge.brief_names import invented_names
     from storyforge.illustrations import read_scene_prose
+    from storyforge.must import MUST_FIELDS, keep_must_fields, unmarked
     changed = {f: v for f, v in rewrites.items() if v and v != current_values.get(f)}
+    # #642: a `must` beat is the author's; a rewrite never drops or rewords one
+    changed, must_notes = keep_must_fields(row, changed)
+    for note in must_notes:
+        log(f'    NOTE: {sid}: {kind} rewrite: {note}')
+    changed = {f: v for f, v in changed.items() if v != row.get(f)}
     if not changed:
         return 0
     prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
     notes: list[str] = []
     prose = (read_scene_prose(prose_path, notes=notes, label=f'scenes/{sid}.md')
              if os.path.isfile(prose_path) else '')
-    names = invented_names(list(changed.values()), '\n'.join((known_reference, prose)))
+    # the author's `must` items are theirs, not the rewrite's: not name-checked
+    names = invented_names([unmarked(v) if f in MUST_FIELDS else v for f, v in changed.items()],
+                           '\n'.join((known_reference, prose)))
     if names:
         reason = f'{kind} rewrite of {", ".join(sorted(changed))} named {", ".join(names)}'
         log(f'    WARNING: not rewriting {sid}: the {reason}, which appear nowhere in the '
@@ -1947,7 +1960,7 @@ def hone_briefs(
         for f in all_issues:
             path = os.path.join(hone_dir, f'briefs-analysis-{f["scene_id"]}.md')
             with open(path, 'a') as fh:
-                fh.write(f"**{f['field']}:** {f['issue']}\n")
+                fh.write(f"**{f['field']}:** {f['issue']}{craft_advisory_tag(f['issue'])}\n")
                 if 'value' in f:
                     fh.write(f"  Current: {f['value'][:200]}\n")
         return {
@@ -1967,9 +1980,10 @@ def hone_briefs(
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
-    # Group issues by scene and separate by type
+    # Group issues by scene and separate by type; the craft-framework
+    # diagnostics are reported, never rewritten (#643)
     by_scene: dict[str, list[dict]] = {}
-    for issue in all_issues:
+    for issue in _report_craft(all_issues):
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
     from storyforge.brief_names import reference_text as names_reference_text
@@ -2045,7 +2059,13 @@ def hone_briefs(
         if eval_issues and coaching_level == 'full':
             eval_fields = list(set(i['field'] for i in eval_issues if i['field']))
             if not eval_fields:
-                eval_fields = [f for f in briefs_map[sid].keys() if f != 'id' and briefs_map[sid].get(f, '')]
+                # a finding naming no field (revise --scores' brief pass) never
+                # reaches the author's notes; one naming a note is the author's
+                # own ask (#644; PR #675's review CR-3)
+                from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+                eval_fields = [f for f in briefs_map[sid].keys()
+                               if f != 'id' and f not in AUTHOR_NOTE_COLUMNS
+                               and briefs_map[sid].get(f, '')]
             current_values = {f: briefs_map[sid].get(f, '') for f in eval_fields}
             guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
 
@@ -2110,14 +2130,16 @@ def hone_briefs(
 # Gaps domain: detect missing fields
 # ============================================================================
 
+# Never the author's notes (`elaborate.AUTHOR_NOTE_COLUMNS`: goal, conflict,
+# crisis, decision, key_dialogue...; plan decision 9): an empty one isn't a gap
 _GAPS_REQUIRED = {
     'briefed': [
         'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-        'goal', 'conflict', 'outcome', 'crisis', 'decision',
+        'outcome', 'key_actions',
     ],
     'drafted': [
         'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-        'goal', 'conflict', 'outcome', 'crisis', 'decision',
+        'outcome', 'key_actions',
     ],
 }
 
@@ -2130,8 +2152,12 @@ def detect_gaps(
 ) -> list[dict]:
     """Scan for empty required fields given each scene's status.
 
+    A craft-framework field (``elaborate.CRAFT_FRAMEWORK_COLUMNS``: value
+    shift, emotional arc...) is listed with ``advisory`` True (#643): a
+    scene needn't fit a framework. The author's notes are never listed.
+
     Returns:
-        List of dicts: {scene_id, field, status, file}.
+        List of dicts: {scene_id, field, status, file, advisory}.
     """
     results = []
     ids_to_check = scene_ids if scene_ids else list(scenes_map.keys())
@@ -2161,6 +2187,8 @@ def detect_gaps(
                     'field': field,
                     'status': status,
                     'file': file,
+                    # a craft framework's field (#643): reported, not a gap
+                    'advisory': field in CRAFT_FRAMEWORK_COLUMNS,
                 })
 
     return results
@@ -2483,6 +2511,57 @@ def detect_value_shift_outcome_mismatch(
     return results
 
 
+#: Detector issues that test conformity to a craft framework (#643, plan
+#: D6): an emotional arc with no "X giving way to Y" turn (`flat`), a value
+#: shift whose polarity disagrees with the outcome (`outcome_mismatch`), a
+#: conflict with no opposition or a "yes" scene with a flat value shift
+#: (`conflict_free`). Reported as diagnostics; hone never rewrites the
+#: author's notes to fit them (an evaluation finding the author sends still
+#: is). The others (vague, abstract, overlong, overspecified...) are about
+#: the notes' language and stay fixable.
+CRAFT_ADVISORY_ISSUES = frozenset({'flat', 'outcome_mismatch', 'conflict_free'})
+
+
+def craft_advisory_tag(issue_type: str) -> str:
+    """' (craft framework, advisory)' for a `CRAFT_ADVISORY_ISSUES` issue,
+    else '': every place hone lists an issue tags these the same way (the
+    log, --diagnose, strict mode's analysis files; #643's review SF-6)."""
+    return ' (craft framework, advisory)' if issue_type in CRAFT_ADVISORY_ISSUES else ''
+
+
+def _report_craft(issues: list[dict]) -> list[dict]:
+    """Log the craft-framework issues among `issues` as reported, not
+    rewritten, and the issues on the author's notes (`_report_author_notes`),
+    and return the rest: what hone may rewrite. Both rewriting
+    paths (``hone_briefs``, ``hone_intent``) go through it, so a detector
+    added to `CRAFT_ADVISORY_ISSUES` is never rewritten (#643's review
+    TD-5). An evaluation finding the author sends is issue `evaluation`,
+    never among them, so it is still rewritten."""
+    craft = [i for i in issues if i['issue'] in CRAFT_ADVISORY_ISSUES]
+    if craft:
+        log(f'  {len(craft)} craft-framework finding(s) reported, not rewritten '
+            f'(advisory): ' + ', '.join(f"{i['scene_id']}.{i['field']} ({i['issue']})"
+                                       for i in craft[:10])
+            + (' ...' if len(craft) > 10 else ''))
+    return _report_author_notes([i for i in issues if i['issue'] not in CRAFT_ADVISORY_ISSUES])
+
+
+def _report_author_notes(issues: list[dict]) -> list[dict]:
+    """Log the issues on the author's note columns (`elaborate.AUTHOR_NOTE_COLUMNS`:
+    goal, conflict, crisis, decision, emotions, subtext, key_dialogue...) as reported, not rewritten, and
+    return the rest (#644's review TD-2: those columns are filled by hand,
+    so a detector may say an emotions list is long, but no model rewrites
+    it). An evaluation finding the author sends is still rewritten."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    notes = [i for i in issues
+             if i.get('field') in AUTHOR_NOTE_COLUMNS and i['issue'] != 'evaluation']
+    if notes:
+        log(f"  {len(notes)} finding(s) on the author's notes reported, not rewritten (#644): "
+            + ', '.join(f"{i['scene_id']}.{i['field']} ({i['issue']})" for i in notes[:10])
+            + (' ...' if len(notes) > 10 else ''))
+    return [i for i in issues if i not in notes]
+
+
 def detect_intent_issues(
     intent_map: dict[str, dict[str, str]],
     scenes_map: dict[str, dict[str, str]],
@@ -2527,8 +2606,9 @@ def build_intent_fix_prompt(
 ) -> str:
     """Build a prompt to fix intent quality issues.
 
-    Handles vague, overlong, flat, abstract_arc issues. Produces labeled
-    output parsed by parse_concretize_response().
+    Handles vague, overlong and abstract_arc issues (a flat arc is a
+    craft-framework diagnostic hone doesn't rewrite, #643). Produces
+    labeled output parsed by parse_concretize_response().
 
     Args:
         scene_id: The scene being fixed.
@@ -2566,12 +2646,6 @@ def build_intent_fix_prompt(
             instructions.append(
                 'Compress to 1-3 sentences. State the scene\'s dramatic purpose '
                 'concisely — cut elaboration and nested clauses.'
-            )
-        if 'flat' in field_issues:
-            instructions.append(
-                'Add a transition phrase showing emotional movement: '
-                '"X giving way to Y", "X shifting to Y", "X breaking into Y", etc. '
-                'The arc needs a clear before and after.'
             )
         if 'abstract_arc' in field_issues:
             instructions.append(
@@ -2624,8 +2698,10 @@ def hone_intent(
     """Fix scene-intent.csv quality issues.
 
     Detects and repairs vague function fields, overlong function fields,
-    flat or abstract emotional arcs, on_stage subset violations, and
-    value_shift/outcome mismatches.
+    abstract emotional arcs and on_stage subset violations. Flat emotional
+    arcs and value_shift/outcome mismatches are craft-framework diagnostics
+    (``CRAFT_ADVISORY_ISSUES``, #643): detected, counted and logged, never
+    rewritten.
 
     Args:
         ref_dir: Path to reference/ directory.
@@ -2716,7 +2792,7 @@ def hone_intent(
                 continue  # already fixed
             path = os.path.join(hone_dir, f'intent-analysis-{f["scene_id"]}.md')
             with open(path, 'a') as fh:
-                fh.write(f"**{f['field']}:** {f['issue']}\n")
+                fh.write(f"**{f['field']}:** {f['issue']}{craft_advisory_tag(f['issue'])}\n")
                 if 'value' in f:
                     fh.write(f"  Current: {f['value'][:200]}\n")
         det_scenes = len(set(i['scene_id'] for i in not_subset_issues)) if det_fields_rewritten > 0 else 0
@@ -2731,8 +2807,9 @@ def hone_intent(
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
-    # Group remaining API-fixable issues by scene (excluding already-fixed not_subset)
-    api_fixable_issues = [i for i in all_issues if i['issue'] != 'not_subset']
+    # Group remaining API-fixable issues by scene (excluding already-fixed
+    # not_subset, and the craft-framework diagnostics, #643)
+    api_fixable_issues = [i for i in _report_craft(all_issues) if i['issue'] != 'not_subset']
     by_scene: dict[str, list[dict]] = {}
     for issue in api_fixable_issues:
         by_scene.setdefault(issue['scene_id'], []).append(issue)
@@ -3104,8 +3181,11 @@ def build_mice_fill_prompt(
     Returns:
         Prompt string for Claude.
     """
+    # goal is an optional note (plan decision 9): shown only when filled
     scene_block = '\n'.join(
-        f"- **{s['id']}** ({s.get('title', '')}): goal: {s.get('goal', 'unknown')}; function: {s.get('function', 'unknown')}"
+        f"- **{s['id']}** ({s.get('title', '')}): "
+        + (f"goal: {s['goal'].strip()}; " if (s.get('goal') or '').strip() else '')
+        + f"function: {s.get('function') or 'unknown'}"
         for s in gap_scenes
     )
 

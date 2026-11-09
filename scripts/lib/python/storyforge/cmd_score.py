@@ -15,6 +15,8 @@ Usage:
     storyforge score --dry-run              # Show what would be scored
     storyforge score --no-apply             # Report proposals, never apply them (evals)
     storyforge score --complete-cycle       # Fill in the newest incomplete cycle's gaps
+    storyforge score --voice --voice-repo ../ben-voice   # Voice drift, free (never a target)
+    storyforge score --voice                    # Against the book's `voice:` block's repo
 """
 
 import argparse
@@ -50,6 +52,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, get_column, update_field
+from storyforge.scoring_levels import is_advisory_failure
 
 
 def parse_args(argv):
@@ -91,6 +94,29 @@ def parse_args(argv):
                              '(#615). Skips what the voice guide\'s "Register exemptions" '
                              'allow. No API calls, no cycle, nothing written. Prose '
                              'projects only.')
+    parser.add_argument('--voice', action='store_true',
+                        help='Print the voice meter: how far the prose in scope (the '
+                             'book\'s with no filter, or --prose files) drifts from an '
+                             'author\'s fingerprint: the distance, each measure\'s, the '
+                             'sentences furthest from the corpus, and constructions the '
+                             'prose uses far more than the corpus (or, with --fingerprint, '
+                             'the general baseline). It measures drift; it can\'t tell good '
+                             'prose from bad, and it is never an optimisation target for an '
+                             'automatic rewrite loop. Measures against --fingerprint, '
+                             '--voice-repo, or else the voice repo the book\'s `voice:` '
+                             'block names. '
+                             'No API calls, no cycle, nothing written.')
+    parser.add_argument('--fingerprint', metavar='PATH', default=None,
+                        help='With --voice: the fingerprint.json to measure against')
+    parser.add_argument('--voice-repo', metavar='PATH', default=None,
+                        help='With --voice: the author voice repo to measure against (its '
+                             'fingerprint.json, and its corpus for the constructions)')
+    parser.add_argument('--prose', nargs='+', metavar='FILE', default=None,
+                        help='With --voice: measure these files instead of the book\'s '
+                             'scenes (no project needed)')
+    parser.add_argument('--top', type=int, default=None, metavar='N',
+                        help='With --voice: how many measures, pieces and sentences to '
+                             'list (default 10)')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -515,22 +541,29 @@ def _print_level_result(result: dict) -> None:
     Failed checks the author has marked as accepted in
     working/scoring-overrides.csv surface with an `(accepted)` marker so
     the author can still see them but the headline counts make it clear
-    they're not blocking quality.
+    they're not blocking quality. A failed craft-framework check (#643)
+    surfaces as `(advisory)`, counted apart for the same reason.
     """
     name = result.get('name', 'unknown')
     level = result.get('level', '?')
     passed = result.get('passed', 0)
     failed = result.get('failed', 0)
     accepted = result.get('accepted', 0)
-    real_failed = failed - accepted
+    advisory = result.get('advisory', 0)
+    real_failed = failed - accepted - advisory   # scoring_levels.blocking_failed
     summary = f'{passed} passed, {real_failed} failed'
     if accepted:
         summary += f' (+ {accepted} accepted)'
+    if advisory:
+        summary += f' (+ {advisory} advisory)'
     print(f'\n[level {level}] {name}: {summary}')
     for c in result.get('checks', []):
         if c.get('accepted'):
             marker = '~'  # accepted-failure marker — visible but not blocking
             tag = ' (accepted)'
+        elif is_advisory_failure(c):
+            marker = '!'  # a craft-framework check (#643): reported, never blocking
+            tag = ' (advisory)'
         elif c['passed']:
             marker = '✓'
             tag = ''
@@ -590,6 +623,10 @@ def main(argv=None):
     if args.register:
         _refuse_clash(args, '--register', 'prints the register check only',
                       _REGISTER_EXCLUSIVE)
+    if args.voice:
+        _refuse_clash(args, '--voice', 'prints the voice meter only', _VOICE_EXCLUSIVE)
+    else:
+        _refuse_without(args, '--voice', _VOICE_ONLY)
 
     # Elaboration entry points short-circuit the prose-scoring flow.
     # (--semantic is a modifier on --compare, not a standalone trigger.)
@@ -606,6 +643,9 @@ def main(argv=None):
         return
     if args.register:
         _run_register_only(args)
+        return
+    if args.voice:
+        _run_voice_only(args)
         return
 
     from datetime import datetime
@@ -1110,16 +1150,24 @@ _ELABORATION_FLAGS = ('level', 'all_levels', 'compare', 'drift', 'boundary',
                       'all_boundaries', 'scope', 'semantic', 'bible_consistency',
                       'story_power', 'text_fidelity')
 
+#: the flags that only mean something with `--voice`
+_VOICE_ONLY = ('fingerprint', 'voice_repo', 'prose', 'top')
+
 #: what `--readability` can't be combined with: each would be dropped (or,
 #: for an elaboration flag or --source-fidelity, run instead)
-_READABILITY_EXCLUSIVE = ('source_fidelity', 'register', 'deterministic', 'principles',
-                          'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
-                          'complete_cycle') + _ELABORATION_FLAGS
+_READABILITY_EXCLUSIVE = ('source_fidelity', 'register', 'voice', 'deterministic',
+                          'principles', 'direct', 'deep', 'diagnosis_only', 'no_apply',
+                          'interactive', 'complete_cycle') + _ELABORATION_FLAGS
 
 #: what `--register` can't be combined with, likewise
-_REGISTER_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
-                       'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
-                       'complete_cycle') + _ELABORATION_FLAGS
+_REGISTER_EXCLUSIVE = ('source_fidelity', 'readability', 'voice', 'deterministic',
+                       'principles', 'direct', 'deep', 'diagnosis_only', 'no_apply',
+                       'interactive', 'complete_cycle') + _ELABORATION_FLAGS
+
+#: what `--voice` can't be combined with, likewise
+_VOICE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'deterministic',
+                    'principles', 'direct', 'deep', 'diagnosis_only', 'no_apply',
+                    'interactive', 'complete_cycle') + _ELABORATION_FLAGS
 
 
 def _given(args, name):
@@ -1134,6 +1182,153 @@ def _refuse_clash(args, flag, what, exclusive):
     clash = [f'--{name.replace("_", "-")}' for name in exclusive if _given(args, name)]
     if clash:
         log(f"ERROR: {flag} {what}; it can't be combined with {', '.join(clash)}")
+        sys.exit(1)
+
+
+def _refuse_without(args, flag, needs):
+    """ERROR, exit 1, when `args` holds a flag that means something only
+    with `flag` (it would be dropped silently)."""
+    given = [f'--{name.replace("_", "-")}' for name in needs if _given(args, name)]
+    if given:
+        log(f"ERROR: {', '.join(given)} only work(s) with {flag}")
+        sys.exit(1)
+
+
+def _voice_source(args):
+    """The fingerprint `score --voice` measures against: --fingerprint or
+    --voice-repo (at most one), or with neither, the voice repo the book's
+    `voice:` block names (`voice_repo.voice_ref`). ERROR, exit 1, when both
+    are given, neither is and the book has no `voice:` block (or there's no
+    book), the block can't be used, or the fingerprint can't be read."""
+    from storyforge import voiceprint_meter as meter
+    from storyforge import voice_repo as vr
+    if args.fingerprint and args.voice_repo:
+        log('ERROR: give score --voice one of --fingerprint and --voice-repo, not both')
+        sys.exit(1)
+    repo = args.voice_repo
+    if not args.fingerprint and not repo:
+        from storyforge.common import find_project_root
+        project_dir = find_project_root()
+        try:
+            ref = vr.voice_ref(project_dir) if project_dir else None
+        except vr.VoiceError as e:
+            log(f'ERROR: {e}')
+            sys.exit(1)
+        if ref is None:
+            log('ERROR: score --voice needs the fingerprint to measure against: '
+                '--fingerprint PATH (a fingerprint.json), --voice-repo PATH (an author '
+                'voice repo), or a `voice:` block in the book\'s storyforge.yaml '
+                '(`author: <path to the voice repo>`)')
+            sys.exit(1)
+        repo = ref.author_dir
+    try:
+        return meter.load_source(args.fingerprint, repo)
+    except meter.MeterError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+
+
+def _voice_pieces(args):
+    """The prose `score --voice` measures, by name, in order: the --prose
+    files, or the book's scenes in scope. Returns (pieces, not_measured,
+    unreadable): scenes with no file are named in `not_measured`; files
+    that can't be read in `unreadable` (each with why)."""
+    pieces, missing, unreadable = {}, [], {}
+    if args.prose:
+        seen = {}
+        for path in args.prose:
+            real = os.path.realpath(path)
+            if real in seen:
+                # one file named twice would count twice in the pool
+                log(f'WARNING: {path} is {seen[real]} again; it is measured once')
+                continue
+            seen[real] = path
+            try:
+                pieces[path] = read_scene_prose(path)   # any markers stripped, as in a scene
+            except (OSError, UnicodeDecodeError) as e:
+                unreadable[path] = _why(e)
+        return pieces, missing, unreadable
+    project_dir = detect_project_root()
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    filter_mode, filter_value, _ = _resolve_filter(args)
+    ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
+                             filter_mode, filter_value)
+    if not ids:
+        log('ERROR: No scene in scope.')
+        sys.exit(1)
+    for sid in ids:
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if not os.path.isfile(path):
+            missing.append(sid)
+            continue
+        try:
+            pieces[sid] = read_scene_prose(path)
+        except (OSError, UnicodeDecodeError) as e:
+            unreadable[sid] = _why(e)
+    return pieces, missing, unreadable
+
+
+def _why(e: Exception) -> str:
+    """Why a file can't be read: the error's kind and its message."""
+    detail = getattr(e, 'strerror', None) or str(e)
+    return f'{e.__class__.__name__}: {detail}' if detail else e.__class__.__name__
+
+
+def _run_voice_only(args):
+    """`score --voice`: print the voice meter (`voiceprint_meter`) for the
+    scenes in scope (--scenes/--act/--from-seq) or the --prose files,
+    against --fingerprint or --voice-repo. No API call, no cycle, nothing
+    written. It reports drift and is never a rewrite target. Exit 1 when
+    the prose is too short to measure, the fingerprint can't be read, or a
+    scene or file can't be read (after the report)."""
+    from storyforge import voiceprint_meter as meter
+    from storyforge.voiceprint import MIN_COMPARE_WORDS
+    _refuse_clash(args, '--voice', 'prints the voice meter only', _VOICE_EXCLUSIVE)
+    if args.prose and (args.scenes or args.act or args.from_seq):
+        log('ERROR: score --voice --prose measures the files given; --scenes, --act and '
+            '--from-seq choose scenes instead')
+        sys.exit(1)
+    top = 10 if args.top is None else args.top
+    if top < 1:
+        log('ERROR: --top must be at least 1')
+        sys.exit(1)
+    source = _voice_source(args)
+    pieces, missing, unreadable = _voice_pieces(args)
+    notes = []
+    if missing:
+        shown = ', '.join(missing[:10]) + (f' (and {len(missing) - 10} more)'
+                                           if len(missing) > 10 else '')
+        notes.append(f'WARNING: {len(missing)} scene(s) in scope have no scene file and '
+                     f'aren\'t measured: {shown}')
+    for name, why in unreadable.items():
+        notes.append(f'ERROR: {name} can\'t be read ({why}); it isn\'t measured')
+    if not pieces and unreadable:
+        for line in notes:
+            log(line)
+        log('ERROR: none of the files in scope could be read, so there is nothing to measure.')
+        sys.exit(1)
+    try:
+        report = meter.meter(source, pieces, top=top)
+    except meter.TooShort as e:
+        print(f'Too short to measure: {e.words:,} words of prose in scope; the voice meter '
+              f'needs at least {MIN_COMPARE_WORDS:,} to read a distance.')
+        if e.empty:
+            shown = ', '.join(e.empty[:10]) + (f' (and {len(e.empty) - 10} more)'
+                                               if len(e.empty) > 10 else '')
+            print(f'No prose to measure: {shown}.')
+        for line in notes:
+            log(line)
+        sys.exit(1)
+    except meter.MeterError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    for line in meter.report_lines(report):
+        print(line)
+    for line in notes:
+        log(line)
+    if unreadable:
+        log('ERROR: the file(s) above can\'t be read, so the reading leaves them out; fix '
+            'them and run again.')
         sys.exit(1)
 
 
@@ -1698,20 +1893,11 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                           cycle_dir, briefs_csv, score_mode, sonnet_model,
                           plugin_dir, system=None):
     """Run brief fidelity scoring."""
-    # Count scenes with brief data
-    brief_count = 0
-    with open(briefs_csv) as f:
-        header = None
-        goal_idx = 1  # fallback
-        for i, line in enumerate(f):
-            if i == 0:
-                header = line.strip().split('|')
-                if 'goal' in header:
-                    goal_idx = header.index('goal')
-                continue
-            fields = line.strip().split('|')
-            if len(fields) > goal_idx and fields[goal_idx].strip():
-                brief_count += 1
+    # Count scenes with brief data: a fact or a goal (#644: goal is optional)
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.scoring import has_brief_facts
+    brief_count = sum(1 for row in _read_csv_as_map(briefs_csv).values()
+                      if has_brief_facts(row))
 
     if brief_count == 0:
         log('No scenes with brief data — skipping fidelity scoring')
@@ -1742,6 +1928,8 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 continue
             prompt = build_fidelity_prompt(sid, project_dir, plugin_dir)
             if not prompt:
+                log(f'  WARNING: brief fidelity: {sid} not scored: its brief has no '
+                    f'outcome, key_actions or goal, or its prose is under 100 characters')
                 continue
             requested.append(sid)
             request = build_batch_request(
@@ -1765,6 +1953,8 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 continue
             prompt = build_fidelity_prompt(sid, project_dir, plugin_dir)
             if not prompt:
+                log(f'  WARNING: brief fidelity: {sid} not scored: its brief has no '
+                    f'outcome, key_actions or goal, or its prose is under 100 characters')
                 continue
             fidelity_log = os.path.join(log_dir, f'fidelity-{sid}.json')
             requested.append(sid)
@@ -1812,6 +2002,15 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 if result.get('scores'):
                     results.append(result)
                     scored_ids.add(sid)
+                    from storyforge.elaborate import get_scene
+                    from storyforge.scoring import unscored_elements
+                    lost = unscored_elements(
+                        get_scene(sid, os.path.join(project_dir, 'reference')) or {},
+                        result['scores'])
+                    if lost:
+                        log(f'  WARNING: {sid}: fidelity reply has no score for '
+                            f'{", ".join(lost)}, which the brief lists; left out of '
+                            f'its overall')
                 break
     unscored = [sid for sid in requested if sid not in scored_ids]
     if unscored:
@@ -1994,12 +2193,12 @@ MIXED = 'changed-within-cycle'
 
 #: What `--complete-cycle` can't be combined with: each would be dropped.
 #: (Checked by identity with None and False: `--level 0` is a level.)
-_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'deterministic',
+_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'voice', 'deterministic',
                        'principles',
                        'diagnosis_only', 'scenes', 'act', 'from_seq', 'direct', 'deep',
                        'interactive', 'no_apply', 'level', 'all_levels', 'compare', 'drift',
                        'boundary', 'all_boundaries', 'scope', 'semantic', 'bible_consistency',
-                       'story_power', 'text_fidelity')
+                       'story_power', 'text_fidelity') + _VOICE_ONLY
 
 _NOVEL_SECTION_NAMES = ('character', 'genre')
 

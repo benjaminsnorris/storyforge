@@ -231,7 +231,8 @@ class TestGateAsRevise:
         assert e8.gate_as_revise(project, 's', 'revise', 'Prose.') == 'Fixed.'
         assert gate.pending(project)['s']['command'] == 'revise'
         assert e8.read_gate_counts(project) == {'new': 1, 'plan_conflicts': 0,
-                                                'extraction': 0, 'inherited': 0}
+                                                'extraction': 0, 'inherited': 0,
+                                                'advisory': 0}
 
     def test_gate_counts_sort_what_the_gate_found(self):
         from storyforge import gate
@@ -242,8 +243,12 @@ class TestGateAsRevise:
         r.check.findings += [conflict, old]
         r.plan_conflicts, r.inherited = [conflict], [old]
         r.problems = {'quote': ['s: x'], 'rejected': ['s: restates y']}
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'w')
+        r.check.findings.append(promise)
+        r.advisory = [promise]                       # #642: reported, not fixed
         counts = e8.gate_counts(r)
-        assert counts == {'new': 2, 'plan_conflicts': 1, 'extraction': 1, 'inherited': 1}
+        assert counts == {'new': 2, 'plan_conflicts': 1, 'extraction': 1, 'inherited': 1,
+                          'advisory': 1}
         assert counts['new'] == len(gate.problems_to_fix(r))   # what the fix is sent
         assert tuple(counts) == e8.GATE_COUNT_KEYS
 

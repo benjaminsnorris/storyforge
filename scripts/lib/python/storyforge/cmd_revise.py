@@ -283,15 +283,18 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     """Re-draft scenes from their updated briefs and commit those written.
 
     Scenes go in reading order, and each redraft is gated as ``write``
-    gates a draft (``_gate_redraft``). Like ``write``, redrafting stops at
-    the first scene the gate doesn't pass: the scenes after it would be
-    checked against a ledger missing its facts.
+    gates a draft (``_gate_redraft``). Like ``write`` (#641), a scene that
+    isn't redrafted or that the gate doesn't pass stops only itself: a
+    later scene that depends on it (``_leaning``: `cmd_write.GateBlockers`
+    narrowed, with the scenes not redrafted held) isn't redrafted, since it
+    would be drafted and checked against a ledger missing its facts; the
+    others are.
 
     Raises RedraftError (after that commit) naming every scene whose prose
     was not re-drafted (no prompt, or a reply refused, cut off or unsafe per
     ``cmd_write._extract_scene_from_response``: its brief changed but its
-    prose did not), a redraft the gate didn't pass, and the scenes not
-    reached after it, so the run must not report success."""
+    prose did not), a redraft the gate didn't pass, and the scenes held
+    behind them, so the run must not report success."""
     from storyforge.cmd_write import _build_prompt, _extract_scene_from_response
     from storyforge.api import invoke_to_file as _invoke_to_file, RefusalError
 
@@ -320,12 +323,17 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     scene_ids = _reading_order(project_dir, scene_ids)
     from storyforge import gate
     baseline = gate.snapshot(project_dir)   # the book before this run
+    # #641: not redrafted; they hold what depends on them: those that wait
+    # (`held`) and those that failed (`failed_why`, named as passed over)
+    held: dict[str, str] = {}
+    failed_why: dict[str, str] = {}
     for i, sid in enumerate(scene_ids, 1):
         log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
-        stop = _leaning(project_dir, sid)
+        stop = _leaning(project_dir, sid, held, failed_why)
         if stop:
-            failed += [stop] + _not_reached(scene_ids[i:])
-            break
+            failed.append(stop)
+            held[sid] = 'not redrafted: it waits on an earlier scene'
+            continue
         try:
             prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
                                    system_context=bool(system), rewrite=True)
@@ -335,8 +343,9 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             why = 'no prompt'
         if not prompt:
             log(f'    ERROR: Could not build a prompt for {sid}: {why}')
-            failed += [f'{sid} ({why})'] + _not_reached(scene_ids[i:])
-            break
+            failed.append(f'{sid} ({why})')
+            failed_why[sid] = f'not redrafted: {why}'
+            continue
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
         scene_system = (list(system) + prior_prose_blocks(sid, project_dir, prior_prose)
                         if system else system)
@@ -351,16 +360,17 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         if reason:
             reason = reason.rstrip('.')
             log(f'    ERROR: Not writing the re-draft of {sid}: {reason}')
-            # the scenes after it would be drafted with its stale prose among
-            # the earlier scenes, as `write` stops at a bad reply
-            failed += [f'{sid} ({reason})'] + _not_reached(scene_ids[i:])
-            break
+            # #641: it stops only itself; the scenes depending on it wait
+            failed.append(f'{sid} ({reason})')
+            failed_why[sid] = f'not redrafted: {reason}'
+            continue
         else:
             written += 1
             why = _gate_redraft(project_dir, sid, scene_file, log_dir, before=baseline)
-            if why:
-                failed += _stopped_at(sid, why, scene_ids[i:])
-                break
+            if why:   # listed in gate.pending: the scenes depending on it wait
+                failed += _stopped_at(sid, why)
+                failed_why[sid] = 'the gate did not pass its redraft'
+                continue
             _note_recheck(rechecks_open, sid,
                           _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget))
 
@@ -671,6 +681,15 @@ def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget):
                                       reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
 
 
+def _log_advisory(project_dir: str) -> None:
+    """#642: list the broken promises the gate reported and didn't stop on
+    (every scene's, `gate.advisory_summary`): the prose stands, and the
+    author amends a brief or marks a beat `must:`."""
+    from storyforge.gate import advisory_summary
+    for line in advisory_summary(project_dir):
+        log(line)
+
+
 def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
                   before=None) -> str:
     """Gate the redraft just written to `scene_file` as `write` gates a
@@ -742,7 +761,7 @@ def _exit_if_pass_blocked(project_dir: str, targets: str,
         blockers = cmd_write.GateBlockers(project_dir, narrow=True)
         for t in sorted(targets_in_book, key=order.get):
             for line in _not_deferred(project_dir, blockers.of(t), deferred):
-                sid = line.split(':', 1)[0]
+                sid = line.scene_id
                 if order[sid] < first:
                     before.setdefault(sid, line)
                 elif (sid not in targets_in_book
@@ -752,12 +771,10 @@ def _exit_if_pass_blocked(project_dir: str, targets: str,
         log(f'ERROR: {e}')
         sys.exit(1)
     if before:
-        cmd_write._log_blockers(sorted(before.values(),
-                                       key=lambda b: order[b.split(':', 1)[0]]))
+        cmd_write._log_blockers(sorted(before.values(), key=lambda b: order[b.scene_id]))
         sys.exit(1)
     if between:
-        cmd_write._log_blockers(sorted(between.values(),
-                                       key=lambda b: order[b.split(':', 1)[0]]))
+        cmd_write._log_blockers(sorted(between.values(), key=lambda b: order[b.scene_id]))
         log('The pass rewrites scenes after it, and they could not be gated: nothing spent.')
         sys.exit(1)
 
@@ -782,14 +799,18 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     (design §3: the ledger is consistent after each step); a scene that
     passes comes off the list.
 
-    Stops at the first scene the gate doesn't pass (listed with the gate's
-    reasons, its prose kept) or that waits behind an earlier pending scene
-    (a re-check that failed mid-pass) that it waits on (`cmd_write.GateBlockers`
-    narrowed, #633): the scenes after it would be gated against a ledger
-    missing its facts, so they stay listed as revised but not gated. Returns the lines naming what didn't pass, at most three:
-    that scene, the scenes left ungated, and a re-check that didn't pass or
-    wasn't run (empty when all passed and every re-check did). The caller
-    commits and stops the session."""
+    A scene the gate doesn't pass (listed with the gate's reasons, its
+    prose kept) stops only itself (#641): the run goes on. A scene that
+    waits behind an earlier pending scene (one that failed here, or a
+    re-check that failed mid-pass) that it depends on
+    (`cmd_write.GateBlockers` narrowed, #633) isn't gated, since it would
+    be gated against a ledger missing that scene's facts: it stays listed
+    as revised but not gated. Returns the lines naming what didn't pass:
+    each scene the gate didn't pass, the scenes left ungated, and the last
+    re-check that didn't pass or wasn't run (empty when all passed and
+    every re-check did). The caller commits and stops the session. A
+    pending list that can't be read stops the gating there, the rest
+    listed ungated."""
     from storyforge import cmd_write, gate
     if not scene_ids:
         return []
@@ -801,21 +822,33 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     log(f'  Gating {len(ordered)} revised scene(s) in reading order...')
     budget = _run_budget()
     trouble = ''  # a re-check that didn't pass or wasn't run
+    failed: list[str] = []   # the lines for each scene the gate didn't pass (#641: the run goes on)
+    ungated: list[str] = []  # the lines for each scene not gated: it waits on an earlier one
+    # #641's review (TD-3): those scenes for `GateBlockers`, should their
+    # pending rows be missing: the ones that wait, and the ones that failed
+    held: dict[str, str] = {}
+    did_not_pass: dict[str, str] = {}
     scenes_dir = os.path.join(project_dir, 'scenes')
     for i, sid in enumerate(ordered):
         rest = ordered[i + 1:]
         try:
             _recheck_before(project_dir, sid, ordered[i:], deferred, log_dir, budget)
-            blocking = _not_deferred(project_dir, cmd_write._gate_blockers(
-                project_dir, sid, narrow=True), deferred)
+            blockers = cmd_write.GateBlockers(project_dir, narrow=True, held=held,
+                                              failed=did_not_pass)
+            stopping = blockers.of(sid)
+            blocking = _not_deferred(project_dir, stopping, deferred)
         except gate.GateError as e:
             log(f'  ERROR: {e}')
-            return _pend_ungated(project_dir, ordered[i:], pass_name, str(e))
+            return failed + ungated + _pend_ungated(project_dir, ordered[i:], pass_name, str(e))
         if blocking:
             cmd_write._log_blockers(blocking)
-            return _pend_ungated(project_dir, ordered[i:], pass_name,
-                                 'an earlier scene waits on the gate: '
-                                 + '; '.join(b.split(':')[0] for b in blocking))
+            ungated += _pend_ungated(project_dir, [sid], pass_name,
+                                     'an earlier scene waits on the gate: '
+                                     + '; '.join(b.scene_id for b in blocking))
+            held[sid] = 'not gated: it waits on an earlier scene'
+            continue
+        # SF-1: named, as write names what it drafts past
+        cmd_write.log_passed_over(sid, blockers.passed_over(sid, stopping), 'gating')
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
         original = read_scene_raw(project_dir, sid)   # its markers must survive the gate
         passed, why = cmd_write._gate_drafted_scene(project_dir, sid, scene_file, 'revise',
@@ -829,8 +862,9 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
                     f'not gated ({e}); remove its row.')
         else:
             log(f'  ERROR: the gate did not pass the revision of {sid}: {why}')
-            return ([f'{sid} (the gate did not pass it: {why})']
-                    + _pend_ungated(project_dir, rest, pass_name, f'the gate stopped at {sid}'))
+            failed.append(f'{sid} (the gate did not pass it: {why})')
+            did_not_pass[sid] = f'the gate did not pass it: {why}'
+            continue
         # one budget for the session: the pass's spend and the gate runs
         # still owed (the rest of this pass) come first. A scene a later
         # pass rewrites is re-read by its gate there (#619)
@@ -845,7 +879,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
             elif run.over_budget:
                 trouble = (f'{", ".join(run.left)} (listed for a re-check after {sid}, not '
                            f'run: over the cost threshold; `storyforge check --pending`)')
-    return [trouble] if trouble else []
+    return failed + ungated + ([trouble] if trouble else [])
 
 
 def _recheck_before(project_dir: str, sid: str, ungated: list[str],
@@ -878,7 +912,7 @@ def _not_deferred(project_dir: str, blocking: list[str],
     from storyforge import gate
     waiting = gate.pending(project_dir)
     return [b for b in blocking
-            if not ((sid := b.split(':', 1)[0]) in deferred
+            if not ((sid := b.scene_id) in deferred
                     and waiting.get(sid, {}).get('command') == gate.RECHECK)]
 
 
@@ -937,8 +971,9 @@ def pass_gate_advice(resume: str) -> str:
     that carries on (it differs between the plan's passes and the polish loop)."""
     return ('The revised prose is kept and committed. Each scene named above is listed in '
             'working/gate-pending.csv (an ERROR above names any that could not be): fix the '
-            'first one\'s prose (or redraft it with `storyforge write --force --scenes <id>`), '
-            f'run `storyforge check --pending`, then {resume}.')
+            'prose of each the gate did not pass (or redraft it with `storyforge write --force '
+            '--scenes <id>`), run `storyforge check --pending` (it checks every listed scene, '
+            f'those left ungated too), then {resume}.')
 
 
 def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
@@ -949,40 +984,49 @@ def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
     return sorted(scene_ids, key=lambda s: (s not in order, order.get(s, 0), s))
 
 
-def _leaning(project_dir: str, scene_id: str) -> str:
+def _leaning(project_dir: str, scene_id: str, held: dict[str, str] | None = None,
+             failed: dict[str, str] | None = None) -> str:
     """Why `scene_id` can't be redrafted before spending ('' when it can),
     the check `write` makes, narrowed to the scenes it waits on (#633,
-    `cmd_write.GateBlockers`): an earlier scene waits on the gate
-    (`working/gate-pending.csv`), so the ledger lacks its facts. Later facts
-    leaning on its commitments are no reason: the scenes they are in are
-    re-checked after its redraft passes (Phase 4)."""
+    `cmd_write.GateBlockers`): an earlier scene it depends on waits on the
+    gate (`working/gate-pending.csv`), or wasn't redrafted this run
+    (`held`: it waited; `failed`: for its own failure; #641), so the
+    ledger lacks its facts. Later facts leaning on its commitments are no
+    reason: the scenes they are in are re-checked after its redraft passes
+    (Phase 4). When it can be redrafted, the earlier scenes waiting on the
+    gate that it goes on past are named (WARNING, as `write` does; #641's
+    review, SF-1)."""
     from storyforge import cmd_write, gate
     try:
-        blocking = cmd_write._gate_blockers(project_dir, scene_id, narrow=True)
+        blockers = cmd_write.GateBlockers(project_dir, narrow=True, held=held, failed=failed)
+        blocking = blockers.of(scene_id)
     except gate.GateError as e:
         log(f'    ERROR: {e}')
         return f'{scene_id} (not redrafted: {e})'
     if blocking:
         cmd_write._log_blockers(blocking)
-        return (f'{scene_id} (not redrafted: earlier scene(s) wait on the gate: '
-                + '; '.join(b.split(':')[0] for b in blocking) + ')')
+        return (f'{scene_id} (not redrafted: it waits on earlier scene(s) that did not '
+                f'pass the gate or were not redrafted: '
+                + '; '.join(b.scene_id for b in blocking) + ')')
+    cmd_write.log_passed_over(scene_id, blockers.passed_over(scene_id, blocking), 'redrafting')
     return ''
 
 
-def _stopped_at(scene_id: str, why: str, rest: list[str]) -> list[str]:
-    """What `RedraftError` says when the gate stops a run of redrafts."""
+def _stopped_at(scene_id: str, why: str) -> list[str]:
+    """What `RedraftError` says about a redraft the gate didn't pass (#641:
+    the run goes on, holding the scenes that depend on it)."""
     log(f'    ERROR: the gate did not pass the redraft of {scene_id}: {why}')
+    log('    Going on: the later scenes that depend on it are not redrafted.')
     return [f'{scene_id} (redrafted, but the gate did not pass it and it is listed in '
-            f'working/gate-pending.csv: {why})'] + _not_reached(rest)
+            f'working/gate-pending.csv: {why})']
 
 
 def _not_reached(rest: list[str]) -> list[str]:
+    """The scenes a run of redrafts stopped before (no reply from the API)."""
     out = []
     if rest:
-        log(f'    Stopping: {len(rest)} later scene(s) not redrafted, as write stops '
-            f'at a scene the gate does not pass')
-        out.append(f'{", ".join(rest)} (not redrafted: redrafting stops at a scene the '
-                   f'gate does not pass)')
+        log(f'    Stopping: {len(rest)} later scene(s) not redrafted')
+        out.append(f'{", ".join(rest)} (not redrafted: the run stopped before them)')
     return out
 
 
@@ -990,8 +1034,8 @@ REDRAFT_ADVICE = (
     'Their briefs were rewritten. For each scene named above: one the gate did not '
     'pass was redrafted and is listed in working/gate-pending.csv: fix its prose and run '
     '`storyforge check <id>`. A later scene whose re-check failed after a redraft is '
-    'listed there too: fix it and run `storyforge check --pending`. Any other (no reply, an earlier scene waiting on the gate, '
-    'or not reached) still has its old prose: once the scenes before it pass the gate, '
+    'listed there too: fix it and run `storyforge check --pending`. Any other (no reply, an earlier scene it depends on waiting on the gate, '
+    'or not reached) still has its old prose: once the scenes it depends on pass the gate, '
     'redraft it with `storyforge write --force --coaching full --scenes <id>`.')
 
 
@@ -1904,15 +1948,26 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
     return cycle_dir, diag_rows
 
 
-def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str]:
-    """Identify scenes needing upstream fixes based on diagnosis root_cause.
+#: Why a scene whose brief the diagnosis blames gets no brief fix (plan
+#: decision 9): the fix rewrote goal, conflict, crisis and decision, which
+#: are now the author's notes, never generated
+NO_BRIEF_FIX = ('goal, conflict, crisis and decision are the author\'s notes (plan '
+                'decision 9), never rewritten; amend the brief by hand, or `storyforge hone` '
+                'for its events')
 
-    Returns sorted list of scene IDs where root_cause is 'brief' and score is low.
-    Scene IDs are drawn from the worst_items field of matching diagnosis rows.
-    An adaptation's scenes with source drift are upstream too (#477; see
-    `_source_drift_scenes`); without a `source:` block there are none.
+
+def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str]:
+    """The scenes whose briefs `_fix_upstream_briefs` fixes before a
+    redraft: an adaptation's scenes with source drift (#477; see
+    `_source_drift_scenes`; without a `source:` block there are none).
+
+    The scenes the diagnosis gives a `brief` root cause (the worst_items of
+    its rows) are no longer fixed: the fix rewrote goal, conflict, crisis
+    and decision, the author's notes since plan decision 9. They are listed
+    for the author in a NOTE (`NO_BRIEF_FIX`) and left to the craft passes.
     """
     upstream = set(_source_drift_scenes(project_dir))
+    blamed: set[str] = set()
     for row in diag_rows:
         if row.get('root_cause') != 'brief':
             continue
@@ -1922,7 +1977,10 @@ def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str
         for sid in worst.split(';'):
             sid = sid.strip()
             if sid:
-                upstream.add(sid)
+                blamed.add(sid)
+    if blamed - upstream:
+        log(f'  NOTE: the diagnosis blames the briefs of {", ".join(sorted(blamed - upstream))}; '
+            f'not rewritten: {NO_BRIEF_FIX}')
     return sorted(upstream)
 
 
@@ -1931,15 +1989,22 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
     (`source_fidelity.drift_state`) on a brief or prose unchanged since it was
     scored. Says what it can't see: no results yet, and results scored on a
     brief or prose since changed. In `free` mode drift is listed for the
-    author and nothing is returned: free mode doesn't undo departures."""
+    author and nothing is returned: free mode doesn't undo departures. A
+    scene whose only drift is in the brief's author notes (goal,
+    key_dialogue...: `_split_note_drift`) is listed for the author and not
+    returned: no fix rewrites those (#644, plan decision 9), so it is no
+    upstream work, no forecast, and no "drift fixed" (PR #675's review SF-1,
+    SF-2, CR-1)."""
     from storyforge import source
     from storyforge.source_fidelity import drift_state
     cfg = source.read_config(project_dir)
     if cfg is None:
         return {}
     state = drift_state(project_dir)
+    fixable = {sid: lines for sid, lines in state.drift.items()
+               if _split_note_drift(lines)[0]}
     if quiet:
-        return {} if cfg.mode == 'free' else state.drift
+        return {} if cfg.mode == 'free' else fixable
     if not state.checked:
         log('  Source fidelity: no results yet, so source drift is not checked; run '
             '`storyforge score --source-fidelity briefs` (or a full score for the prose)')
@@ -1953,25 +2018,30 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
         log(f'  Source drift in {len(state.drift)} scene(s), left as it is (mode: free): '
             f'{", ".join(sorted(state.drift))}')
         return {}
-    return state.drift
+    notes_only = sorted(set(state.drift) - set(fixable))
+    if notes_only:
+        log(f'  NOTE: source drift only in the author\'s notes, not rewritten (#644, plan '
+            f'decision 9); amend them by hand if they should follow the source: '
+            + '; '.join(f'{sid} ({" / ".join(state.drift[sid])})' for sid in notes_only))
+    return fixable
 
 
 _PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
 
 
-# The fields the brief fix rewrites; their current text does not vouch for a
-# name (an earlier fix may have invented it).
-_BRIEF_FIX_FIELDS = ('goal', 'conflict', 'crisis', 'decision')
-# What a source-drift fix rewrites (#477): drift is in events, outcomes and
-# lines as well as in the dramatic four. Drift in on_stage or knowledge_out
-# is shown to the fix but those are not rewritten here (they belong to the
-# intent and the ledger); the fix can only bring the events back.
-_SOURCE_FIX_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
-                      'key_actions', 'key_dialogue')
+# What a source-drift fix rewrites (#477): the brief's facts, its events and
+# outcome. Their current text does not vouch for a name (an earlier fix may
+# have invented it). Drift in on_stage or knowledge_out is shown to the fix
+# but those are not rewritten here (they belong to the intent and the
+# ledger); the fix can only bring the events back. Never the author's notes
+# (`elaborate.AUTHOR_NOTE_COLUMNS`: goal, conflict, crisis, decision,
+# key_dialogue...; #644, plan decision 9): shown to the fix as they stand,
+# and drift in one is reported for the author.
+_SOURCE_FIX_FIELDS = ('outcome', 'key_actions')
 
 
 def _book_text(known_text: str, prose: str, brief: dict,
-               fixed: tuple[str, ...] = _BRIEF_FIX_FIELDS) -> str:
+               fixed: tuple[str, ...] = _SOURCE_FIX_FIELDS) -> str:
     """What a rewrite of one scene's brief may name: the reference text, the
     scene's prose, and the brief fields the fix leaves alone."""
     kept = ' '.join(str(v) for k, v in brief.items() if k not in fixed)
@@ -1994,13 +2064,26 @@ def _brief_field_re(names: tuple[str, ...]) -> re.Pattern:
     return re.compile(rf'^[\s*_#>-]*({alternation})[*_]*\s*:[*_]*\s*(.*?)\s*$')
 
 
-_BRIEF_FIELD_RE = _brief_field_re(_BRIEF_FIX_FIELDS)
+def _split_note_drift(lines: list[str]) -> tuple[list[str], list[str]]:
+    """(drift the source-drift fix works from, drift in the brief's author
+    notes) of one scene's drift lines (`source_fidelity.drift_state`:
+    "{target} {element}: {evidence}"). The author's notes
+    (`elaborate.AUTHOR_NOTE_COLUMNS`: goal, key_dialogue...; #644, plan
+    decision 9) are reported, never rewritten. Drift the prose has stays the
+    fix's: it brings the events back."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    fix, notes = [], []
+    for line in lines:
+        head = line.split(':', 1)[0].split()
+        is_note = len(head) == 2 and head[0] == 'brief' and head[1] in AUTHOR_NOTE_COLUMNS
+        (notes if is_note else fix).append(line)
+    return fix, notes
 
 
 def _parse_brief_fix(response: str,
-                     names: tuple[str, ...] = _BRIEF_FIX_FIELDS) -> dict[str, str]:
+                     names: tuple[str, ...] = _SOURCE_FIX_FIELDS) -> dict[str, str]:
     """The fields of a brief-fix reply, tolerating markdown bold."""
-    pattern = _BRIEF_FIELD_RE if names == _BRIEF_FIX_FIELDS else _brief_field_re(names)
+    pattern = _brief_field_re(names)
     fields = {}
     for line in response.splitlines():
         m = pattern.match(line)
@@ -2052,7 +2135,13 @@ def _source_drift_fix(project_dir: str, scene_id: str, scene: dict, intent: dict
                                                   tables=ctx.tables)
                                for slug, sid in refs)
     rules = ctx.rules
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
     current = '\n'.join(f'{k.upper()}: {brief.get(k, "")}' for k in _SOURCE_FIX_FIELDS)
+    notes = [f'{k}: {brief[k].strip()}' for k in AUTHOR_NOTE_COLUMNS
+             if (brief.get(k) or '').strip()]
+    if notes:
+        current += ('\n\nThe author\'s notes (theirs, not yours to rewrite or repeat):\n'
+                    + '\n'.join(notes))
     drift_lines = '\n'.join(f'- {d}' for d in drift)
     reply_format = '\n'.join(f'{k.upper()}: [rewritten {k}]' for k in _SOURCE_FIX_FIELDS)
     prompt = f"""You are a story editor bringing a scene's brief back to the source it adapts.
@@ -2084,7 +2173,7 @@ Drift found:
 
 {keep_section(project_dir)}
 
-Rewrite the brief so it adapts the source again: undo each drift listed, keep every departure the treatment, its note or the version rules allow, and keep what isn't drift as it is. Use this novel's names, never the source prose's. OUTCOME is one of yes, no, yes-but, no-and, no-but. KEY_ACTIONS and KEY_DIALOGUE are semicolon-separated. Do not introduce any person, place or event that is in neither the source scenes nor this scene.
+Rewrite the brief so it adapts the source again: undo each drift listed, keep every departure the treatment, its note or the version rules allow, and keep what isn't drift as it is. Use this novel's names, never the source prose's. OUTCOME is one of yes, no, yes-but, no-and, no-but. KEY_ACTIONS is semicolon-separated events: say that something is said, never script the words. Do not introduce any person, place or event that is in neither the source scenes nor this scene.
 
 Respond ONLY with the {len(_SOURCE_FIX_FIELDS)} fields in this exact format (no preamble, no explanation):
 {reply_format}"""
@@ -2093,22 +2182,26 @@ Respond ONLY with the {len(_SOURCE_FIX_FIELDS)} fields in this exact format (no 
 
 def _fix_upstream_briefs(project_dir: str,
                          scene_ids: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Rewrite goal/conflict/crisis/decision for scenes with upstream issues.
+    """Fix the briefs of an adaptation's scenes with source drift
+    (`_source_drift_scenes`, #477): shown the drift, its source scenes and
+    the version rules, the fix rewrites `_SOURCE_FIX_FIELDS` (outcome and
+    key_actions), may also name what its source scenes name, and is refused
+    on an outcome outside `schema.VALID_OUTCOMES`, when its map row or source
+    scenes are gone, when the reply lacks a field, or when it names a
+    capitalized word found nowhere in the reference files, this scene's
+    prose, its source scenes or the brief fields the fix keeps (a WARNING,
+    and the brief left as it was). Drift in the author's notes is reported,
+    never rewritten.
 
-    Uses API to generate briefs with genuine dramatic opposition, from the
-    scene's own characters, place, plan and prose. A rewrite is rejected with
-    a WARNING, and the brief left as it was, when it lacks one of the four
-    fields or names a capitalized word found nowhere in the reference files,
-    this scene's prose or the brief fields the fix keeps. An adaptation's
-    scene with source drift (`_source_drift_scenes`) gets the source-drift fix
-    instead: shown the drift, its source scenes and the version rules, it
-    rewrites `_SOURCE_FIX_FIELDS`, may also name what its source scenes name,
-    and is refused on an outcome outside `schema.VALID_OUTCOMES` or when its
-    map row or source scenes are gone. Returns the ids of
-    the scenes whose briefs were rewritten (only those need a redraft) and,
-    for each scene left unchanged, why.
+    A scene without source drift is left alone, with a NOTE saying why
+    (`NO_BRIEF_FIX`): the dramatic
+    opposition rewrite of goal, conflict, crisis and decision is gone (plan
+    decision 9: they are the author's notes, never generated; see
+    `_detect_upstream_scenes`). Returns the ids of the scenes whose briefs
+    were rewritten (only those need a redraft) and, for each scene left
+    unchanged, why.
     """
-    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _read_csv
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
     ref_dir = os.path.join(project_dir, 'reference')
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
@@ -2126,6 +2219,11 @@ def _fix_upstream_briefs(project_dir: str,
     ctx = _SourceFixContext(project_dir) if drift else None
 
     for scene_id in scene_ids:
+        if scene_id not in drift:
+            skipped[scene_id] = NO_BRIEF_FIX
+            log(f'  NOTE: {scene_id}: no source drift to fix; its brief is left as it is '
+                f'({NO_BRIEF_FIX})')
+            continue
         brief = briefs_map.get(scene_id, {})
         prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
         prose_notes: list[str] = []
@@ -2134,73 +2232,25 @@ def _fix_upstream_briefs(project_dir: str,
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
 
-        title = scene.get('title', scene_id)
-        pov = scene.get('pov', '')
-        outcome = brief.get('outcome', '')
-        value_at_stake = intent.get('value_at_stake', '')
-        emotional_arc = intent.get('emotional_arc', '')
-        current_goal = brief.get('goal', '')
-        current_conflict = brief.get('conflict', '')
-        current_crisis = brief.get('crisis', '')
-        current_decision = brief.get('decision', '')
-
-        prompt = f"""You are a story editor rewriting scene briefs to introduce genuine dramatic opposition.
-
-Scene: {title}
-POV: {pov}
-Location: {scene.get('location', '')}
-Characters: {intent.get('characters', '')}
-On stage: {intent.get('on_stage', '')}
-Function: {intent.get('function', '')}
-Outcome: {outcome}
-Value at stake: {value_at_stake}
-Emotional arc: {emotional_arc}
-Key actions: {brief.get('key_actions', '')}
-
-Current brief:
-GOAL: {current_goal}
-CONFLICT: {current_conflict}
-CRISIS: {current_crisis}
-DECISION: {current_decision}
-
-The scene as written:
-<scene>
-{_scene_prose_excerpt(scene_id, prose)}
-</scene>
-
-The current brief lacks genuine opposition — the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.
-
-Rewrite all four fields to introduce genuine opposition while:
-- Preserving the existing emotional arc and value at stake
-- Making the conflict a concrete, specific obstacle with a clear opposing force
-- Making the goal something the POV character actively wants and must fight for
-- Making the crisis a specific moment where the worst happens or the hardest choice appears
-- Making the decision a concrete choice with real cost on both sides
-
-Find the opposition inside this scene: its characters, its place, and what already happens in it. Do not introduce any person, place, organization or event that is not named above; the brief must still describe this book's scene.
-
-Respond ONLY with the four fields in this exact format (no preamble, no explanation):
-GOAL: [rewritten goal]
-CONFLICT: [rewritten conflict]
-CRISIS: [rewritten crisis]
-DECISION: [rewritten decision]"""
-        fix_fields = _BRIEF_FIX_FIELDS
-        extra_known = ''
-        if scene_id in drift:
-            fix = _source_drift_fix(project_dir, scene_id, scene, intent, brief, prose,
-                                    drift[scene_id], ctx)
-            if isinstance(fix, str):
-                skipped[scene_id] = fix
-                log(f'  WARNING: Not fixing the source drift of {scene_id}: {fix}. '
-                    f'Its brief is unchanged.')
-                continue
-            prompt, extra_known = fix
-            fix_fields = _SOURCE_FIX_FIELDS
-            log(f'  {scene_id}: fixing its source drift (this replaces the '
-                f'dramatic-opposition fix: the source sets the opposition)')
+        lines, notes = _split_note_drift(drift[scene_id])
+        if notes:
+            log(f'  NOTE: {scene_id}: source drift in the author\'s notes is not rewritten '
+                f'(#644, plan decision 9); amend them by hand if they should follow the '
+                f'source: ' + ' / '.join(notes))
+        if not lines:
+            skipped[scene_id] = 'its only source drift is in the author\'s notes'
+            continue
+        fix = _source_drift_fix(project_dir, scene_id, scene, intent, brief, prose,
+                                lines, ctx)
+        if isinstance(fix, str):
+            skipped[scene_id] = fix
+            log(f'  WARNING: Not fixing the source drift of {scene_id}: {fix}. '
+                f'Its brief is unchanged.')
+            continue
+        prompt, extra_known = fix
 
         model = select_model('creative')
-        log(f'  Fixing upstream brief: {scene_id}')
+        log(f'  Fixing the source drift of {scene_id}\'s brief')
         response = invoke_api(prompt, model, max_tokens=1024)
 
         if not response:
@@ -2208,27 +2258,26 @@ DECISION: [rewritten decision]"""
             log(f'  WARNING: No response for {scene_id} upstream fix. Its brief is unchanged.')
             continue
 
-        fields = _parse_brief_fix(response, fix_fields)
-        missing = [k.upper() for k in fix_fields if k not in fields]
+        fields = _parse_brief_fix(response)
+        missing = [k.upper() for k in _SOURCE_FIX_FIELDS if k not in fields]
         if missing:
             skipped[scene_id] = f'reply lacked {", ".join(missing)}'
             log(f'  WARNING: Not rewriting the brief of {scene_id}: the reply has no '
                 f'{", ".join(missing)}. Its brief is unchanged.')
             continue
 
-        if fix_fields is _SOURCE_FIX_FIELDS:
-            fields = {k: csv_safe(v) for k, v in fields.items()}
-            from storyforge.schema import VALID_OUTCOMES
-            if fields['outcome'] not in VALID_OUTCOMES:
-                skipped[scene_id] = f'outcome {fields["outcome"]!r}'
-                log(f'  WARNING: Not rewriting the brief of {scene_id}: the outcome '
-                    f'{fields["outcome"]!r} is not one of {", ".join(sorted(VALID_OUTCOMES))}. '
-                    f'Its brief is unchanged.')
-                continue
+        fields = {k: csv_safe(v) for k, v in fields.items()}
+        from storyforge.schema import VALID_OUTCOMES
+        if fields['outcome'] not in VALID_OUTCOMES:
+            skipped[scene_id] = f'outcome {fields["outcome"]!r}'
+            log(f'  WARNING: Not rewriting the brief of {scene_id}: the outcome '
+                f'{fields["outcome"]!r} is not one of {", ".join(sorted(VALID_OUTCOMES))}. '
+                f'Its brief is unchanged.')
+            continue
 
         invented = invented_names(list(fields.values()),
                                    _book_text(known_text + '\n' + extra_known, prose or '',
-                                              brief, fix_fields))
+                                              brief))
         if invented:
             skipped[scene_id] = f'named {", ".join(invented)}'
             from storyforge.hone import _unread_note
@@ -2236,6 +2285,12 @@ DECISION: [rewritten decision]"""
                 f'{", ".join(invented)}, which appear nowhere in the reference files '
                 f'or this scene{_unread_note(prose_notes)}. Its brief is unchanged.')
             continue
+
+        # #642: a `must` beat is the author's; the rewrite never drops or rewords one
+        from storyforge.must import keep_must_fields
+        fields, must_notes = keep_must_fields(brief, fields)
+        for note in must_notes:
+            log(f'  NOTE: {scene_id}: {note}')
 
         briefs_map.setdefault(scene_id, {'id': scene_id})
         briefs_map[scene_id].update(fields)
@@ -2295,11 +2350,12 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     Only re-drafts scenes that already have a scene file. A reply that fails
     ``parsing.unsafe_scene_reason`` (truncated, or a collapsed word count) is
     never written. Scenes go in reading order and each redraft is gated
-    (``_gate_redraft``); redrafting stops at the first scene it couldn't
-    redraft (no prompt, no reply, an unsafe reply) or the gate doesn't pass,
-    and RedraftError names it with the scenes not reached, since its
-    rewritten brief and its prose now disagree. Returns number of scenes
-    re-drafted.
+    (``_gate_redraft``). A scene it couldn't redraft (no prompt, an unsafe
+    reply) or the gate doesn't pass stops only itself (#641): a later scene
+    that depends on it isn't redrafted (``_leaning``, with the scenes not
+    redrafted held), the others are; no reply from the API stops the run.
+    RedraftError names each, since a rewritten brief and its prose now
+    disagree. Returns number of scenes re-drafted.
     """
     from storyforge.cmd_write import _build_prompt, _detect_briefs
     from storyforge.common import get_coaching_level, build_shared_context
@@ -2339,16 +2395,21 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     scene_ids = _reading_order(project_dir, scene_ids)
     from storyforge import gate
     baseline = gate.snapshot(project_dir)   # the book before this run
+    # #641: not redrafted; they hold what depends on them: those that wait
+    # (`held`) and those that failed (`failed_why`, named as passed over)
+    held: dict[str, str] = {}
+    failed_why: dict[str, str] = {}
     for i, scene_id in enumerate(scene_ids, 1):
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_file):
             log(f'  Skipping re-draft of {scene_id} (not yet drafted)')
             continue
 
-        stop = _leaning(project_dir, scene_id)
+        stop = _leaning(project_dir, scene_id, held, failed_why)
         if stop:
-            failed += [stop] + _not_reached(scene_ids[i:])
-            break
+            failed.append(stop)
+            held[scene_id] = 'not redrafted: it waits on an earlier scene'
+            continue
         log(f'  Re-drafting scene: {scene_id}')
         original_prose = read_scene_raw(project_dir, scene_id)   # the markers to keep
         try:
@@ -2367,12 +2428,13 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
                             if system else system)
         except (OSError, UnicodeDecodeError, ValueError) as e:
             prompt, why = '', f'could not read the earlier prose: {e}'
-        # Each failure stops the run: the scenes after it would be drafted
-        # with its stale prose among the earlier scenes, as `write` stops
+        # #641: a failure stops only its scene; the scenes depending on it
+        # wait (`held`), as in `write`
         if not prompt:
             log(f'  ERROR: Could not build a prompt for {scene_id}: {why}')
-            failed += [f'{scene_id} ({why})'] + _not_reached(scene_ids[i:])
-            break
+            failed.append(f'{scene_id} ({why})')
+            failed_why[scene_id] = f'not redrafted: {why}'
+            continue
 
         response = invoke_api(prompt, model, max_tokens=16384,
                               label=f'redraft {scene_id}', system=scene_system or None,
@@ -2387,8 +2449,9 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         reason = unsafe_scene_reason(revised, original_prose)
         if reason:
             log(f'  ERROR: Not writing the re-draft of {scene_id}: {reason}')
-            failed += [f'{scene_id} ({reason})'] + _not_reached(scene_ids[i:])
-            break
+            failed.append(f'{scene_id} ({reason})')
+            failed_why[scene_id] = f'not redrafted: {reason}'
+            continue
 
         # A model has no reason to reproduce an illustration marker, and losing
         # one silently costs the author an illustration that nothing downstream
@@ -2412,9 +2475,10 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         why = _gate_redraft(project_dir, scene_id, scene_file, log_dir, before=baseline)
         _restore_gate_markers(project_dir, scene_id, scene_file, original_prose,
                               preserved['lost'])
-        if why:
-            failed += _stopped_at(scene_id, why, scene_ids[i:])
-            break
+        if why:   # listed in gate.pending: the scenes depending on it wait
+            failed += _stopped_at(scene_id, why)
+            failed_why[scene_id] = 'the gate did not pass its redraft'
+            continue
         _note_recheck(rechecks_open, scene_id,
                       _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget))
 
@@ -2655,7 +2719,8 @@ def _polish_loop(project_dir: str, max_loops: int,
                                 ['reference/', 'scenes/', 'working/'])
 
         if craft_converged:
-            log('  No high or medium priority issues; source drift fixed — converged')
+            log('  No high or medium priority issues; source drift '
+                + ('fixed' if fixed else 'left as it is (see above)') + ' — converged')
             _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
                                       converged=True)
             break
@@ -2727,6 +2792,7 @@ def _polish_loop(project_dir: str, max_loops: int,
 
     log('\n============================================')
     report_fallback_replies()
+    _log_advisory(project_dir)
     log('Polish loop complete')
     log(f'  Deterministic baseline: avg {baseline_summary["overall_avg"]:.2f}, '
         f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
@@ -4258,6 +4324,8 @@ Rules:
     if not args.dry_run:
         print_summary(project_dir, ('revise', 'gate', 'gate-fix'), session_start=session_start)
     report_fallback_replies()
+    if not args.dry_run:
+        _log_advisory(project_dir)
 
     if redraft_error:
         _report_redraft_error(redraft_error)
