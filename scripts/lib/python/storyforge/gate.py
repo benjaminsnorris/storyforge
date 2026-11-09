@@ -246,10 +246,11 @@ class GateResult:
     source_ruled: bool = False
     #: committed without a pass (`commit_provisional`, `write --keep-going`)
     provisional: bool = False
-    #: #631: the prose has had a blocking read (`check_blocking`): this run
-    #: made one, or skipped it as already made on the same prose; recorded
-    #: with the prose on commit (`record_prose`)
-    blocking_read: bool = False
+    #: #631/#647: how the prose's blocking was checked (one of
+    #: `BLOCKING_METHODS`; '' when it wasn't): this run checked it, or skipped
+    #: it as already checked the same way on the same prose; recorded with
+    #: the prose on commit (`record_prose`)
+    blocking_method: str = ''
     #: #631: this re-check skipped the blocking read (the prose is the gated
     #: prose, which had one); the scene's reported blocking findings are kept
     blocking_skipped: bool = False
@@ -1515,23 +1516,26 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         raise error from e
     skip, why_not = (blocking_read_before(project_dir, scene_id, prose)
                      if GATE_BLOCKING and command == 'recheck' else (False, ''))
+    what = 'stage sheet' if GATE_BLOCKING_METHOD == 'stage-sheet' else 'blocking read'
     if skip:
         # #631: a re-check runs because an earlier scene changed; the
-        # blocking read takes the scene alone, so on the gated prose it can
+        # blocking check takes the scene alone, so on the gated prose it can
         # only read the same words again (and word them otherwise)
-        result.blocking_read = result.blocking_skipped = True
-        result.blocking_note = ('blocking read skipped: the prose is unchanged since its '
-                                'last gate, which read its blocking')
+        result.blocking_method = GATE_BLOCKING_METHOD
+        result.blocking_skipped = True
+        result.blocking_note = (f'{what} skipped: the prose is unchanged since its last gate, '
+                                + ('which read its blocking' if what == 'blocking read'
+                                   else 'which checked it with the stage sheet'))
     elif GATE_BLOCKING:
         if command == 'recheck':
-            result.blocking_note = f'blocking read run: {why_not}'
+            result.blocking_note = f'{what} run: {why_not}'
         # The scene against itself (#626): the checker reads it against the
         # book; this reads its blocking alone. Its findings join the check's,
         # so they are sorted, reported, fixed and accepted the same way
         blocked = _read_blocking(project_dir, scene_id, prose, check_model, log_dir, result)
         result.check.findings.extend(blocked.findings)
         result.check.unverified.extend(blocked.unverified)
-        result.blocking_read = True
+        result.blocking_method = GATE_BLOCKING_METHOD
     if result.blocking_note:
         from storyforge.common import log
         log(f'  {scene_id}: {result.blocking_note}')
@@ -1740,7 +1744,7 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
     """What follows a written commit: the prose recorded, the source-fix,
     reported, blocked and pending lists updated (a failure is a WARNING:
     the ledger is written)."""
-    note = record_prose(project_dir, scene_id, prose, blocking=result.blocking_read)
+    note = record_prose(project_dir, scene_id, prose, blocking=result.blocking_method)
     if note:
         result.prose_notes.append(f'{scene_id}: {note}')
     if fixed_toward_source:
@@ -1984,13 +1988,13 @@ def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, 
 #: blob of its text (#558): what `steady_facts` diffs a later version
 #: against. Rows replaced on each commit
 PROSE_PATH = 'working/gate-prose.csv'
-#: `blocking`: `BLOCKING_READ` when the gate run that committed the prose
-#: had a blocking read of it (#631), so a re-check of the same prose skips
-#: it; blank for a scene gated before #626, or with the read off
+#: `blocking`: how the gate run that committed the prose checked its
+#: blocking, one of `BLOCKING_METHODS` (`read`, #631; `stage-sheet`, #647),
+#: so a re-check of the same prose by the same method skips it; blank for a
+#: scene gated before #626, or with the check off
 _PROSE_COLUMNS = ['scene_id', 'blob', 'blocking']
 #: the header before #631, still read (its rows had no blocking read)
 _OLD_PROSE_COLUMNS = ['scene_id', 'blob']
-BLOCKING_READ = 'read'
 
 
 def _git_out(project_dir: str, *args: str, data: bytes | None = None) -> bytes | None:
@@ -2052,12 +2056,16 @@ def gated_prose(project_dir: str, scene_id: str) -> tuple[str | None, str]:
     return out.decode('utf-8', errors='replace'), ''
 
 
-def blocking_read_before(project_dir: str, scene_id: str, prose: str) -> tuple[bool, str]:
+def blocking_read_before(project_dir: str, scene_id: str, prose: str,
+                         method: str | None = None) -> tuple[bool, str]:
     """#631: whether `prose` is the prose `scene_id` was last committed with
-    (`PROSE_PATH`: the same git blob) and that commit's gate run had a
-    blocking read of it, and why not. The blocking read takes the scene
-    alone, so on the same prose another read can only add noise (a new
-    reading of the same words), never a finding a change elsewhere made."""
+    (`PROSE_PATH`: the same git blob) and that commit's gate run checked its
+    blocking by `method` (default `GATE_BLOCKING_METHOD`; #647: a scene
+    checked by the stage sheet still gets the read, and the other way
+    round), and why not. The blocking check takes the scene alone, so on
+    the same prose another one can only add noise (a new reading of the
+    same words), never a finding a change elsewhere made."""
+    method = method or GATE_BLOCKING_METHOD
     try:
         row = _prose_table(project_dir).get(scene_id)
     except (OSError, UnicodeDecodeError, ValueError) as e:
@@ -2069,8 +2077,10 @@ def blocking_read_before(project_dir: str, scene_id: str, prose: str) -> tuple[b
         return False, 'git can\'t compare the prose with the gated one'
     if blob.decode().strip() != row['blob']:
         return False, 'its prose changed since its last gate'
-    if row['blocking'] != BLOCKING_READ:
+    if not row['blocking']:
         return False, 'its last gate had no blocking read (gated before it existed)'
+    if row['blocking'] != method:
+        return False, f'its last gate checked its blocking by {row["blocking"]}, not {method}'
     return True, ''
 
 
@@ -2130,12 +2140,16 @@ def _prose_from_history(project_dir: str, scene_id: str) -> str | None:
     return None
 
 
-def record_prose(project_dir: str, scene_id: str, prose: str, blocking: bool = False) -> str:
+def record_prose(project_dir: str, scene_id: str, prose: str, blocking: str = '') -> str:
     """Record `prose` as what `scene_id`'s commitments were read from: its
-    git blob, written to the object store, in `PROSE_PATH`, with whether the
-    gate run had a blocking read of it (`blocking`, #631). Returns why it
-    couldn't be ('' when it was); its row goes then, so a later gate never
-    diffs against the wrong prose."""
+    git blob, written to the object store, in `PROSE_PATH`, with how the
+    gate run checked its blocking (`blocking`: one of `BLOCKING_METHODS`,
+    or '' for not at all; #631, #647). Returns why it couldn't be ('' when
+    it was); its row goes then, so a later gate never diffs against the
+    wrong prose."""
+    if blocking not in ('',) + BLOCKING_METHODS:
+        raise ValueError(f'blocking must be one of {", ".join(BLOCKING_METHODS)} or blank, '
+                         f'not {blocking!r}')
     blob = _git_out(project_dir, 'hash-object', '-w', '--stdin', data=prose.encode('utf-8'))
     blob_id = blob.decode().strip() if blob else ''
     try:
@@ -2143,7 +2157,7 @@ def record_prose(project_dir: str, scene_id: str, prose: str, blocking: bool = F
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return f'{PROSE_PATH} not updated ({e}); the next re-check counts every reworded fact'
     if blob_id:
-        rows[scene_id] = {'blob': blob_id, 'blocking': BLOCKING_READ if blocking else ''}
+        rows[scene_id] = {'blob': blob_id, 'blocking': blocking}
     elif rows.pop(scene_id, None) is None:
         return ''   # no git, and nothing recorded to take back
     path = os.path.join(project_dir, PROSE_PATH)
