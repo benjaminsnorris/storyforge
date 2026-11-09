@@ -15,6 +15,7 @@ Usage:
     storyforge score --dry-run              # Show what would be scored
     storyforge score --no-apply             # Report proposals, never apply them (evals)
     storyforge score --complete-cycle       # Fill in the newest incomplete cycle's gaps
+    storyforge score --voice --voice-repo ../ben-voice   # Voice drift, free (never a target)
 """
 
 import argparse
@@ -91,6 +92,26 @@ def parse_args(argv):
                              '(#615). Skips what the voice guide\'s "Register exemptions" '
                              'allow. No API calls, no cycle, nothing written. Prose '
                              'projects only.')
+    parser.add_argument('--voice', action='store_true',
+                        help='Print the voice meter: how far the prose in scope (the '
+                             'book\'s with no filter, or --prose files) drifts from an '
+                             'author\'s fingerprint: the distance, each measure\'s, the '
+                             'sentences furthest from the corpus, and constructions the '
+                             'corpus never uses. It measures drift; it can\'t tell good '
+                             'prose from bad, and it is never an optimisation target for an '
+                             'automatic rewrite loop. Needs --fingerprint or --voice-repo. '
+                             'No API calls, no cycle, nothing written.')
+    parser.add_argument('--fingerprint', metavar='PATH', default=None,
+                        help='With --voice: the fingerprint.json to measure against')
+    parser.add_argument('--voice-repo', metavar='PATH', default=None,
+                        help='With --voice: the author voice repo to measure against (its '
+                             'fingerprint.json, and its corpus for the constructions)')
+    parser.add_argument('--prose', nargs='+', metavar='FILE', default=None,
+                        help='With --voice: measure these files instead of the book\'s '
+                             'scenes (no project needed)')
+    parser.add_argument('--top', type=int, default=None, metavar='N',
+                        help='With --voice: how many measures, pieces and sentences to '
+                             'list (default 10)')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -590,6 +611,10 @@ def main(argv=None):
     if args.register:
         _refuse_clash(args, '--register', 'prints the register check only',
                       _REGISTER_EXCLUSIVE)
+    if args.voice:
+        _refuse_clash(args, '--voice', 'prints the voice meter only', _VOICE_EXCLUSIVE)
+    else:
+        _refuse_without(args, '--voice', _VOICE_ONLY)
 
     # Elaboration entry points short-circuit the prose-scoring flow.
     # (--semantic is a modifier on --compare, not a standalone trigger.)
@@ -606,6 +631,9 @@ def main(argv=None):
         return
     if args.register:
         _run_register_only(args)
+        return
+    if args.voice:
+        _run_voice_only(args)
         return
 
     from datetime import datetime
@@ -1110,16 +1138,24 @@ _ELABORATION_FLAGS = ('level', 'all_levels', 'compare', 'drift', 'boundary',
                       'all_boundaries', 'scope', 'semantic', 'bible_consistency',
                       'story_power', 'text_fidelity')
 
+#: the flags that only mean something with `--voice`
+_VOICE_ONLY = ('fingerprint', 'voice_repo', 'prose', 'top')
+
 #: what `--readability` can't be combined with: each would be dropped (or,
 #: for an elaboration flag or --source-fidelity, run instead)
-_READABILITY_EXCLUSIVE = ('source_fidelity', 'register', 'deterministic', 'principles',
-                          'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
-                          'complete_cycle') + _ELABORATION_FLAGS
+_READABILITY_EXCLUSIVE = ('source_fidelity', 'register', 'voice', 'deterministic',
+                          'principles', 'direct', 'deep', 'diagnosis_only', 'no_apply',
+                          'interactive', 'complete_cycle') + _ELABORATION_FLAGS
 
 #: what `--register` can't be combined with, likewise
-_REGISTER_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
-                       'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
-                       'complete_cycle') + _ELABORATION_FLAGS
+_REGISTER_EXCLUSIVE = ('source_fidelity', 'readability', 'voice', 'deterministic',
+                       'principles', 'direct', 'deep', 'diagnosis_only', 'no_apply',
+                       'interactive', 'complete_cycle') + _ELABORATION_FLAGS
+
+#: what `--voice` can't be combined with, likewise
+_VOICE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'deterministic',
+                    'principles', 'direct', 'deep', 'diagnosis_only', 'no_apply',
+                    'interactive', 'complete_cycle') + _ELABORATION_FLAGS
 
 
 def _given(args, name):
@@ -1134,6 +1170,119 @@ def _refuse_clash(args, flag, what, exclusive):
     clash = [f'--{name.replace("_", "-")}' for name in exclusive if _given(args, name)]
     if clash:
         log(f"ERROR: {flag} {what}; it can't be combined with {', '.join(clash)}")
+        sys.exit(1)
+
+
+def _refuse_without(args, flag, needs):
+    """ERROR, exit 1, when `args` holds a flag that means something only
+    with `flag` (it would be dropped silently)."""
+    given = [f'--{name.replace("_", "-")}' for name in needs if _given(args, name)]
+    if given:
+        log(f"ERROR: {', '.join(given)} only work(s) with {flag}")
+        sys.exit(1)
+
+
+def _voice_source(args):
+    """The fingerprint `score --voice` measures against, from --fingerprint
+    or --voice-repo (exactly one). ERROR, exit 1, when neither or both is
+    given or it can't be read. (#652: with neither, read the book's
+    `voice.author` from storyforge.yaml here and pass it as the voice repo.)"""
+    from storyforge import voiceprint_meter as meter
+    if not args.fingerprint and not args.voice_repo:
+        log('ERROR: score --voice needs the fingerprint to measure against: '
+            '--fingerprint PATH (a fingerprint.json) or --voice-repo PATH (an author '
+            'voice repo)')
+        sys.exit(1)
+    if args.fingerprint and args.voice_repo:
+        log('ERROR: give score --voice one of --fingerprint and --voice-repo, not both')
+        sys.exit(1)
+    try:
+        return meter.load_source(args.fingerprint, args.voice_repo)
+    except meter.MeterError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+
+
+def _voice_pieces(args):
+    """The prose `score --voice` measures, by name, in order: the --prose
+    files, or the book's scenes in scope. Returns (pieces, not_measured,
+    unreadable): scenes with no file are named in `not_measured`; files
+    that can't be read in `unreadable` (each with why)."""
+    pieces, missing, unreadable = {}, [], {}
+    if args.prose:
+        for path in args.prose:
+            try:
+                with open(path, encoding='utf-8') as f:
+                    pieces[path] = f.read()
+            except (OSError, UnicodeDecodeError) as e:
+                unreadable[path] = e.__class__.__name__
+        return pieces, missing, unreadable
+    project_dir = detect_project_root()
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    filter_mode, filter_value, _ = _resolve_filter(args)
+    ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
+                             filter_mode, filter_value)
+    if not ids:
+        log('ERROR: No scene in scope.')
+        sys.exit(1)
+    for sid in ids:
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if not os.path.isfile(path):
+            missing.append(sid)
+            continue
+        try:
+            pieces[sid] = read_scene_prose(path)
+        except (OSError, UnicodeDecodeError) as e:
+            unreadable[sid] = e.__class__.__name__
+    return pieces, missing, unreadable
+
+
+def _run_voice_only(args):
+    """`score --voice`: print the voice meter (`voiceprint_meter`) for the
+    scenes in scope (--scenes/--act/--from-seq) or the --prose files,
+    against --fingerprint or --voice-repo. No API call, no cycle, nothing
+    written. It reports drift and is never a rewrite target. Exit 1 when
+    the prose is too short to measure, the fingerprint can't be read, or a
+    scene or file can't be read (after the report)."""
+    from storyforge import voiceprint_meter as meter
+    from storyforge.voiceprint import MIN_COMPARE_WORDS
+    _refuse_clash(args, '--voice', 'prints the voice meter only', _VOICE_EXCLUSIVE)
+    if args.prose and (args.scenes or args.act or args.from_seq):
+        log('ERROR: score --voice --prose measures the files given; --scenes, --act and '
+            '--from-seq choose scenes instead')
+        sys.exit(1)
+    top = 10 if args.top is None else args.top
+    if top < 1:
+        log('ERROR: --top must be at least 1')
+        sys.exit(1)
+    source = _voice_source(args)
+    pieces, missing, unreadable = _voice_pieces(args)
+    notes = []
+    if missing:
+        shown = ', '.join(missing[:10]) + (f' (and {len(missing) - 10} more)'
+                                           if len(missing) > 10 else '')
+        notes.append(f'WARNING: {len(missing)} scene(s) in scope have no scene file and '
+                     f'aren\'t measured: {shown}')
+    for name, why in unreadable.items():
+        notes.append(f'ERROR: {name} can\'t be read ({why}); it isn\'t measured')
+    try:
+        report = meter.meter(source, pieces, top=top)
+    except meter.TooShort as e:
+        print(f'Too short to measure: {e.words:,} words of prose in scope; the voice meter '
+              f'needs at least {MIN_COMPARE_WORDS:,} to read a distance.')
+        for line in notes:
+            log(line)
+        sys.exit(1)
+    except meter.MeterError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    for line in meter.report_lines(report, top):
+        print(line)
+    for line in notes:
+        log(line)
+    if unreadable:
+        log('ERROR: the file(s) above can\'t be read, so the reading leaves them out; fix '
+            'them and run again.')
         sys.exit(1)
 
 

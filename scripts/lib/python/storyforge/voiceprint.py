@@ -801,6 +801,37 @@ def _overrepresented(paras: Sequence[_Para], baseline: Baseline) -> dict[str, li
     return out
 
 
+# ----------------------------------------------------------------------------
+# Counting as the fingerprint counts, for the meter (`voiceprint_meter`, #653)
+# ----------------------------------------------------------------------------
+
+def proper_words(text: str) -> frozenset[str]:
+    """The names in `text`'s prose, lower-cased: words written with a
+    capital in most of their occurrences away from a sentence's start. The
+    fingerprint's phrase list leaves them out."""
+    return _proper_words(_parse(paragraphs(text)))
+
+
+def ngram_counts(text: str, n: int, names: frozenset[str] | None = None) -> Counter:
+    """The `n`-word phrases of `text`'s prose, lower-cased, counted within
+    sentences as the fingerprint's phrase list counts them, leaving out any
+    phrase holding a name (`names`, by default `proper_words(text)`)."""
+    paras = _parse(paragraphs(text))
+    return _ngram_counts(paras, n, _proper_words(paras) if names is None else names)
+
+
+def is_contraction(word: str) -> bool:
+    """Whether a lower-cased word is a contraction as `contraction_rate`
+    counts them ("didn't", "she'd", "it's")."""
+    return _is_contraction(word)
+
+
+def length_bucket(n_words: int) -> str:
+    """The bucket of `Fingerprint.sentence_lengths` a sentence of `n_words`
+    words falls in ('1-5' .. '61+')."""
+    return next(label for bound, label in _LENGTH_BUCKETS if bound is None or n_words <= bound)
+
+
 # ============================================================================
 # Fingerprint
 # ============================================================================
@@ -1010,8 +1041,7 @@ def fingerprint(texts: Mapping[str, str] | Sequence[str] | str,
     sent_lens = [len(s) for p in paras for s in p.sentences]
     buckets: Counter = Counter()
     for x in sent_lens:
-        buckets[next(label for bound, label in _LENGTH_BUCKETS
-                     if bound is None or x <= bound)] += 1
+        buckets[length_bucket(x)] += 1
     lengths = {label: _round(_share(buckets[label], len(sent_lens)))
                for _, label in _LENGTH_BUCKETS}
     first = Counter(p.sentences[0][0].lower() for p in paras)
