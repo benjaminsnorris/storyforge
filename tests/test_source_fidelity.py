@@ -285,9 +285,10 @@ class TestReviseHook:
         from storyforge.cmd_revise import _detect_upstream_scenes
         _run(adapted)
         assert _detect_upstream_scenes(adapted, []) == ['athena-at-the-door']
+        # a scene the diagnosis blames on its brief isn't rewritten (plan
+        # decision 9): named for the author, not returned
         diag = [{'root_cause': 'brief', 'worst_items': 'olympus-council-meets'}]
-        assert _detect_upstream_scenes(adapted, diag) == ['athena-at-the-door',
-                                                         'olympus-council-meets']
+        assert _detect_upstream_scenes(adapted, diag) == ['athena-at-the-door']
 
     def test_without_source_nothing_changes(self, project_dir):
         from storyforge.cmd_revise import _detect_upstream_scenes
@@ -321,7 +322,10 @@ class TestReviseHook:
             'athena-at-the-door']
         assert row['outcome'] == 'no-but'
         assert row['key_actions'] == 'Athena arrives as Mentes;the assembly meets'
-        assert row['conflict'] == 'The suitors / jeer'           # no | reaches the CSV
+        # conflict is the author's note (plan decision 9): the reply's is ignored
+        assert row['conflict'] == 'suitors'
+        assert 'CONFLICT: [rewritten' not in prompts[0]
+        assert 'conflict: suitors' in prompts[0]                 # shown, read-only
 
     def test_drift_fix_keeps_the_authors_must_beats(self, adapted, fake_api, monkeypatch,
                                                     capsys):
@@ -350,17 +354,20 @@ class TestReviseHook:
 
     def test_dialogue_drift_is_reported_never_rewritten(self, adapted, fake_api, monkeypatch,
                                                         capsys):
-        """#644's review TD-1, CR-3, SF-3: key_dialogue is the author's. Its
-        drift is a NOTE for the author; a scene whose only drift is there is
-        left alone, with no model call."""
+        """#644's review TD-1, CR-3, SF-3: key_dialogue is the author's, and
+        goal too since plan decision 9. Their drift is a NOTE for the author;
+        a scene whose only drift is there is left alone, with no model call."""
         from storyforge import cmd_revise
         monkeypatch.setattr(cmd_revise, '_source_drift_scenes', lambda p: {
-            'athena-at-the-door': ['brief key_dialogue: "Go" is not in the source']})
+            'athena-at-the-door': ['brief key_dialogue: "Go" is not in the source',
+                                   'brief goal: the source has none']})
         (fixed, skipped), prompts = self._fix(adapted, monkeypatch, self.FIX)
         assert fixed == [] and prompts == []
-        assert 'key_dialogue' in skipped['athena-at-the-door']
-        assert ('NOTE: athena-at-the-door: source drift in key_dialogue, the author\'s '
-                'notes, is not rewritten (#644)') in capsys.readouterr().out
+        assert "the author's notes" in skipped['athena-at-the-door']
+        out = capsys.readouterr().out
+        assert ('NOTE: athena-at-the-door: source drift in the author\'s notes is not '
+                'rewritten') in out
+        assert 'brief goal: the source has none' in out
 
     def test_the_fix_shows_key_dialogue_but_never_asks_for_it(self, adapted, fake_api,
                                                               monkeypatch):
@@ -373,8 +380,8 @@ class TestReviseHook:
         (fixed, _), prompts = self._fix(adapted, monkeypatch, self.FIX)
         assert fixed == ['athena-at-the-door']
         assert 'KEY_DIALOGUE: [rewritten' not in prompts[0]
-        assert ('The author\'s key dialogue notes (theirs, not yours to rewrite or repeat): '
-                'Go\n') in prompts[0]
+        assert 'The author\'s notes (theirs, not yours to rewrite or repeat):\n' in prompts[0]
+        assert '\nkey_dialogue: Go\n' in prompts[0]
         assert '- brief outcome: drifted' in prompts[0]
         assert 'brief key_dialogue' not in prompts[0]
         row = _read_csv_as_map(os.path.join(adapted, 'reference', 'scene-briefs.csv'))[
@@ -437,12 +444,16 @@ class TestReviseHook:
         assert _detect_upstream_scenes(adapted, []) == []
         assert '1 result(s) scored on a brief or prose changed since' in capsys.readouterr().out
 
-    def test_a_scene_without_drift_gets_the_old_fix(self, adapted, monkeypatch):
+    def test_a_scene_without_drift_is_left_alone(self, adapted, monkeypatch, capsys):
+        """Plan decision 9: the dramatic-opposition rewrite of goal,
+        conflict, crisis and decision is gone (they're the author's notes),
+        so a scene without drift gets no model call."""
+        from storyforge.cmd_revise import NO_BRIEF_FIX
         (fixed, skipped), prompts = self._fix(adapted, monkeypatch,
                                               'GOAL: g\nCONFLICT: c\nCRISIS: x\nDECISION: d\n')
-        assert 'genuine dramatic opposition' in prompts[0]
-        assert 'source' not in prompts[0].lower()
-        assert fixed == ['athena-at-the-door']
+        assert prompts == [] and fixed == []
+        assert skipped == {'athena-at-the-door': NO_BRIEF_FIX}
+        assert 'no source drift to fix' in capsys.readouterr().out
 
 
 class TestScoreCommand:
