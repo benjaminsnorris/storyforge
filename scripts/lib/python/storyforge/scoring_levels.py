@@ -126,7 +126,7 @@ _BRIEF_REQUIRED_CHECK = 'outcome populated'
 
 #: check name -> the name it had before, whose override still applies to it.
 #: #643 split one check each at L4 and L6 into a blocking and an advisory
-#: half; an acceptance recorded on the old check covered both, so it carries
+#: half (L6's advisory half went with plan decision 9); an acceptance recorded on the old check covered both, so it carries
 #: to both (#643's review C4, CR-2, TD-1)
 _FORMER_CHECK_NAMES = {
     _ARCH_REQUIRED_CHECK: 'all required columns populated',

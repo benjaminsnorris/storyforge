@@ -1093,7 +1093,7 @@ def parse_scene_briefs(project_dir: str) -> list[Brief]:
 
     Returns [] when the file is missing, empty, or lacks the required
     `id` column. Briefs with empty `id` are dropped with a WARNING.
-    Briefs with all five scene-engine fields and key_actions empty are
+    Briefs with every column empty (id and has_overflow aside) are
     dropped with an INFO log — they're scaffolding rows from migration, expected
     during elaboration. (WARNING would be misleading since this is the
     intended steady-state for pre-briefed scenes; if the parent scene
@@ -1149,13 +1149,14 @@ def parse_scene_briefs(project_dir: str) -> list[Brief]:
             row.get('crisis', '').strip(),
             row.get('decision', '').strip(),
         )
-        if not any(engine_fields) and not row.get('key_actions', '').strip():
+        if not any((v or '').strip() for k, v in row.items()
+                   if k not in ('id', 'has_overflow')):
             # Migration scaffolding — empty placeholder row for a scene
             # that hasn't been briefed yet. The deterministic pre-pass
-            # would otherwise emit five high-severity findings per row
+            # would otherwise emit two high-severity findings per row
             # for the entire pre-briefed corpus.
             log(f'INFO: scene-briefs.csv row {i} (id={brief_id}) has all '
-                'scene-engine fields empty; treating as pre-briefed and '
+                'columns empty; treating as pre-briefed and '
                 'skipping.')
             continue
         out.append(Brief(
@@ -5457,14 +5458,11 @@ def _build_briefs_prompt(briefs: list[Brief],
     allowed_outcomes = ', '.join(sorted(VALID_BRIEF_OUTCOMES))
 
     return f"""You are scoring the BRIEFS of a manuscript. A brief is the drafting
-contract for one scene: scene-engine fields (goal, conflict, outcome,
-crisis, decision), information state (knowledge_in / knowledge_out),
-execution beats (key_actions, key_dialogue, emotions, motifs, subtext),
-and scene-graph edges (continuity_deps). Its facts are outcome,
-key_actions and the knowledge state; goal, conflict, crisis, decision,
-key_dialogue, emotions, motifs and subtext are optional notes the author
-writes by hand. An empty note is not a fault: don't score a brief down
-for one, and never propose a value for one.
+contract for one scene: its facts (outcome, key_actions, knowledge_in /
+knowledge_out), its scene-graph edges (continuity_deps), and optional
+notes the author writes by hand (goal, conflict, crisis, decision,
+key_dialogue, emotions, motifs, subtext). An empty note is not a fault:
+don't score a brief down for one, and never propose a value for one.
 
 Your job:
 

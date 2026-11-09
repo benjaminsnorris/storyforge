@@ -113,10 +113,17 @@ class TestEventCount:
         from storyforge.prompts_elaborate import build_briefs_prompt
         prompt = build_briefs_prompt(project_dir, PLUGIN)
         ka = prompt.split('- **key_actions**:', 1)[1].split('\n- **', 1)[0]
-        assert f'never more than {MAX_BRIEF_EVENTS}' in ka
+        assert f'never more than {MAX_BRIEF_EVENTS}' in ka.lower()
         assert f'{KEY_ACTIONS_MAX_CHARS} characters' in ka
         assert f'{BRIEF_EVENTS_PER_1K:g}' in ka
         assert f'{brief_event_limit(1000)} in a 1,000-word scene' in ka
+        # #675's review C-1, C-2: the limits agree with each other
+        assert 'fewer in a short scene' in ka
+        from storyforge.prompts_elaborate import EVENT_EXAMPLE
+        per = KEY_ACTIONS_MAX_CHARS // MAX_BRIEF_EVENTS // 5 * 5
+        assert f'about {per} characters' in ka and EVENT_EXAMPLE in ka
+        assert len(EVENT_EXAMPLE) <= per
+        assert MAX_BRIEF_EVENTS * per + MAX_BRIEF_EVENTS - 1 <= KEY_ACTIONS_MAX_CHARS
 
     def test_hones_trim_aims_at_the_same_limit(self):
         prompt = hone.build_trim_prompt(
@@ -209,6 +216,11 @@ class TestAnEmptyNoteIsFine:
             'SCORES\nid|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
             'emotions|knowledge\nact1-sc01|||4|||5|||3\n', 'act1-sc01')
         assert parsed['scores'] == {'outcome': 4, 'key_actions': 5, 'knowledge': 3}
+        # a listed element with no score is named (PR #675's review SF-6)
+        from storyforge.scoring import unscored_elements
+        brief = {'outcome': 'yes', 'key_actions': 'x', 'knowledge_out': 'f', 'goal': ''}
+        assert unscored_elements(brief, parsed['scores']) == []
+        assert unscored_elements(brief, {'outcome': 4}) == ['key_actions', 'knowledge']
 
     def test_source_fidelity_takes_an_empty_note_as_no_departure(self):
         with open(os.path.join(PLUGIN, 'scripts', 'prompts', 'scoring',
@@ -254,3 +266,48 @@ class TestReviseNeverRewritesThem:
         assert _detect_upstream_scenes(project_dir, rows) == []
         out = capsys.readouterr().out
         assert 'act1-sc01' in out and 'author' in out
+
+
+class TestOneSourceOfTruth:
+    """PR #675's review TD-4: the hand-written column lists agree with the
+    groups in elaborate (facts, craft-framework columns, author notes)."""
+
+    def test_required_lists_hold_the_facts_and_no_author_note(self):
+        from storyforge import cmd_revise, structural
+        from storyforge.elaborate import BRIEF_FACT_COLUMNS, _REQUIRED_BY_STATUS
+        lists = {'hone briefed': hone._GAPS_REQUIRED['briefed'],
+                 'hone drafted': hone._GAPS_REQUIRED['drafted'],
+                 'structural': structural.REQUIRED_FIELDS,
+                 'revise source fix': cmd_revise._SOURCE_FIX_FIELDS}
+        for status in ('briefed', 'drafted', 'polished'):
+            lists[f'validate {status}'] = _REQUIRED_BY_STATUS[status]
+        for name, cols in lists.items():
+            assert set(BRIEF_FACT_COLUMNS) <= set(cols), name
+            assert not set(cols) & set(AUTHOR_NOTE_COLUMNS), name
+        assert tuple(cmd_revise._SOURCE_FIX_FIELDS) == BRIEF_FACT_COLUMNS
+
+    def test_craft_note_lists_are_craft_columns(self):
+        from storyforge import structural
+        assert set(structural.CRAFT_NOTE_FIELDS) <= set(CRAFT_FRAMEWORK_COLUMNS)
+
+
+class TestHoneReportsTheFourNeverRewrites:
+    def test_a_long_goal_is_reported_without_a_model_call(self, project_dir, monkeypatch,
+                                                          capsys):
+        """PR #675's review T-3: hone's briefs domain reports a verbose goal
+        (an author's note) and calls no model."""
+        from storyforge import api
+        path = os.path.join(_ref(project_dir), 'scene-briefs.csv')
+        update_csv_field(path, 'act1-sc01', 'goal', 'g' * 200)
+
+        def no_call(*a, **kw):
+            raise AssertionError('hone rewrote an author note')
+        monkeypatch.setattr(api, 'invoke_to_file', no_call)
+        monkeypatch.setattr(hone, 'detect_brief_issues', lambda *a, **kw: [
+            {'scene_id': 'act1-sc01', 'field': 'goal', 'value': 'g' * 200,
+             'issue': 'verbose', 'char_count': 200, 'max_chars': 80}])
+        result = hone.hone_briefs(_ref(project_dir), project_dir, model='m',
+                                  log_dir=os.path.join(project_dir, 'logs'),
+                                  coaching_level='full')
+        assert result['fields_rewritten'] == 0
+        assert _read_csv_as_map(path)['act1-sc01']['goal'] == 'g' * 200

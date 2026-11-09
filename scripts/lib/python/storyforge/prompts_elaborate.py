@@ -467,6 +467,10 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 BRIEFS_OUTPUT_HEADER = ('id|outcome|key_actions|knowledge_in|knowledge_out|physical_state_in|'
                         'physical_state_out|continuity_deps|has_overflow')
 
+#: The briefs prompt's example of one terse key_actions event; it fits the
+#: per-event length the prompt asks for (tests/test_briefs_decision9.py)
+EVENT_EXAMPLE = 'Tessa finds the straight edge'
+
 
 def build_briefs_prompt(project_dir: str, plugin_dir: str,
                         scene_ids: list[str] | None = None,
@@ -508,6 +512,9 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     from .elaborate import (AUTHOR_NOTE_COLUMNS, BRIEF_EVENTS_PER_1K, KEY_ACTIONS_MAX_CHARS,
                             MAX_BRIEF_EVENTS, brief_event_limit)
     notes = ', '.join(AUTHOR_NOTE_COLUMNS)
+    # #675's review C-2, TD-6: a per-event length the cap allows at the most
+    # events (rounded down to 5)
+    EVENT_CHARS = KEY_ACTIONS_MAX_CHARS // MAX_BRIEF_EVENTS // 5 * 5
     return f"""You are writing the scene briefs for a novel: the facts of what happens in each scene, as terse notes, so that scenes can be drafted independently and still cohere.
 
 A brief is a plan of events, not a script. It keeps every fact the scene must honour or establish, and it drops the staging: how the scene is played, what is said, what it means. The drafter finds the gesture, the line and the image.
@@ -537,7 +544,7 @@ A brief is a plan of events, not a script. It keeps every fact the scene must ho
 For each scene that needs a brief, write its facts:
 
 - **outcome**: How the scene ends for the POV character — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles), judged by what they are trying to do or hoping for in the scene
-- **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning. List only the events the scene turns on, about 3 to {MAX_BRIEF_EVENTS}: never more than {MAX_BRIEF_EVENTS}, and no more than {BRIEF_EVENTS_PER_1K:g} for each 1,000 of the scene's target_words ({brief_event_limit(1000)} in a 1,000-word scene, {brief_event_limit(2000)} in a 2,000-word one). Each event about 5 to 7 words ("Tessa finds the edge runs straight"), so the whole cell, semicolons included, stays under {KEY_ACTIONS_MAX_CHARS} characters: cut a clause before you add an event. The drafter fills in everything between them.
+- **key_actions**: Semicolon-separated events, in order: who does what. Include the turn, the event that changes the scene's situation, when the scene has one. Events, not lines: say that something is said ("Achilles refuses the gifts"), never script the words. No feelings and no meaning. List only the events the scene turns on: usually 3 to {MAX_BRIEF_EVENTS}, fewer in a short scene. Never more than {MAX_BRIEF_EVENTS}, and no more than {BRIEF_EVENTS_PER_1K:g} for each 1,000 of the scene's target_words ({brief_event_limit(1000)} in a 1,000-word scene, {brief_event_limit(2000)} in a 2,000-word one). Keep each event to about {EVENT_CHARS} characters ("{EVENT_EXAMPLE}"), so the whole cell, semicolons and any `must:` beats included, stays under {KEY_ACTIONS_MAX_CHARS} characters: cut a clause before you add an event. The drafter fills in everything between them.
 - **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
 - **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.

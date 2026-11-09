@@ -1989,15 +1989,22 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
     (`source_fidelity.drift_state`) on a brief or prose unchanged since it was
     scored. Says what it can't see: no results yet, and results scored on a
     brief or prose since changed. In `free` mode drift is listed for the
-    author and nothing is returned: free mode doesn't undo departures."""
+    author and nothing is returned: free mode doesn't undo departures. A
+    scene whose only drift is in the brief's author notes (goal,
+    key_dialogue...: `_split_note_drift`) is listed for the author and not
+    returned: no fix rewrites those (#644, plan decision 9), so it is no
+    upstream work, no forecast, and no "drift fixed" (PR #675's review SF-1,
+    SF-2, CR-1)."""
     from storyforge import source
     from storyforge.source_fidelity import drift_state
     cfg = source.read_config(project_dir)
     if cfg is None:
         return {}
     state = drift_state(project_dir)
+    fixable = {sid: lines for sid, lines in state.drift.items()
+               if _split_note_drift(lines)[0]}
     if quiet:
-        return {} if cfg.mode == 'free' else state.drift
+        return {} if cfg.mode == 'free' else fixable
     if not state.checked:
         log('  Source fidelity: no results yet, so source drift is not checked; run '
             '`storyforge score --source-fidelity briefs` (or a full score for the prose)')
@@ -2011,7 +2018,12 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
         log(f'  Source drift in {len(state.drift)} scene(s), left as it is (mode: free): '
             f'{", ".join(sorted(state.drift))}')
         return {}
-    return state.drift
+    notes_only = sorted(set(state.drift) - set(fixable))
+    if notes_only:
+        log(f'  NOTE: source drift only in the author\'s notes, not rewritten (#644, plan '
+            f'decision 9); amend them by hand if they should follow the source: '
+            + '; '.join(f'{sid} ({" / ".join(state.drift[sid])})' for sid in notes_only))
+    return fixable
 
 
 _PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
@@ -2181,7 +2193,8 @@ def _fix_upstream_briefs(project_dir: str,
     and the brief left as it was). Drift in the author's notes is reported,
     never rewritten.
 
-    A scene without source drift is left alone and said: the dramatic
+    A scene without source drift is left alone, with a NOTE saying why
+    (`NO_BRIEF_FIX`): the dramatic
     opposition rewrite of goal, conflict, crisis and decision is gone (plan
     decision 9: they are the author's notes, never generated; see
     `_detect_upstream_scenes`). Returns the ids of the scenes whose briefs
@@ -2706,7 +2719,8 @@ def _polish_loop(project_dir: str, max_loops: int,
                                 ['reference/', 'scenes/', 'working/'])
 
         if craft_converged:
-            log('  No high or medium priority issues; source drift fixed — converged')
+            log('  No high or medium priority issues; source drift '
+                + ('fixed' if fixed else 'left as it is (see above)') + ' — converged')
             _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
                                       converged=True)
             break

@@ -39,5 +39,5 @@ class TestTheBriefsStageNeverWritesThem:
         assert after['crisis'] != 'A dilemma'
         out = capsys.readouterr().out
         assert "left out the reply's goal, crisis" in out
-        assert ('act1-sc01: kept its goal, conflict, crisis, decision, key_dialogue, '
-                'emotions, motifs as the author\'s notes') in out
+        assert ("WARNING: kept the filled author's notes of 1 scene(s): act1-sc01 (goal, "
+                'conflict, crisis, decision, key_dialogue, emotions, motifs)') in out

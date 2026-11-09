@@ -1187,7 +1187,7 @@ def detect_abstract_fields(
 
 # How many key_actions events a scene may list: `elaborate.brief_event_limit`
 # (never more than `MAX_BRIEF_EVENTS`, and no more than `BRIEF_EVENTS_PER_1K`
-# for each 1,000 target words; 3 in 1,500 words is fine, 5 is too many), the
+# for each 1,000 target words; 3 in 1,500 words is the most), the
 # limit the briefs prompt asks for (#644's review SF-5).
 
 # Max emotional beats before arc feels mechanical.
@@ -2059,7 +2059,13 @@ def hone_briefs(
         if eval_issues and coaching_level == 'full':
             eval_fields = list(set(i['field'] for i in eval_issues if i['field']))
             if not eval_fields:
-                eval_fields = [f for f in briefs_map[sid].keys() if f != 'id' and briefs_map[sid].get(f, '')]
+                # a finding naming no field (revise --scores' brief pass) never
+                # reaches the author's notes; one naming a note is the author's
+                # own ask (#644; PR #675's review CR-3)
+                from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+                eval_fields = [f for f in briefs_map[sid].keys()
+                               if f != 'id' and f not in AUTHOR_NOTE_COLUMNS
+                               and briefs_map[sid].get(f, '')]
             current_values = {f: briefs_map[sid].get(f, '') for f in eval_fields}
             guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
 
@@ -2542,7 +2548,7 @@ def _report_craft(issues: list[dict]) -> list[dict]:
 
 def _report_author_notes(issues: list[dict]) -> list[dict]:
     """Log the issues on the author's note columns (`elaborate.AUTHOR_NOTE_COLUMNS`:
-    emotions, subtext, key_dialogue...) as reported, not rewritten, and
+    goal, conflict, crisis, decision, emotions, subtext, key_dialogue...) as reported, not rewritten, and
     return the rest (#644's review TD-2: those columns are filled by hand,
     so a detector may say an emotions list is long, but no model rewrites
     it). An evaluation finding the author sends is still rewritten."""

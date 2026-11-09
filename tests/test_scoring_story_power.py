@@ -4906,15 +4906,27 @@ def test_parse_scene_briefs_drops_malformed_rows(tmp_path, capsys):
 
 
 def test_parse_scene_briefs_drops_empty_engine_scaffolds(tmp_path, capsys):
-    """A row with all five scene-engine fields empty is migration
-    scaffolding, not a real brief — drop it with an INFO log rather
-    than letting the pre-pass flag five high-severity findings."""
+    """A row with every column empty is migration scaffolding, not a
+    real brief — drop it with an INFO log rather than letting the
+    pre-pass flag its missing facts."""
     from storyforge.scoring_story_power import parse_scene_briefs
     _seed_briefs(str(tmp_path), empty_engine_row=True)
     parsed = parse_scene_briefs(str(tmp_path))
     assert 's5' not in {b.id for b in parsed}
     out = capsys.readouterr().out
-    assert 'all scene-engine fields empty' in out
+    assert 'has all columns empty' in out
+
+
+def test_parse_scene_briefs_keeps_a_knowledge_only_row(tmp_path):
+    """PR #675's review SF-7: a row with only knowledge filled is a brief
+    (its missing facts are findings), not scaffolding to drop."""
+    from storyforge.scoring_story_power import parse_scene_briefs
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scene-briefs.csv').write_text(
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions\n'
+        's1|||||||a-fact|\n')
+    assert [b.id for b in parse_scene_briefs(str(tmp_path))] == ['s1']
 
 
 def test_parse_scene_briefs_splits_array_cells(tmp_path):

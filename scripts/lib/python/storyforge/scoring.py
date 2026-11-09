@@ -353,8 +353,16 @@ def _attribute_root_causes(diag_rows, diag_header, project_dir):
                 briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
                 scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
                 intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+                from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+                from storyforge.hone import CRAFT_ADVISORY_ISSUES
                 issues = detect_brief_issues(briefs, scenes, intent_map=intent)
-                brief_issue_scenes = {i['scene_id'] for i in issues}
+                # only issues a brief fix can act on: never the author's notes
+                # (goal, conflict, crisis, decision... plan decision 9) or a
+                # craft-framework advisory, which nothing rewrites (PR #675's
+                # review SF-3, CR-2)
+                brief_issue_scenes = {i['scene_id'] for i in issues
+                                      if i.get('field') not in AUTHOR_NOTE_COLUMNS
+                                      and i.get('issue') not in CRAFT_ADVISORY_ISSUES}
             except Exception:
                 brief_issue_scenes = set()
 
@@ -1470,6 +1478,21 @@ FIDELITY_ELEMENTS = [
     'goal', 'conflict', 'outcome', 'crisis', 'decision',
     'key_actions', 'key_dialogue', 'emotions', 'knowledge',
 ]
+
+
+#: The brief columns each fidelity element scores
+_FIDELITY_COLUMNS = {'knowledge': ('knowledge_in', 'knowledge_out')}
+
+
+def unscored_elements(brief: dict, scores: dict) -> list[str]:
+    """The fidelity elements `brief` lists (a filled column) that `scores`
+    has no score for. The prompt asks for a score only on the elements the
+    brief lists, and the parser can't tell an empty cell from a garbled one,
+    so the caller says which listed elements were lost (PR #675's review
+    SF-6)."""
+    return [el for el in FIDELITY_ELEMENTS
+            if any((brief.get(c) or '').strip() for c in _FIDELITY_COLUMNS.get(el, (el,)))
+            and el not in scores]
 
 
 def has_brief_facts(brief: dict) -> bool:

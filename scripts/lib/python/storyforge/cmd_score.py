@@ -1815,6 +1815,15 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 if result.get('scores'):
                     results.append(result)
                     scored_ids.add(sid)
+                    from storyforge.elaborate import get_scene
+                    from storyforge.scoring import unscored_elements
+                    lost = unscored_elements(
+                        get_scene(sid, os.path.join(project_dir, 'reference')) or {},
+                        result['scores'])
+                    if lost:
+                        log(f'  WARNING: {sid}: fidelity reply has no score for '
+                            f'{", ".join(lost)}, which the brief lists; left out of '
+                            f'its overall')
                 break
     unscored = [sid for sid in requested if sid not in scored_ids]
     if unscored:

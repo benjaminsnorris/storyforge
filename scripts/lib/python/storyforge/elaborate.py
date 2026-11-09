@@ -623,13 +623,17 @@ CRAFT_FRAMEWORK_COLUMNS = ('action_sequel', 'emotional_arc', 'value_at_stake',
 #: the images and how they appear (#644, plan D3). They stay as optional
 #: columns the author fills by hand, and nothing requires them or reports one
 #: empty: the briefs stage never generates them (a model's value is dropped,
-#: `cmd_elaborate`; nor do revise's brief fixes or hone's rewrites), and
+#: `cmd_elaborate`; nor do revise's source-drift fix or hone's rewrites,
+#: though a revise plan's CSV blocks, `cmd_revise._apply_upstream_blocks`,
+#: still can), and
 #: drafting, the gate and scoring read them only when filled. Model-written
 #: staging was the route by which the plan's phrasing leaked into the prose.
 #: Extraction still records them from prose that exists (a motif is noticed
 #: in the draft and recorded after; `motif_details` is how it appears). A
 #: prose book's only: a graphic novel's briefs stage writes key_dialogue as
-#: the balloon text the panel script carries, and its goal.
+#: the balloon text the panel script carries, and its goal; a GN reader that
+#: keys on this set (hone reports rather than rewrites them; validate and
+#: hone's gaps don't list an empty goal) treats those as notes too.
 AUTHOR_NOTE_COLUMNS = ('goal', 'conflict', 'crisis', 'decision', 'key_dialogue',
                        'subtext', 'emotions', 'motifs', 'motif_details')
 
