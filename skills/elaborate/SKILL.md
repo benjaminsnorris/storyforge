@@ -250,7 +250,7 @@ author.
    - Set `architecture_scene` on every scene: its own id for an architecture scene, the anchor's id for a scene split off one (`score --all-boundaries` gathers an anchor's map scenes by it). Leave it empty only for a new scene that serves no architecture scene.
    - An enum cell holds only its value (`turning_point` `action`, never `action: she strikes`; `time_of_day` one of morning, afternoon, evening, night, dawn, dusk or unstated). The CLI stage splits a `value: description` cell and keeps the description in `function`.
 5. Write updates
-6. Run validation — MICE nesting, timeline, character references
+6. Run validation — timeline, character references (MICE nesting is advisory)
 7. Commit: `git add -A -- . && git commit -m "Elaborate: scene map" && git push`
 
 ### Graphic-novel mode
@@ -517,7 +517,7 @@ This scores 8 dimensions of story quality from CSV data (deterministic, free, in
 - Arc completeness, thematic concentration, pacing shape, character presence
 - MICE thread health, knowledge chain integrity, scene function variety, structural completeness
 
-If any dimension is below target, review the diagnosis (which includes craft-grounded explanations and specific CSV changes) and address findings before drafting. Structural fixes are much cheaper than prose rewrites.
+If a dimension is below target, show the author the diagnosis (which includes craft-grounded explanations and specific CSV changes). It is a diagnostic, not a gate: pacing shape, function variety, arc shape and MICE health measure a book against craft frameworks, and a book may depart from them on purpose. Offer the changes; the author decides.
 
 If registries are missing or thematic concentration is low, recommend reconciliation:
 ```bash
@@ -530,7 +530,7 @@ Also confirm the pitch tier still holds under the added structure:
 - `storyforge status` — confirm the ladder shows the expected rung as
   `solid` and surfaces no blockers before advancing.
 
-Report results to the author. Blocking validation failures must be fixed before advancing. Structural scoring findings are advisory but strongly recommended before drafting.
+Report results to the author. Validate prints two groups: blocking errors (missing required columns, duplicate seqs or ids, orphaned rows, schema and canon errors, a broken told_by chain, a faithful adaptation's coverage gaps) must be fixed before advancing; advisory diagnostics never hold a stage. **Every craft-framework check is advisory** (#643): an empty value_shift, turning_point, action_sequel, emotional_arc, value_at_stake, goal, conflict, crisis or decision, MICE nesting, flat polarity, scene-type and turning-point runs, the action/sequel balance. Mention them as observations the author can use; never press a scene toward a turn and a landing it doesn't want. Structural scoring findings are advisory too.
 
 ## Step 6: Ensure Feature Branch
 

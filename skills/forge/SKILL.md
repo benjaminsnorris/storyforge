@@ -38,7 +38,11 @@ Before doing anything else, orient yourself:
      doesn't deliver. Not blockers: the prose stands. Mention them, and
      offer to amend the brief, or to mark the beat `must:` (in
      `key_actions` or `key_dialogue`) if the author wants the gate to
-     require it.
+     require it. Lines starting `craft framework: ` are the failed
+     craft-framework floor checks (#643: a missing value shift or turning
+     point, the action/sequel balance, a brief with no goal, conflict,
+     crisis or decision). They never keep a rung thin; mention them as
+     observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
      stage and blocker).
@@ -170,7 +174,7 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```bash
 ./storyforge validate --structural
 ```
-If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
+If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv` with the author: they measure the book against craft frameworks and are advisory, never a reason to hold drafting (#643). At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
 **"Is my elaboration on track?" / "Drift check" / "Are the levels consistent?":**
 Run the elaboration drift report — deterministic, no LLM, no cost:
@@ -345,7 +349,7 @@ the source of truth for position and next step:
 - **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → voice → draft → evaluate (voice from the `voice` stage/blocker, not a rung).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
 - **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
-- **Advisory:** list `advisory` (broken promises the gate didn't stop on) apart from the blockers: the author amends the brief, marks the beat `must:`, or leaves it.
+- **Advisory:** list `advisory` (broken promises the gate didn't stop on, then the `craft framework: ` lines) apart from the blockers: for a promise the author amends the brief, marks the beat `must:`, or leaves it; a craft-framework line is a diagnostic the author can use or ignore.
 
 Then add the context the verdict doesn't carry:
 
