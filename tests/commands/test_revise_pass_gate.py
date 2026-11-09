@@ -953,3 +953,17 @@ class TestDeferralThroughMain:
         out = capsys.readouterr().out
         assert 'a re-check they owed did not finish: new-x1 (re-checked after the last' in out
         assert 'All revision passes are done' not in out
+
+
+def test_revise_lists_the_advisory_broken_promises(project_dir, capsys):
+    """#642: revise's end of run lists the gate's advisory broken promises."""
+    from storyforge import cmd_revise, gate
+    from storyforge.checker import Finding
+    cmd_revise._log_advisory(project_dir)
+    assert 'broken promise' not in capsys.readouterr().out      # none: nothing said
+    gate.record_advisory(project_dir, 'act1-sc02', 'revise', [Finding(
+        'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
+    cmd_revise._log_advisory(project_dir)
+    out = capsys.readouterr().out
+    assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+    assert 'act1-sc02: PRM the brief\'s key_actions promises "Finds nothing"' in out

@@ -204,7 +204,7 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     assert data['next']['stage'] == 'logline'
     # Full verdict contract forge/elaborate route on — lock the whole shape.
     assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
-                         'ladder', 'next', 'then', 'blockers'}
+                         'ladder', 'next', 'then', 'blockers', 'advisory'}
     assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
     assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
     assert isinstance(data['blockers'], list)
@@ -566,3 +566,35 @@ def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
                              'reference', 'voice-guide.md'),
                 os.path.join(project_dir, 'reference', 'voice-guide.md'))
     assert status.build_status(project_dir)['next']['stage'] != 'voice'
+
+
+def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
+    """#642: the gate's advisory broken promises are in the verdict and the
+    human output, and never a blocker or the next step."""
+    from storyforge import gate
+    from storyforge.checker import Finding
+    gate.record_advisory(project_dir, 'act1-sc02', 'draft', [Finding(
+        'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
+    verdict = status.build_status(project_dir)
+    assert verdict['advisory'] == [
+        'act1-sc02: PRM the brief\'s key_actions promises "Finds nothing" — not delivered']
+    assert not any(b['source'] == 'gate' for b in verdict['blockers'])
+    assert verdict['next']['stage'] != 'check'
+    out = cmd_status.render_human(verdict)
+    assert 'ADVISORY: 1 broken promise(s) the gate reported but did not stop on' in out
+    assert '  act1-sc02: PRM the brief' in out
+
+
+def test_no_advisory_section_without_any(project_dir):
+    verdict = status.build_status(project_dir)
+    assert verdict['advisory'] == []
+    assert 'ADVISORY' not in cmd_status.render_human(verdict)
+
+
+def test_an_unreadable_advisory_list_says_so(project_dir):
+    from storyforge import gate
+    os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+    with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
+        f.write('bad header\n')
+    [line] = status.build_status(project_dir)['advisory']
+    assert line.startswith(f'{gate.ADVISORY_PATH} could not be read')

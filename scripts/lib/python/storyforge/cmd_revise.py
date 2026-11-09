@@ -678,6 +678,15 @@ def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget):
                                       reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
 
 
+def _log_advisory(project_dir: str) -> None:
+    """#642: list the broken promises the gate reported and didn't stop on
+    (every scene's, `gate.advisory_summary`): the prose stands, and the
+    author amends a brief or marks a beat `must:`."""
+    from storyforge.gate import advisory_summary
+    for line in advisory_summary(project_dir):
+        log(line)
+
+
 def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
                   before=None) -> str:
     """Gate the redraft just written to `scene_file` as `write` gates a
@@ -2754,6 +2763,7 @@ def _polish_loop(project_dir: str, max_loops: int,
 
     log('\n============================================')
     report_fallback_replies()
+    _log_advisory(project_dir)
     log('Polish loop complete')
     log(f'  Deterministic baseline: avg {baseline_summary["overall_avg"]:.2f}, '
         f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
@@ -4285,6 +4295,8 @@ Rules:
     if not args.dry_run:
         print_summary(project_dir, ('revise', 'gate', 'gate-fix'), session_start=session_start)
     report_fallback_replies()
+    if not args.dry_run:
+        _log_advisory(project_dir)
 
     if redraft_error:
         _report_redraft_error(redraft_error)

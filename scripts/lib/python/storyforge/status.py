@@ -263,6 +263,15 @@ def gate_waiting(project_dir: str) -> list[dict[str, str]]:
     return out
 
 
+def gate_advisory(project_dir: str) -> list[str]:
+    """#642: the broken promises the gate reported but didn't stop on
+    (`gate.advisory_lines`, working/gate-advisory.csv), one line each;
+    an unreadable file is one line saying so. Not blockers: the prose
+    stands unless the author marks the beat `must:`."""
+    from storyforge import gate
+    return gate.advisory_lines(project_dir)
+
+
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
     """Compose the full next-step verdict. Deterministic, read-only."""
     ladder = ladder_states(project_dir, medium)
@@ -360,4 +369,5 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'next': nxt,
         'then': then,
         'blockers': blockers,
+        'advisory': gate_advisory(project_dir),
     }

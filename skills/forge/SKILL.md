@@ -33,6 +33,12 @@ Before doing anything else, orient yourself:
      disagreement, a `voice` blocker (no voice guide to draft from) and a
      `gate` blocker per scene waiting on the gate; surface these before
      advancing.
+   - `advisory` — broken promises the gate reported but didn't stop on
+     (`working/gate-advisory.csv`, one line each): a brief item the prose
+     doesn't deliver. Not blockers: the prose stands. Mention them, and
+     offer to amend the brief, or to mark the beat `must:` (in
+     `key_actions` or `key_dialogue`) if the author wants the gate to
+     require it.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
      stage and blocker).
@@ -339,6 +345,7 @@ the source of truth for position and next step:
 - **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → voice → draft → evaluate (voice from the `voice` stage/blocker, not a rung).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
 - **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
+- **Advisory:** list `advisory` (broken promises the gate didn't stop on) apart from the blockers: the author amends the brief, marks the beat `must:`, or leaves it.
 
 Then add the context the verdict doesn't carry:
 

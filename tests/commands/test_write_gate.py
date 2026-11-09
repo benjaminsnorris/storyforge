@@ -74,6 +74,24 @@ class TestGatedWrite:
         assert calls == [('act1-sc01', 'draft'), ('act1-sc02', 'draft')]
         assert gate.pending(setup) == {}
 
+    def test_the_advisory_broken_promises_are_listed_at_the_end(self, setup, monkeypatch,
+                                                                 capsys):
+        """#642: a broken promise doesn't stop a scene; the run lists it."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                          'not delivered')
+
+        def fake(project_dir, scene_id, *, command, prose, log_dir, **k):
+            gate.record_advisory(project_dir, scene_id, command, [promise])
+            r = _result(scene_id, True)
+            return gate.GatedScene(prose, r, r)
+        monkeypatch.setattr(gate, 'gate_and_fix', fake)
+        gate.record_advisory(setup, 'act2-sc01', 'draft', [promise])   # not this run's
+        main(['--scenes', 'act1-sc01'])
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+        assert 'act1-sc01: PRM the brief\'s key_actions promises "Finds nothing"' in out
+
     def test_the_fixed_prose_is_what_is_saved(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
         fixed = GOOD.replace('word.', 'ending.')
