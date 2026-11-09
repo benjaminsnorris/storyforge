@@ -64,6 +64,10 @@ GOOD_CLAIMS = {'claims': [
 ]}
 
 
+#: a sample holding GOOD_CLAIMS' one example
+SAMPLE = vpp.Sample((vpp.Paragraph(1, 'c.md', 1, 1, '"It was so," said she, and left.', 7),), 1)
+
+
 def _runs_of(sample, words_lo=120, words_hi=380):
     """Paragraph runs inside one window, within the length, not overlapping."""
     out, used = [], set()
@@ -185,22 +189,25 @@ def test_parse_claims_numbers_by_section_and_names_problems():
     reply = dict(GOOD_CLAIMS)
     reply['claims'] = GOOD_CLAIMS['claims'] + [{'section': 'does', 'claim': '  ', 'example': ''},
                                                {'section': 'tone', 'claim': 'x', 'example': ''}]
-    claims, problems = vpp.parse_claims(json.dumps(reply))
+    claims, problems = vpp.parse_claims(json.dumps(reply), SAMPLE)
     assert [(c.id, c.section) for c in claims] == [
         ('c01', 'does'), ('c02', 'does'), ('c03', 'never'), ('c04', 'stance'),
         ('c05', 'humour'), ('c06', 'rhythm')]
     assert claims[1].claim == 'Generalises freely.'
-    assert len(problems) == 2 and 'empty' in problems[0] and 'no known section' in problems[1]
+    assert 'empty' in problems[0] and 'no known section' in problems[1]
+    # SF-3: every section is short of what was asked; the example is in the sample
+    assert '`does` has 2 claims; 6 to 10 were asked for' in problems[2]
+    assert len(problems) == 2 + len(vpp.SECTIONS)
     assert not claims[2].positive and claims[0].positive
 
 
 def test_parse_claims_names_an_empty_section_and_refuses_bad_replies():
     claims, problems = vpp.parse_claims(json.dumps(
-        {'claims': [{'section': 'does', 'claim': 'x', 'example': ''}]}))
+        {'claims': [{'section': 'does', 'claim': 'x', 'example': ''}]}), SAMPLE)
     assert [p for p in problems if 'never' in p]
     for bad in ('not json', '[]', '{"claims": 3}', '{"claims": []}'):
         with pytest.raises(vpp.ProposalError):
-            vpp.parse_claims(bad)
+            vpp.parse_claims(bad, SAMPLE)
 
 
 def test_parse_shortlist_cuts_text_and_refuses_bad_runs(voice_dir):
@@ -317,7 +324,7 @@ def test_auto_picks_takes_the_typical_and_tops_up_by_nearness():
 # ============================================================================
 
 def test_claims_round_trip_with_a_pipe_and_a_newline(voice_dir):
-    claims, _ = vpp.parse_claims(json.dumps(GOOD_CLAIMS))
+    claims, _ = vpp.parse_claims(json.dumps(GOOD_CLAIMS), SAMPLE)
     vpp.write_claims(voice_dir, claims)
     back = vpp.read_claims(voice_dir)
     assert [c.claim for c in back][-1] == 'Long sentences / then short.'
@@ -347,7 +354,7 @@ def test_read_claims_of_a_missing_file(voice_dir):
 
 
 def _marked(voice_dir, marks):
-    claims, _ = vpp.parse_claims(json.dumps(GOOD_CLAIMS))
+    claims, _ = vpp.parse_claims(json.dumps(GOOD_CLAIMS), SAMPLE)
     vpp.write_claims(voice_dir, [vpp.Claim(c.id, c.section, c.claim, c.example, m)
                                  for c, m in zip(claims, marks)])
 
@@ -485,7 +492,7 @@ def test_propose_calls_send_the_prompts_and_save_the_reply(voice_dir, fake_api, 
     sample = vpp.build_sample(voice.texts)
     system = vpp.system_blocks(voice, sample)
     reply_file = str(tmp_path / 'r' / 'description.json')
-    claims, _ = vpp.propose_description(system, 'claude-opus-5-5', reply_file)
+    claims, _ = vpp.propose_description(system, sample, 'claude-opus-5-5', reply_file)
     assert len(claims) == 6 and os.path.isfile(reply_file)
     assert calls[0]['prompt'] == vpp.DESCRIPTION_PROMPT and calls[0]['system'] == system
     state['shortlist'] = _shortlist_reply(sample, 21)
@@ -499,10 +506,11 @@ def test_propose_refuses_a_cut_off_reply(voice_dir, monkeypatch, tmp_path):
     monkeypatch.setattr(api, 'invoke', lambda *a, **k: {
         'content': [{'type': 'text', 'text': '{"claims": ['}], 'stop_reason': 'max_tokens'})
     voice = vpp.load_voice(voice_dir)
-    system = vpp.system_blocks(voice, vpp.build_sample(voice.texts))
+    sample = vpp.build_sample(voice.texts)
+    system = vpp.system_blocks(voice, sample)
     reply_file = str(tmp_path / 'd.json')
     with pytest.raises(vpp.ProposalError, match='cut off'):
-        vpp.propose_description(system, 'claude-opus-5-5', reply_file)
+        vpp.propose_description(system, sample, 'claude-opus-5-5', reply_file)
     assert os.path.isfile(reply_file)          # the paid reply is kept
 
 
@@ -851,7 +859,7 @@ def test_parse_replies_dont_turn_nulls_into_text():
     reply = {'claims': [{'section': 'does', 'claim': None, 'example': ''},
                         {'section': 'does', 'claim': 'Real.', 'example': None},
                         {'section': 'never', 'claim': 'Never.', 'example': ''}]}
-    claims, problems = vpp.parse_claims(json.dumps(reply))
+    claims, problems = vpp.parse_claims(json.dumps(reply), SAMPLE)
     assert [c.claim for c in claims] == ['Real.', 'Never.'] and claims[0].example == ''
     assert any('claim 1 (does) is empty' in p for p in problems)
     assert any("example that isn't text" in p for p in problems)
@@ -889,3 +897,48 @@ def test_load_exemplars_reads_the_bank_and_names_what_it_cant(voice_dir):
     os.remove(os.path.join(folder, f'{passages[1].id}.md'))
     with pytest.raises(vpp.ProposalError, match=passages[1].id):
         vpp.load_exemplars(voice_dir)
+
+
+# ============================================================================
+# Review fixes (#665): what a reply or an edit can't silently get past
+# ============================================================================
+
+def test_parse_claims_names_an_example_not_in_the_sample():
+    """SF-4: an example the sample doesn't hold is kept but named. Curly
+    quotes, a dash, an ellipsis and the quotation marks around an excerpt
+    don't count as differences."""
+    text = 'She said, "It was--I think--so," and left the room; nobody followed.'
+    sample = vpp.Sample((vpp.Paragraph(1, 'c.md', 1, 1, text, 13),), 1)
+
+    def problems_for(example):
+        reply = {'claims': [{'section': s, 'claim': f'Claim {i}.', 'example': ''}
+                            for s, (_, lo, _) in vpp.SECTION_ASK.items() for i in range(lo)]}
+        reply['claims'][0]['example'] = example
+        return vpp.parse_claims(json.dumps(reply), sample)[1]
+    assert problems_for('\u201cIt was\u2014I think\u2014so,\u201d and left') == []
+    assert problems_for('"It was--I think . . . so,"') != []
+    assert problems_for('"It was...so," and left the room') == []
+    found = problems_for('She said it was so and left.')
+    assert len(found) == 1 and "c01's example isn't in the sample" in found[0]
+
+
+def test_description_prompt_is_written_from_the_section_table():
+    """SF-3: one table for the prompt's counts and the check."""
+    for s, (what, lo, hi) in vpp.SECTION_ASK.items():
+        assert f'- {s}: {what} ({lo} to {hi} claims)' in vpp.DESCRIPTION_PROMPT
+
+
+def test_accept_exemplars_warns_of_a_passage_edited_beyond_a_trim(voice_dir):
+    """SF-7: a trim is fine; a reworded passage's source and paragraphs no
+    longer say where it's from."""
+    passages = _shortlisted(voice_dir, k=21)
+    folder = os.path.join(voice_dir, vpp.SHORTLIST_DIR)
+    with open(os.path.join(folder, f'{passages[0].id}.md'), encoding='utf-8') as f:
+        words = f.read().split()
+    with open(os.path.join(folder, f'{passages[0].id}.md'), 'w', encoding='utf-8') as f:
+        f.write(' '.join(words[1:-1]) + '\n')                  # trimmed at both ends
+    with open(os.path.join(folder, f'{passages[1].id}.md'), 'w', encoding='utf-8') as f:
+        f.write('Reworded entirely. ' * 60 + '\n')
+    done = vpp.accept_exemplars(voice_dir, [p.id for p in passages])
+    edited = [n for n in done.notes if 'edited, not only trimmed' in n]
+    assert len(edited) == 1 and passages[1].id in edited[0]

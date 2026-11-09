@@ -6,11 +6,14 @@ author then corrects. Everything lives in the author voice repo (plan B0):
 
 - **The described voice (B3).** Short claims, each one sentence, in
   `SECTIONS`: what the voice does and never does, its stance toward the
-  reader, its humour, its rhythm. They go to `proposals/description-claims.csv`
+  reader, its humour, its rhythm (`SECTION_ASK`: how many each). Each
+  example is checked against the sample, and a section outside its count
+  is named. They go to `proposals/description-claims.csv`
   (`CLAIM_COLUMNS`) with an empty `mark` column. The author marks each claim
   `yes` ("yes, me") or `no`, and may reword one before marking it yes.
   `accept_description` writes the claims marked yes to `description.md`; an
   unmarked claim or a mark that isn't yes or no stops it, nothing written.
+  `read_description` reads it back without its provenance comment.
 - **The exemplar shortlist (B4).** The model names runs of consecutive
   paragraphs in the sample (by the numbers the sample shows), 100 to 400
   words each, tagged by job (`JOBS`). The code cuts each passage from the
@@ -18,14 +21,19 @@ author then corrects. Everything lives in the author voice repo (plan B0):
   of the sample, crosses a passage break, overlaps another or is the wrong
   length (each refusal named), and measures each against the fingerprint
   (`passage_range`: `typical` when its distance is inside the corpus's own
-  range for passages of its size). They go to `proposals/shortlist.csv`
-  (`SHORTLIST_COLUMNS`) and `proposals/shortlist/<id>.md`, with an empty
-  `pick` column. The author writes `yes` in `pick` for each passage to keep
-  (and may trim its file), and `accept_exemplars` copies the picks to
-  `exemplars/<id>.md` with their index `exemplars/exemplars.csv`
-  (`EXEMPLAR_COLUMNS`). `auto_picks` is the rule the reference voiceprint's
-  exemplars were chosen by (no author to pick them): every typical passage,
-  topped up to `SHORTLIST_MIN` with the nearest of the rest.
+  range for passages of its size; unjudged in a band the corpus is too thin
+  for). A passage's id is where it is (`passage_id`), so it keeps it across
+  proposals. They go to `proposals/shortlist.csv` (`SHORTLIST_COLUMNS`) and
+  `proposals/shortlist/<id>.md`, with an empty `pick` column. The author
+  writes `yes` in `pick` for each passage to keep (and may trim its file;
+  the passage then reads unjudged until `rejudge`), and `accept_exemplars`
+  copies the picks to `exemplars/<id>.md` with their index
+  `exemplars/exemplars.csv` (`EXEMPLAR_COLUMNS`), touching only the
+  shortlist's passages: an author's own rows and an earlier round's picks
+  stay. `load_exemplars` reads the bank. `auto_picks` is the rule the
+  reference voiceprint's exemplars were chosen by (no author to pick them):
+  every typical passage, topped up to `SHORTLIST_MIN` with the nearest of
+  the rest.
 
 The two model calls send the same system block (the sample and the
 fingerprint) but no cache mark: their structured-output schemas differ, and
@@ -38,12 +46,16 @@ to come from the text.
 
 API: `load_voice(voice_dir)` -> `Voice`; `build_sample(texts)` -> `Sample`;
 `system_blocks(voice, sample)`, `description_prompt()`, `shortlist_prompt()`;
-`propose_description(...)` / `propose_shortlist(...)` (one call each, through
-`storyforge.api`); `parse_claims(reply)`, `parse_shortlist(reply, sample)`;
-`write_claims` / `read_claims`, `write_shortlist` / `read_shortlist`;
-`accept_description`, `accept_exemplars`; `recorded_sample(system_text, texts)`
-(a recorded reply parsed as it was answered); `rejudge`; `passage_range(fp, texts)` ->
-`PassageRange`; `auto_picks(rows)`; `forecast(voice, sample, model)`.
+`propose_description(system, sample, model, reply_file)` /
+`propose_shortlist(system, sample, model, reply_file)` (one call each,
+through `storyforge.api`); `parse_claims(reply, sample)`,
+`parse_shortlist(reply, sample)`; `write_claims` / `read_claims`,
+`write_shortlist` / `read_shortlist`, `set_picks`; `accept_description`,
+`accept_exemplars(voice_dir, picks=None)`; `read_description`,
+`load_exemplars` -> `ExemplarBank`; `recorded_sample(system_text, texts)` (a
+recorded reply parsed as it was answered); `rejudge` -> (`PassageRange`,
+passages); `passage_range(fp, texts)` -> `PassageRange`; `auto_picks(rows)`;
+`forecast(system, model, calls)`.
 Errors are `ProposalError`, whose message says what to fix. The CLI is
 `storyforge voice propose` / `judge` / `accept` (`cmd_voice`).
 """
@@ -59,8 +71,17 @@ from typing import Mapping, Sequence
 from storyforge import voiceprint as vp
 from storyforge.common import csv_safe
 
-#: the description's sections, in the order description.md gives them
-SECTIONS = ('does', 'never', 'stance', 'humour', 'rhythm')
+#: the description's sections, in the order description.md gives them: what
+#: each covers and how many claims the prompt asks for (DESCRIPTION_PROMPT is
+#: written from this table; parse_claims names a section outside its range)
+SECTION_ASK = {
+    'does': ('what the voice habitually does', 6, 10),
+    'never': ('what it never, or almost never, does', 3, 6),
+    'stance': ('its stance toward the reader', 2, 4),
+    'humour': ('its humour, or its lack of humour', 2, 4),
+    'rhythm': ('how its sentences and paragraphs move', 2, 4),
+}
+SECTIONS = tuple(SECTION_ASK)
 SECTION_HEADINGS = {
     'does': 'What the voice does',
     'never': 'What it never does',
@@ -220,8 +241,9 @@ def prose_paragraphs(text: str) -> list[str]:
 
 
 def _runs(paras: Sequence[str], size: int) -> list[list[int]]:
-    """Consecutive runs of paragraph indexes of at least `size` words (a
-    short last run is dropped), as `voiceprint.chunks` cuts."""
+    """Consecutive runs of paragraph indexes, each closed once it reaches
+    `size` words; a last run of at least half that is kept, one under half
+    is dropped (as `voiceprint._chunk_paras` cuts)."""
     out, cur, n = [], [], 0
     for i, p in enumerate(paras):
         cur.append(i)
@@ -404,11 +426,8 @@ DESCRIPTION_PROMPT = """\
 Describe this writer's prose voice as a list of short claims the writer will mark one by one, "yes, that's me" or "no".
 
 Sections:
-- does: what the voice habitually does (6 to 10 claims)
-- never: what it never, or almost never, does (3 to 6 claims)
-- stance: its stance toward the reader (2 to 4 claims)
-- humour: its humour, or its lack of humour (2 to 4 claims)
-- rhythm: how its sentences and paragraphs move (2 to 4 claims)
+""" + '\n'.join(f'- {s}: {what} ({lo} to {hi} claims)'
+                for s, (what, lo, hi) in SECTION_ASK.items()) + """
 
 Rules:
 - One sentence a claim, in plain words, specific enough to be wrong. "Uses vivid language" says nothing; "Sentences often turn on a final qualifying clause" can be checked.
@@ -464,10 +483,32 @@ def _json_reply(reply: str, what: str) -> dict:
     return data
 
 
-def parse_claims(reply: str) -> tuple[list[Claim], list[str]]:
+def _plain(text: str) -> str:
+    """`text` for finding a quotation: curly quotes straight, dashes as
+    `--`, whitespace collapsed."""
+    text = (text.replace('\u2018', "'").replace('\u2019', "'").replace('\u201c', '"')
+            .replace('\u201d', '"').replace('\u2014', '--').replace('\u2013', '--'))
+    return ' '.join(text.split())
+
+
+_QUOTE_EDGES = ' "\'.,;:!?'
+
+
+def example_in_sample(example: str, sample_text: str) -> bool:
+    """Whether `example` is copied from `sample_text` (already `_plain`):
+    each part between ellipses found as written, leaving out quotation
+    marks and punctuation at its ends."""
+    parts = re.split(r'\.\.\.|\u2026', _plain(example))
+    parts = [p.strip(_QUOTE_EDGES) for p in parts]
+    return all(p in sample_text for p in parts if p)
+
+
+def parse_claims(reply: str, sample: Sample) -> tuple[list[Claim], list[str]]:
     """The claims in a reply, numbered `c01`.. in section order (the reply's
-    order within a section), and the problems: a claim with no text is left
-    out and named, a section with no claim is named. Raises ProposalError
+    order within a section), and the problems, each named: a claim with no
+    text (left out), a section with fewer or more claims than
+    `SECTION_ASK` asked for, an example that isn't in `sample` as written
+    (kept, so the author sees it, but not evidence). Raises ProposalError
     for a reply that isn't the schema's shape or holds no claim."""
     data = _json_reply(reply, 'description')
     items = data.get('claims')
@@ -488,13 +529,21 @@ def parse_claims(reply: str) -> tuple[list[Claim], list[str]]:
                             f'left without one')
         by_section[item['section']].append((text, _text(example)))
     claims = []
-    for s in SECTIONS:
+    for s, (_, lo, hi) in SECTION_ASK.items():
         if not by_section[s]:
             problems.append(f'no claim in section `{s}`')
+        elif not lo <= len(by_section[s]) <= hi:
+            problems.append(f'section `{s}` has {len(by_section[s])} claims; {lo} to {hi} '
+                            f'were asked for')
         for text, example in by_section[s]:
             claims.append(Claim(f'c{len(claims) + 1:02d}', s, text, example))
     if not claims:
         raise ProposalError('the description reply holds no claim')
+    sample_text = _plain(' '.join(p.text for p in sample.paragraphs))
+    for c in claims:
+        if c.example and not example_in_sample(c.example, sample_text):
+            problems.append(f'claim {c.id}\'s example isn\'t in the sample as written, so it '
+                            f'shows nothing: {c.example[:80]}')
     return claims, problems
 
 
@@ -1019,6 +1068,24 @@ def accept_description(voice_dir: str) -> Accepted:
     return Accepted(path, len(kept), len(claims))
 
 
+def _source_note(voice_dir: str, p: Passage) -> str:
+    """'' when `p`'s text is its source's paragraphs as written (trimmed or
+    whole); otherwise a WARNING note: its `source` and `paragraphs` no longer
+    say where it's from, or they can't be checked."""
+    try:
+        first, last = (int(x) for x in p.paragraphs.split('-'))
+        paras = prose_paragraphs(_read(os.path.join(voice_dir, p.source)))
+    except (ValueError, OSError, UnicodeDecodeError) as e:
+        return (f'WARNING: couldn\'t check {p.id} against {p.source} paragraphs '
+                f'{p.paragraphs} ({e})')
+    whole = _plain(' '.join(paras[first - 1:last]))
+    if not paras[first - 1:last] or _plain(p.text) not in whole:
+        return (f'WARNING: {p.id} isn\'t {p.source} paragraphs {p.paragraphs} as written '
+                f'(edited, not only trimmed): its source and paragraphs no longer say where '
+                f'it\'s from')
+    return ''
+
+
 def accept_exemplars(voice_dir: str, picks: Sequence[str] | None = None) -> Accepted:
     """Copy the picked passages to exemplars/ and update their index.
 
@@ -1097,6 +1164,7 @@ def accept_exemplars(voice_dir: str, picks: Sequence[str] | None = None) -> Acce
     if not SHORTLIST_MIN <= len(rows) <= SHORTLIST_MAX:
         notes.append(f'WARNING: the bank holds {len(rows)} exemplars; it is meant to be '
                      f'{SHORTLIST_MIN} to {SHORTLIST_MAX}')
+    notes += [n for n in (_source_note(voice_dir, p) for p in picked) if n]
     jobs = {r['job'] for r in rows}
     missing = [j for j in JOBS if j not in jobs]
     if missing:
@@ -1227,14 +1295,15 @@ def _call(system: list[dict], prompt: str, schema: dict, model: str, tokens: int
     return api.extract_text(response)
 
 
-def propose_description(system: list[dict], model: str,
+def propose_description(system: list[dict], sample: Sample, model: str,
                         reply_file: str | None = None) -> tuple[list[Claim], list[str]]:
-    """One call: the claims and the problems (`parse_claims`). The raw reply
-    is written to `reply_file` first. Raises ProposalError for an unusable
-    reply, `api.RefusalError` for a refusal."""
+    """One call: the claims and the problems (`parse_claims`, the examples
+    checked against `sample`). The raw reply is written to `reply_file`
+    first. Raises ProposalError for an unusable reply, `api.RefusalError`
+    for a refusal (its reply saved too), RuntimeError for a failed request."""
     reply = _call(system, description_prompt(), CLAIMS_SCHEMA, model, DESCRIPTION_TOKENS,
                   'voice description', reply_file)
-    return parse_claims(reply)
+    return parse_claims(reply, sample)
 
 
 def propose_shortlist(system: list[dict], sample: Sample, model: str,

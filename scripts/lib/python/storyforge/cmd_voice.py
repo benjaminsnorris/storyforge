@@ -1,7 +1,7 @@
 """storyforge voice — the author voice repo (plan Part B).
 
 Run in an author voice repo (plan B0: `voice.yaml`, `corpus/`,
-`fingerprint.json`), not in a book. So far it proposes and accepts the
+`fingerprint.json`), not in a book. It proposes, judges and accepts the
 described voice and the exemplar bank (B3, B4; `storyforge.voiceprint_proposals`):
 
 1. `voice propose` reads a sample of the fingerprinted corpus alongside the
@@ -9,14 +9,19 @@ described voice and the exemplar bank (B3, B4; `storyforge.voiceprint_proposals`
    `proposals/description-claims.csv` (an empty `mark` column), the exemplar
    shortlist to `proposals/shortlist.csv` and `proposals/shortlist/<id>.md`
    (an empty `pick` column). Paid: the forecast is printed first and held
-   to the cost threshold (`STORYFORGE_COST_THRESHOLD`).
+   to the cost threshold (`STORYFORGE_COST_THRESHOLD`). The typical range is
+   measured before either call (free), so a corpus that can't give one fails
+   before paying. The spend is printed, not ledgered (a voice repo has no
+   cost ledger).
 2. The author marks each claim `yes` or `no` (rewording any they keep), and
    writes `yes` in `pick` for each passage to keep (trimming its file if
    they like).
    `voice judge` measures the shortlist against the fingerprint again
    (free; after the fingerprint changes).
 3. `voice accept` writes `description.md` from the claims marked yes and
-   copies the picked passages to `exemplars/`. Free.
+   copies the picked passages to `exemplars/`, leaving index rows the
+   shortlist doesn't hold (the author's own, an earlier round's) as they
+   are. Free.
 
 Usage:
     storyforge voice propose                    # both proposals, in this directory
@@ -27,7 +32,8 @@ Usage:
     storyforge voice accept --only exemplars --auto-pick   # pick by the reference rule
 
 `voice propose` won't replace a claims file with marks in it, or a shortlist
-with picks, without `--force`. Nothing is committed: commit the repo after.
+with picks, without `--force`; nor will `voice accept --auto-pick` replace
+picks. Nothing is committed: commit the repo after.
 """
 
 import argparse
@@ -40,16 +46,16 @@ from storyforge.common import install_signal_handlers, log
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='storyforge voice',
-        description='The author voice repo: propose and accept the described voice and '
-                    'the exemplar bank.')
+        description='The author voice repo: propose, judge and accept the described '
+                    'voice and the exemplar bank.')
     sub = parser.add_subparsers(dest='action', required=True)
     prop = sub.add_parser('propose', help='Propose the description\'s claims and the '
                                           'exemplar shortlist (two model calls)')
     prop.add_argument('--dir', default='.', help='The author voice repo (default: here)')
     prop.add_argument('--only', choices=['description', 'shortlist'],
                       help='Make one of the two proposals')
-    prop.add_argument('--model', help='The model (default: common.select_model'
-                                      '(voiceprint_proposals.MODEL_TASK))')
+    prop.add_argument('--model', help='The model (default: the synthesis-tier model; '
+                                      'STORYFORGE_MODEL overrides)')
     prop.add_argument('--force', action='store_true',
                       help='Replace a claims file with marks or a shortlist with picks')
     prop.add_argument('--dry-run', action='store_true',
@@ -152,8 +158,8 @@ def _propose(voice_dir: str, args) -> int:
             reply_file = os.path.join(replies, f'{call}.json')
             try:
                 if call == 'description':
-                    status |= _propose_description(voice_dir, system, model, reply_file,
-                                                   written)
+                    status |= _propose_description(voice_dir, system, sample, model,
+                                                   reply_file, written)
                 else:
                     status |= _propose_shortlist(voice_dir, system, sample, model, rng,
                                                  reply_file, written)
@@ -173,9 +179,9 @@ def _propose(voice_dir: str, args) -> int:
     return status
 
 
-def _propose_description(voice_dir, system, model, reply_file, written) -> int:
+def _propose_description(voice_dir, system, sample, model, reply_file, written) -> int:
     from storyforge import voiceprint_proposals as vpp
-    claims, problems = vpp.propose_description(system, model, reply_file)
+    claims, problems = vpp.propose_description(system, sample, model, reply_file)
     path = vpp.write_claims(voice_dir, claims)
     written.append('description')
     log(f'{len(claims)} claims -> {os.path.relpath(path, voice_dir)}: mark each '

@@ -320,8 +320,8 @@ def test_reference_exemplars_are_the_auto_picks(shortlist):
 # ============================================================================
 
 def _recordings():
-    """The cassette's recordings, {'description': (body, reply), 'shortlist': ...},
-    told apart by their schema."""
+    """The cassette's recordings, {'description': (body, reply text, response),
+    'shortlist': ...}, told apart by their schema."""
     import gzip
     import json
     from storyforge import api
@@ -359,7 +359,7 @@ def test_recording_is_the_committed_proposals(voice):
     sample = vpp.recorded_sample(system_text, voice.texts)
     assert sample.windows == vpp.SAMPLE_WINDOWS
 
-    claims, problems = vpp.parse_claims(recs['description'][1])
+    claims, problems = vpp.parse_claims(recs['description'][1], sample)
     assert problems == []
     want = vpp.read_claims(AUSTEN)
     assert [(c.id, c.section, c.claim, c.example) for c in claims] == [

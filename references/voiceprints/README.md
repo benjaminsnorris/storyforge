@@ -175,26 +175,41 @@ other writers', and makes two calls (`storyforge.voiceprint_proposals`,
    rhythm), each with a short example, go to `proposals/description-claims.csv`
    (`id|section|claim|example|mark`). The author writes `yes` or `no` in
    `mark` for every claim, rewording a claim before keeping it if they like.
-2. **The shortlist.** The model names 30 runs of consecutive paragraphs (100
-   to 400 words, tagged by job: description, argument, turn, humour, quiet,
-   dialogue); the code cuts each from the corpus as written, refuses a run
-   that is out of the sample, crosses a break, overlaps another or is the
-   wrong length (each named), and measures each against the fingerprint. They
-   go to `proposals/shortlist.csv`
+   A section with fewer or more claims than asked for, and an example that
+   isn't in the sample as written, are WARNINGs.
+2. **The shortlist.** The model is asked for 30 runs of consecutive
+   paragraphs (100 to 400 words, tagged by job: description, argument, turn,
+   humour, quiet, dialogue); the code cuts each from the corpus as written,
+   refuses a run that is out of the sample, crosses a break, overlaps another
+   or is the wrong length (each named in a WARNING and dropped), and measures
+   each against the fingerprint. A reply naming other than 30 is a WARNING;
+   fewer than 20 or more than 40 usable passages is an ERROR (the shortlist
+   is still written). A passage's id is where it is
+   (`pride-and-prejudice-67-68`), so it keeps it across proposals. They go to
+   `proposals/shortlist.csv`
    (`id|job|source|paragraphs|words|distance|limit|typical|why|pick`) and
    `proposals/shortlist/<id>.md`. The author writes `yes` in `pick` for
-   each passage to keep, and may trim a passage's file.
+   each passage to keep, and may trim a passage's file (it then reads
+   unjudged until `voice judge`).
 3. `storyforge voice accept` writes `description.md` (the claims marked yes,
-   by section; an unmarked claim stops it) and copies the picks to
-   `exemplars/<id>.md`, indexed in `exemplars/exemplars.csv`. Free.
+   by section, under a provenance comment; an unmarked claim stops it) and
+   copies the picks to `exemplars/<id>.md`, indexed in
+   `exemplars/exemplars.csv` (`id|job|source|paragraphs|words|why`). It
+   touches only the shortlist's passages: an exemplar the author added to the
+   index, or an earlier round's pick, stays. A pick whose file is already in
+   `exemplars/` without an index row stops it, nothing written; a picked
+   passage edited beyond a trim is a WARNING. Free.
 
 A passage is **typical** when its distance from the fingerprint is at most
 the 90th percentile of the corpus's own passages of its size (bands of 100,
 150, 200 and 300 words; short passages vary far more than the fingerprint's
 2,000-word chunks). On Austen the limits are 0.95, 0.90, 0.87 and 0.82;
-held-out *Emma* passages fall inside 89% of the time, the seven other
-authors' 14%. `storyforge voice judge` measures the shortlist again after
-the fingerprint changes (free).
+held-out *Emma* passages of about 150 words fall inside 89% of the time, the
+seven other authors' 14%. A band the corpus has fewer than 20 passages of (a
+corpus of long paragraphs may have no run of 100-149 words) gets no limit:
+`voice propose` says so before paying, and a passage in it is left unjudged.
+`storyforge voice judge` measures the shortlist again after the fingerprint
+changes (free).
 
 Each call costs about $0.32 on Opus 5.5 for the Austen sample (67k tokens of
 input each: the two calls' schemas differ, and a structured-output schema is
@@ -202,8 +217,8 @@ part of the cached prefix, so they can't share a cache).
 
 ### The Austen description and exemplars
 
-**Nobody marked or picked them.** Ben wasn't there to mark claims or pick
-passages, so both follow the rule the tests define:
+**Nobody marked or picked them.** The reference has no author to mark
+claims or pick passages, so both follow the rule the tests define:
 
 - **Claims** are marked `no` when they assert something the critic's list
   rejects (`reference_mark` in `tests/test_voiceprint_description.py`) and
@@ -281,11 +296,13 @@ import dataclasses, test_voiceprint_description as t
 from storyforge import voiceprint_proposals as vpp
 d = 'references/voiceprints/austen'
 vpp.write_claims(d, [dataclasses.replace(c, mark=t.reference_mark(c)) for c in vpp.read_claims(d)])"
-./storyforge voice accept --dir references/voiceprints/austen --auto-pick
+rm -r references/voiceprints/austen/exemplars
+./storyforge voice accept --dir references/voiceprints/austen --auto-pick --force
 ```
 
 Update
 `RECORDED_MODEL` if the model changed, and record test 4's result here. If
-the fingerprint changes, `voice judge` and `voice accept --auto-pick` bring
-the shortlist's figures and the exemplars up to date for free.
+the fingerprint changes, `voice judge` and `voice accept --only exemplars
+--auto-pick --force` bring the shortlist's figures and the exemplars up to
+date for free.
 

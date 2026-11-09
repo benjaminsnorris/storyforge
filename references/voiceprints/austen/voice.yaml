@@ -1,6 +1,7 @@
 # The Austen reference voiceprint (plan B7, #650), in the author voice repo
 # layout (plan B0). Storyforge's worked example and the fixture of
-# tests/test_voiceprint_reference.py. The voice.yaml format is provisional
+# tests/test_voiceprint_reference.py and tests/test_voiceprint_description.py;
+# `author` titles description.md. The voice.yaml format is provisional
 # until `storyforge voice init` defines it (#652); plan B0's per-piece
 # "sections in or out" isn't here yet. Years are the title page's.
 # tests/test_voiceprint_reference.py checks that the `use: fingerprint`
