@@ -672,3 +672,64 @@ def test_hugo_toml_front_matter():
                           'The river was high that June.\n', 'src')
     assert (p.title, p.date, p.kind, p.kind_from) == ('On Rivers', '2020-06-01', 'essay', 'said')
     assert p.body == 'The river was high that June.'
+
+
+def test_an_atom_feed_through_read_sources(repo):
+    """T3: an Atom feed read as a source: kinds from <category term>, a
+    rel="related" link post, a cut <summary> left out, the rest imported."""
+    xml = ('<feed xmlns="http://www.w3.org/2005/Atom"><link href="https://me.com/"/>'
+           '<entry><title>On Rain</title><link href="https://me.com/rain"/>'
+           '<published>2017-04-02T12:00:00Z</published><category term="essay"/>'
+           '<content type="html">&lt;p&gt;It rained for nine days.&lt;/p&gt;</content></entry>'
+           '<entry><title>See this</title><link href="https://me.com/see"/>'
+           '<link rel="related" href="https://them.net/x"/>'
+           '<content type="html">&lt;p&gt;Worth a look, this.&lt;/p&gt;</content></entry>'
+           '<entry><title>Cut</title><link href="https://me.com/cut"/>'
+           '<summary>It starts and then\u2026</summary></entry></feed>')
+    r = vi.read_sources(repo, [_feed_file(repo, xml, 'atom.xml')], fetch=_no_network)
+    assert [(p.title, p.kind, p.kind_from, p.date) for p in r.pieces] == [
+        ('On Rain', 'essay', 'said', '2017-04-02'), ('See this', 'link', 'said', '')]
+    assert len(r.warnings) == 1 and 'cut summary' in r.warnings[0] and 'Cut' in r.warnings[0]
+
+
+def test_a_local_html_file_takes_its_date_and_title_from_its_name(repo, tmp_path):
+    """T5: a local page with no date or title of its own."""
+    page = tmp_path / '2021-07-04-on-fireworks.html'
+    page.write_text('<html><body><article><p>The dog hid under the bed.</p></article>'
+                    '</body></html>', encoding='utf-8')
+    r = vi.read_sources(repo, [str(page)], fetch=_no_network)
+    p = r.pieces[0]
+    assert (p.title, p.date, p.kind, p.kind_from) == ('on fireworks', '2021-07-04', 'essay',
+                                                      'guessed')
+    assert p.body == 'The dog hid under the bed.'
+
+
+def test_fetch_url_refuses_a_redirect_off_http_and_wraps_urllib_errors(monkeypatch):
+    """T9: a redirect to another scheme is refused, and urllib's own errors
+    become a VoiceImportError (an ERROR line, not a traceback)."""
+    import urllib.error
+    import urllib.request
+
+    class Resp:
+        headers = {}
+
+        def geturl(self):
+            return 'ftp://example.com/x'
+
+        def read(self, n):
+            return b''
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(urllib.request, 'urlopen', lambda req, timeout: Resp())
+    with pytest.raises(vi.VoiceImportError, match="redirected to ftp://example.com/x"):
+        vi.fetch_url('https://example.com/x')
+
+    def boom(req, timeout):
+        raise urllib.error.URLError('timed out')
+    monkeypatch.setattr(urllib.request, 'urlopen', boom)
+    with pytest.raises(vi.VoiceImportError, match="couldn't be fetched .URLError"):
+        vi.fetch_url('https://example.com/x')

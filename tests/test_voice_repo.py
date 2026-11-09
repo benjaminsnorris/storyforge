@@ -205,7 +205,9 @@ def test_cmd_fingerprint_recomputes_the_austen_reference(tmp_path, capsys):
     d = tmp_path / 'austen'
     shutil.copytree(AUSTEN, d)
     assert cmd_voice.main(['fingerprint', '--dir', str(d)]) == 0
-    assert 'is current' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'is current' in out
+    assert 'WARNING' not in out          # T2: 122,136 counted words, over the minimum
     os.remove(d / 'fingerprint.json')
     assert cmd_voice.main(['fingerprint', '--dir', str(d)]) == 0
     with open(d / 'fingerprint.json', encoding='utf-8') as a, \
@@ -582,3 +584,19 @@ def test_index_refuses_an_impossible_date_and_write_index_refuses_what_read_woul
     with pytest.raises(vr.VoiceRepoError, match='repeated'):
         vr.write_index(str(tmp_path / 'w'), [vr.IndexRow('corpus/a.md'), vr.IndexRow('corpus/a.md')])
     assert vi._norm_date('2019-13-99') == '' and vi._date_from_name('2019-02-30-x.md') == ''
+
+
+def test_the_minimum_corpus_warning_sums_counted_words_only():
+    """T2: quiet at MIN_CORPUS_WORDS, a WARNING one word under, and a large
+    held-out piece doesn't lift the counted words over it."""
+    from storyforge.voiceprint import MIN_CORPUS_WORDS
+
+    def piece(words, counts=True, why=''):
+        return vr.CorpusPiece(vr.IndexRow(f'corpus/{words}-{counts}.md'), words, counts, why)
+    at = vr.corpus_summary([piece(MIN_CORPUS_WORDS - 100), piece(100)])
+    assert not any(l.startswith('WARNING') for l in at)
+    under = vr.corpus_summary([piece(MIN_CORPUS_WORDS - 1)])
+    assert under[-1].startswith('WARNING')
+    held = vr.corpus_summary([piece(1000), piece(MIN_CORPUS_WORDS * 2, False, 'held out')])
+    assert held[-1].startswith('WARNING: the pieces that count hold 1,000 words')
+    assert '  not counted: 1 held out' in held
