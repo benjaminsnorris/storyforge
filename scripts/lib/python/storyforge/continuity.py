@@ -10,23 +10,28 @@ calendar and the world table, free and the same every run:
   `time_mode` frame, vision, memory, dream or ghost: `elaborate.off_present`)
   is exempt, and so is a flashback, whose `timeline_day` comes before the
   death. An unmarked scene is reported, never assumed to be a memory.
-- **possession** (PHY): an object in two people's hands at once, or held,
-  given or used after it was given away, lost or destroyed, unless a fact
-  between moves it (`gets`). A saved stage sheet's hands (#647) count for
-  the objects tracked.
+- **possession** (PHY): within a scene, an object in two people's hands
+  with nothing between; in any scene, an object used after it was
+  destroyed, or held again by the person who gave it away or lost it,
+  unless a fact between moves it (`gets`). An object in other hands than an
+  earlier scene left it is a note (an offstage handover is ordinary). A
+  current stage sheet's hands (#647) count for the objects tracked, placed
+  by their quotes on the prose's scale.
 - **knowledge** (KNO): the POV character acts on, says or thinks a fact
-  before the scene where they learn it (or one they never learn). When a
-  character learns a fact (`learned_at`) is the earliest of the ledger's
-  knowledge rows (`known_by`), the briefs' `knowledge_in`/`knowledge_out`
-  for their POV, and `knows learns` records.
-- **place** (PHY): a character in two places in one time slot (the same
-  `timeline_day` and `time_of_day`), places matched through
-  locations.csv; (WLD) travel faster than world.csv's fastest `speed`
-  allows over a `distance` it gives.
+  before a scene or brief shows them learning it (`knows learns`, the
+  briefs' `knowledge_in`/`knowledge_out` for their POV). The ledger's
+  `known_by` says who knows a fact, not when, so a fact it alone places
+  later, or one never shown learned, is a note.
+- **travel** (WLD): a person further from where the story last had them
+  than world.csv's fastest `speed` allows in the days between (a time of
+  day is a slot: at least `SLOT_DAYS`), places matched through
+  locations.csv and distances from world.csv. Two places in one morning
+  are ordinary unless they are too far apart.
 - **time** (TIM): an elapsed-time phrase ("three days ago", "the tenth
   day") against the calendar: the days between this scene and the scene the
   count runs from (`parse_elapsed`, a small parser that says what it can't
-  read rather than guessing).
+  read rather than guessing: a compound, a bound and an estimate are read
+  whole, a range or two counts not at all).
 - **injury** (PHY): a body part used at full strength while a serious or
   disabling injury to it is current.
 - **names** (WLD): a name the book rules out appears: an adaptation's name
@@ -39,8 +44,11 @@ calendar and the world table, free and the same every run:
 Every finding is a `checker.Finding` with the scene's own words, verified;
 a record whose quote isn't in its scene makes none. Whatever couldn't be
 checked is a note (`ContinuityResult.notes`): silence means checked and
-clean. The gate runs this on every scene it checks (`gate.GATE_CONTINUITY`):
-its findings join the check's and block like any continuity error.
+clean. A scene before this one in story order whose typed state wasn't read
+(`Book.gaps`) turns a finding it could explain (a `gets`, a `learns`, a
+`healed` there) into a note. Cut and merged scenes don't count. The gate
+runs this on every scene it checks (`gate.GATE_CONTINUITY`): its findings
+join the check's and block like any continuity error.
 """
 
 from __future__ import annotations
@@ -48,11 +56,12 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from storyforge.checker import CALENDAR, Finding
 from storyforge.quotes import normalize, quote_in
-from storyforge.typed_state import (MAX_OFFERED_FACTS, MAX_OFFERED_INJURIES, Record,
-                                    object_key, part_key)
+from storyforge.typed_state import (END, MAX_OFFERED_FACTS, MAX_OFFERED_INJURIES,
+                                    MAX_OFFERED_OBJECTS, START, Record, object_key, part_key)
 
 #: The block and key in storyforge.yaml holding names the book rules out,
 #: `;`-separated (`continuity:` / `  forbidden_names: Jupiter; Juno`)
@@ -63,8 +72,12 @@ SERIOUS_DAYS = 42
 #: Where in its day each time of day falls, for travel
 _DAY_FRACTION = {'dawn': 0.2, 'morning': 0.35, 'afternoon': 0.6, 'evening': 0.75,
                  'dusk': 0.8, 'night': 0.9}
+#: The least time a move between two scenes is allowed: a time of day is a
+#: slot, not an instant, so two scenes in one morning may be hours apart
+#: (#648's review, CR-2)
+SLOT_DAYS = 0.25
 #: Codes by check
-CODES = {'life': 'PHY', 'possession': 'PHY', 'knowledge': 'KNO', 'place': 'PHY',
+CODES = {'life': 'PHY', 'possession': 'PHY', 'knowledge': 'KNO',
          'travel': 'WLD', 'time': 'TIM', 'injury': 'PHY', 'names': 'WLD', 'sky': 'WLD'}
 
 
@@ -108,6 +121,12 @@ class Book:
     forbidden: dict[str, str] = field(default_factory=dict)
     #: lower-case names a person may be called by; None: no registry
     known_names: set[str] | None = None
+    #: lower-case names characters.csv gives (ids, names, aliases); None: no
+    #: registry. A forbidden name here isn't checked
+    registry_names: set[str] | None = None
+    #: other scenes with prose whose typed state couldn't be read (none yet,
+    #: or of earlier prose): what they say is unknown (`gap_before`)
+    gaps: set[str] = field(default_factory=set)
     key: dict[str, tuple] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -163,6 +182,16 @@ class Book:
                for r in recs if r.type in kinds and r.verified]
         return sorted(out, key=lambda r: (self.key.get(r.scene_id, (0, 0)), r.index))
 
+    def gap_between(self, a: str, b: str) -> list[str]:
+        """The scenes in `gaps` that come after scene `a` and before scene
+        `b` in story order (`a` '' for the book's start), present-time ones
+        only: a fact there (a `gets`, a `learns`, a `healed`) is unknown."""
+        lo = self.key.get(a) if a else None
+        hi = self.key.get(b, (0, 0))
+        return sorted((g for g in self.gaps if not self.off_present(g) and g in self.key
+                       and (lo is None or lo < self.key[g]) and self.key[g] < hi),
+                      key=self.key.get)
+
     def pov(self, sid: str) -> str:
         return (self.row(sid).get('pov') or '').strip()
 
@@ -185,6 +214,10 @@ def _where(book: Book, sid: str) -> str:
 # ============================================================================
 
 def check_life(book: Book) -> tuple[list[Finding], list[str]]:
+    """PHY: a person this scene puts present (`at`) after their death in
+    story order (`alive dead` records, characters.csv's `death_scene`) with
+    no `alive alive` between. Exempt: an off-present scene, and a death in
+    one."""
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
@@ -226,10 +259,30 @@ def check_life(book: Book) -> tuple[list[Finding], list[str]]:
 # Possession
 # ============================================================================
 
+def _slot(state: dict, key: str) -> str:
+    """The state key `key` names: itself, else the one tracked object it is
+    `stage_sheet.same_object` with ("sword" and "Hector's sword"), else
+    itself when none or several are."""
+    from storyforge.stage_sheet import same_object
+    if not key or key in state:
+        return key
+    matches = [k for k in state if same_object(k, key)]
+    return matches[0] if len(matches) == 1 else key
+
+
 def check_possession(book: Book, sheet_records: list[Record] | None = None
                      ) -> tuple[list[Finding], list[str]]:
-    """Fold every `holds` record, in story order, per object; check this
-    scene's against the state before each."""
+    """PHY: fold every `holds` record (and a current stage sheet's hands), in
+    story order, per object (`object_key`, names matched by
+    `stage_sheet.same_object`); check this scene's against the state before
+    each. Blocking: within this scene, an object in another person's hands
+    with nothing between; in any scene, an object used after it was
+    destroyed, or held again by the person who gave it away or lost it.
+    A different holder than an earlier scene left it with is a note (an
+    offstage handover is ordinary, #648's review CR-3), and so is anything
+    that a scene between without typed state might explain (CR-5). Exempt:
+    an off-present scene. A holder not in characters.csv is read as a place
+    (an object lying there) and said."""
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
@@ -239,27 +292,37 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
     # object key → (holder canonical or place, status, record, by)
     state: dict[str, tuple[str, str, Record, str]] = {}
     flagged: set[str] = set()
+    offstage, gapped, places = [], [], set()
     for r in records:
-        obj = object_key(r.item)
+        obj = _slot(state, object_key(r.item))
         if not obj:
             continue
         holder = book.who(r.who)
         person = book.is_person(r.who) or r.origin == 'stage-sheet'
+        if r.scene_id == sid and not person and r.value in ('gets', 'has'):
+            places.add(r.who)
         prev = state.get(obj)
         problem = ''
         if r.scene_id == sid and prev is not None and obj not in flagged:
             p_holder, status, p_rec, by = prev
-            p_where = ('earlier in this scene' if p_rec.scene_id == sid
-                       else _where(book, p_rec.scene_id))
+            here = p_rec.scene_id == sid
+            p_where = 'earlier in this scene' if here else _where(book, p_rec.scene_id)
             if r.value != 'gets' and status == 'destroyed':
                 problem = f'{r.item} was destroyed {p_where}'
             elif r.value in ('has', 'gives', 'loses', 'destroyed') and person:
                 if status == 'held' and p_holder != holder and p_rec.origin != 'place':
-                    problem = f'{p_rec.who} holds {r.item} ({p_where}), with nothing between'
+                    if here:
+                        problem = f'{p_rec.who} holds {r.item} ({p_where}), with nothing between'
+                    else:
+                        offstage.append(f'{r.who} has {r.item}, which {p_rec.who} held in '
+                                        f'{p_rec.scene_id}')
                 elif status in ('given', 'lost') and by == holder:
                     problem = (f'{r.who} {"gave away" if status == "given" else "lost"} '
                                f'{r.item} {p_where}, with nothing between')
-            if problem:
+            gap = [] if here else book.gap_between(p_rec.scene_id, sid)
+            if problem and gap:
+                gapped.append(f'{r.item} ({", ".join(gap[:3])})')
+            elif problem:
                 flagged.add(obj)
                 verb = {'has': 'has', 'gives': 'gives away', 'loses': 'loses',
                         'destroyed': 'destroys', 'gets': 'gets'}[r.value]
@@ -267,20 +330,32 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
                                          f'{r.who} {verb} {r.item}, but {problem}'))
         # the state after the record
         if r.value in ('gets', 'has'):
-            rec = r if person else Record(**{**r.__dict__, 'origin': 'place'})
+            rec = r if person else r.replace(origin='place')
             state[obj] = (holder, 'held', rec, '')
         elif r.value == 'gives':
             to = r.detail.strip()
             if to and book.is_person(to):
-                state[obj] = (book.who(to), 'held',
-                              Record(**{**r.__dict__, 'who': to}), holder)
+                state[obj] = (book.who(to), 'held', r.replace(who=to), holder)
             else:
                 state[obj] = ('', 'given', r, holder)
         elif r.value == 'loses':
             state[obj] = ('', 'lost', r, holder)
         elif r.value == 'destroyed':
             state[obj] = ('', 'destroyed', r, holder)
-    return findings, []
+    notes = []
+    if offstage:
+        notes.append(f'possession: {len(offstage)} object(s) in other hands than an earlier '
+                     f'scene left them, with no handover shown (an offstage one is ordinary; '
+                     f'not a finding): ' + '; '.join(offstage[:5]))
+    if gapped:
+        notes.append(f'possession: {len(gapped)} object(s) used after being given away, lost '
+                     f'or destroyed, with a scene between whose typed state wasn\'t read, not '
+                     f'compared: ' + '; '.join(gapped[:5]))
+    if places:
+        notes.append(f'possession: {len(places)} holder(s) characters.csv doesn\'t name, read as '
+                     f'places (an object lying there), not compared as people: '
+                     + ', '.join(sorted(places)[:5]))
+    return findings, notes
 
 
 # ============================================================================
@@ -298,47 +373,59 @@ def knowledge_facts(rows: list[dict]) -> dict[str, dict]:
             and (r.get('status') or '') in ('binding', 'planned') and r.get('id')}
 
 
-def learned_at(book: Book, who: str, facts: dict[str, dict]
-               ) -> dict[str, tuple[tuple[str, int] | None, str, str]]:
-    """Fact id → (where `who` learns it: (scene, index), None for before
-    the book; the scene or file that says so; its words) for every fact
-    `who` is known to learn. From the ledger's `known_by` (a fact's scene,
-    or before the book when it has none), the briefs (`knowledge_out` of a
-    scene `who` is the POV of: learned there; `knowledge_in`: known by its
-    start) and `knows learns` records. The earliest wins."""
-    out: dict[str, tuple[tuple[str, int] | None, str, str]] = {}
+class Learned(NamedTuple):
+    """Where a person learns a fact: `at` (scene, index), None for before
+    the book; `source` (the scene or file that says so); `words`;
+    `shown` True when a scene or brief shows the learning (`knows learns`,
+    `knowledge_in`/`knowledge_out`), False for the ledger's `known_by`
+    alone, which says who knows a fact, not when they learned it."""
+    at: tuple[str, int] | None
+    source: str
+    words: str
+    shown: bool
 
-    def put(fid: str, at, source: str, words: str) -> None:
+
+def learned_at(book: Book, who: str, facts: dict[str, dict], *, shown_only: bool = False
+               ) -> dict[str, Learned]:
+    """Fact id → the earliest `Learned` for every fact `who` is known to
+    learn: from the ledger's `known_by` (a fact's scene, or before the book
+    when it has none; skipped with `shown_only`), the briefs
+    (`knowledge_out` of a scene `who` is the POV of: learned there;
+    `knowledge_in`: known by its start) and `knows learns` records."""
+    out: dict[str, Learned] = {}
+
+    def put(fid: str, at, source: str, words: str, shown: bool) -> None:
         if fid not in facts:
             return
         if fid in out:
-            old = out[fid][0]
+            old = out[fid].at
             if old is None or (at is not None and not book.before(at, old)):
                 return
-        out[fid] = (at, source, words)
+        out[fid] = Learned(at, source, words, shown)
 
-    for fid, r in facts.items():
-        if who in {book.who(k) for k in _split(r.get('known_by', ''))}:
-            scene = (r.get('scene_id') or '').strip()
-            put(fid, (scene, 0) if scene in book.order else None, scene or 'the ledger',
-                r.get('quote') or r.get('statement') or '')
+    if not shown_only:
+        for fid, r in facts.items():
+            if who in {book.who(k) for k in _split(r.get('known_by', ''))}:
+                scene = (r.get('scene_id') or '').strip()
+                put(fid, (scene, 0) if scene in book.order else None, scene or 'the ledger',
+                    r.get('quote') or r.get('statement') or '', False)
     for sid, brief in book.briefs.items():
         if sid not in book.order or book.who(book.pov(sid)) != who:
             continue
         for fid in _split(brief.get('knowledge_in', '')):
-            put(fid, (sid, -1), sid, f'knowledge_in of {sid}\'s brief')
+            put(fid, (sid, START), sid, f'knowledge_in of {sid}\'s brief', True)
         for fid in _split(brief.get('knowledge_out', '')):
-            put(fid, (sid, 0), sid, f'knowledge_out of {sid}\'s brief')
+            put(fid, (sid, 0), sid, f'knowledge_out of {sid}\'s brief', True)
     for sid, recs in book.records.items():
         for r in recs:
             if r.type == 'knows' and r.value == 'learns' and r.verified \
                     and book.who(r.who) == who:
-                put(r.item, (sid, r.index), sid, r.quote)
+                put(r.item, (sid, r.index), sid, r.quote, True)
     return out
 
 
 def offered_facts(book: Book) -> tuple[list[tuple[str, str]], int]:
-    """(id, statement) of the facts this scene's POV hasn't learned before
+    """(id, statement) of the facts this scene's POV may not know before
     it, for extraction to watch: those learned later (soonest first), then
     those never learned that someone knows. Capped (`MAX_OFFERED_FACTS`);
     returns how many were left out."""
@@ -351,8 +438,8 @@ def offered_facts(book: Book) -> tuple[list[tuple[str, str]], int]:
     later, never = [], []
     for fid, r in facts.items():
         if fid in learned:
-            at = learned[fid][0]
-            if at is not None and at[0] != sid and book.before((sid, 10 ** 6), at):
+            at = learned[fid].at
+            if at is not None and at[0] != sid and book.before((sid, END), at):
                 later.append((book.key.get(at[0], (0, 0)), fid))
         elif _split(r.get('known_by', '')):
             never.append(fid)
@@ -363,11 +450,25 @@ def offered_facts(book: Book) -> tuple[list[tuple[str, str]], int]:
 
 
 def check_knowledge(book: Book) -> tuple[list[Finding], list[str]]:
+    """KNO: the POV acts on, says or thinks a fact (`knows uses`) before a
+    scene or brief shows them learning it (`learned_at(shown_only=True)`).
+    Not a finding, a note: a fact the ledger alone places later (`known_by`
+    says who knows, not when: #648's review CR-4), one never shown learned,
+    and one a scene before without typed state might teach (CR-5). Exempt:
+    an off-present scene (a vision may show what isn't known yet). A scene
+    without a POV character isn't checked, and says so."""
     sid = book.scene_id
+    if book.off_present(sid):
+        return [], []
     facts = knowledge_facts(book.rows)
+    pov = book.pov(sid)
+    if not pov or pov.lower() == 'narrator':
+        return [], ([f'knowledge: the scene has no POV character, so the ledger\'s '
+                     f'{len(facts)} knowledge fact(s) were not checked against it']
+                    if facts else [])
     findings, notes = [], []
-    cache: dict[str, dict] = {}
-    unknown = []
+    cache: dict[str, tuple[dict, dict]] = {}
+    unknown, unshown, gapped = [], [], []
     for r in book.records.get(sid, []):
         if r.type != 'knows' or r.value != 'uses' or not r.verified:
             continue
@@ -376,28 +477,37 @@ def check_knowledge(book: Book) -> tuple[list[Finding], list[str]]:
             continue
         who = book.who(r.who)
         if who not in cache:
-            cache[who] = learned_at(book, who, facts)
-        learned = cache[who].get(r.item)
-        if learned is not None:
-            at, source, words = learned
-            if at is None or not book.before((sid, r.index), at) or at[0] == sid:
-                continue
-            findings.append(_finding(
-                'knowledge', r.quote, at[0], words,
-                f'{r.who} acts on {r.item} ("{_short(facts[r.item].get("statement"))}") '
-                f'before learning it, in {_where(book, at[0])}', fact_id=r.item))
-        else:
-            row = facts[r.item]
-            findings.append(_finding(
-                'knowledge', r.quote, (row.get('scene_id') or '').strip(),
-                row.get('quote') or row.get('statement') or '',
-                f'{r.who} acts on {r.item} ("{_short(row.get("statement"))}"), which no scene, '
-                f'brief or ledger row has {r.who} learn (known by '
-                f'{row.get("known_by") or "no one named"})', fact_id=r.item))
+            cache[who] = (learned_at(book, who, facts),
+                          learned_at(book, who, facts, shown_only=True))
+        known, shown = cache[who][0].get(r.item), cache[who][1].get(r.item)
+        if known is not None and (known.at is None or known.at[0] == sid
+                                  or not book.before((sid, r.index), known.at)):
+            continue   # known by now
+        if shown is None:
+            why = (f'the ledger places it in {known.source}' if known else
+                   f'known by {facts[r.item].get("known_by") or "no one named"}')
+            unshown.append(f'{r.item} ({why})')
+            continue
+        gap = book.gap_between('', sid)
+        if gap:
+            gapped.append(f'{r.item} ({", ".join(gap[:3])})')
+            continue
+        findings.append(_finding(
+            'knowledge', r.quote, shown.at[0], shown.words,
+            f'{r.who} acts on {r.item} ("{_short(facts[r.item].get("statement"))}") '
+            f'before learning it, in {_where(book, shown.at[0])}', fact_id=r.item))
     if unknown:
         notes.append(f'knowledge: {len(unknown)} record(s) name a fact id the ledger has no '
                      f'binding or planned knowledge fact for, not checked: '
                      + ', '.join(sorted(set(unknown))[:5]))
+    if unshown:
+        notes.append(f'knowledge: {len(unshown)} fact(s) acted on that no scene or brief shows '
+                     f'the POV learning first (the ledger\'s known_by says who knows, not '
+                     f'when), not a finding: ' + '; '.join(unshown[:5]))
+    if gapped:
+        notes.append(f'knowledge: {len(gapped)} fact(s) acted on before the scene that shows '
+                     f'them learned, with an earlier scene whose typed state wasn\'t read, not '
+                     f'compared: ' + '; '.join(gapped[:5]))
     return findings, notes
 
 
@@ -419,14 +529,16 @@ def _at_place(book: Book, r: Record) -> str:
     return book.place(locs[0]) if len(locs) == 1 else ''
 
 
-def _slot_scene(book: Book, sid: str) -> bool:
-    from storyforge.elaborate import time_mode, told_by
-    row = book.row(sid)
-    return (not book.off_present(sid) and time_mode(row) != 'summary' and not told_by(row)
-            and book.day(sid) is not None and bool(book.time(sid)))
-
-
 def check_place(book: Book) -> tuple[list[Finding], list[str]]:
+    """WLD: each person this scene places (`at`, through locations.csv)
+    against where the story last had them, in story order: a move longer
+    than world.csv's fastest `speed` allows in the time between is a WLD
+    finding. A time of day is a slot, so a move is allowed at least
+    `SLOT_DAYS` (two scenes in one morning at two places is ordinary unless
+    the places are too far apart, #648's review CR-2). Notes count each move
+    not compared and why: no place, no `timeline_day`, a summary scene, no
+    distance or no speed (SF-3). Exempt: an off-present scene."""
+    from storyforge.elaborate import time_mode
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
@@ -439,63 +551,51 @@ def check_place(book: Book) -> tuple[list[Finding], list[str]]:
     first = {}
     for r in mine:
         first.setdefault(book.who(r.who), r)
-    # two places in one time slot
-    if _slot_scene(book, sid):
-        slot = (book.day(sid), book.time(sid))
-        for other, recs in book.records.items():
-            if other == sid or not _slot_scene(book, other) or \
-                    (book.day(other), book.time(other)) != slot:
-                continue
-            for o in recs:
-                if o.type != 'at' or not o.verified:
-                    continue
-                r = first.get(book.who(o.who))
-                here, there = (_at_place(book, r), _at_place(book, o)) if r else ('', '')
-                if r and here and there and here != there:
-                    findings.append(_finding(
-                        'place', r.quote, other, o.quote,
-                        f'{r.who} is at {book.place_names.get(here, here)} here and at '
-                        f'{book.place_names.get(there, there)} in {other}, both day {slot[0]}, '
-                        f'{slot[1]}'))
-                    first.pop(book.who(o.who), None)
-    # travel
     fastest = book.world.fastest() if book.world is not None else None
-    untimed = 0
+    skipped: dict[str, int] = {}
+    earlier = book.present_records(('at',))
     for who, r in first.items():
         here = _at_place(book, r)
-        if not here or book.day(sid) is None:
+        if not here:
             continue
         prev = None
-        for o in book.present_records(('at',)):
+        for o in earlier:
             if o.scene_id != sid and book.who(o.who) == who and _at_place(book, o) and \
                     book.before((o.scene_id, o.index), (sid, r.index)):
                 prev = o
         if prev is None:
             continue
         there = _at_place(book, prev)
-        if there == here or book.day(prev.scene_id) is None:
+        if there == here:
             continue
+        why = ''
+        if book.day(sid) is None or book.day(prev.scene_id) is None:
+            why = 'a scene without a timeline_day'
+        elif 'summary' in (time_mode(book.row(sid)), time_mode(book.row(prev.scene_id))):
+            why = 'a summary scene, which covers a stretch'
         dist = None
-        for a in (book.place_names.get(there, there), there, prev.item):
-            for b in (book.place_names.get(here, here), here, r.item):
-                if a and b and dist is None:
-                    dist = book.world.distance(a, b) if book.world is not None else None
-        if dist is None or fastest is None:
-            untimed += 1
+        if not why:
+            for a in (book.place_names.get(there, there), there, prev.item):
+                for b in (book.place_names.get(here, here), here, r.item):
+                    if a and b and dist is None and book.world is not None:
+                        dist = book.world.distance(a, b)
+            why = ('world.csv gives no distance between them' if dist is None else
+                   'world.csv gives no speed' if fastest is None else '')
+        if why:
+            skipped[why] = skipped.get(why, 0) + 1
             continue
         t0 = _DAY_FRACTION.get(book.time(prev.scene_id), 0.0)
         t1 = _DAY_FRACTION.get(book.time(sid), 1.0)
-        days = book.day(sid) - book.day(prev.scene_id) + t1 - t0
-        if days <= 0 or dist > fastest * days:
+        days = max(book.day(sid) - book.day(prev.scene_id) + t1 - t0, SLOT_DAYS)
+        if dist > fastest * days:
             findings.append(_finding(
                 'travel', r.quote, prev.scene_id, prev.quote,
                 f'{r.who} is at {book.place_names.get(here, here)} here, '
                 f'{dist:g} m from {book.place_names.get(there, there)} in '
                 f'{_where(book, prev.scene_id)}; world.csv\'s fastest travel is '
                 f'{fastest:g} m a day, so it needs {dist / fastest:.1f} day(s)'))
-    if untimed:
-        notes.append(f'travel: {untimed} move(s) between places not checked (world.csv gives '
-                     + ('no speed' if fastest is None else 'no distance between them') + ')')
+    for why, n in sorted(skipped.items()):
+        notes.append(f'travel: {n} move(s) between places not checked ({why})')
     return findings, notes
 
 
@@ -503,13 +603,15 @@ def check_place(book: Book) -> tuple[list[Finding], list[str]]:
 # Time
 # ============================================================================
 
-_NUMBERS = {
-    'a': 1, 'an': 1, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
-    'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10, 'eleven': 11, 'twelve': 12,
-    'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17,
-    'eighteen': 18, 'nineteen': 19, 'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
-    'sixty': 60, 'hundred': 100, 'dozen': 12, 'a dozen': 12, 'a hundred': 100,
+_SMALL = {
+    'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7,
+    'eight': 8, 'nine': 9, 'ten': 10, 'eleven': 11, 'twelve': 12, 'thirteen': 13,
+    'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
+    'nineteen': 19,
 }
+_TENS = {'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50, 'sixty': 60, 'seventy': 70,
+         'eighty': 80, 'ninety': 90}
+_SCALES = {'hundred': 100, 'thousand': 1000, 'dozen': 12}
 _ORDINALS = {
     'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5, 'sixth': 6,
     'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10, 'eleventh': 11, 'twelfth': 12,
@@ -523,33 +625,84 @@ _UNITS = {
     'sunrise': 1, 'sunset': 1, 'sun': 1, 'week': 7, 'fortnight': 14, 'month': 30,
     'moon': 30, 'year': 365, 'winter': 365, 'summer': 365,
 }
-_NUM = r'(?P<n>\d+|(?:a |an )?(?:hundred|dozen)|' + '|'.join(
-    sorted((k for k in _NUMBERS if ' ' not in k), key=len, reverse=True)) + r')'
+_WORD = '|'.join(sorted({**_SMALL, **_TENS, **_SCALES}, key=len, reverse=True))
+#: A count: digits, or number words ("twenty three", "a hundred and twenty")
+_NUM = rf'(?P<n>\d+|(?:an?|{_WORD})(?:\s+(?:and\s+)?(?:{_WORD}))*)'
 _ORD = r'(?P<o>\d+(?:st|nd|rd|th)|' + '|'.join(sorted(_ORDINALS, key=len, reverse=True)) + r')'
 _UNIT = r'(?P<u>' + '|'.join(sorted(_UNITS, key=len, reverse=True)) + r')s?'
 _COUNT_RE = re.compile(rf'\b{_NUM}\s+(?:(?:full|whole|long|more)\s+)?{_UNIT}\b')
 _ORDINAL_RE = re.compile(rf'\b{_ORD}\s+{_UNIT}\b')
 _PAST = re.compile(r'\b(ago|since|later|after|past|gone|before this|earlier)\b')
 _FUTURE = re.compile(r'^\s*(in|within)\b|\b(from now|hence|to come|more to)\b')
-_VAGUE = re.compile(r'\b(few|several|some|many|countless|a couple|couple of|ages|years and)\b')
+_VAGUE = re.compile(r'\b(few|several|many|countless|a couple|couple of|ages|years and)\b')
+#: Words before a count that make it a bound or an estimate, not exact
+#: (#648's review, T2)
+_AT_LEAST = re.compile(r'\b(more than|over|upwards of|at least|longer than|better than)\s*$')
+_AT_MOST = re.compile(r'\b(less than|under|fewer than|not yet|barely|scarcely)\s*$')
+_NEARLY = re.compile(r'\b(nearly|almost|close to|just short of)\s*$')
+_ABOUT = re.compile(r'\b(about|around|roughly|some|maybe|perhaps)\s*$')
+_RANGE = re.compile(r'\b(or|to)\s*$')
 
 
 @dataclass
 class Span:
     """What an elapsed-time phrase says: the days between the scene and the
-    one the count runs from, `low` to `high` (a tolerance included), and
-    whether the counted event is `past` or `future`."""
+    one the count runs from, `low` to `high` (a tolerance included; `high`
+    may be infinite for "more than"), and whether the counted event is
+    `past` or `future`."""
     low: float
     high: float
     direction: str
 
 
+def _count(raw: str) -> int | None:
+    """The number a count's words or digits give ("twenty three" 23, "a
+    hundred and twenty" 120), or None when the words don't make one number
+    ("three two")."""
+    raw = raw.strip()
+    if raw.isdigit():
+        return int(raw)
+    total, cur, first = 0, 0, True
+    for t in raw.split():
+        if t == 'and':
+            continue
+        if t in ('a', 'an'):
+            if not first:
+                return None
+            cur = 1
+        elif t in _SMALL:
+            if cur % 10 or 10 <= cur % 100 <= 19:
+                return None
+            cur += _SMALL[t]
+        elif t in _TENS:
+            if cur % 100:
+                return None
+            cur += _TENS[t]
+        elif t == 'hundred':
+            cur = (cur or 1) * 100
+        elif t == 'dozen':
+            cur = (cur or 1) * 12
+        elif t == 'thousand':
+            total, cur = total + (cur or 1) * 1000, 0
+        else:
+            return None
+        first = False
+    n = total + cur
+    return n or None
+
+
 def parse_elapsed(phrase: str) -> tuple[Span | None, str]:
-    """A phrase's `Span`, or None and why it can't be read (vague, no
-    direction, no number)."""
+    """A phrase's `Span`, or None and why it can't be read: vague ("a few
+    days"), a half, a range ("one or two days"), two counts ("two weeks and
+    three days"), no direction, no number. A bound ("more than three days",
+    "nearly a week") or an estimate ("about ten days") widens the span; it
+    never reads part of a phrase as the whole (#648's review, SF-2, T1, T2)."""
     p = ' '.join((phrase or '').lower().replace('-', ' ').split())
     if _VAGUE.search(p):
         return None, 'a vague count'
+    if re.search(r'\bhalf\b', p):
+        return None, 'a half'
+    future = bool(_FUTURE.search(p))
     m = _ORDINAL_RE.search(p)
     if m and not _COUNT_RE.search(p[:m.start()]):
         o = m.group('o')
@@ -559,17 +712,22 @@ def parse_elapsed(phrase: str) -> tuple[Span | None, str]:
             return None, 'an hour counted by ordinal'
         low = (n - 1) * unit
         high = n * unit - 1 if unit > 1 else low
-        return Span(low, high, 'past'), ''
-    m = _COUNT_RE.search(p)
-    if not m:
+        return Span(low, high, 'future' if future else 'past'), ''
+    counts = list(_COUNT_RE.finditer(p))
+    if not counts:
         return None, 'no number of days, weeks, months or years'
-    raw = m.group('n').strip()
-    n = int(raw) if raw.isdigit() else _NUMBERS.get(raw, _NUMBERS.get(raw.split()[-1]))
+    if len(counts) > 1:
+        return None, 'two counts in one phrase'
+    m = counts[0]
+    lead = p[:m.start()]
+    if _RANGE.search(lead):
+        return None, 'a range ("or", "to")'
+    n = _count(m.group('n'))
     if n is None:
         return None, 'a number it can\'t read'
     unit = m.group('u')
     days = n * _UNITS[unit]
-    if _FUTURE.search(p):
+    if future:
         direction = 'future'
     elif _PAST.search(p):
         direction = 'past'
@@ -577,22 +735,33 @@ def parse_elapsed(phrase: str) -> tuple[Span | None, str]:
         return None, 'no ago, since, later or in to say which way it counts'
     if unit == 'hour':
         low, high = float(int(days)), float(int(days)) + 1
-    elif unit in ('month', 'moon'):
-        tol = max(3, 3 * n)
-        low, high = days - tol, days + tol
-    elif unit in ('year', 'winter', 'summer'):
-        tol = max(15, 15 * n)
-        low, high = days - tol, days + tol
-    elif unit in ('week', 'fortnight'):
-        tol = max(1, n)
-        low, high = days - tol, days + tol
     else:
-        tol = 0 if days <= 3 else max(1, round(days / 10))
+        if unit in ('month', 'moon'):
+            tol = max(3, 3 * n)
+        elif unit in ('year', 'winter', 'summer'):
+            tol = max(15, 15 * n)
+        elif unit in ('week', 'fortnight'):
+            tol = max(1, n)
+        else:
+            tol = 0 if days <= 3 else max(1, round(days / 10))
+        if _ABOUT.search(lead) or re.search(r'\bor so\b', p[m.end():]):
+            tol = max(1, 2 * tol)
         low, high = days - tol, days + tol
+    if _AT_LEAST.search(lead):
+        low, high = days, float('inf')
+    elif _AT_MOST.search(lead):
+        low, high = 0.0, days
+    elif _NEARLY.search(lead):
+        low, high = days * 0.5, days
     return Span(low, high, direction), ''
 
 
 def check_time(book: Book) -> tuple[list[Finding], list[str]]:
+    """TIM: each `elapsed` phrase (`parse_elapsed`) against the days
+    between this scene and the scene it counts from. Notes: a phrase the
+    parser can't read, one counting from no scene, and one between scenes
+    without a `timeline_day` or from a summary or off-present scene.
+    Exempt: an off-present scene."""
     sid = book.scene_id
     from storyforge.elaborate import time_mode
     if book.off_present(sid):
@@ -650,7 +819,9 @@ def _side(r: Record) -> str:
 def current_injuries(book: Book, at: tuple[str, int]) -> list[Record]:
     """The serious or disabling injuries in force at (scene, index): from
     present-time scenes before it, less those healed since, and a serious
-    one past `SERIOUS_DAYS` story days (when both scenes have a day)."""
+    one past `SERIOUS_DAYS` story days (when both scenes have a day). Only
+    `healed` or the lapse ends one: a later `minor` injury to the same part
+    doesn't, and a `serious` one doesn't replace a `disabling` one."""
     live: dict[tuple[str, str, str], Record] = {}
     for r in book.present_records(('injury',)):
         if not book.before((r.scene_id, r.index), at):
@@ -661,9 +832,9 @@ def current_injuries(book: Book, at: tuple[str, int]) -> list[Record]:
                 if key[:2] == k[:2] and (not k[2] or key[2] == k[2]):
                     live.pop(key)
         elif r.value in ('serious', 'disabling'):
-            live[k] = r
-        else:
-            live.pop(k, None)
+            if not (r.value == 'serious' and k in live and live[k].value == 'disabling'):
+                live[k] = r
+        # a minor injury never ends a worse one (#648's review, C4)
     out = []
     for r in live.values():
         d0, d1 = book.day(r.scene_id), book.day(at[0])
@@ -682,10 +853,15 @@ def offered_injuries(book: Book) -> tuple[list[str], int]:
 
 
 def check_injury(book: Book) -> tuple[list[Finding], list[str]]:
+    """PHY: a body part this scene uses at full strength (`uses full`)
+    while a serious or disabling injury to it is current
+    (`current_injuries`). Notes: a use with no side against a one-sided
+    injury, and an injury a scene between without typed state might have
+    healed (CR-5). Exempt: an off-present scene."""
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
-    findings, unsided = [], 0
+    findings, unsided, gapped = [], 0, []
     done: set[tuple] = set()
     for r in book.records.get(sid, []):
         if r.type != 'uses' or r.value != 'full' or not r.verified:
@@ -703,6 +879,10 @@ def check_injury(book: Book) -> tuple[list[Finding], list[str]]:
             if (who, part, iside) in done:
                 continue
             done.add((who, part, iside))
+            gap = book.gap_between(inj.scene_id, sid) if inj.scene_id != sid else []
+            if gap:
+                gapped.append(f'{r.who}\'s {part} ({", ".join(gap[:3])})')
+                continue
             where = 'earlier in this scene' if inj.scene_id == sid else _where(book, inj.scene_id)
             findings.append(_finding(
                 'injury', r.quote, inj.scene_id, inj.quote,
@@ -712,6 +892,10 @@ def check_injury(book: Book) -> tuple[list[Finding], list[str]]:
     if unsided:
         notes.append(f'injury: {unsided} use(s) of a part injured on one side, with no side '
                      f'given, not checked')
+    if gapped:
+        notes.append(f'injury: {len(gapped)} injured part(s) used at full strength, with a scene '
+                     f'between whose typed state wasn\'t read (it may heal them), not compared: '
+                     + '; '.join(gapped[:5]))
     return findings, notes
 
 
@@ -729,10 +913,16 @@ def _sentence(prose: str, start: int, end: int) -> str:
 
 
 def check_names(book: Book, prose: str) -> tuple[list[Finding], list[str]]:
+    """WLD: a name the book rules out (`forbidden_names`) in the prose, as a
+    whole word; skipped at a sentence start when the scene also uses it as a
+    lower-case word ("Will you..."), and skipped (with a note) when
+    characters.csv gives it. Advisory note: a `named` record no registry,
+    ledger subject or name map knows. Runs in every scene, off the present
+    too."""
     findings, notes = [], []
     lower_words = set(re.findall(r'\b[a-z][\w\']*\b', prose))
     for name, where in sorted(book.forbidden.items()):
-        if book.known_names is not None and name.lower() in book.known_names:
+        if book.registry_names is not None and name.lower() in book.registry_names:
             notes.append(f'names: "{name}" is ruled out in {where} but is also a name the '
                          f'character registry gives, not checked')
             continue
@@ -774,7 +964,13 @@ def check_names(book: Book, prose: str) -> tuple[list[Finding], list[str]]:
 # Geography and sky
 # ============================================================================
 
-_PLACE = r'(?:the\s+)?(?P<place>[^.,;:!?\n"“”]{1,40})'
+#: The place a sun phrase names: from an optional "the" (kept, as world.csv
+#: may name "the sea") up to punctuation or a word that starts another
+#: clause or phrase ("behind the hills on the road from Kesh" is the hills;
+#: #648's review, T4, T5)
+_PLACE = (r'(?P<place>(?:the\s+)?[^.,;:!?\n"“”]{1,40}?)'
+          r'(?=\s+(?:as|and|but|while|when|where|until|on|from|to|toward|towards|into|at|'
+          r'with|for|over|across|along|through)\b|[.,;:!?\n"“”]|$)')
 _SKY = [
     ('east', re.compile(r'\b(?:the\s+)?sun\s+(?:rose|rises|risen|was\s+rising|came\s+up|comes\s+up|'
                         r'climbed|lifted|broke|cleared|was\s+up)\s+(?:up\s+)?(?:over|above|behind|'
@@ -789,11 +985,16 @@ _SKY = [
                         + _PLACE, re.I)),
 ]
 _SKY_COMPASS = re.compile(r'\b(?:the\s+)?sun\s+(?P<verb>rose|rises|came\s+up|set|sets|went\s+down|'
-                          r'sank)\s+in\s+the\s+(?P<place>north|south|east|west|north-?east|'
-                          r'north-?west|south-?east|south-?west)\b', re.I)
+                          r'sank)\s+in\s+the\s+(?P<place>north[\s-]?east|north[\s-]?west|'
+                          r'south[\s-]?east|south[\s-]?west|north|south|east|west)(?![\w-])',
+                          re.I)
 
 
 def check_sky(book: Book, prose: str) -> tuple[list[Finding], list[str]]:
+    """WLD: the sun rising or setting over, behind or in a place (`_SKY`,
+    `_SKY_COMPASS`) more than 45° from east or west by world.csv's
+    directions. A capitalised place world.csv doesn't give is a note; a
+    common noun ("the hills") is nothing. Exempt: an off-present scene."""
     from storyforge.world_table import angle
     if book.off_present(book.scene_id) or book.world is None:
         return [], []
@@ -807,8 +1008,9 @@ def check_sky(book: Book, prose: str) -> tuple[list[Finding], list[str]]:
         where = book.world.direction(place)
         quote = ' '.join(m.group(0).split())
         if where is None:
-            if place[:1].isupper():
-                unknown.append(f'"{quote}" ({place.split()[0]} is not in world.csv)')
+            bare = re.sub(r'^the\s+', '', place, flags=re.I)
+            if bare[:1].isupper():
+                unknown.append(f'"{quote}" ({bare.split()[0]} is not in world.csv)')
             continue
         if angle(where, want) > 45:
             findings.append(_finding(
@@ -834,10 +1036,10 @@ def forbidden_names(project_dir: str) -> tuple[dict[str, str], list[str]]:
     from storyforge.common import read_top_level_field
     out: dict[str, str] = {}
     notes: list[str] = []
+    from storyforge import source
     try:
-        from storyforge import source
         cfg = source.read_config(project_dir)
-    except Exception as e:   # noqa: BLE001 - a bad source block: say so, check the rest
+    except (source.SourceError, OSError, ValueError) as e:   # a bad source block: say so
         cfg, notes = None, [f'names: the source block can\'t be read ({e}); its name map not '
                             f'checked']
     if cfg is not None:
@@ -873,17 +1075,21 @@ def known_names(project_dir: str, rows: list[dict]) -> set[str] | None:
         for slug in sorted(os.listdir(src)):
             names |= set(load_alias_map(os.path.join(src, slug, 'reference', 'characters.csv')))
             names |= set(load_alias_map(os.path.join(src, slug, 'characters.csv')))
+    from storyforge import source
     try:
-        from storyforge import source
         cfg = source.read_config(project_dir)
-        for proj in (cfg.projects if cfg else ()):
-            rel = cfg.map_path(proj)
-            if rel:
-                nm = source.load_name_map(source.resolve(project_dir, rel))
-                names |= {t.lower() for t in nm.replacements.values()}
-                names |= {t.lower() for t in nm.id_names.values()}
-    except Exception:   # noqa: BLE001 - forbidden_names reports an unreadable map
-        pass
+    except (source.SourceError, OSError, ValueError):
+        cfg = None   # forbidden_names reports an unreadable source block
+    for proj in (cfg.projects if cfg else ()):
+        rel = cfg.map_path(proj)
+        if not rel:
+            continue
+        try:
+            nm = source.load_name_map(source.resolve(project_dir, rel))
+        except (source.SourceError, OSError, ValueError):
+            continue   # forbidden_names reports an unreadable name map
+        names |= {t.lower() for t in nm.replacements.values()}
+        names |= {t.lower() for t in nm.id_names.values()}
     tokens = {t for n in names for t in re.findall(r"[\w']+", n)}
     return names | tokens
 
@@ -891,20 +1097,27 @@ def known_names(project_dir: str, rows: list[dict]) -> set[str] | None:
 def load_book(project_dir: str, scene_id: str, *, rows: list[dict] | None = None
               ) -> tuple[Book, list[str]]:
     """Everything the checks read but this scene's records, and notes on
-    what couldn't be read (earlier scenes without typed state for their
-    current prose, a name map). Raises ContinuityError on a malformed
-    world table or scenes.csv."""
+    what couldn't be read. The scenes are the live ones (`prompts.live_order`:
+    a cut or merged scene's records never count, #648's review CR-9). Notes:
+    scenes before this one in story order without typed state for their
+    current prose (`Book.gaps`, which turns findings they could explain into
+    notes; C5, SF-10), other scenes' misquoted records that would have
+    counted (SF-6), a characters.csv `death_scene` that isn't a scene (left
+    out, never placed at the book's start; SF-7, TD-3), a name map. Raises
+    ContinuityError on a malformed world table or scenes.csv."""
     from storyforge import ledger, typed_state, world_table
     from storyforge.elaborate import _read_csv, _read_csv_as_map
     from storyforge.enrich import load_alias_map
+    from storyforge.prompts import live_order
     ref = os.path.join(project_dir, 'reference')
     try:
-        order = ledger.scene_order(project_dir)
+        all_order = ledger.scene_order(project_dir)
         rows = ledger.load(project_dir) if rows is None else rows
         world = world_table.load(project_dir)
     except (ValueError, ledger.LedgerError, OSError) as e:
         raise ContinuityError(f'{scene_id}: {e}') from e
     scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+    order = live_order(all_order, scenes, scene_id)
     header = _read_csv(os.path.join(ref, 'scenes.csv'))
     places = load_alias_map(os.path.join(ref, 'locations.csv'))
     place_names = {}
@@ -913,30 +1126,49 @@ def load_book(project_dir: str, scene_id: str, *, rows: list[dict] | None = None
         if pid:
             place_names[pid] = (r.get('name') or pid).strip()
     forbidden, notes = forbidden_names(project_dir)
-    book = Book(scene_id, order, scenes, deaths=typed_state.registry_deaths(project_dir),
-                chars=load_alias_map(os.path.join(ref, 'characters.csv')), places=places,
-                place_names=place_names, world=world, rows=rows,
+    deaths, unplaced = [], []
+    for d in typed_state.registry_deaths(project_dir):
+        (deaths if d.scene_id in order else unplaced).append(d)
+    if unplaced:
+        notes.append(f'life: {len(unplaced)} characters.csv death_scene(s) name no live scene, '
+                     f'not checked: ' + ', '.join(f'{d.who} ({d.scene_id})' for d in unplaced[:5]))
+    chars_path = os.path.join(ref, 'characters.csv')
+    book = Book(scene_id, order, scenes, deaths=deaths, chars=load_alias_map(chars_path),
+                places=places, place_names=place_names, world=world, rows=rows,
                 briefs=_read_csv_as_map(os.path.join(ref, 'scene-briefs.csv')),
                 has_time_mode=bool(header) and 'time_mode' in header[0],
-                forbidden=forbidden, known_names=known_names(project_dir, rows))
-    missing, stale = [], []
+                forbidden=forbidden, known_names=known_names(project_dir, rows),
+                registry_names=(set(load_alias_map(chars_path))
+                                if os.path.isfile(chars_path) else None))
+    missing, stale, misquoted = [], [], []
+    here = book.key.get(scene_id, (0, 0))
     for sid in sorted(order, key=order.get):
         if sid == scene_id or not os.path.isfile(os.path.join(project_dir, 'scenes', f'{sid}.md')):
             continue
         recs, why = typed_state.current(project_dir, sid)
         if recs is not None:
-            for r in recs:
-                r.scene_id = sid
-            book.records[sid] = recs
-        elif order[sid] < order.get(scene_id, 0):
+            book.records[sid] = [r if r.scene_id == sid else r.replace(scene_id=sid)
+                                 for r in recs]
+            bad = sum(1 for r in recs if not r.verified and (
+                r.type in ('alive', 'holds', 'injury') or (r.type == 'knows'
+                                                         and r.value == 'learns')))
+            if bad and not book.off_present(sid):
+                misquoted.append(f'{sid} ({bad})')
+            continue
+        if book.key[sid] < here:
+            book.gaps.add(sid)
             (stale if why else missing).append(sid if not why else f'{sid} ({why})')
     if missing:
-        notes.append(f'{len(missing)} earlier scene(s) with prose have no typed state yet, so '
-                     f'their facts weren\'t read (check them to add it): '
+        notes.append(f'{len(missing)} earlier scene(s) in story order with prose have no typed '
+                     f'state yet, so their facts weren\'t read (check them to add it): '
                      + ', '.join(missing[:8]) + (' ...' if len(missing) > 8 else ''))
     if stale:
         notes.append(f'{len(stale)} earlier scene(s)\' typed state not read: '
                      + '; '.join(stale[:5]) + (' ...' if len(stale) > 5 else ''))
+    if misquoted:
+        notes.append(f'{len(misquoted)} other scene(s) have death, possession, injury or '
+                     f'learning records whose quotes aren\'t in their prose, so those records '
+                     f'weren\'t compared: ' + ', '.join(misquoted[:8]))
     return book, notes
 
 
@@ -963,18 +1195,42 @@ def run_checks(book: Book, prose: str, sheet_records: list[Record] | None = None
     return kept, notes
 
 
+def tracked_objects(book: Book) -> list[str]:
+    """The object names other present-time scenes' `holds` records give, for
+    extraction to name an object the same way (#648's review, TD-6): those
+    before this scene in story order first, nearest first; one name per
+    object key; capped at `MAX_OFFERED_OBJECTS`."""
+    sid = book.scene_id
+    seen: dict[str, tuple] = {}
+    names: dict[str, str] = {}
+    for r in book.present_records(('holds',)):
+        k = object_key(r.item)
+        if not k or r.scene_id == sid:
+            continue
+        before = book.before((r.scene_id, r.index), (sid, START))
+        rank = (0, tuple(-x for x in book.key.get(r.scene_id, (0, 0)))) if before else \
+            (1, book.key.get(r.scene_id, (0, 0)))
+        if k not in seen or rank < seen[k]:
+            seen[k], names[k] = rank, r.item
+    return [names[k] for k in sorted(seen, key=seen.get)][:MAX_OFFERED_OBJECTS]
+
+
 def check_continuity(project_dir: str, scene_id: str, *, prose: str | None = None,
                      model: str | None = None, log_file: str = '', reuse: bool = True,
                      save: bool = True, rows: list[dict] | None = None) -> ContinuityResult:
     """Read `scene_id`'s typed state (one call; none when `reuse` and its
-    file is of this prose), save it, and run every check.
+    file is of this prose and of this prompt: the same facts, injuries,
+    objects and calendar offered, and the same model), save it with what
+    extraction couldn't use, and run every check. A reused file's notes are
+    said again.
 
     Raises:
-        ContinuityError: no prose, a refusal or API failure, a reply off
-            the schema twice, or a malformed world table or scenes.csv.
+        ContinuityError: no prose, a scene not in scenes.csv, a refusal or
+            API failure, a reply off the schema twice, or a malformed world
+            table or scenes.csv.
     """
     from storyforge import typed_state, world_table
-    from storyforge.prompts import calendar_lines, live_order
+    from storyforge.prompts import calendar_lines
     if prose is None:
         from storyforge.illustrations import read_scene_raw
         prose = read_scene_raw(project_dir, scene_id)
@@ -987,34 +1243,45 @@ def check_continuity(project_dir: str, scene_id: str, *, prose: str | None = Non
     if scene_id not in book.order:
         raise ContinuityError(f'{scene_id} is not a scene in reference/scenes.csv')
     result = ContinuityResult(scene_id, notes=notes)
-    records, _ = typed_state.current(project_dir, scene_id, prose) if reuse else (None, '')
-    if records is None:
-        facts, cut_f = offered_facts(book)
-        injuries, cut_i = offered_injuries(book)
-        cast = sorted({(r.get('name') or r.get('id') or '').strip() for r in _registry(
-            project_dir)} - {''})
-        calendar = calendar_lines(live_order(book.order, book.scenes, scene_id), book.scenes,
-                                  scene_id)
-        model = typed_state.resolve_model(model)
+    facts, cut_f = offered_facts(book)
+    injuries, cut_i = offered_injuries(book)
+    objects = tracked_objects(book)
+    cast = sorted({(r.get('name') or r.get('id') or '').strip() for r in _registry(
+        project_dir)} - {''})
+    calendar = calendar_lines(book.order, book.scenes, scene_id)
+    model = typed_state.resolve_model(model)
+    pov = book.pov(scene_id)
+    prompt_id = typed_state.prompt_hash(
+        typed_state.build_prompt(scene_id, prose, pov=pov, cast=cast, calendar=calendar,
+                                 facts=facts, injuries=injuries, objects=objects), model)
+    saved, why = (typed_state.current_state(project_dir, scene_id, prose, prompt_sha256=prompt_id)
+                  if reuse else (None, ''))
+    if saved is not None:
+        records = saved['records']
+        result.notes += saved['notes']
+    else:
+        if why and why != 'its typed state is of earlier prose':
+            result.notes.append(f'typed state read again: {why}')
         try:
             got = typed_state.extract(scene_id, prose, model=model, log_file=log_file,
-                                      pov=book.pov(scene_id), cast=cast, calendar=calendar,
-                                      facts=facts, injuries=injuries)
+                                      pov=pov, cast=cast, calendar=calendar,
+                                      facts=facts, injuries=injuries, objects=objects)
         except typed_state.TypedStateError as e:
             raise ContinuityError(str(e)) from e
         records = got.records
-        result.notes += got.notes
+        extracted = list(got.notes)
         if cut_f:
-            result.notes.append(f'knowledge: {cut_f} fact(s) past the {MAX_OFFERED_FACTS} '
-                                f'offered not watched')
+            extracted.append(f'knowledge: {cut_f} fact(s) past the {MAX_OFFERED_FACTS} '
+                             f'offered not watched')
         if cut_i:
-            result.notes.append(f'injury: {cut_i} injur(ies) past the {MAX_OFFERED_INJURIES} '
-                                f'offered not watched')
+            extracted.append(f'injury: {cut_i} injur(ies) past the {MAX_OFFERED_INJURIES} '
+                             f'offered not watched')
+        result.notes += extracted
         result.extracted = True
         if save:
-            typed_state.write_state(project_dir, scene_id, prose, records, model=model)
-    for r in records:
-        r.scene_id = scene_id
+            typed_state.write_state(project_dir, scene_id, prose, records, model=model,
+                                    prompt_sha256=got.prompt_sha256, notes=extracted)
+    records = [r if r.scene_id == scene_id else r.replace(scene_id=scene_id) for r in records]
     misquoted = sum(1 for r in records if not r.verified)
     if misquoted:
         result.notes.append(f'{misquoted} of {len(records)} record(s) quote words not in the '
@@ -1025,9 +1292,10 @@ def check_continuity(project_dir: str, scene_id: str, *, prose: str | None = Non
                if r.type == 'holds'} - {''}
     sheet_records = []
     for sid in book.records:
-        got, why = typed_state.sheet_holdings(project_dir, sid, tracked)
-        sheet_records += [r for r in got if quote_in(prose, r.quote)] if sid == scene_id \
-            else got
+        if book.off_present(sid):
+            continue   # a memory's hands say nothing about the present (TD-4)
+        got_sheet, why = typed_state.sheet_holdings(project_dir, sid, tracked)
+        sheet_records += got_sheet
         if why:
             result.notes.append(f'possession: {why}')
     findings, more = run_checks(book, prose, sheet_records)
@@ -1039,6 +1307,18 @@ def check_continuity(project_dir: str, scene_id: str, *, prose: str | None = Non
 def _registry(project_dir: str) -> list[dict]:
     from storyforge.elaborate import _read_csv
     return _read_csv(os.path.join(project_dir, 'reference', 'characters.csv'))
+
+
+def covered_fact_ids(rows: list[dict]) -> set[str]:
+    """The ledger ids whose content a typed check compares by code, for the
+    question layer (#649) to leave out: the knowledge facts the knowledge
+    check holds a scene to (`knowledge_facts`: type `knowledge`, binding or
+    planned) that name someone in `known_by` (a fact no one knows is never
+    offered to extraction, so nothing compares it). Every other row (every
+    `physical` row among them: the possession and injury checks compare the
+    prose's own records, not ledger rows) stays a statement only a model
+    reads (#648's review, TD-7)."""
+    return {fid for fid, r in knowledge_facts(rows).items() if _split(r.get('known_by', ''))}
 
 
 def overlaps(a: str, b: str) -> bool:

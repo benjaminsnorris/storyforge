@@ -52,9 +52,7 @@ def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, 
                 has_time_mode=time_mode_column, forbidden=dict(forbidden or {}),
                 known_names=known)
     for sid, rs in recs.items():
-        for n, r in enumerate(rs):
-            r.scene_id, r.index = sid, n
-        book.records[sid] = rs
+        book.records[sid] = [r.replace(scene_id=sid, index=n) for n, r in enumerate(rs)]
     return book
 
 
@@ -161,12 +159,62 @@ class TestLife:
 # ============================================================================
 
 class TestPossession:
-    def test_two_hands_at_once(self):
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'the brass key', 'has', quote='Mara key')],
-                             's2': [R('holds', 'Oren', 'brass key', 'has', quote='Oren key')]})
+    def test_two_hands_at_once_in_one_scene(self):
+        b = make_book('s2', {'s1': [], 's2': [
+            R('holds', 'Mara', 'the brass key', 'has', quote='Mara key'),
+            R('holds', 'Oren', 'brass key', 'has', quote='Oren key')]})
         f, _ = continuity.check_possession(b)
-        assert codes(f) == ['PHY'] and f[0].established_scene == 's1'
+        assert codes(f) == ['PHY'] and f[0].established_scene == 's2'
         assert 'Mara holds brass key' in f[0].explanation
+
+    def test_another_holder_across_scenes_is_a_note(self):
+        # #648's review CR-3: an offstage handover is ordinary
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'the letter', 'has', quote='Mara letter')],
+                             's2': [R('holds', 'Oren', 'the letter', 'has', quote='Oren letter')]})
+        f, notes = continuity.check_possession(b)
+        assert f == []
+        assert any('other hands than an earlier scene left them' in n and
+                   'Oren has the letter, which Mara held in s1' in n for n in notes)
+
+    def test_names_for_one_object_are_matched(self):
+        # TD-6: "Hector's sword" and "the sword" are one object; two matches are none
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Oren's sword", 'destroyed')],
+                             's2': [R('holds', 'Mara', 'the sword', 'has', quote='Mara sword')]})
+        assert 'destroyed' in continuity.check_possession(b)[0][0].explanation
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Oren's sword", 'destroyed'),
+                                    R('holds', 'Jory', "Lise's sword", 'has')],
+                             's2': [R('holds', 'Mara', 'the sword', 'has', quote='Mara sword')]})
+        assert continuity.check_possession(b)[0] == []
+
+    def test_a_gap_between_turns_a_finding_into_a_note(self):
+        # CR-5: a scene between without typed state may hold the `gets`
+        b = make_book('s3', {'s1': [R('holds', 'Mara', 'brass key', 'gives', 'a stranger')],
+                             's2': [], 's3': [R('holds', 'Mara', 'brass key', 'has')]})
+        b.gaps = {'s2'}
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('brass key (s2)' in n for n in notes)
+
+    def test_a_holder_not_in_the_registry_is_said(self):
+        # CR-6: read as a place, never silently
+        b = make_book('s1', {'s1': [R('holds', 'Captain Ash', 'brass key', 'has')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('read as places' in n and 'Captain Ash' in n for n in notes)
+
+    def test_lost_then_held_again_by_the_loser(self):
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'loses')],
+                             's2': [R('holds', 'Mara', 'brass key', 'has')]})
+        assert 'Mara lost brass key' in continuity.check_possession(b)[0][0].explanation
+
+    def test_given_to_no_one_then_held_by_another_is_fine(self):
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'gives', '')],
+                             's2': [R('holds', 'Oren', 'brass key', 'has')]})
+        assert continuity.check_possession(b) == ([], [])
+
+    def test_an_off_present_scene_s_holding_is_left_out(self):
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'destroyed')],
+                             's2': [R('holds', 'Mara', 'brass key', 'has')]},
+                      scenes={'s1': {'time_mode': 'memory'}, 's2': {}})
+        assert continuity.check_possession(b) == ([], [])
 
     def test_given_on_is_fine(self):
         b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'gives', 'Oren')],
@@ -196,16 +244,30 @@ class TestPossession:
         assert continuity.check_possession(b)[0] == []
 
     def test_only_this_scene_is_judged(self):
-        b = make_book('s3', {'s1': [R('holds', 'Mara', 'brass key', 'has')],
+        b = make_book('s3', {'s1': [R('holds', 'Mara', 'brass key', 'destroyed')],
                              's2': [R('holds', 'Oren', 'brass key', 'has')], 's3': []})
         assert continuity.check_possession(b)[0] == []
 
     def test_a_stage_sheet_hand_counts(self):
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'has')], 's2': []})
+        b = make_book('s2', {'s1': [], 's2': [R('holds', 'Mara', 'brass key', 'has', quote='a')]})
         sheet = [Record('holds', 'Oren', 'brass key', 'has', quote='Oren gripped the key',
-                        scene_id='s2', origin='stage-sheet', index=0)]
+                        scene_id='s2', origin='stage-sheet', index=5)]
         f, _ = continuity.check_possession(b, sheet)
         assert f[0].scene_quote == 'Oren gripped the key'
+
+    def test_a_sheet_hand_before_a_handover_is_on_the_prose_s_scale(self):
+        # CR-10, TD-5: sheet and prose records are placed by where their quotes
+        # stand, so a hand before the handover sorts before it
+        prose = 'Mara held the sword. Mara gave the sword to Oren. Oren held it high.'
+        recs = typed_state.place_in_prose(prose, [
+            Record('holds', 'Mara', 'sword', 'gives', 'Oren', quote='Mara gave the sword to Oren'),
+            Record('holds', 'Oren', 'sword', 'has', quote='Oren held it high')])
+        sheet = typed_state.place_in_prose(prose, [Record(
+            'holds', 'Mara', 'sword', 'has', quote='Mara held the sword', origin='stage-sheet')])
+        b = make_book('s1', {'s1': []})
+        b.records['s1'] = [r.replace(scene_id='s1') for r in recs]
+        assert continuity.check_possession(b, [r.replace(scene_id='s1') for r in sheet]) \
+            == ([], [])
 
 
 # ============================================================================
@@ -220,12 +282,23 @@ def fact(fid, scene, known_by, statement='The mill is flooded', quote='the mill 
 class TestKnowledge:
     def test_acting_on_a_fact_before_learning_it(self):
         b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses',
-                                                quote='Mara avoided the mill')], 's3': []},
+                                                quote='Mara avoided the mill')],
+                             's3': [R('knows', 'Mara', 'mill-flooded', 'learns',
+                                      quote='she heard the mill flooded')]},
                       rows=[fact('mill-flooded', 's3', 'mara')])
         f, _ = continuity.check_knowledge(b)
         assert codes(f) == ['KNO'] and f[0].fact_id == 'mill-flooded'
-        assert f[0].established_scene == 's3' and f[0].established_quote == 'the mill flooded'
+        assert f[0].established_scene == 's3'
+        assert f[0].established_quote == 'she heard the mill flooded'
         assert 'before learning it' in f[0].explanation
+
+    def test_a_brief_s_knowledge_out_is_shown_learning(self):
+        b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
+                             's3': []},
+                      rows=[fact('mill-flooded', 's3', 'mara')],
+                      briefs={'s3': {'knowledge_out': 'mill-flooded'}})
+        f, _ = continuity.check_knowledge(b)
+        assert codes(f) == ['KNO'] and "knowledge_out of s3's brief" in f[0].established_quote
 
     def test_learned_earlier_by_a_brief(self):
         b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
@@ -239,8 +312,43 @@ class TestKnowledge:
                              's3': []},
                       scenes={'s1': {'pov': 'Oren'}, 's2': {}, 's3': {}},
                       rows=[fact('mill-flooded', 's3', 'mara')],
-                      briefs={'s1': {'knowledge_out': 'mill-flooded'}})
+                      briefs={'s1': {'knowledge_out': 'mill-flooded'},
+                              's3': {'knowledge_out': 'mill-flooded'}})
         assert codes(continuity.check_knowledge(b)[0]) == ['KNO']
+
+    def test_the_ledger_alone_placing_it_later_is_a_note(self):
+        # #648's review CR-4: known_by says who knows a fact, not when
+        b = make_book('s1', {'s1': [R('knows', 'Mara', 'mill-flooded', 'uses')], 's2': []},
+                      rows=[fact('mill-flooded', 's2', 'mara')])
+        f, notes = continuity.check_knowledge(b)
+        assert f == []
+        assert any('no scene or brief shows' in n and 'the ledger places it in s2' in n
+                   for n in notes)
+
+    def test_a_gap_before_turns_a_finding_into_a_note(self):
+        # CR-5: an earlier scene without typed state may teach it
+        b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
+                             's3': [R('knows', 'Mara', 'mill-flooded', 'learns')]},
+                      rows=[fact('mill-flooded', 's3', 'mara')])
+        b.gaps = {'s1'}
+        f, notes = continuity.check_knowledge(b)
+        assert f == [] and any('mill-flooded (s1)' in n for n in notes)
+
+    @pytest.mark.parametrize('mode', ['vision', 'dream'])
+    def test_an_off_present_scene_is_exempt(self, mode):
+        # C1, T6: a vision may show what isn't known yet
+        b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
+                             's3': [R('knows', 'Mara', 'mill-flooded', 'learns')]},
+                      scenes={'s1': {}, 's2': {'time_mode': mode}, 's3': {}},
+                      rows=[fact('mill-flooded', 's3', 'mara')])
+        assert continuity.check_knowledge(b) == ([], [])
+
+    def test_no_pov_is_a_note(self):
+        # SF-4
+        b = make_book('s1', {'s1': []}, scenes={'s1': {'pov': ''}},
+                      rows=[fact('x', 's1', 'oren')])
+        f, notes = continuity.check_knowledge(b)
+        assert f == [] and 'no POV character' in notes[0]
 
     def test_learned_earlier_in_the_scene(self):
         b = make_book('s2', {'s2': [R('knows', 'Mara', 'mill-flooded', 'learns'),
@@ -253,12 +361,12 @@ class TestKnowledge:
                       rows=[fact('mill-flooded', '', 'Mara Vell')])
         assert continuity.check_knowledge(b)[0] == []
 
-    def test_never_learned(self):
+    def test_never_learned_is_a_note(self):
+        # CR-4: known_by is a sparse list, not a closed one
         b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')]},
                       rows=[fact('mill-flooded', 's1', 'oren')])
-        f, _ = continuity.check_knowledge(b)
-        assert 'which no scene, brief or ledger row has Mara learn' in f[0].explanation
-        assert f[0].established_scene == 's1'
+        f, notes = continuity.check_knowledge(b)
+        assert f == [] and any('mill-flooded (known by oren)' in n for n in notes)
 
     def test_an_unknown_fact_id_is_a_note(self):
         b = make_book('s2', {'s2': [R('knows', 'Mara', 'no-such-fact', 'uses')]})
@@ -296,10 +404,38 @@ class TestPlace:
                          scenes={'s1': {'timeline_day': '3'},
                                  's2': {'timeline_day': '3', 'time_of_day': time2}})
 
-    def test_two_places_in_one_slot(self):
-        f, _ = continuity.check_place(self._two('the harbour', 'Mill'))
-        assert codes(f) == ['PHY'] and f[0].established_scene == 's2'
-        assert 'at Harbour here and at Mill in s2, both day 3, morning' in f[0].explanation
+    def test_two_places_in_one_slot_is_no_finding_without_a_distance(self):
+        # #648's review CR-2: a time of day is a slot, not an instant
+        b = make_book('s2', {'s1': [R('at', 'Mara', 'harbour', quote='Mara here')],
+                             's2': [R('at', 'Mara', 'mill', quote='Mara there')]},
+                      scenes={'s1': {'timeline_day': '3'}, 's2': {'timeline_day': '3'}})
+        f, notes = continuity.check_place(b)
+        assert f == [] and notes == ['travel: 1 move(s) between places not checked (world.csv '
+                                     'gives no distance between them)']
+
+    def test_one_slot_allows_a_short_move_not_a_long_one(self):
+        def book(metres):
+            w = World(distances={frozenset(('harbour', 'mill')): metres},
+                      speeds={'on foot': 40000.0})
+            return make_book('s2', {'s1': [R('at', 'Mara', 'harbour', quote='Mara here')],
+                                    's2': [R('at', 'Mara', 'mill', quote='Mara there')]},
+                             scenes={'s1': {'timeline_day': '3'},
+                                     's2': {'timeline_day': '3'}}, world=w)
+        assert continuity.check_place(book(500.0)) == ([], [])
+        f, _ = continuity.check_place(book(30000.0))
+        assert codes(f) == ['WLD']
+
+    def test_no_day_is_a_note(self):
+        # SF-3
+        b = make_book('s2', {'s1': [R('at', 'Mara', 'harbour')], 's2': [R('at', 'Mara', 'mill')]},
+                      scenes={'s1': {'timeline_day': ''}, 's2': {'timeline_day': ''}})
+        assert continuity.check_place(b)[1] == [
+            'travel: 1 move(s) between places not checked (a scene without a timeline_day)']
+
+    def test_a_summary_scene_is_a_note(self):
+        b = make_book('s2', {'s1': [R('at', 'Mara', 'harbour')], 's2': [R('at', 'Mara', 'mill')]},
+                      scenes={'s1': {'time_mode': 'summary'}, 's2': {}})
+        assert 'a summary scene' in continuity.check_place(b)[1][0]
 
     def test_the_same_place_is_fine(self):
         assert continuity.check_place(self._two('harbour', 'the harbour'))[0] == []
@@ -313,9 +449,11 @@ class TestPlace:
         assert f == [] and 'locations.csv doesn\'t name' in notes[0]
 
     def test_the_scene_s_one_location_stands_in(self):
-        b = make_book('s1', {'s1': [R('at', 'Mara', '')], 's2': [R('at', 'Mara', 'mill')]},
-                      scenes={'s1': {'location': 'Harbour'}, 's2': {'timeline_day': '1'}})
-        assert codes(continuity.check_place(b)[0]) == ['PHY']
+        b = make_book('s2', {'s1': [R('at', 'Mara', '')], 's2': [R('at', 'Mara', 'mill')]},
+                      scenes={'s1': {'location': 'Harbour'}, 's2': {'timeline_day': '1'}},
+                      world=World(distances={frozenset(('harbour', 'mill')): 90000.0},
+                                  speeds={'on foot': 40000.0}))
+        assert codes(continuity.check_place(b)[0]) == ['WLD']
 
     def _travel(self, day2, world):
         return make_book('s2', {'s1': [R('at', 'Mara', 'harbour', quote='at the harbour')],
@@ -482,8 +620,17 @@ class TestNames:
     def test_a_forbidden_name_the_registry_allows_is_a_note(self):
         b = make_book('s1', {'s1': []}, forbidden={'Oren': 'storyforge.yaml'},
                       known={'oren'})
+        b.registry_names = {'oren'}
         f, notes = continuity.check_names(b, 'Oren ran.')
         assert f == [] and 'also a name the character registry gives' in notes[0]
+
+    def test_a_ledger_subject_s_word_does_not_hide_a_forbidden_name(self):
+        # #648's review C3: only characters.csv's names skip a forbidden one
+        b = make_book('s1', {'s1': []}, forbidden={'Juno': 'storyforge.yaml'},
+                      known={'temple of juno', 'temple', 'juno'})
+        b.registry_names = {'mara'}
+        f, _ = continuity.check_names(b, 'Juno smiled.')
+        assert codes(f) == ['WLD']
 
     def test_unknown_names_are_advisory(self):
         b = make_book('s1', {'s1': [R('named', 'Mara', value='Mara Vell'),
@@ -681,8 +828,8 @@ class TestCheckContinuity:
     def test_an_earlier_scene_without_state_is_said(self, project_dir):
         _write(project_dir, PREV, PROSE_1)
         r = self._run(project_dir, [])
-        assert any('earlier scene(s) with prose have no typed state' in n and PREV in n
-                   for n in r.notes)
+        assert any('earlier scene(s) in story order with prose have no typed state' in n
+                   and PREV in n for n in r.notes)
 
     def test_the_prompt_offers_facts_calendar_and_cast(self, project_dir):
         from storyforge import ledger
@@ -916,3 +1063,412 @@ def test_cleanup_expects_the_typed_state_dir(project_dir):
     from storyforge.cmd_cleanup import report_unexpected_files
     os.makedirs(os.path.join(project_dir, 'working', 'typed-state'))
     assert 'UNEXPECTED_DIR:working/typed-state' not in report_unexpected_files(project_dir)
+
+
+# ============================================================================
+# #648's 5-agent review: regression tests
+# ============================================================================
+
+def _scene_status(project_dir, scene, status):
+    from storyforge.elaborate import _read_csv, _write_csv
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    rows = _read_csv(path)
+    for r in rows:
+        if r['id'] == scene:
+            r['status'] = status
+    _write_csv(path, rows, list(rows[0]))
+
+
+def _scene_set(project_dir, scene, **cells):
+    from storyforge.elaborate import _read_csv, _write_csv
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    rows = _read_csv(path)
+    header = list(rows[0]) + [c for c in cells if c not in rows[0]]
+    for r in rows:
+        r.update({c: r.get(c, '') for c in header})
+        if r['id'] == scene:
+            r.update(cells)
+    _write_csv(path, rows, header)
+
+
+def _death_scene(project_dir, who, scene):
+    path = os.path.join(project_dir, 'reference', 'characters.csv')
+    with open(path) as f:
+        text = f.read()
+    with open(path, 'w') as f:
+        f.write(text.replace(f'{who}|{who.capitalize()}||minor|',
+                             f'{who}|{who.capitalize()}||minor|{scene}'))
+
+
+class TestReviewPlacement:
+    """TD-1: a record's place is where its quote stands, not the reply's order."""
+
+    def test_a_reply_grouped_by_type_is_put_in_the_prose_s_order(self):
+        prose = 'Oren shouted at Mara. Then the arrow killed Oren.'
+        recs = typed_state.place_in_prose(prose, [
+            Record('alive', 'Oren', value='dead', quote='the arrow killed Oren'),
+            Record('at', 'Oren', quote='Oren shouted at Mara')])
+        assert [r.type for r in recs] == ['at', 'alive']
+        b = make_book('s1', {'s1': []})
+        b.records['s1'] = [r.replace(scene_id='s1') for r in recs]
+        assert continuity.check_life(b) == ([], [])
+
+    def test_extraction_places_its_records(self, project_dir):
+        prose = 'Oren shouted at Mara. Then the arrow killed Oren.'
+        reply = {'records': [rec('alive', 'Oren', value='dead', quote='the arrow killed Oren'),
+                             rec('at', 'Oren', quote='Oren shouted at Mara')]}
+        with patch('storyforge.api._api_request', return_value=_text(reply)):
+            got = typed_state.extract('s1', prose, model='m')
+        assert [r.type for r in got.records] == ['at', 'alive']
+        assert got.records[0].index < got.records[1].index
+
+    def test_a_misquoted_record_takes_the_place_before_it(self):
+        recs = typed_state.place_in_prose('One. Two.', [
+            Record('at', 'A', quote='Two'), Record('at', 'B', quote='nowhere', verified=False)])
+        assert [r.who for r in recs] == ['A', 'B']
+
+
+class TestReviewElapsed:
+    """SF-2, T1, T2: the parser never reads part of a phrase as the whole."""
+
+    @pytest.mark.parametrize('phrase,low,high,direction', [
+        ('twenty-three days ago', 21, 25, 'past'),
+        ('a hundred and twenty days ago', 108, 132, 'past'),
+        ('two hundred days ago', 180, 220, 'past'),
+        ('thirty-six hours ago', 1, 2, 'past'),
+        ('the third day from now', 2, 2, 'future'),
+        ('more than three days ago', 3, float('inf'), 'past'),
+        ('less than three days ago', 0, 3, 'past'),
+        ('nearly a week ago', 3.5, 7, 'past'),
+        ('about ten days ago', 8, 12, 'past'),
+        ('ten days or so ago', 8, 12, 'past'),
+    ])
+    def test_compounds_bounds_and_estimates(self, phrase, low, high, direction):
+        assert parse_elapsed(phrase) == (continuity.Span(low, high, direction), '')
+
+    @pytest.mark.parametrize('phrase,why', [
+        ('two weeks and three days ago', 'two counts'),
+        ('a day and a half ago', 'a half'),
+        ('half a day later', 'a half'),
+        ('one or two days ago', 'a range'),
+        ('two to three days ago', 'a range'),
+        ('three two days ago', 'a number it can'),
+    ])
+    def test_what_it_cannot_read_it_says(self, phrase, why):
+        span, reason = parse_elapsed(phrase)
+        assert span is None and why in reason
+
+    def test_a_compound_count_that_fits_is_no_finding(self):
+        b = make_book('s2', {'s1': [], 's2': [R('elapsed', item='s1', value='twenty-three days ago',
+                                                quote='twenty-three days ago')]},
+                      scenes={'s1': {'timeline_day': '1'}, 's2': {'timeline_day': '24'}})
+        assert continuity.check_time(b) == ([], [])
+
+
+class TestReviewSky:
+    """T3, T4, T5."""
+
+    def _book(self, **dirs):
+        return make_book('s1', {'s1': []}, world=World(directions=dirs))
+
+    @pytest.mark.parametrize('prose', ['The sun rose in the north-east.',
+                                       'The sun set in the south-west.',
+                                       'The sun rose in the north east.'])
+    def test_a_compound_compass_word_is_read_whole(self, prose):
+        assert continuity.check_sky(self._book(), prose) == ([], [])
+
+    def test_setting_in_the_east_is_a_finding(self):
+        f, _ = continuity.check_sky(self._book(), 'The sun set in the east.')
+        assert codes(f) == ['WLD']
+
+    def test_a_landmark_written_with_the(self):
+        f, _ = continuity.check_sky(self._book(**{'the sea': 'west'}),
+                                    'The sun rose over the sea.')
+        assert codes(f) == ['WLD'] and 'the sea' in f[0].scene_quote
+
+    def test_dawn_and_sunset_phrases(self):
+        b = self._book(kesh='west', varn='east')
+        assert codes(continuity.check_sky(b, 'Dawn broke over Kesh.')[0]) == ['WLD']
+        assert codes(continuity.check_sky(b, 'Sunset burned behind Varn.')[0]) == ['WLD']
+        assert continuity.check_sky(b, 'Dawn broke over Varn.')[0] == []
+
+    def test_a_trailing_clause_is_not_the_place(self):
+        b = self._book(kesh='east')
+        assert continuity.check_sky(
+            b, 'The sun set behind the hills on the road from Kesh.') == ([], [])
+        f, _ = continuity.check_sky(b, 'The sun set behind Kesh as Mara walked home.')
+        assert codes(f) == ['WLD'] and f[0].scene_quote == 'The sun set behind Kesh'
+
+
+class TestReviewInjury:
+    def test_a_minor_injury_does_not_end_a_worse_one(self):
+        # C4, CR-11
+        b = make_book('s3', {'s1': [R('injury', 'Mara', 'leg', 'disabling', 'left')],
+                             's2': [R('injury', 'Mara', 'leg', 'minor', 'left')],
+                             's3': [R('uses', 'Mara', 'leg', 'full', 'left',
+                                      quote='she sprinted')]})
+        assert codes(continuity.check_injury(b)[0]) == ['PHY']
+
+    def test_a_serious_one_does_not_replace_a_disabling_one(self):
+        b = make_book('s3', {'s1': [R('injury', 'Mara', 'leg', 'disabling', 'left')],
+                             's2': [R('injury', 'Mara', 'leg', 'serious', 'left')],
+                             's3': [R('uses', 'Mara', 'leg', 'full', 'left', quote='ran')]},
+                      scenes={'s1': {'timeline_day': '1'}, 's2': {'timeline_day': '2'},
+                              's3': {'timeline_day': '90'}})
+        assert 'disablingly' in continuity.check_injury(b)[0][0].explanation
+
+    def test_a_gap_between_is_a_note(self):
+        b = make_book('s3', {'s1': [R('injury', 'Mara', 'arm', 'serious')], 's2': [],
+                             's3': [R('uses', 'Mara', 'arm', 'full', quote='she swung')]})
+        b.gaps = {'s2'}
+        f, notes = continuity.check_injury(b)
+        assert f == [] and any("Mara's arm (s2)" in n for n in notes)
+
+
+class TestReviewBook:
+    def test_a_death_scene_that_is_not_a_scene_is_a_note(self, project_dir):
+        # SF-7, TD-3: never placed at the book's start
+        _death_scene(project_dir, 'pell', 'no-such-scene')
+        book, notes = continuity.load_book(project_dir, SCENE)
+        assert book.deaths == []
+        assert any('death_scene(s) name no live scene' in n and 'pell (no-such-scene)' in n
+                   for n in notes)
+
+    def test_a_cut_scene_s_records_do_not_count(self, project_dir):
+        # CR-9
+        _write(project_dir, PREV, PROSE_1)
+        typed_state.write_state(project_dir, PREV, PROSE_1, [
+            Record('alive', 'Pell', value='dead', quote='lay dead at the foot of the stair')])
+        _scene_status(project_dir, PREV, 'cut')
+        book, _ = continuity.load_book(project_dir, SCENE)
+        assert PREV not in book.order and PREV not in book.records
+
+    def test_gaps_are_by_story_order(self, project_dir):
+        # C5, SF-10: a flashback read later but set earlier is a gap
+        _write(project_dir, 'new-x1', 'Kael read the ledger alone.')
+        _scene_set(project_dir, 'new-x1', timeline_day='0')
+        book, notes = continuity.load_book(project_dir, SCENE)
+        assert 'new-x1' in book.gaps
+        assert any('new-x1' in n and 'story order' in n for n in notes)
+
+    def test_another_scene_s_misquoted_records_are_said(self, project_dir):
+        # SF-6
+        _write(project_dir, PREV, PROSE_1)
+        typed_state.write_state(project_dir, PREV, PROSE_1, [
+            Record('alive', 'Pell', value='dead', quote='was buried', verified=False)])
+        _, notes = continuity.load_book(project_dir, SCENE)
+        assert any('quotes aren\'t in their prose' in n and f'{PREV} (1)' in n for n in notes)
+
+
+class TestReviewFile:
+    def _fake(self, calls, records):
+        def fake(path, body, **k):
+            calls.append(body['messages'][0]['content'])
+            return _text({'records': records})
+        return fake
+
+    def test_another_prompt_reads_again(self, project_dir):
+        # SF-1, CR-8, TD-2: a fact added since is asked about
+        from storyforge import ledger
+        _write(project_dir, SCENE, PROSE_2)
+        calls = []
+        with patch('storyforge.api._api_request', side_effect=self._fake(calls, [])):
+            continuity.check_continuity(project_dir, SCENE, model='m')
+            continuity.check_continuity(project_dir, SCENE, model='m')
+            assert len(calls) == 1
+            rows = ledger.load(project_dir)
+            rows.append({**{c: '' for c in ledger.COLUMNS}, 'id': 'map-is-forged',
+                         'type': 'knowledge', 'status': 'binding', 'scene_id': 'act2-sc01',
+                         'known_by': 'dorren-hayle', 'statement': 'The map was forged',
+                         'origin': 'prose', 'mutable': 'state'})
+            ledger.write_ledger(ledger.ledger_path(project_dir), rows)
+            r = continuity.check_continuity(project_dir, SCENE, model='m')
+            assert len(calls) == 2 and r.extracted
+            assert any('read with other facts' in n for n in r.notes)
+            continuity.check_continuity(project_dir, SCENE, model='other')
+            assert len(calls) == 3
+
+    def test_extraction_notes_are_said_again_on_reuse(self, project_dir):
+        # SF-5
+        _write(project_dir, SCENE, PROSE_2)
+        calls = []
+        bad = [rec('holds', 'Pell', 'map', value='maybe', quote='the map')]
+        with patch('storyforge.api._api_request', side_effect=self._fake(calls, bad)):
+            first = continuity.check_continuity(project_dir, SCENE, model='m')
+            again = continuity.check_continuity(project_dir, SCENE, model='m')
+        assert len(calls) == 1 and not again.extracted
+        assert any('off the schema' in n for n in first.notes)
+        assert any('off the schema' in n for n in again.notes)
+
+    def test_load_state_rejects_a_value_off_its_list(self, project_dir):
+        # TD-9
+        path = typed_state.write_state(project_dir, SCENE, PROSE_2, [
+            Record('holds', 'Pell', 'map', 'has', quote='the map')])
+        with open(path) as f:
+            data = json.load(f)
+        data['records'][0]['value'] = 'took'
+        with open(path, 'w') as f:
+            json.dump(data, f)
+        with pytest.raises(ValueError, match='record 1: holds value "took"'):
+            typed_state.load_state(path)
+
+    def test_records_are_frozen(self):
+        r = Record('at', 'Pell')
+        with pytest.raises(Exception):
+            r.who = 'Dorren'
+        assert r.replace(who='Dorren').who == 'Dorren' and r.who == 'Pell'
+
+    def test_the_prompt_offers_tracked_objects(self, project_dir):
+        # TD-6: one object keeps one name
+        _write(project_dir, PREV, PROSE_1)
+        typed_state.write_state(project_dir, PREV, PROSE_1, [
+            Record('holds', 'Pell', "the cartographer's map", 'has', quote='Pell slipped')])
+        _write(project_dir, SCENE, PROSE_2)
+        calls = []
+        with patch('storyforge.api._api_request', side_effect=self._fake(calls, [])):
+            continuity.check_continuity(project_dir, SCENE, model='m')
+        assert "## Objects other scenes track\n\n- the cartographer's map" in calls[0]
+
+
+class TestReviewSheet:
+    def _sheet(self, project_dir, scene, prose, beats):
+        from storyforge import stage_sheet
+        stage_sheet.write_sheet(project_dir, {
+            'format': 1, 'scene_id': scene, 'prose_sha256': stage_sheet.prose_hash(prose),
+            'opening': [], 'end': [], 'beats': beats})
+
+    def test_carried_and_misquoted_hands_are_left_out_and_said(self, project_dir):
+        # TD-4, SF-9
+        prose = 'Pell took the brass key in his right hand.'
+        _write(project_dir, SCENE, prose)
+        self._sheet(project_dir, SCENE, prose, [
+            {'quote': 'Pell took the brass key', 'event': {'verified': False}, 'set': [
+                {'who': 'Pell', 'field': 'hand_right', 'item': '', 'value': 'brass key',
+                 'quote': 'Pell took the brass key'}]},
+            {'quote': 'x', 'set': [{'who': 'Pell', 'field': 'hand_left', 'item': '',
+                                    'value': 'brass key', 'quote': 'not in the prose'}]}])
+        got, why = typed_state.sheet_holdings(project_dir, SCENE, {'brass key'})
+        assert got == [] and '2 hand(s)' in why
+
+    def test_a_sheet_of_earlier_prose_is_said(self, project_dir):
+        # C6, SF-9
+        self._sheet(project_dir, SCENE, 'Older prose.', [])
+        _write(project_dir, SCENE, PROSE_2)
+        got, why = typed_state.sheet_holdings(project_dir, SCENE, {'map'})
+        assert got == [] and 'is of earlier prose' in why
+
+    def test_an_off_present_scene_s_sheet_is_not_read(self, project_dir, monkeypatch):
+        # TD-4: Lise's knife in a memory says nothing about the present
+        _write(project_dir, PREV, PROSE_1)
+        typed_state.write_state(project_dir, PREV, PROSE_1, [
+            Record('holds', 'Pell', 'brass key', 'has', quote='Pell slipped')])
+        _scene_set(project_dir, PREV, time_mode='memory')
+        seen = []
+        monkeypatch.setattr(typed_state, 'sheet_holdings',
+                            lambda p, sid, objs: (seen.append(sid), ([], ''))[1])
+        _write(project_dir, SCENE, PROSE_2)
+        with patch('storyforge.api._api_request', return_value=_text({'records': []})):
+            continuity.check_continuity(project_dir, SCENE, model='m')
+        assert PREV not in seen and SCENE in seen
+
+
+def test_write_commits_the_gate_s_saved_state():
+    # CR-7: another clone doesn't pay for them again or check without them
+    import inspect
+    from storyforge import cmd_write
+    assert cmd_write.gate_state_paths() == ['working/typed-state/', 'working/stage-sheets/']
+    src = inspect.getsource(cmd_write)
+    assert src.count('*gate_state_paths()') == 3
+
+
+def test_covered_fact_ids_for_the_question_layer():
+    # TD-7
+    rows = [fact('k1', 's1', 'mara'), fact('k2', 's1', ''),
+            {**fact('k3', 's1', 'mara'), 'status': 'retired'},
+            {'id': 'p1', 'type': 'physical', 'status': 'binding', 'known_by': 'mara'}]
+    assert continuity.covered_fact_ids(rows) == {'k1'}
+
+
+class TestReviewCouldNotCheck:
+    """T7-T10: the names the book knows, and every couldn't-check path."""
+
+    def _map(self, project_dir, monkeypatch, body):
+        from storyforge import source
+        path = os.path.join(project_dir, 'reference', 'name-map.csv')
+        with open(path, 'w') as f:
+            f.write(body)
+        cfg = source.SourceConfig(projects=(source.SourceProject('src', '../src'),),
+                                  name_map='reference/name-map.csv')
+        monkeypatch.setattr(source, 'read_config', lambda d: cfg)
+
+    def test_known_names(self, project_dir, monkeypatch):
+        from storyforge import source
+        self._map(project_dir, monkeypatch, '|'.join(source.NAME_MAP_COLUMNS) + '\n'
+                  'ulix|odys|Ulix|Odys Farwander\n')
+        rows = [{'id': 'r1', 'subject': 'Temple of Varn'}]
+        names = continuity.known_names(project_dir, rows)
+        assert {'dr. hayle', 'tessa', 'temple of varn', 'varn', 'odys farwander',
+                'farwander'} <= names
+        assert 'ulix' not in names     # a source name the map replaced
+
+    def test_known_names_without_a_registry(self, project_dir):
+        os.remove(os.path.join(project_dir, 'reference', 'characters.csv'))
+        assert continuity.known_names(project_dir, []) is None
+
+    def test_an_unreadable_name_map_is_a_note(self, project_dir, monkeypatch):
+        self._map(project_dir, monkeypatch, 'not|the|header\n')
+        found, notes = continuity.forbidden_names(project_dir)
+        assert found == {} and len(notes) == 1 and 'its names not checked' in notes[0]
+        assert continuity.known_names(project_dir, []) is not None   # SF-8: no crash
+
+    def test_an_unreadable_source_block_is_a_note(self, project_dir, monkeypatch):
+        from storyforge import source
+
+        def bad(d):
+            raise source.SourceError('storyforge.yaml: source project 1 needs both')
+        monkeypatch.setattr(source, 'read_config', bad)
+        found, notes = continuity.forbidden_names(project_dir)
+        assert 'the source block can\'t be read' in notes[0]
+        assert continuity.known_names(project_dir, []) is not None
+
+    def test_a_bug_is_not_swallowed(self, project_dir, monkeypatch):
+        # SF-8: only the source's own errors are a note
+        from storyforge import source
+
+        def bug(d):
+            raise AttributeError('a bug')
+        monkeypatch.setattr(source, 'read_config', bug)
+        with pytest.raises(AttributeError):
+            continuity.known_names(project_dir, [])
+
+    def test_stale_typed_state_is_said(self, project_dir):
+        _write(project_dir, PREV, PROSE_1)
+        typed_state.write_state(project_dir, PREV, PROSE_1, [])
+        _write(project_dir, PREV, PROSE_1 + ' Later words.')
+        book, notes = continuity.load_book(project_dir, SCENE)
+        assert PREV in book.gaps
+        assert any(f'{PREV} (its typed state is of earlier prose)' in n for n in notes)
+
+    def test_no_prose_is_an_error(self, project_dir):
+        _write(project_dir, SCENE, '   ')
+        with pytest.raises(continuity.ContinuityError, match='no prose'):
+            continuity.check_continuity(project_dir, SCENE, model='m')
+
+    def test_a_scene_not_in_scenes_csv_is_an_error(self, project_dir):
+        with pytest.raises(continuity.ContinuityError, match='not a scene'):
+            continuity.check_continuity(project_dir, 'no-such-scene', prose='Words.', model='m')
+
+    def test_a_malformed_world_table_is_an_error(self, project_dir):
+        with open(world_table.path_for(project_dir), 'w') as f:
+            f.write('kind|name|value|note\nspeed|on foot|fast|\n')
+        _write(project_dir, SCENE, PROSE_2)
+        with pytest.raises(continuity.ContinuityError, match='speed'):
+            continuity.check_continuity(project_dir, SCENE, model='m')
+
+    def test_travel_with_no_time_of_day_takes_the_whole_day(self):
+        w = World(distances={frozenset(('harbour', 'tower')): 50000.0}, speeds={'f': 40000.0})
+        b = make_book('s2', {'s1': [R('at', 'Mara', 'harbour')], 's2': [R('at', 'Mara', 'tower')]},
+                      scenes={'s1': {'timeline_day': '1', 'time_of_day': ''},
+                              's2': {'timeline_day': '2', 'time_of_day': ''}}, world=w)
+        # day 1 from its start to day 2's end: two days, enough for 50 km
+        assert continuity.check_place(b) == ([], [])
