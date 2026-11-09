@@ -56,7 +56,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
-from storyforge.illustrations import count_prose_words, read_scene_prose
+from storyforge.illustrations import count_prose_words, read_scene_prose, read_scene_raw
 
 
 def parse_args(argv):
@@ -548,10 +548,8 @@ class GateBlockers:
             ok = False
             if self.waiting[sid]['command'] in _REREAD_COMMANDS and self.facts.get(sid):
                 earlier, _ = gate.gated_prose(self.project_dir, sid)
-                try:
-                    with open(os.path.join(self.project_dir, 'scenes', f'{sid}.md'),
-                              encoding='utf-8') as f:
-                        prose = f.read()
+                try:   # the exact text: gated_prose is the file as gated, markers and all
+                    prose = read_scene_raw(self.project_dir, sid)
                 except (OSError, UnicodeDecodeError):
                     prose = None
                 ok = earlier is not None and prose is not None \
