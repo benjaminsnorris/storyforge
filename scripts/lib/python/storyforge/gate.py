@@ -3454,8 +3454,9 @@ def report_lines(result: GateResult) -> list[str]:
 # ============================================================================
 
 #: Scenes whose prose is on disk but didn't pass the gate, so their facts
-#: aren't in the ledger. `write` won't draft a scene after one (it would be
-#: drafted from an incomplete ledger); a pass, through `write` or
+#: aren't in the ledger. `write` won't draft a later scene that depends on
+#: one (it would be drafted from an incomplete ledger; `cmd_write.GateBlockers`,
+#: #641), and drafts the others; a pass, through `write` or
 #: `storyforge check`, takes it off.
 PENDING_PATH = 'working/gate-pending.csv'
 _PENDING_COLUMNS = ['scene_id', 'command', 'reason']
