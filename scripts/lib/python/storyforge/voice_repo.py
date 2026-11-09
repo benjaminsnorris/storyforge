@@ -40,7 +40,7 @@ A book names the repo in its `storyforge.yaml`:
 
 `book_voice` loads it: the description, the exemplar bank, the fiction anchor
 and the fingerprint's path, plus the book's own `reference/voice/book.md`
-when it has one. `drafting_section` renders it for the drafting prompt; a
+when it has one. `author_voice_section` renders it for the drafting prompt; a
 book without the block gets '' and its prompt is exactly what it was. A block
 that can't be used (a key it doesn't take, a repo that isn't there or isn't
 a voice repo, no description or exemplars yet, a narrator folder with no
@@ -222,8 +222,11 @@ def check_repo(voice_dir: str) -> None:
     has voice.yaml and isn't in a book."""
     book = book_above(voice_dir)
     if book:
-        raise VoiceRepoError(f'{voice_dir} is in a book ({book} has storyforge.yaml); run '
-                             f'this in the author voice repo, which lives outside the book')
+        where = ('is a book (it has storyforge.yaml)'
+                 if os.path.realpath(book) == os.path.realpath(voice_dir)
+                 else f'is in a book ({book} has storyforge.yaml)')
+        raise VoiceRepoError(f'{voice_dir} {where}; run this in the author voice repo, '
+                             f'which lives outside the book')
     if not os.path.isfile(os.path.join(voice_dir, VOICE_FILE)):
         raise VoiceRepoError(f'{voice_dir} has no {VOICE_FILE}: run this in the author voice '
                              f'repo, or make one with `storyforge voice init`')
@@ -628,7 +631,7 @@ def _demote(markdown: str, by: int = 2) -> str:
                   markdown, flags=re.MULTILINE)
 
 
-def drafting_section(project_dir: str) -> str:
+def author_voice_section(project_dir: str) -> str:
     """The author's voice for the drafting prompt: the description, the
     exemplars by job, the fiction anchor and the book's own voice notes.
     '' without a `voice:` block.

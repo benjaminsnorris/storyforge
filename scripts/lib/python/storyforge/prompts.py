@@ -883,8 +883,8 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     # The author's voice from the book's `voice:` block (#652); nothing
     # without one
     if coaching_level == 'full':
-        from .voice_repo import drafting_section
-        author_voice = drafting_section(project_dir)
+        from .voice_repo import author_voice_section
+        author_voice = author_voice_section(project_dir)
         if author_voice:
             lines.append('')
             lines.append(author_voice)
@@ -2242,8 +2242,8 @@ Do NOT add creative interpretation or suggestions."""
     # `voice:` block names (#652): '' without one, so other prompts are byte
     # for byte what they were
     if coaching_level == 'full':
-        from .voice_repo import drafting_section
-        author_voice = drafting_section(project_dir)
+        from .voice_repo import author_voice_section
+        author_voice = author_voice_section(project_dir)
         if author_voice:
             exemplar_block = (f'{author_voice}\n\n{exemplar_block}' if exemplar_block
                               else author_voice)

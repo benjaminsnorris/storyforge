@@ -83,8 +83,11 @@ def test_init_refuses_inside_a_book(project_dir):
     with pytest.raises(vr.VoiceRepoError, match='is in a book'):
         vr.init_repo(os.path.join(project_dir, 'voice'))
     assert not os.path.exists(os.path.join(project_dir, 'voice'))
-    with pytest.raises(vr.VoiceRepoError, match='is in a book'):
+    with pytest.raises(vr.VoiceRepoError, match='is a book'):
         vr.check_repo(project_dir)
+    os.makedirs(os.path.join(project_dir, 'scenes', 'deeper'), exist_ok=True)
+    with pytest.raises(vr.VoiceRepoError, match='is in a book'):
+        vr.check_repo(os.path.join(project_dir, 'scenes', 'deeper'))
 
 
 def test_settings_round_trip_an_author_with_quotes(tmp_path):
@@ -233,7 +236,7 @@ def test_cmd_voice_refuses_a_book(project_dir, capsys):
     from storyforge import cmd_voice
     for action in (['import', 'x'], ['fingerprint'], ['propose', '--dry-run']):
         assert cmd_voice.main(action + ['--dir', project_dir]) == 1
-        assert 'is in a book' in capsys.readouterr().out
+        assert 'is a book' in capsys.readouterr().out
 
 
 # ============================================================================
@@ -244,7 +247,7 @@ def test_no_block_is_no_voice(project_dir):
     assert vr.voice_ref(project_dir) is None
     assert vr.book_voice(project_dir) is None
     assert vr.require_voice(project_dir) == []
-    assert vr.drafting_section(project_dir) == ''
+    assert vr.author_voice_section(project_dir) == ''
 
 
 def test_block_loads_description_exemplars_anchor_and_fingerprint_path(project_dir, voice):
@@ -262,12 +265,12 @@ def test_block_loads_description_exemplars_anchor_and_fingerprint_path(project_d
     assert v.book_notes == ''
 
 
-def test_drafting_section_carries_the_voice(project_dir, voice):
+def test_author_voice_section_carries_the_voice(project_dir, voice):
     rel = os.path.relpath(voice, project_dir)
     _yaml(project_dir, f'voice:\n  author: {rel}\n  narrator: fiction/close-third\n')
     _write(os.path.join(project_dir, 'reference', 'voice', 'book.md'),
            '# This book\n\nBronze-age vocabulary only.\n')
-    text = vr.drafting_section(project_dir)
+    text = vr.author_voice_section(project_dir)
     assert text.startswith("## The Author's Voice")
     assert '#### What the voice does' in text            # demoted under the section
     assert '#### Passage 1 (description): The heron, seen plainly.' in text
@@ -281,7 +284,7 @@ def test_drafting_section_carries_the_voice(project_dir, voice):
 def test_the_voice_repo_is_never_written(project_dir, voice):
     _yaml(project_dir, f'voice:\n  author: {voice}\n')
     before = _tree(voice)
-    vr.drafting_section(project_dir)
+    vr.author_voice_section(project_dir)
     vr.require_voice(project_dir)
     assert _tree(voice) == before
 
@@ -341,7 +344,7 @@ def test_austen_reference_as_a_books_voice(project_dir):
     _yaml(project_dir, f'voice:\n  author: {os.path.relpath(AUSTEN, project_dir)}\n')
     v = vr.book_voice(project_dir)
     assert v.author == 'Jane Austen' and len(v.exemplars.exemplars) >= 20
-    assert 'Never uses contractions in narration' in vr.drafting_section(project_dir)
+    assert 'Never uses contractions in narration' in vr.author_voice_section(project_dir)
 
 
 def test_a_bad_block_stops_the_dispatcher_plainly(project_dir, capsys):
@@ -384,8 +387,8 @@ def test_drafting_prompts_without_a_block_are_unchanged(project_dir, monkeypatch
     plain = _briefs_prompt(project_dir, coaching_level=coaching)
     old = prompts.build_scene_prompt('act1-sc01', project_dir, coaching, api_mode=True)
     calls = []
-    real = vr.drafting_section
-    monkeypatch.setattr(vr, 'drafting_section', lambda d: calls.append(d) or real(d))
+    real = vr.author_voice_section
+    monkeypatch.setattr(vr, 'author_voice_section', lambda d: calls.append(d) or real(d))
     assert _briefs_prompt(project_dir, coaching_level=coaching) == plain
     assert prompts.build_scene_prompt('act1-sc01', project_dir, coaching,
                                       api_mode=True) == old
@@ -398,7 +401,7 @@ def test_briefs_prompt_carries_the_voice_and_nothing_else_changes(project_dir, v
                                                                   system_context):
     plain = _briefs_prompt(project_dir, system_context=system_context)
     _yaml(project_dir, f'voice:\n  author: {voice}\n  narrator: fiction/close-third\n')
-    section = vr.drafting_section(project_dir)
+    section = vr.author_voice_section(project_dir)
     voiced = _briefs_prompt(project_dir, system_context=system_context)
     assert section in voiced
     assert voiced.replace(section, '', 1) == plain
@@ -425,7 +428,7 @@ def test_older_drafting_prompt_carries_the_voice(project_dir, voice):
     plain = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
     _yaml(project_dir, f'voice:\n  author: {voice}\n')
     voiced = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
-    section = vr.drafting_section(project_dir)
+    section = vr.author_voice_section(project_dir)
     assert voiced.replace('\n\n' + section, '', 1) == plain
 
 
