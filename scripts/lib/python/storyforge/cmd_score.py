@@ -1212,8 +1212,7 @@ def _voice_pieces(args):
     if args.prose:
         for path in args.prose:
             try:
-                with open(path, encoding='utf-8') as f:
-                    pieces[path] = f.read()
+                pieces[path] = read_scene_prose(path)   # any markers stripped, as in a scene
             except (OSError, UnicodeDecodeError) as e:
                 unreadable[path] = e.__class__.__name__
         return pieces, missing, unreadable
