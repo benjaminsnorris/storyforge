@@ -5,7 +5,7 @@ geography and sky, and travel).
 `reference/world.csv`, pipe-delimited, one fact a row::
 
     kind|name|value|note
-    direction|Ida|east|seen from Troy
+    direction|the Tor|west|seen from the village
     sun|dawn|east|
     sight|face|30|metres at which a face can be made out
     distance|the wall > the ships|2000|metres
@@ -14,11 +14,12 @@ geography and sky, and travel).
 Kinds (`KINDS`):
 
 - `direction`: a landmark and the compass direction it lies in from the
-  book's usual standpoint (`value` a `COMPASS` word). "The sun went down
-  behind Ida" puts the sun where Ida is.
+  book's usual standpoint (`value` a `COMPASS` word). "The sun set behind
+  the Tor" puts the sun where the Tor is.
 - `sun`: a time of day and where the sun is then (`value` a `COMPASS` word,
-  or `none` when it's down). A row replaces the default for its time
-  (`DEFAULT_SUN`, a northern temperate sky).
+  or `none` when it's down). A row replaces the default for that time only
+  (`DEFAULT_SUN`, a northern temperate sky): a book under another sky gives
+  every time it uses.
 - `sight`: a detail and the farthest it can be made out, in metres
   (`value` a positive number): `face` (a face, eyes, an expression) and
   `figure` (who someone is by build and bearing). Replaces `DEFAULT_SIGHT`.
@@ -116,7 +117,7 @@ class World:
     def direction(self, where: str) -> str | None:
         """A compass word for `where`: a compass word itself, or a landmark
         the table names (a whole-word match inside a longer phrase counts:
-        "behind Ida" is Ida)."""
+        "behind the Tor" is the Tor)."""
         c = compass(where)
         if c:
             return c
@@ -146,7 +147,25 @@ class World:
         return self.sight_m.get(_key(detail))
 
     def distance(self, a: str, b: str) -> float | None:
-        return self.distances.get(frozenset((_key(a), _key(b))))
+        """The metres between two places: a row naming both, or whose two
+        names each stand as whole words inside one of them ("on the wall"
+        and "by the ships" are `the wall > the ships`); the longest names
+        win. None when no row does."""
+        x, y = _key(a), _key(b)
+        exact = self.distances.get(frozenset((x, y)))
+        if exact is not None or not (x and y):
+            return exact
+
+        def inside(name: str, text: str) -> bool:
+            return bool(re.search(rf'(?<!\w){re.escape(name)}(?!\w)', text))
+        best: tuple[int, float] | None = None
+        for pair, metres in self.distances.items():
+            p, q = (tuple(pair) * 2)[:2]
+            if (inside(p, x) and inside(q, y)) or (inside(q, x) and inside(p, y)):
+                size = len(p) + len(q)
+                if best is None or size > best[0]:
+                    best = (size, metres)
+        return best[1] if best else None
 
     def fastest(self) -> float | None:
         """The most metres a day any `speed` row allows, or None without one."""

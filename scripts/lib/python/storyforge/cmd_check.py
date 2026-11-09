@@ -196,8 +196,21 @@ def main(argv=None):
                 '--pending, --keep-going or --stop-at-first.')
             sys.exit(1)
         sys.exit(_blocking_report(args, project_dir))
-    if args.stage_sheet:
-        gate.GATE_BLOCKING_METHOD = 'stage-sheet'
+    if not args.stage_sheet:
+        return _check_named(args, project_dir)
+    # this run only: an in-process caller after it keeps its own method
+    saved = gate.GATE_BLOCKING_METHOD
+    gate.GATE_BLOCKING_METHOD = 'stage-sheet'
+    try:
+        return _check_named(args, project_dir)
+    finally:
+        gate.GATE_BLOCKING_METHOD = saved
+
+
+def _check_named(args, project_dir: str):
+    """`check`'s scenes (named, or `--pending`) through the gate."""
+    from storyforge import gate, ledger
+    from storyforge.git import commit_and_push, create_branch
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')
