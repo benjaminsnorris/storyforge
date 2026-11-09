@@ -106,6 +106,37 @@ anything. Gate on what the suite records today (E7's `NOISE_CEILING`, E2's
 `e2.FLOORS`: the value must equal it, so a gain moves it in the same commit)
 and give the plan's target as a note (#488).
 
+## Private suites: the blocking set (#646)
+
+Some labelled sets are the author's unpublished prose, and this repo is
+public. Such a set lives in the private storyforge-evals repo
+(benjaminsnorris/storyforge-evals), cloned at `STORYFORGE_PRIVATE_EVALS_DIR`
+(default `~/Developer/evals`), and so do its recordings, since a recording
+holds the request: `Suite(..., cassettes=fn)` names the directory (`fn`
+raises, erroring the suite, when the private repo isn't there; `--cassettes-dir`
+doesn't move it). The suite's notes and metrics reach `baseline.json`, so they
+carry counts and case ids, never a quote; per-case outcomes and findings go to
+the private repo (gitignored there).
+
+`blocking-set` measures today's blocking read (`storyforge.blocking`, #626,
+two readings per scene) against 118 known blocking slips (34 that gawain's
+readers and Ben found, 10 from gawain's blocking run, 74 from Wrath's last gate
+run, each with its fix verdict), 13 readings people judged plausible and left
+alone, and 14 clean scenes (`evals/blocking_set`; how each case was found:
+`blocking-set/README.md` in storyforge-evals). It reports recall overall, per
+category (`recall_hands`, `_posture`, `_sightline`, `_worn`, `_position`,
+`_light`, `_other`), per book and per finder (`recall_found_by_readers` is the
+independent measure; the `tool` cases were found by the same read), false
+alarms per 10,000 words of clean prose, and `left_flagged`. It gates each on
+its recorded value (`FLOORS` in the suite, #488). The #647 stage sheet is
+measured on the same set before the whole-scene read is retired (plan A4).
+
+**Not recorded yet** (forecast about $6.60, past an issue's $5): until then it
+errors in replay with a cassette miss. To record: check out the evals PR's
+branch (`blocking-set-646`) at `~/Developer/evals`, run
+`python3 evals/run.py --mode auto --suite blocking-set`, commit the cassettes
+there, then set `FLOORS` from the report and refresh `baseline.json`.
+
 ## Recorded API calls
 
 Every Anthropic call goes through `api._api_request`, which consults
