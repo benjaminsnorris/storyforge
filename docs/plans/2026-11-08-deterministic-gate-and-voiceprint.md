@@ -816,6 +816,11 @@ recorded instead. Only question 20 is still open.
 9. **Which brief fields survive by default?**
    *Decided:* events, the turn, POV, and the knowledge and physical state
    out. Everything else becomes optional notes the author writes.
+   *Implemented* (after #644/PR #668): goal, conflict, crisis and decision
+   are `elaborate.AUTHOR_NOTE_COLUMNS` too, never generated, and an empty
+   one is fine to every reader; the outcome is worded without a goal; the
+   briefs prompt and hone share one event limit (3-6 events, at most 2.5
+   per 1,000 words, key_actions under 200 characters).
 10. **Briefs and plans written as terse notes, with interpretation
     forbidden?**
     *Decided:* yes. It's cheap, and it cuts the main route by which the

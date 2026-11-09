@@ -8,7 +8,7 @@ Scene data is split across three CSV files, each with a clear purpose:
 
 - **`reference/scenes.csv`** — structural identity and position (POV, location, timeline, status, word counts)
 - **`reference/scene-intent.csv`** — narrative dynamics and tracking (function, value shifts, characters, MICE threads)
-- **`reference/scene-briefs.csv`** — drafting contracts (goal, conflict, outcome, knowledge states, key actions/dialogue)
+- **`reference/scene-briefs.csv`** — drafting contracts: the scene's facts (outcome, key actions, knowledge and physical states), plus the author's optional notes (goal, conflict, crisis, decision, key dialogue...)
 
 All three files use pipe (`|`) as the field delimiter, semicolon (`;`) for array values within a column, and `id` as the join key. The first row is always the header. The `id` column in intent and briefs matches scenes.csv.
 
@@ -99,16 +99,16 @@ print(dump_schema_markdown())
 
 ### scene-briefs.csv — drafting contracts
 
-A brief keeps the scene's **facts**, not its staging (#644): the events (`key_actions`, the turn included), the `outcome`, and the knowledge and physical state in and out. `elaborate --stage briefs` writes those as terse notes, with no interpretation, and fills goal/conflict/crisis/decision only where the scene plainly has one. `key_dialogue`, `subtext`, `emotions`, `motifs` and `motif_details` (`elaborate.AUTHOR_NOTE_COLUMNS`) are the author's optional notes in a prose book: the briefs stage never generates them (it writes only the columns it asks for, `prompts_elaborate.BRIEFS_OUTPUT_HEADER`), no model rewrites them (revise's source-drift fix shows key_dialogue and reports drift in it; hone reports findings on them), the briefs stage keeps them as the author wrote them, and drafting and the gate read them only when filled. Extraction still records them from prose that exists. A graphic novel's briefs stage writes `key_dialogue` as the balloon text its panel script carries. A source line the author wants verbatim goes into `key_dialogue` by hand, marked `must:`. `outcome` and `key_actions` are the brief's facts (`elaborate.BRIEF_FACT_COLUMNS`), required from `briefed` on.
+A brief keeps the scene's **facts**, not its staging (#644): the events (`key_actions`, the turn included), the `outcome`, and the knowledge and physical state in and out. `elaborate --stage briefs` writes those as terse notes, with no interpretation: about 3 to 6 events, never more than `elaborate.MAX_BRIEF_EVENTS` (6) or 2.5 for each 1,000 target words (`brief_event_limit`), the whole key_actions cell under `KEY_ACTIONS_MAX_CHARS` (200) characters, the limits hone flags past. `goal`, `conflict`, `crisis`, `decision`, `key_dialogue`, `subtext`, `emotions`, `motifs` and `motif_details` (`elaborate.AUTHOR_NOTE_COLUMNS`; the first four since plan decision 9) are the author's optional notes in a prose book: the briefs stage never generates them (it writes only the columns it asks for, `prompts_elaborate.BRIEFS_OUTPUT_HEADER`), nothing reports one empty (validate, hone's gaps, the status floors, structural completeness and the story-power pre-pass check only the facts), no model rewrites them (revise's source-drift fix shows them and reports drift in them; its old dramatic-opposition rewrite of the four is gone; hone reports findings on them), scoring scores only the ones filled, the briefs stage keeps them as the author wrote them, and drafting and the gate read them only when filled. Extraction still records them from prose that exists. A graphic novel's briefs stage writes `key_dialogue` as the balloon text its panel script carries. A source line the author wants verbatim goes into `key_dialogue` by hand, marked `must:`. `outcome` and `key_actions` are the brief's facts (`elaborate.BRIEF_FACT_COLUMNS`), required from `briefed` on.
 
 | Column | Constraint | Stage | Description |
 |--------|-----------|-------|-------------|
 | `id` | free_text | brief | Join key — matches scenes.csv. |
-| `goal` | free_text | brief | POV character's concrete objective entering the scene (Swain). |
-| `conflict` | free_text | brief | What specifically opposes the goal. |
-| `outcome` | enum: yes, no, yes-but, no-and, no-but | brief | How the scene ends for the POV character: yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new complication or cost) / no-and (fails, and things get worse) / no-but (fails, but something genuinely goes their way). Bickham's scene disasters plus Kowal's no-but; see structural-craft.md §2. |
-| `crisis` | free_text | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid). |
-| `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
+| `goal` | free_text | brief | Optional, the author's note: the POV character's concrete objective entering the scene (Swain), filled by hand and never generated for a prose book (plan decision 9). Extraction records it from prose. |
+| `conflict` | free_text | brief | Optional, the author's note: what specifically opposes the POV character in the scene, filled by hand and never generated for a prose book (plan decision 9). Extraction records it from prose. |
+| `outcome` | enum: yes, no, yes-but, no-and, no-but | brief | How the scene ends for the POV character: yes (it goes their way) / no (it goes against them) / yes-but (it goes their way, with a new complication or cost) / no-and (it goes against them, and things get worse) / no-but (it goes against them, but something genuinely goes their way). Bickham's scene disasters plus Kowal's no-but; see structural-craft.md §2. |
+| `crisis` | free_text | brief | Optional, the author's note: the dilemma, a best bad choice or irreconcilable goods (Story Grid), filled by hand and never generated for a prose book (plan decision 9). Extraction records it from prose. |
+| `decision` | free_text | brief | Optional, the author's note: what the character actively chooses in response to the crisis, filled by hand and never generated for a prose book (plan decision 9). Extraction records it from prose. |
 | `knowledge_in` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows entering. Normalized against the knowledge facts in reference/commitments.csv (the commitments ledger). See knowledge-guidelines.md for fact selection criteria. |
 | `knowledge_out` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene. See knowledge-guidelines.md. |
 | `key_actions` | free_text | brief | The scene's events, in order, the turn included: who does what, never scripted lines. A brief fact, required from `briefed` on (#644). An item starting `must:` is a beat the author requires (see below). |
@@ -144,7 +144,7 @@ The `status` field tracks how deeply a scene has been elaborated:
 | `spine` | id, seq, title, function | Stage 1: irreducible story events |
 | `architecture` | + act, pov, action_sequel, emotional_arc, value_shift, turning_point | Stage 2: structure |
 | `mapped` | + location, timeline_day, time_of_day, duration, type, characters, on_stage, mice_threads | Stage 3: full scene map |
-| `briefed` | + outcome, key_actions, knowledge_in/out, physical_state_in/out, continuity_deps (goal, conflict, crisis, decision as optional notes; key_dialogue, subtext, emotions, motifs only by the author) | Stage 4: the scenes' facts |
+| `briefed` | + outcome, key_actions, knowledge_in/out, physical_state_in/out, continuity_deps (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs only by the author) | Stage 4: the scenes' facts |
 | `drafted` | + word_count (prose exists in scenes/{id}.md) | After drafting |
 | `polished` | Prose has been through craft polish | After polish pass |
 
@@ -152,7 +152,7 @@ The `status` field tracks how deeply a scene has been elaborated:
 
 Run `./storyforge validate` to check both structural integrity and schema compliance. It prints its structural findings in two groups: **blocking** errors, which fail validation (exit 1) and hold an elaborate stage's phase, then **advisory** diagnostics, which never do.
 
-**Checks catch errors; craft frameworks advise** (#643). Every check of conformity to a craft framework is advisory: a scene's empty craft-framework columns (`action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift`, `turning_point`, `goal`, `conflict`, `crisis`, `decision`), MICE nesting and operations, flat polarity, scene-type and turning-point runs, and in `storyforge status` and `score --level` the architecture's action/sequel balance. These are useful notes, but a book may leave a scene without a turn or a landing on purpose. Errors still block: a required column that isn't a craft one, duplicate seqs or ids, orphaned rows, a broken `told_by` chain, schema errors, canon errors, and for a faithful adaptation its coverage gaps and unnamed cast.
+**Checks catch errors; craft frameworks advise** (#643). Every check of conformity to a craft framework is advisory: a scene's empty craft-framework columns (`action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift`, `turning_point`; a brief's goal, conflict, crisis and decision are the author's notes, which nothing checks), MICE nesting and operations, flat polarity, scene-type and turning-point runs, and in `storyforge status` and `score --level` the architecture's action/sequel balance. These are useful notes, but a book may leave a scene without a turn or a landing on purpose. Errors still block: a required column that isn't a craft one, duplicate seqs or ids, orphaned rows, a broken `told_by` chain, schema errors, canon errors, and for a faithful adaptation its coverage gaps and unnamed cast.
 
 **Structural checks:**
 - **Identity:** Every ID in intent/briefs exists in scenes.csv
@@ -175,8 +175,8 @@ Use `--no-schema` to skip schema validation. Use `--json` for machine-readable o
 
 Two types of scoring reference scene data:
 
-- **Structural scoring** (`score_structure`): Pre-draft check on brief quality (0-5 per scene). Checks goal/conflict/outcome completeness, value shift, crisis, knowledge flow.
-- **Brief fidelity scoring** (`fidelity-scores.csv`): Post-draft check — did the prose deliver what the brief promised? Scores 9 elements: goal, conflict, outcome, crisis, decision, key_actions, key_dialogue, emotions, knowledge.
+- **Structural scoring** (`score_structure`): Pre-draft check on brief quality (0-5 per scene). Checks the brief's facts (outcome, key_actions), value shift and knowledge flow; goal, conflict, crisis and decision are optional notes.
+- **Brief fidelity scoring** (`fidelity-scores.csv`): Post-draft check — did the prose deliver what the brief promised? Scores up to 9 elements: goal, conflict, outcome, crisis, decision, key_actions, key_dialogue, emotions, knowledge. An element the brief leaves empty (an optional note) is left unscored.
 
 ## CSV Format Conventions
 

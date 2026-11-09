@@ -46,8 +46,7 @@ Before doing anything else, orient yourself:
      craft-framework floor checks (`scene_id` and `quote` empty; `finding`
      names the rung, the check and the first scene; `command` is the
      `storyforge score --level N` that lists every scene) (#643: a missing value shift or turning
-     point, the action/sequel balance, a brief with no goal, conflict,
-     crisis or decision). They never keep a rung thin; mention them as
+     point, the action/sequel balance). They never keep a rung thin; mention them as
      observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
