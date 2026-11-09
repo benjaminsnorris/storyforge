@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -80,15 +81,16 @@ def parse_args(argv):
 
 def monthly_budget(config_file: str) -> float:
     """The monthly eval budget in USD: ``monthly_budget_usd`` in
-    evals/config.json, $25 when the file is absent. A file that exists but
-    doesn't give a non-negative number refuses the run: a guessed budget is
-    no guard."""
-    if not os.path.isfile(config_file):
+    evals/config.json, $25 when nothing exists at that path. Anything there
+    that doesn't give a finite, non-negative number (a directory, a dangling
+    symlink, NaN) refuses the run: a guessed budget is no guard."""
+    if not os.path.lexists(config_file):
         return DEFAULT_MONTHLY_BUDGET
     try:
         with open(config_file) as f:
             value = json.load(f)['monthly_budget_usd']
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value) or value < 0:
             raise ValueError(f'{value!r} is not a non-negative number')
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise Refused(f'{config_file}: monthly_budget_usd unreadable ({e})') from e
@@ -97,13 +99,31 @@ def monthly_budget(config_file: str) -> float:
 
 def _forecast(suites, baseline_file: str, runs: int) -> tuple[float, list[str]]:
     """What recording ``suites`` live costs, ``runs`` times, from each one's
-    ``usd_if_live`` in the baseline; and the suites it has no figure for."""
-    try:
-        with open(baseline_file) as f:
-            by_suite = {r['suite']: r['cost']['usd_if_live']
-                        for r in json.load(f).get('results', [])}
-    except (OSError, ValueError, KeyError, TypeError):
-        by_suite = {}
+    ``usd_if_live`` in the baseline; and the suites it has no figure for (no
+    entry, or one without a usable figure). No baseline file at all leaves
+    every suite without a figure.
+
+    Raises:
+        Refused: the baseline exists but can't be read, so no figure is known.
+    """
+    by_suite = {}
+    if os.path.lexists(baseline_file):
+        try:
+            with open(baseline_file) as f:
+                results = json.load(f).get('results', [])
+            if not isinstance(results, list):
+                raise TypeError('results is not a list')
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            raise Refused(f'the baseline {baseline_file} can\'t be read for the forecast '
+                          f'({type(e).__name__}: {e})') from e
+        for r in results:
+            try:
+                usd = r['cost']['usd_if_live']
+            except (KeyError, TypeError):
+                continue
+            if isinstance(usd, (int, float)) and not isinstance(usd, bool) \
+                    and math.isfinite(usd) and usd >= 0 and isinstance(r.get('suite'), str):
+                by_suite[r['suite']] = usd
     known = [by_suite[s.name] for s in suites if s.name in by_suite]
     return round(sum(known) * runs, 2), [s.name for s in suites if s.name not in by_suite]
 
@@ -138,7 +158,13 @@ def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
     recorded suite's ``usd_if_live`` in the baseline, times ``--runs``) passes
     the budget; ``auto`` records only misses, so it is refused only once the
     budget is spent. Either way the cassette refuses each live call once the
-    month reaches the budget."""
+    month reaches the budget.
+
+    A suite with no baseline figure adds $0 to the forecast, so for it the
+    forecast is a lower bound: named in a WARNING, and the cassette's
+    per-call check is its guard. A frozen suite recorded with no figure is
+    refused (a cut-off three-run recording leaves its cassettes mixed), as is
+    a baseline that can't be read; ``--over-budget`` lifts both."""
     from storyforge import eval_spend
     budget = monthly_budget(args.config_file)
     try:
@@ -149,19 +175,38 @@ def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
         print(f'WARNING: {e}', file=sys.stderr)
         spent = None
     recording = [s for s in suites if not s.frozen or s.name in record_frozen]
-    forecast, unknown = _forecast(recording, args.baseline_file, args.runs)
+    try:
+        forecast, unknown = _forecast(recording, args.baseline_file, args.runs)
+    except Refused as e:
+        if not args.over_budget:
+            raise
+        print(f'WARNING: {e}', file=sys.stderr)
+        forecast, unknown = 0.0, [s.name for s in recording]
+    source = args.config_file if os.path.lexists(args.config_file) else \
+        f'default; {args.config_file} absent'
     info = {'monthly_usd': budget, 'ledger': ledger, 'spent_before_usd': spent,
             'forecast_usd': forecast, 'forecast_unknown': unknown,
             'over_budget': args.over_budget or None}
     spent_text = 'unknown' if spent is None else f'${spent:.2f}'
     bound = 'at most ' if args.mode == 'auto' else ''
-    print(f'Eval budget: {spent_text} of ${budget:.2f} spent this month ({ledger}); '
-          f'this run, {bound}${forecast:.2f} if every call goes live'
+    print(f'Eval budget: {spent_text} of ${budget:.2f} ({source}) spent this month '
+          f'({ledger}); this run, {bound}${forecast:.2f} if every call goes live'
           + (f' (no figure for {", ".join(unknown)}: not in the baseline)' if unknown else ''))
+    if unknown and args.mode == 'record':
+        print(f'WARNING: no baseline figure for {", ".join(unknown)}, so the forecast counts '
+              f'it as $0 and is a lower bound; the per-call budget check still applies.',
+              file=sys.stderr)
     if args.over_budget:
         print(f'WARNING: --over-budget: the monthly eval budget is not enforced for this run. '
               f'Reason: {args.over_budget}', file=sys.stderr)
         return info
+    unforecast_frozen = sorted(set(unknown) & record_frozen)
+    if unforecast_frozen:
+        raise Refused(
+            f'{", ".join(unforecast_frozen)} has no usd_if_live in the baseline, so its '
+            f'{args.runs}-run recording can\'t be forecast, and a recording the budget cuts '
+            f'off partway leaves its cassettes mixed. Ask Ben; with his approval re-run with '
+            f'--over-budget "<who approved, why>".')
     over = spent >= budget if args.mode == 'auto' else spent + forecast > budget
     if over:
         raise Refused(

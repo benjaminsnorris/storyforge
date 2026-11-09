@@ -41,7 +41,9 @@ the month past the budget, never more.
 import gzip
 import hashlib
 import json
+import math
 import os
+import sys
 import tempfile
 
 MODES = ('replay', 'record', 'auto')
@@ -68,7 +70,9 @@ def _budget_refusal() -> str:
     try:
         budget = float(raw)
     except ValueError:
-        return f'{eval_spend.BUDGET_ENV}={raw!r} is not a number of dollars'
+        budget = math.nan
+    if not math.isfinite(budget) or budget < 0:
+        return f'{eval_spend.BUDGET_ENV}={raw!r} is not a non-negative number of dollars'
     return eval_spend.refusal(eval_spend.default_ledger(), budget)
 
 
@@ -89,11 +93,13 @@ def _record_spend(cassette_dir: str, body: dict | None, response: dict) -> None:
             model=model, usd=eval_spend.usage_cost(model, usage),
             over_budget=os.environ.get(eval_spend.OVERRIDE_ENV, '').strip())
     except OSError as e:
+        message = (f'eval spend ledger not written ({e}); this call is missing from '
+                   f'the month\'s eval spend')
         try:
-            _append_log({'error': f'eval spend ledger not written ({e}); this call is '
-                                  f'missing from the month\'s eval spend'})
+            _append_log({'error': message})
         except OSError:
-            pass
+            print(f'WARNING: {message} (and the cassette log could not be written either)',
+                  file=sys.stderr)
 
 
 def active_dir() -> str:

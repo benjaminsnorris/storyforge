@@ -420,9 +420,11 @@ def test_cassette_refuses_at_the_budget_unless_overridden(tape, monkeypatch, liv
     assert len(live) == 1 and _ledger(tape)[-1]['over_budget'] == 'approved'
 
 
-def test_cassette_refuses_on_a_budget_that_is_not_a_number(tape, monkeypatch, live):
-    monkeypatch.setenv(eval_spend.BUDGET_ENV, 'lots')
-    with pytest.raises(cassette.BudgetRefused, match='not a number'):
+@pytest.mark.parametrize('raw', ['lots', 'nan', 'inf', '-1'])
+def test_cassette_refuses_on_a_budget_that_is_not_a_number(tape, monkeypatch, live, raw):
+    """SF-3: NaN would make every `spent >= budget` False."""
+    monkeypatch.setenv(eval_spend.BUDGET_ENV, raw)
+    with pytest.raises(cassette.BudgetRefused, match='not a non-negative number'):
         api._api_request('messages', BODY, method='POST')
     assert live == []
 
@@ -527,3 +529,181 @@ def test_an_errored_extra_run_errors_the_whole_recording(tmp_path, live, capsys)
     assert report['extra_runs']['run3']['results'][0]['status'] == 'pass'
     err = capsys.readouterr().err
     assert 'frozen recording errored' in err and str(tmp_path / 'e6' / 'run2' / 'e4') in err
+
+
+# --- the ledger and the budget fail closed (PR #661 review) ------------------
+
+@pytest.mark.parametrize('line', [
+    '{"at": "11/05/2026", "usd": 40}',                       # T1: not ISO
+    '{"at": "2026-11", "usd": 40}',
+    '{"at": "2026-11-01T00:00:00+00:00", "usd": NaN}',       # T2 / CR-3
+    '{"at": "2026-11-01T00:00:00+00:00", "usd": Infinity}',
+    '{"at": "2026-11-01T00:00:00+00:00", "usd": -30}',
+    '{"at": "2026-11-01T00:00:00+00:00", "usd": true}',
+    '5', '[]', 'null',
+])
+def test_month_spend_rejects_a_line_it_cannot_count(tmp_path, line):
+    path = tmp_path / 'spend.jsonl'
+    path.write_text(line + '\n')
+    with pytest.raises(eval_spend.SpendLedgerError, match='line 1'):
+        eval_spend.month_spend(str(path))
+    assert eval_spend.refusal(str(path), 25.0)  # and the budget refuses on it
+
+
+def test_month_spend_refuses_a_ledger_path_that_is_not_a_file(tmp_path):
+    """SF-4: only 'nothing there' is $0."""
+    (tmp_path / 'dir').mkdir()
+    with pytest.raises(eval_spend.SpendLedgerError, match="can't be read"):
+        eval_spend.month_spend(str(tmp_path / 'dir'))
+    (tmp_path / 'dangling').symlink_to(tmp_path / 'gone')
+    with pytest.raises(eval_spend.SpendLedgerError):
+        eval_spend.month_spend(str(tmp_path / 'dangling'))
+    assert eval_spend.month_spend(str(tmp_path / 'absent')) == 0.0
+
+
+def test_a_ledger_that_turns_unreadable_mid_run_is_a_refusal(tmp_path, monkeypatch):
+    """SF-6: an OSError reaches the cassette as a BudgetRefused (through
+    _fail and the log), not a bare exception command code may swallow."""
+    path = tmp_path / 'spend.jsonl'
+    path.write_text('')
+    monkeypatch.setattr('builtins.open', _raising_open(str(path)))
+    assert "can't be read" in eval_spend.refusal(str(path), 25.0)
+
+
+def _raising_open(target):
+    real = open
+
+    def fake(file, *a, **k):
+        if str(file) == target:
+            raise PermissionError('denied')
+        return real(file, *a, **k)
+    return fake
+
+
+def test_record_starts_a_new_line_after_a_cut_off_one(tmp_path):
+    """CR-4: an entry is never glued to a truncated last line."""
+    path = tmp_path / 'spend.jsonl'
+    path.write_text('{"at": "2026-11-01T00:0')
+    eval_spend.record(str(path), suite='e3', model='m', usd=1.0)
+    lines = path.read_text().splitlines()
+    assert len(lines) == 2 and json.loads(lines[1])['suite'] == 'e3'
+    eval_spend.record(str(path), suite='e3', model='m', usd=1.0)
+    assert len(path.read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize('bad', ['{"monthly_budget_usd": NaN}', '{"monthly_budget_usd": Infinity}'])
+def test_a_budget_that_is_not_finite_refuses(tmp_path, bad):
+    """SF-3"""
+    (tmp_path / 'config.json').write_text(bad)
+    with pytest.raises(eval_run.Refused, match='unreadable'):
+        eval_run.monthly_budget(str(tmp_path / 'config.json'))
+
+
+def test_a_config_path_that_is_not_a_file_refuses_and_the_default_is_named(tmp_path, live,
+                                                                            capsys):
+    """SF-7"""
+    (tmp_path / 'cfgdir').mkdir()
+    with pytest.raises(eval_run.Refused):
+        eval_run.monthly_budget(str(tmp_path / 'cfgdir'))
+    _suite(tmp_path, 'ok', PASSING)
+    assert _run(tmp_path, '--mode', 'auto') == 0
+    assert 'default; ' in capsys.readouterr().out
+
+
+def test_cassette_warns_when_neither_the_ledger_nor_the_log_can_be_written(
+        tape, monkeypatch, capsys):
+    """SF-9"""
+    monkeypatch.setattr(eval_spend, 'record', _oserror)
+    monkeypatch.setattr(cassette, '_append_log', _oserror)
+    monkeypatch.setattr(cassette, '_log_call', lambda *a, **k: None)
+    api._api_request('messages', BODY, method='POST')
+    assert 'eval spend ledger not written' in capsys.readouterr().err
+
+
+def _oserror(*a, **k):
+    raise OSError('disk gone')
+
+
+def test_record_with_an_unreadable_baseline_is_refused(tmp_path, live, capsys):
+    """SF-5 / CR-5: the forecast can't be made, so it isn't guessed as $0."""
+    _suite(tmp_path, 'e3')
+    (tmp_path / 'baseline.json').write_text('{not json')
+    assert _run(tmp_path, '--mode', 'record') == 2
+    assert "can't be read for the forecast" in capsys.readouterr().err
+    assert live == []
+
+
+def test_one_bad_baseline_entry_blanks_only_its_own_suite(tmp_path):
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [
+        {'suite': 'a', 'cost': {'usd_if_live': 2.0}},
+        {'suite': 'b', 'cost': {}},
+        {'suite': 'c', 'cost': {'usd_if_live': 'x'}}]}))
+    suites = [harness.Suite(n, '', None) for n in 'abc']
+    assert eval_run._forecast(suites, str(tmp_path / 'baseline.json'), 2) == (4.0, ['b', 'c'])
+
+
+def test_a_suite_with_no_baseline_figure_is_a_lower_bound_warning(tmp_path, live, capsys):
+    """T10 / TD5 / C5: recorded, with a WARNING; the per-call check stops it."""
+    _suite(tmp_path, 'e3')
+    _spent(tmp_path, 22.0)
+    assert _run(tmp_path, '--mode', 'record') == 2  # forecast $0 passes; the cassette stops call 2
+    captured = capsys.readouterr()
+    assert 'no figure for e3' in captured.out and 'lower bound' in captured.err
+    assert len(live) == 1 and 'BudgetRefused' in _result(tmp_path, 'e3')['error']
+
+
+def test_a_frozen_recording_with_no_baseline_figure_is_refused(tmp_path, live, capsys):
+    """SF-5: a cut-off three-run recording would leave its cassettes mixed."""
+    _suite(tmp_path, 'e4', frozen=True)
+    assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '3') == 2
+    assert "can't be forecast" in capsys.readouterr().err
+    assert live == []
+
+
+def test_the_forecast_multiplies_by_runs_and_skips_unnamed_frozen_suites(tmp_path, live, capsys):
+    """T5"""
+    _suite(tmp_path, 'e4', frozen=True)
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [
+        {'suite': 'e4', 'status': 'pass', 'metrics': {}, 'cost': {'usd_if_live': 5.0}}]}))
+    _spent(tmp_path, 11.0)
+    assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '3') == 2
+    assert 'forecasts $15.00' in capsys.readouterr().err
+    assert live == []
+    _record_frozen(tmp_path)
+    (tmp_path / 'config.json').write_text('{"monthly_budget_usd": 100}')
+    capsys.readouterr()
+    assert _run(tmp_path, '--mode', 'record') == 0  # e4 not named: replayed, forecast $0
+    assert '$0.00 if every call goes live' in capsys.readouterr().out
+
+
+def test_record_exactly_at_the_budget_is_allowed_and_blank_over_budget_is_no_override(
+        tmp_path, live):
+    """T8: the record guard is `>`; --over-budget '   ' strips to nothing."""
+    _suite(tmp_path, 'e3')
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [
+        {'suite': 'e3', 'status': 'pass', 'metrics': {}, 'cost': {'usd_if_live': 6.0}}]}))
+    _spent(tmp_path, 19.0)
+    assert _run(tmp_path, '--mode', 'record') == 0
+    assert _run(tmp_path, '--mode', 'auto', '--over-budget', '   ') == 2  # $25 spent
+    assert not (tmp_path / 'results' / 'latest.json').exists()
+
+
+def test_auto_is_refused_once_the_month_is_spent(tmp_path, live, capsys):
+    """C (gap): the `spent >= budget` branch, without --over-budget."""
+    _suite(tmp_path, 'e3')
+    _spent(tmp_path, 25.0)
+    assert _run(tmp_path, '--mode', 'auto') == 2
+    assert 'monthly eval budget would be passed' in capsys.readouterr().err
+    assert live == []
+
+
+def test_an_unreadable_ledger_with_over_budget_runs_and_says_so(tmp_path, live, capsys):
+    """T6"""
+    _suite(tmp_path, 'e3')
+    (tmp_path / 'spend.jsonl').write_text('{broken\n')
+    assert _run(tmp_path, '--mode', 'auto', '--over-budget', 'Ben, ledger repair') == 0
+    err = capsys.readouterr().err
+    assert err.count("line 1 can't be read") == 2  # before and after
+    budget = _report(tmp_path)['budget']
+    assert budget['spent_before_usd'] is None and budget['spent_after_usd'] is None
+    assert len(live) == 2
