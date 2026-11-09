@@ -213,6 +213,9 @@ class GateResult:
     #: brief items that are only the `must:` marker (`field (n)`): they
     #: mark nothing, and are reported
     bare_must: list[str] = field(default_factory=list)
+    #: scripted words of `must` items too short to find by code
+    #: (`field: "words"`, `_verbatim_findings`): left to the check, reported
+    short_must: list[str] = field(default_factory=list)
     #: on commit: (statement, inherited finding) for each extracted
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
@@ -1083,39 +1086,63 @@ SET_UP_HERE = ('the ledger sets up {id} in this scene, and later scenes are read
                'establish it in the prose, or move or reject the fact')
 
 
-#: How many words a speech tag between two parts of a `must` line may take
-#: (`_verbatim_in`: `"Sing," he said, "goddess"`)
+#: How many words of narration (a speech tag) may stand between two quoted
+#: parts of a `must` line (`_verbatim_in`: `"Sing," he said, "goddess"`)
 _TAG_GAP = 6
+
+#: A quotation in the prose: straight or curly double quotes, within a line
+_QUOTATION = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
 
 
 def _verbatim_in(line: str, prose: str) -> bool:
     """Whether the brief's `line` is in `prose` word for word (case,
     punctuation and spacing aside, `_found_in`), or split by speech tags:
-    its parts between punctuation in order, at most `_TAG_GAP` words
-    apart."""
+    the words of consecutive quotations of one paragraph, joined, with at
+    most `_TAG_GAP` words of narration between each two. Only narration
+    outside the quotation marks counts as a tag: words inside a quotation
+    are the line's own, so a line with words put inside it isn't the line
+    (#642's review CR-3). A paragraph without double quotes (single-quoted
+    dialogue, or none) is matched whole only."""
     if _found_in(line, prose):
         return True
-    parts = [p for p in (_words(x) for x in re.split(r'[,;:.!?—–]+|--', line)) if p.strip()]
-    if len(parts) < 2:
+    want = _words(line)
+    if not want.strip():
         return False
-    words = _words(prose)
-    start = words.find(parts[0])
-    while start >= 0:
-        at, ok = start + len(parts[0]) - 1, True
-        for p in parts[1:]:
-            found = words.find(p, at)
-            if found < 0 or _count(words[at:found + 1]) > _TAG_GAP:
-                ok = False
-                break
-            at = found + len(p) - 1
-        if ok:
+    for para in re.split(r'\n\s*\n', prose):
+        chain: list[str] = []
+        end = None
+        for m in _QUOTATION.finditer(para):
+            if end is not None and _count(_words(para[end:m.start()])) > _TAG_GAP:
+                if len(chain) > 1 and want in _words(' '.join(chain)):
+                    return True
+                chain = []
+            chain.append(m.group(1) or m.group(2))
+            end = m.end()
+        if len(chain) > 1 and want in _words(' '.join(chain)):
             return True
-        start = words.find(parts[0], start + 1)
     return False
 
 
+def _line_forms(col: str, text: str) -> list[str]:
+    """The ways an unquoted `key_dialogue` line may stand in the prose: as
+    `_item_lines` gives it, and without a leading `Label:` it kept because
+    the label names no one in characters.csv (a role: `The old man: ...`;
+    #642's review T3)."""
+    label = re.match(r'\s*([^:"“]{1,80}):\s*(\S.*)$', text, re.S)
+    if col != 'key_dialogue' or not label:
+        return [text]
+    return [text, label.group(2)]
+
+
+#: The code of a broken promise the gate finds by code (`_verbatim_findings`),
+#: not the checker: a `must` line not in the prose word for word (#642's
+#: review TD-5)
+MUST_CODE = 'MST'
+
+
 def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
-                       check: CheckResult) -> list[Finding]:
+                       check: CheckResult,
+                       short_lines: list[str] | None = None) -> list[Finding]:
     """A broken promise, found by code, for each `must` item of the brief
     whose scripted words (`_item_lines`: its quoted spans, or a
     `key_dialogue` line that quotes nothing; `_MIN_BRIEF_WORDS` words or
@@ -1123,7 +1150,10 @@ def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
     check already reported a broken promise of that item. A faithful
     adaptation marks the source lines it keeps verbatim this way (#642).
     An unquoted action is a paraphrase: the check judges whether it is
-    kept."""
+    kept. A scripted part under `_MIN_BRIEF_WORDS` words is too short to
+    find by code: it goes into `short_lines` (`field: "words"`), for a
+    NOTE, and is left to the check (#642's review CR-5). The findings'
+    code is `MUST_CODE`."""
     from storyforge.must import names_beat
     scene = _brief_row(project_dir, scene_id)
     beats = _must_beats(scene)
@@ -1134,21 +1164,28 @@ def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
     reported = [f for f in check.findings + check.unverified
                 if f.kind == 'broken-promise' and _is_must(f, scene, beats)]
     holder: list[Cast | None] = [None]
-    out = []
+    out, short = [], []
     for col, items_ in beats.items():
         for item in items_:
-            lines = [p.text for p in _item_lines(project_dir, col, item.text, holder)
-                     if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
-            missing = [line for line in lines if not _verbatim_in(line, prose)]
+            lines = _item_lines(project_dir, col, item.text, holder)
+            short += [f'{col}: "{p.text}"' for p in lines
+                      if _count(_words(p.text)) < _MIN_BRIEF_WORDS]
+            lines = [p for p in lines if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
+            missing = [p.text for p in lines
+                       if not any(_verbatim_in(form, prose)
+                                  for form in (_line_forms(col, p.text)
+                                               if p.why == _NO_QUOTES else [p.text]))]
             if not missing or any(names_beat(f.established_quote, item.text)
                                   for f in reported):
                 continue
             out.append(Finding(
-                'broken-promise', 'PRM', '', '', item.raw, col,
+                'broken-promise', MUST_CODE, '', '', item.raw, col,
                 'the brief marks this beat must:, and the scene does not have its words '
                 'word for word: ' + '; '.join(f'"{line}"' for line in missing)))
     if holder[0] is not None:
         _warn_once(holder[0].warnings)
+    if short_lines is not None:
+        short_lines[:] = short
     return out
 
 
@@ -1584,7 +1621,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         from storyforge.common import log
         log(f'  {scene_id}: {result.blocking_note}')
     # #642: a `must` line's words, checked by code
-    result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check))
+    result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check,
+                                                    short_lines=result.short_must))
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
@@ -3630,6 +3668,10 @@ def report_lines(result: GateResult) -> list[str]:
     if result.bare_must:
         lines.append('NOTE (brief items that are only the must: marker; they mark nothing): '
                      + ', '.join(result.bare_must))
+    if result.short_must:
+        lines.append(f'NOTE (must: lines under {_MIN_BRIEF_WORDS} words; too short to check '
+                     f'word for word, left to the check): '
+                     + _one_line('; '.join(result.short_must)))
     for f in result.inherited:
         lines.append(f'ALREADY IN THE SCENE (before this pass, or reported before; not '
                      f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '

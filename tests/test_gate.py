@@ -3887,6 +3887,34 @@ class TestMustLines:
         _set_brief(project_dir, key_actions='must: Dorren burns the archive')
         assert _gate(project_dir, tmp_path, [_commitment()]).passed
 
+    def test_the_code_found_finding_has_its_own_code(self, project_dir, tmp_path):
+        # TD-5: told apart from a checker's reading
+        _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
+        [f] = _gate(project_dir, tmp_path, [_commitment()]).findings
+        assert f.code == gate.MUST_CODE != 'PRM'
+
+    # T3: an unquoted must line, with a cast label or a role label
+    def test_an_unquoted_cast_labelled_line_in_the_prose_passes(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: Dorren: It was here last quarter')
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_an_unquoted_role_labelled_line_in_the_prose_passes(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: The old cartographer: It was here last quarter')
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_an_unquoted_role_labelled_line_missing_blocks(self, project_dir, tmp_path):
+        _set_dialogue_raw(project_dir, 'must: The old cartographer: The map was altered by '
+                                       'hand')
+        assert not _gate(project_dir, tmp_path, [_commitment()]).passed
+
+    def test_a_must_line_too_short_to_check_is_noted(self, project_dir, tmp_path):
+        # CR-5: not checked by code, and said
+        _set_dialogue_raw(project_dir, 'must: Dorren: "Pity me."')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.passed and result.short_must == ['key_dialogue: "Pity me."']
+        assert any(line.startswith('NOTE (must: lines under 3 words')
+                   and 'Pity me.' in line for line in gate.report_lines(result))
+
     def test_one_finding_when_the_check_reported_it_too(self, project_dir, tmp_path):
         _set_dialogue_raw(project_dir, 'must: Dorren: "The map has been altered by hand"')
         result = _gate(project_dir, tmp_path, [_commitment()],
@@ -3912,6 +3940,25 @@ class TestVerbatimIn:
         prose = ('"Left hand on the case," he said, and then he walked to the window and '
                  'looked out at the rain for a long time. "Right hand free."')
         assert not gate._verbatim_in('Left hand on the case, right hand free.', prose)
+
+    def test_words_put_inside_the_quotation_are_not_a_tag(self):
+        # CR-3: the inserted words invert the line; they are inside the quote
+        line = 'I have kissed the hands, of the man, who killed my son'
+        assert not gate._verbatim_in(
+            line, '"I have kissed the hands, he said, but never of the man who killed my son."')
+        assert gate._verbatim_in(
+            line, '"I have kissed the hands," he said, "of the man, who killed my son."')
+        assert not gate._verbatim_in(
+            'Kill him, now', '"Kill him," she said, "never, not now."')
+
+    def test_curly_quotes_split_by_a_tag(self):
+        assert gate._verbatim_in('Left hand on the case, right hand free.',
+                                 '\u201cLeft hand on the case,\u201d he said. '
+                                 '\u201cRight hand free.\u201d')
+
+    def test_quotations_in_different_paragraphs_are_not_joined(self):
+        assert not gate._verbatim_in('Left hand on the case, right hand free.',
+                                     '"Left hand on the case," he said.\n\n"Right hand free."')
 
     def test_a_word_changed(self):
         assert not gate._verbatim_in('Left hand on the box, right hand free.', self.PROSE)
