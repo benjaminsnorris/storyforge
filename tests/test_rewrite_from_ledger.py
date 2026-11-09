@@ -188,8 +188,9 @@ class TestRedraftsAreRewrites:
             f.write('\ndrafting:\n  prior_prose: everything\n')
         assert 'prior_prose' in self._redraft_scenes(project_dir, monkeypatch)
 
-    def test_a_scene_it_cannot_redraft_stops_the_rest(self, project_dir, monkeypatch):
-        """The later scenes would see its stale prose among the earlier ones."""
+    def test_no_reply_from_the_api_stops_the_rest(self, project_dir, monkeypatch):
+        """No reply is the API's, not one scene's: the run stops (#641 keeps
+        this stop; a bad reply stops only its scene)."""
         from storyforge import cmd_revise
         for sid in ('act1-sc01', 'act1-sc02'):
             with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w') as f:
@@ -202,7 +203,7 @@ class TestRedraftsAreRewrites:
         with pytest.raises(cmd_revise.RedraftError) as e:
             cmd_revise._redraft_scenes(project_dir, ['act1-sc02', 'act1-sc01'])
         assert sent == ['redraft act1-sc01']
-        assert 'act1-sc02 (not redrafted: redrafting stops' in str(e.value)
+        assert 'act1-sc02 (not redrafted: the run stopped before them)' in str(e.value)
 
     def test_redraft_from_briefs_stops_at_an_unreadable_scene(self, project_dir, monkeypatch):
         from storyforge import cmd_revise

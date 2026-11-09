@@ -56,9 +56,8 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 2. Add supporting scenes: character development, subplot introduction, transitions, world-building
 3. Assign every scene to a structural act (`act` — 1, 2, 3, ...)
 4. Assign POV characters
-5. Classify each as action or sequel (Swain's scene/sequel pattern)
-6. Define the value at stake and its polarity shift (McKee)
-7. Identify the turning point type (action or revelation — vary these)
+5. Where it fits the scene, note it as action or sequel (Swain's scene/sequel pattern), the value at stake and its polarity shift (McKee), and the turning point type (action or revelation). These are notes: leave a cell empty for a scene that doesn't fit
+
 ### Output Format
 
 Update the scenes CSV with new columns filled:
@@ -96,10 +95,9 @@ If the world needs a bible, output:
 
 ### Rules
 
-- No flat polarity stretches: 3+ consecutive scenes with no value shift (+/+) is a red flag
-- Vary scene types: no 4+ consecutive action or sequel scenes
-- Vary turning point types: no 4+ consecutive action or revelation turning points
+- action_sequel, emotional_arc, value_at_stake, value_shift and turning_point are craft-framework notes, not requirements: fill one when the scene plainly has it, and leave the cell empty when it doesn't. Not every scene turns or shifts a value, and validate reports flat stretches and runs of one scene type or turning point as diagnostics, not errors.
 - An enum cell holds only its value: `action_sequel` is action or sequel, `turning_point` is action or revelation, never "action: she strikes" (what turns the scene goes in `function`)
 - Every thread introduced must have a planned resolution
 - Acts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
 - Character arcs need structural progression: lie reinforced → challenged → confronted → truth/refusal
+- Write every scene row's cells (the CSV blocks) as terse notes of what happens and what is true: who does what, to whom, with what ("Agamemnon counts the gifts on the sceptre studs; Briseis is the sixth stud"), not a paragraph about what the moment means. No interpretation in a scene row: never say what a moment means or reveals, what a character feels underneath, or what the reader should take from it, and no polished or quotable sentences. The drafter finds the words; these notes give only the facts. The story architecture and the character and world bibles are where a theme, a want, a need, a wound or a lie belongs: write those plainly, as short notes too.

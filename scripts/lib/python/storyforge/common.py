@@ -1345,7 +1345,8 @@ def _read_if_exists(path: str) -> str:
         return ''
 
 
-def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
+def build_shared_context(project_dir: str, model: str = '',
+                         craft_rules: bool = True) -> list[dict]:
     """Assemble project reference materials as cacheable system blocks.
 
     Two-tier structure:
@@ -1358,11 +1359,16 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
     Args:
         project_dir: Path to the Storyforge project.
         model: Model ID for determining minimum cache token threshold.
+        craft_rules: False leaves out references/craft-engine.md and
+            scoring-rubrics.md (#644's review CR-1): their scene rules
+            ("every scene must turn") are the drafter's and the scorer's,
+            and the elaboration stages that write plans and briefs as
+            facts must not be handed them.
 
     Returns:
         List of content blocks for the API 'system' parameter.
     """
-    cache_key = f'{project_dir}:{model}'
+    cache_key = f'{project_dir}:{model}:{craft_rules}'
     if cache_key in _shared_context_cache:
         return _shared_context_cache[cache_key]
 
@@ -1371,8 +1377,9 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
 
     # --- Tier 1: Plugin-level (near-permanent) ---
     tier1_sources = [
-        (os.path.join(plugin_dir, 'references', 'craft-engine.md'), 'Craft Engine'),
-        (os.path.join(plugin_dir, 'references', 'scoring-rubrics.md'), 'Scoring Rubrics'),
+        *([(os.path.join(plugin_dir, 'references', 'craft-engine.md'), 'Craft Engine'),
+           (os.path.join(plugin_dir, 'references', 'scoring-rubrics.md'), 'Scoring Rubrics')]
+          if craft_rules else []),
         (os.path.join(plugin_dir, 'references', 'ai-tell-words.csv'), 'AI-Tell Vocabulary'),
     ]
 

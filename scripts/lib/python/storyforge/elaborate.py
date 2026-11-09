@@ -33,6 +33,24 @@ def time_mode(row: dict) -> str:
     return (row.get('time_mode') or '').strip().lower() or 'scene'
 
 
+# Time modes whose scene sits on its day in the story's present (the
+# remembering, the night of the dream, the ghost's visit) but whose events
+# aren't the present's action (#648): a memory relived, a dream, the dead
+# visiting. The calendar reads them as `scene` (each keeps its day, time and
+# duration); the continuity checks read them as off the present
+# (`off_present`), so a dead character may appear there. A flashback set on
+# its own earlier `timeline_day` needs no mode
+INNER_MODES = frozenset({'memory', 'dream', 'ghost'})
+
+
+def off_present(row: dict) -> bool:
+    """Whether what the scene shows isn't the story's present action: a
+    `time_mode` in `OFF_PRESENT_MODES` (frame narration, a vision) or
+    `INNER_MODES` (a memory, a dream, a ghost). A scene with no `time_mode`
+    (or a book without the column) is the present."""
+    return time_mode(row) in OFF_PRESENT_MODES | INNER_MODES
+
+
 def told_by(row: dict) -> str:
     """A scenes.csv row's `told_by`, stripped: the id of the scene that
     tells this one (an embedded tale), or '' for a scene lived on the page.
@@ -54,8 +72,8 @@ _SCENES_COLS = [
     'id', 'seq', 'title', 'summary', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
-    # How the scene sits in time (scene | summary | frame | vision) and the calendar
-    # date its own text states, in EDTF (docs/plans/timeline-pass.md)
+    # How the scene sits in time (scene | summary | frame | vision | memory |
+    # dream | ghost) and the calendar date its own text states, in EDTF (docs/plans/timeline-pass.md)
     'time_mode', 'timeline_date',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
     'target_pages', 'panel_count', 'page_count',
@@ -583,18 +601,59 @@ _REQUIRED_BY_STATUS = {
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
-                'goal', 'conflict', 'outcome'],
+                'goal', 'conflict', 'outcome', 'key_actions'],
     'drafted': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
-                'goal', 'conflict', 'outcome'],
+                'goal', 'conflict', 'outcome', 'key_actions'],
     'polished': ['id', 'seq', 'title', 'act', 'pov', 'location',
                  'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
                  'turning_point', 'characters', 'on_stage',
-                 'goal', 'conflict', 'outcome'],
+                 'goal', 'conflict', 'outcome', 'key_actions'],
 }
+
+
+#: Columns that record a scene's place in a craft framework: Swain's
+#: action/sequel and goal/conflict, McKee's value at stake and its shift, the
+#: turning point, the emotional arc, the Story Grid's crisis and decision
+#: (#643, plan D6). They're useful notes, but requiring them on every scene
+#: presses every book toward one shape (each scene a closed unit with a turn
+#: and a landing), so a missing one is advisory everywhere: validate's
+#: `craft-columns-{id}`, the status floors, hone's gaps. `elaborate
+#: --gap-fill` still fills them.
+CRAFT_FRAMEWORK_COLUMNS = ('action_sequel', 'emotional_arc', 'value_at_stake',
+                           'value_shift', 'turning_point', 'goal', 'conflict',
+                           'crisis', 'decision')
+
+#: Brief columns that stage the scene rather than state its facts: what is
+#: said, what lies under it, the feelings in order, the images and how they
+#: appear (#644, plan D3). They stay as optional columns the author fills by hand, and nothing
+#: requires them: the briefs stage never generates them (a model's value is
+#: dropped, `cmd_elaborate`; nor does revise's source-drift fix or hone's
+#: rewrites), drafting and the gate read them only when filled.
+#: Model-written staging was the route by which the plan's phrasing leaked
+#: into the prose. Extraction still records them from prose that exists (a
+#: motif is noticed in the draft and recorded after; `motif_details` is how it
+#: appears). A prose book's only: a graphic novel's briefs stage writes
+#: key_dialogue as the balloon text the panel script carries.
+AUTHOR_NOTE_COLUMNS = ('key_dialogue', 'subtext', 'emotions', 'motifs', 'motif_details')
+
+#: The brief facts every briefed scene has (#644): how the scene ends and its
+#: events in order. The briefs prompt asks for them, validate requires them
+#: from `briefed` on (`_REQUIRED_BY_STATUS`) and hone's gaps lists them. A
+#: brief with no key_actions gives drafting and the gate nothing to hold the
+#: scene to.
+BRIEF_FACT_COLUMNS = ('outcome', 'key_actions')
+
+
+def split_failures(failures: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(blocking, advisory) failures of a validation report, each in its
+    order. A failure with no severity is blocking (``_check``'s default)."""
+    blocking = [f for f in failures if f.get('severity', 'blocking') != 'advisory']
+    advisory = [f for f in failures if f.get('severity', 'blocking') == 'advisory']
+    return blocking, advisory
 
 
 def finding_scene_list(finding: dict) -> str:
@@ -1234,11 +1293,15 @@ def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
     Each check has a `severity` field — ``'blocking'`` (default) or
-    ``'advisory'``. Blocking failures indicate structural problems that
-    must be fixed before drafting (orphaned rows, missing required
-    columns, timeline contradictions, broken MICE nesting). Advisory
-    failures are reported as FYI signals — for example, crosscut pacing
-    on a single timeline_day — and do not gate the pipeline.
+    ``'advisory'``. Blocking failures are errors to fix before drafting:
+    orphaned or duplicate rows, missing required columns, a broken
+    ``told_by`` chain, a faithful adaptation's unnamed cast. Advisory
+    failures are diagnostics, and every check of conformity to a craft
+    framework is one (#643, plan D6): MICE nesting and operations, value
+    shift polarity runs, scene-type and turning-point rhythm, missing
+    craft-framework columns (``CRAFT_FRAMEWORK_COLUMNS``), as well as FYI
+    signals such as flashbacks and crosscuts. Advisory failures never gate
+    the pipeline.
 
     Returns:
         A dict with:
@@ -1247,8 +1310,8 @@ def validate_structure(ref_dir: str) -> dict:
             affect ``'passed'``.
           - ``'checks'`` (list): every check run, passed or failed.
           - ``'failures'`` (list): all failed checks (blocking AND
-            advisory). Callers that need to distinguish should inspect
-            each entry's ``'severity'`` field.
+            advisory), each with its ``'severity'``; :func:`split_failures`
+            splits them.
     """
     checks: list[dict] = []
 
@@ -1326,9 +1389,11 @@ def validate_structure(ref_dir: str) -> dict:
             merged.update({k: v for k, v in briefs_map[sid].items() if k != 'id'})
 
         clockless = time_mode(merged) in CLOCKLESS_MODES
-        missing = [col for col in required if not merged.get(col, '').strip()
-                   and not (unmigrated and col == 'act')
-                   and not (clockless and col in CLOCK_FIELDS)]
+        empty = [col for col in required if not merged.get(col, '').strip()
+                 and not (unmigrated and col == 'act')
+                 and not (clockless and col in CLOCK_FIELDS)]
+        missing = [col for col in empty if col not in CRAFT_FRAMEWORK_COLUMNS]
+        craft = [col for col in empty if col in CRAFT_FRAMEWORK_COLUMNS]
         checks.append(_check(
             'completeness', f'required-columns-{sid}',
             len(missing) == 0,
@@ -1337,6 +1402,15 @@ def validate_structure(ref_dir: str) -> dict:
             scene_id=sid,
             fields=missing if missing else None,
         ))
+        if craft:
+            # A craft framework's columns advise (#643): reported, with the
+            # fields gap-fill reads, never blocking
+            checks.append(_check(
+                'completeness', f'craft-columns-{sid}', False,
+                f"Scene {sid} (status={status}) has no craft-framework notes in: {craft} "
+                f"(advisory: a scene needn't fit a framework)",
+                severity='advisory', scene_id=sid, fields=craft,
+            ))
 
     # --- Thread, timeline, knowledge, pacing ---
     _validate_threads(scenes_map, intent_map, checks, ref_dir=ref_dir)
@@ -1352,7 +1426,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_narrator(ref_dir, scenes_map, checks)
 
     failures = [c for c in checks if not c['passed']]
-    blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
+    blocking_failures, _advisory = split_failures(failures)
     return {
         'passed': len(blocking_failures) == 0,
         'checks': checks,
@@ -1807,14 +1881,17 @@ def analyze_gaps(ref_dir: str) -> dict:
     """
     report = validate_structure(ref_dir)
 
-    # Collect per-scene missing fields from completeness failures
+    # Collect per-scene missing fields from completeness failures: a scene
+    # can have a blocking required-columns failure and an advisory
+    # craft-columns one (#643), and gap-fill fills both
     scene_missing: dict = {}
     for failure in report['failures']:
         if failure['category'] == 'completeness' and failure.get('scene_id'):
             sid = failure['scene_id']
             fields = failure.get('fields', [])
             if fields:
-                scene_missing[sid] = fields
+                scene_missing.setdefault(sid, []).extend(
+                    f for f in fields if f not in scene_missing.get(sid, []))
 
     # Categorize into gap groups
     groups: dict = {}

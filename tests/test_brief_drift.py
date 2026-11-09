@@ -223,6 +223,14 @@ class TestStrayNames:
         _set_brief(project_dir, OTHER, goal="she hides from Mallen")
         assert _strays(project_dir)[DRAFTED] == {'key_actions': ['Mallen']}
 
+    def test_a_must_marker_opens_the_beat_it_marks(self, project_dir):
+        """#642: `must: Leaves` opens its beat as `Leaves` does."""
+        _set_brief(project_dir, DRAFTED,
+                   key_actions='Consults Tessa;must: Mallen arrives;MUST : Leaves')
+        assert _strays(project_dir) == {}
+        _set_brief(project_dir, OTHER, goal="she hides from Mallen")
+        assert _strays(project_dir)[DRAFTED] == {'key_actions': ['Mallen']}
+
     def test_a_possessive_opener_is_a_name(self, project_dir):
         _set_brief(project_dir, DRAFTED, conflict="The copy cracks; Dechlan's riders arrive")
         assert _strays(project_dir) == {DRAFTED: {'conflict': ['Dechlan']}}

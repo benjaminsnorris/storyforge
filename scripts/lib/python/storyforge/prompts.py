@@ -1720,7 +1720,10 @@ def scene_when(scene: Mapping[str, str]) -> str:
     mode = (scene.get('time_mode') or '').strip().lower()
     how = {'summary': 'a summary: covers a stretch from that day',
            'frame': "frame narration: not the story's present",
-           'vision': "a vision: not the story's present"}.get(mode, '')
+           'vision': "a vision: not the story's present",
+           'memory': "a memory relived that day: not the present's action",
+           'dream': "a dream that night: not the present's action",
+           'ghost': "a ghost's visit: not the present's action"}.get(mode, '')
     # An embedded tale's day is when its events happened (#548)
     told = (scene.get('told_by') or '').strip()
     told = f'told in {told}' if told else ''
@@ -1887,6 +1890,87 @@ def key_decisions_block(decisions: str) -> str:
             "may show and how an event is treated), follow it.\n\n" + decisions)
 
 
+def _brief_contract(scene: dict) -> str:
+    """What the drafting prompt holds the scene to (full coaching): the
+    brief's facts, each only when filled, and the rest as notes (#644; the
+    craft-framework fields were a contract the scene had to deliver, which
+    pressed every scene toward one shape, #643)."""
+    from .must import must_items
+    facts = []
+    if (scene.get('key_actions') or '').strip():
+        facts.append('- The events in key_actions')
+    if (scene.get('outcome') or '').strip():
+        facts.append(f"- The outcome: {scene['outcome'].strip()}")
+    if (scene.get('knowledge_out') or '').strip():
+        facts.append(f"- By the scene's end the POV character knows: "
+                     f"{scene['knowledge_out'].strip()}")
+    beats = [i.text for i in must_items(scene.get('key_actions') or '') if i.text]
+    if beats:
+        facts.append('- These beats, which the brief marks must: '
+                     + '; '.join(beats))
+    head = 'The brief is a plan of what happens.'
+    if not (scene.get('key_actions') or '').strip():
+        # validate requires key_actions from `briefed` on (#644); said here
+        # too, so a draft from an eventless brief isn't silent about it
+        head += (' It lists no events (key_actions is empty): take what happens from the '
+                 'scene\'s function and summary.')
+    lines = [f'{head} Hold to its facts:'] + facts if facts else [head]
+    lines.append('Its other fields (a value shift, an emotional arc, goal, conflict, crisis, '
+                 'decision, and any notes the author wrote) are notes, not requirements: let '
+                 'the scene find its own shape.')
+    return '\n'.join(lines)
+
+
+def _dialogue_checklist(scene: dict, reading: str) -> str:
+    """The key_dialogue lines for the drafting prompt: a `must:` line (#642)
+    must be in the scene word for word; the author's other lines are notes
+    to use where they fit (#644: key_dialogue is the author's optional
+    column, so it may be empty). `reading` (LABEL_READING with a leading
+    space, or '') goes on the first heading, or alone when there are no
+    lines."""
+    from .must import items
+    lines = [i for i in items(scene.get('key_dialogue') or '') if i.text]
+    required = [i.text for i in lines if i.must]
+    notes = [i.text for i in lines if not i.must]
+    parts = []
+    if required:
+        parts.append('**Key dialogue checklist — the brief marks these lines must:. Every '
+                     'line below MUST appear in the scene word for word. Do not end the '
+                     f'scene until all are delivered:**{reading}\n'
+                     + '\n'.join(f'  - [ ] {line}' for line in required))
+        reading = ''
+    if notes:
+        parts.append("**Key dialogue notes — the author's lines for this scene. Use them "
+                     f'where they fit, verbatim or in close paraphrase:**{reading}\n'
+                     + '\n'.join(f'  - {line}' for line in notes))
+        reading = ''
+    if reading:
+        parts.append(reading.strip())
+    return ''.join(f'\n\n{p}' for p in parts)
+
+
+def _coach_items(scene: dict) -> str:
+    """The coach-level guide's items, each that leans on a brief field only
+    when the field is filled (#644: the optional columns may be empty)."""
+    def filled(col):
+        return (scene.get(col) or '').strip()
+    out = ['- Voice notes specific to this scene and POV character']
+    if filled('action_sequel'):
+        out.append(f"- Craft reminders relevant to the scene type ({filled('action_sequel')})")
+    if filled('value_shift'):
+        out.append(f"- How the value shift noted in the brief ({filled('value_shift')}) "
+                   f"might land, if it fits")
+    if filled('crisis') or filled('decision'):
+        out.append('- Suggested approach for the crisis/decision moment')
+    if filled('key_dialogue'):
+        out.append('- Line-level suggestions for key dialogue')
+    if filled('emotional_arc'):
+        out.append('- Pacing guidance given the emotional arc')
+    else:
+        out.append('- Pacing guidance')
+    return '\n'.join(out)
+
+
 def build_scene_prompt_from_briefs(
     scene_id: str,
     project_dir: str,
@@ -1954,13 +2038,11 @@ def build_scene_prompt_from_briefs(
         for dep_id in dep_scenes:
             dep = get_scene(dep_id, ref_dir)
             if dep:
-                dep_summary = (
-                    f"**{dep_id}** — {dep.get('function', '')}\n"
-                    f"  outcome: {dep.get('outcome', '')}\n"
-                    f"  knowledge_out: {dep.get('knowledge_out', '')}\n"
-                    f"  physical_state_out: {dep.get('physical_state_out', '')}\n"
-                    f"  emotional_arc: {dep.get('emotional_arc', '')}"
-                )
+                # only what's filled: an optional column may be empty (#644)
+                dep_summary = f"**{dep_id}** — {dep.get('function', '')}".rstrip(' —')
+                for col in ('outcome', 'knowledge_out', 'physical_state_out', 'emotional_arc'):
+                    if (dep.get(col) or '').strip():
+                        dep_summary += f"\n  {col}: {dep[col].strip()}"
                 dep_parts.append(dep_summary)
         if dep_parts:
             dep_block = "## Dependency Scenes\n\nThese scenes happen before this one. Their outcomes and knowledge states are your starting context.\n\n" + '\n\n'.join(dep_parts)
@@ -2133,12 +2215,7 @@ def build_scene_prompt_from_briefs(
     reading = (f' {LABEL_READING}' if any(has_label(scene.get(f, ''))
                                           for f in ('key_dialogue', 'key_actions', 'outcome'))
                else '')
-    key_dialogue = scene.get('key_dialogue', '').strip()
-    lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
-    dialogue_checklist = f'\n\n{reading.strip()}' if reading else ''
-    if lines:
-        items = '\n'.join(f'  - [ ] {line}' for line in lines)
-        dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**{reading}\n{items}"
+    dialogue_checklist = _dialogue_checklist(scene, reading)
 
     states_checklist = _states_checklist(scene, ref_dir)
 
@@ -2176,11 +2253,7 @@ def build_scene_prompt_from_briefs(
 Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
 {word_target_line}{told_line}{rewrite_line}
 
-The brief is your contract. Deliver:
-- The value shift specified ({scene.get('value_shift', '')})
-- The outcome specified ({scene.get('outcome', '')})
-- The emotional arc from {scene.get('emotional_arc', '')}
-- The POV character must know {scene.get('knowledge_out', '')} by scene end
+{_brief_contract(scene)}
 {dialogue_checklist}{states_checklist}
 
 **Prose rules:**
@@ -2190,11 +2263,7 @@ The brief is your contract. Deliver:
 - Enter late, leave early
 - Match the voice guide exactly
 
-**Scene ending — choose ONE, then stop:**
-- A physical action
-- A line of dialogue
-- A concrete image
-Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor sentence.
+**Scene ending:** no set shape. Stop when what happens is done: on an action, a line, an image, or running on toward what comes next. Do NOT close on a reflection, a thematic echo, or a landscape-as-metaphor sentence.
 
 **Guardrails:**
 - Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, established facts, or character bible
@@ -2212,12 +2281,7 @@ Output the scene prose only. No metadata, no frontmatter, no commentary."""
 Produce an expanded writing guide for scene **{scene_id}** ("{scene.get('title', '')}").
 
 Include:
-- Voice notes specific to this scene and POV character
-- Craft reminders relevant to the scene type ({scene.get('action_sequel', '')})
-- How to land the value shift ({scene.get('value_shift', '')})
-- Suggested approach for the crisis/decision moment
-- Line-level suggestions for key dialogue
-- Pacing guidance given the emotional arc
+{_coach_items(scene)}
 
 Do NOT write the prose. The author writes from your guide."""
 

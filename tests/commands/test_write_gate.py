@@ -1,6 +1,7 @@
 """`write` gates each drafted scene (plan §3.2–3.3; Ben's decisions,
 2026-10-30): sequential by default, fix once and re-check, and a scene that
-still fails is kept, listed in working/gate-pending.csv, and stops the run.
+still fails is kept and listed in working/gate-pending.csv; it holds back
+the later scenes that depend on it (#641).
 The gate itself is mocked at `gate.gate_and_fix`; its own tests are
 tests/test_gate.py and tests/commands/test_cmd_check.py."""
 
@@ -73,6 +74,24 @@ class TestGatedWrite:
         assert calls == [('act1-sc01', 'draft'), ('act1-sc02', 'draft')]
         assert gate.pending(setup) == {}
 
+    def test_the_advisory_broken_promises_are_listed_at_the_end(self, setup, monkeypatch,
+                                                                 capsys):
+        """#642: a broken promise doesn't stop a scene; the run lists it."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions',
+                          'not delivered')
+
+        def fake(project_dir, scene_id, *, command, prose, log_dir, **k):
+            gate.record_advisory(project_dir, scene_id, command, [promise])
+            r = _result(scene_id, True)
+            return gate.GatedScene(prose, r, r)
+        monkeypatch.setattr(gate, 'gate_and_fix', fake)
+        gate.record_advisory(setup, 'act2-sc01', 'draft', [promise])   # not this run's
+        main(['--scenes', 'act1-sc01'])
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 broken promise(s) the gate reported but did not stop on' in out
+        assert 'act1-sc01: PRM the brief\'s key_actions promises "Finds nothing"' in out
+
     def test_the_fixed_prose_is_what_is_saved(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
         fixed = GOOD.replace('word.', 'ending.')
@@ -80,8 +99,9 @@ class TestGatedWrite:
         main(['--scenes', 'act1-sc01'])
         assert _scene(setup, 'act1-sc01') == fixed
 
-    def test_a_scene_still_failing_is_kept_listed_and_stops_the_run(
+    def test_a_scene_still_failing_is_kept_listed_and_holds_its_dependents(
             self, setup, monkeypatch, capsys):
+        """act1-sc02's brief lists act1-sc01 in continuity_deps (#641)."""
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         with pytest.raises(SystemExit) as e:
@@ -92,7 +112,8 @@ class TestGatedWrite:
         assert _scene(setup, 'act1-sc02') is None           # never drafted
         assert 'act1-sc01' in gate.pending(setup)
         out = capsys.readouterr().out
-        assert 'did not pass the gate' in out and 'not attempted' in out
+        assert 'did not pass the gate' in out
+        assert 'act1-sc02 (not drafted: it waits on act1-sc01' in out
 
     def test_a_gate_error_is_a_stop_too(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
@@ -188,7 +209,7 @@ class TestPendingFile:
 class TestReview443:
     """Fixes from #443's review."""
 
-    def test_a_pending_scene_between_scenes_to_draft_stops_the_run_there(
+    def test_a_pending_scene_between_scenes_to_draft_holds_its_dependent(
             self, setup, monkeypatch, capsys):
         from storyforge import ledger
         order = ledger.scene_order(setup)
@@ -201,8 +222,10 @@ class TestReview443:
         with pytest.raises(SystemExit):
             main(['--scenes', f'act1-sc01,{later}'])
         assert calls == [('act1-sc01', 'draft')]
-        assert f'{later} (not attempted: an earlier scene did not pass the gate)' \
-            in capsys.readouterr().out
+        out = capsys.readouterr().out
+        # #641: new-x1's brief needs the key act1-sc02's brief sets up
+        assert f'{later} (not drafted: it waits on act1-sc02' in out
+        assert "its brief needs archive-key-dorren, which act1-sc02's brief sets up" in out
 
     def test_a_redraft_is_not_refused_and_its_dependents_are_rechecked(
             self, setup, monkeypatch, capsys, mock_git):
@@ -254,6 +277,17 @@ class TestReview443:
         assert commits == ['Draft scene act1-sc01']
         assert not mock_git.calls_for('run_review_phase') and drift == []
         assert 'Skipping the timeline drift check and the review phase' in out
+
+    def test_the_advisory_list_is_committed_with_the_scene(self, setup, monkeypatch,
+                                                           mock_git):
+        """T7 (#642's review): working/gate-advisory.csv goes in the scene's
+        commit, so an advisory doesn't leave the tree dirty."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        main(['--scenes', 'act1-sc01'])
+        [paths] = [c[2] for c in mock_git.calls
+                   if c[0] == 'commit_and_push' and c[1] == 'Draft scene act1-sc01']
+        assert gate.ADVISORY_PATH in paths
 
     def test_a_failed_commit_of_a_scene_the_gate_stopped_says_both(
             self, setup, monkeypatch, capsys, mock_git):
@@ -667,13 +701,15 @@ class TestReviseRedraftsAreGated:
         assert all(self.befores[sid].scenes[sid] == old[sid] != 'A new redraft.'
                    for sid in drafted)
 
-    def test_a_scene_the_gate_does_not_pass_stops_the_run(self, project_dir, monkeypatch):
+    def test_a_scene_the_gate_does_not_pass_holds_its_dependents(self, project_dir,
+                                                                monkeypatch):
+        """act2-sc01 has no brief and no facts, so it waits (#641)."""
         drafted, _, error = self._redraft(project_dir, monkeypatch,
                                           ['act1-sc01', 'act1-sc02', 'act2-sc01'],
                                           gate_fails={'act1-sc02'})
         assert drafted == ['act1-sc01', 'act1-sc02']
         assert 'act1-sc02 (redrafted, but the gate did not pass it' in error
-        assert 'act2-sc01 (not redrafted: redrafting stops' in error
+        assert 'act2-sc01 (not redrafted: it waits on earlier scene(s)' in error
 
     def test_a_recheck_failing_after_the_last_redraft_fails_the_run(
             self, project_dir, monkeypatch):
@@ -777,7 +813,8 @@ class TestReviseRedraftsRealGate:
         gate.mark_pending(project_dir, 'act1-sc01', 'redraft', 'a contradiction')
         error = self._run(project_dir, ['act1-sc02'])
         assert gated == []
-        assert 'earlier scene(s) wait on the gate: act1-sc01' in error
+        assert 'earlier scene(s) that did not pass the gate or were not redrafted: ' \
+            'act1-sc01' in error
 
     def test_the_advice_names_check_for_a_scene_the_gate_failed(self, capsys):
         from storyforge import cmd_revise
@@ -1026,23 +1063,30 @@ class TestKeepGoing:
         per_scene = due[1] / 2
         assert due[2] == pytest.approx(draft + 3 * one_gate + one_fix + per_scene)
 
-    def test_without_the_flag_the_run_still_stops(self, setup, monkeypatch):
+    def test_without_the_flag_a_scene_depending_on_the_failure_is_held(
+            self, setup, monkeypatch, capsys):
+        """#641's review, T-4: held because act1-sc02's brief lists act1-sc01
+        in continuity_deps (#641: not a stop of the whole run)."""
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         done = self._provisional(monkeypatch)
         with pytest.raises(SystemExit):
             main(['--scenes', 'act1-sc01,act1-sc02'])
         assert calls == [('act1-sc01', 'draft')] and done == []
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in \
+            capsys.readouterr().out
 
-    def test_a_scene_that_cant_be_committed_provisionally_stops_it(self, setup, monkeypatch,
-                                                                   capsys):
+    def test_a_scene_that_cant_be_committed_provisionally_holds_its_dependents(
+            self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         self._provisional(monkeypatch, allowed=False)
         with pytest.raises(SystemExit):
             main(['--keep-going', '--scenes', 'act1-sc01,act1-sc02'])
         assert calls == [('act1-sc01', 'draft')]
-        assert 'Not committed provisionally: it changes a fixed fact' in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert 'Not committed provisionally: it changes a fixed fact' in out
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in out
 
     def test_an_earlier_provisional_scene_blocks_only_without_the_flag(self, setup,
                                                                        monkeypatch):

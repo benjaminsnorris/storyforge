@@ -68,6 +68,11 @@ unreplayable. Scenes renamed after the introducing commit are found through
 E1's id-maps.
 
 Needs the book repos cloned under ``STORYFORGE_CORPUS_DIR`` (see ``evals/e1``).
+
+**Frozen** (#645): ``run.py`` never re-records this suite on a prompt change;
+a miss reports it ``stale`` and spends nothing. Re-record it only when a
+decision depends on it, as three runs:
+``python3 evals/run.py --mode record --suite e8-revision-safety --runs 3``.
 """
 
 from __future__ import annotations
@@ -396,7 +401,7 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True, rewrite: bool =
 #: (`gate_counts`), for the suite
 GATE_COUNTS = os.path.join('working', 'e8-gate-counts.json')
 #: `gate_counts`' keys, in report order
-GATE_COUNT_KEYS = ('new', 'plan_conflicts', 'extraction', 'inherited')
+GATE_COUNT_KEYS = ('new', 'plan_conflicts', 'extraction', 'inherited', 'advisory')
 
 
 def gate_counts(result) -> dict[str, int]:
@@ -405,14 +410,17 @@ def gate_counts(result) -> dict[str, int]:
     promises, verified or not, halts, unruled disputes, rejected facts
     restated), `plan_conflicts` (the brief's own words contradict the
     book), `extraction` (unresolved extraction problems, less the rejected
-    facts already in `new`) and `inherited` (in the book before the pass:
-    reported, not blocking)."""
+    facts already in `new`), `inherited` (in the book before the pass:
+    reported, not blocking) and `advisory` (#642: broken promises of beats
+    the brief doesn't mark `must:`; reported, not blocking, never fixed).
+    Before #642 an advisory broken promise was in `new`."""
     from storyforge import gate
     return {'new': len(gate.problems_to_fix(result)),
             'plan_conflicts': len(result.plan_conflicts),
             'extraction': sum(len(result.problems.get(k, [])) for k in gate.UNRESOLVED
                               if k != 'rejected'),
-            'inherited': len(result.inherited)}
+            'inherited': len(result.inherited),
+            'advisory': len(result.advisory)}
 
 
 def read_gate_counts(project_dir: str) -> dict[str, int] | None:

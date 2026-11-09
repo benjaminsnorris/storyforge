@@ -1210,6 +1210,22 @@ class TestFidelityIncompleteReply:
 
         assert 'No fidelity results to process' in capsys.readouterr().out
 
+    def test_a_scene_left_out_is_named(self, project_dir, tmp_path, monkeypatch, capsys):
+        """#644's review TD-6: a scene with prose but nothing to score is a
+        WARNING, never a silent skip."""
+        from storyforge import cmd_score
+        monkeypatch.setattr(cmd_score, 'invoke_to_file', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.scoring.build_fidelity_prompt',
+                            lambda sid, *a: '' if sid == 'act1-sc01' else 'p')
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+        cmd_score._run_fidelity_scoring(
+            ['act1-sc01'], project_dir, os.path.join(project_dir, 'scenes'), log_dir,
+            str(tmp_path), os.path.join(project_dir, 'reference', 'scene-briefs.csv'),
+            'direct', 'm', '')
+        assert ('WARNING: brief fidelity: act1-sc01 not scored: its brief has no outcome, '
+                'key_actions or goal') in capsys.readouterr().out
+
 
 # ============================================================================
 # #618: the novel-level re-ask, prose hashes, and --complete-cycle

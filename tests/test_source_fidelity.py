@@ -323,6 +323,64 @@ class TestReviseHook:
         assert row['key_actions'] == 'Athena arrives as Mentes;the assembly meets'
         assert row['conflict'] == 'The suitors / jeer'           # no | reaches the CSV
 
+    def test_drift_fix_keeps_the_authors_must_beats(self, adapted, fake_api, monkeypatch,
+                                                    capsys):
+        """#642: a `must` beat is the author's; the source-drift fix that
+        rewrites key_actions never drops or rewords one."""
+        path = os.path.join(adapted, 'reference', 'scene-briefs.csv')
+        text = open(path).read().replace(
+            'athena-at-the-door|Athena wants to rouse him|suitors|yes|c|d|she knocks|"Go"|',
+            'athena-at-the-door|Athena wants to rouse him|suitors|yes|c|d|she knocks;must: '
+            'Athena takes the shape of Mentes|must: Athena: "Go"|')
+        _write(adapted, {'reference/scene-briefs.csv': text})
+        _run(adapted)
+        (fixed, _), _ = self._fix(adapted, monkeypatch, self.FIX.replace(
+            'KEY_ACTIONS: Athena arrives as Mentes;the assembly meets',
+            'KEY_ACTIONS: must: Athena arrives as Mentes;the assembly meets'))
+        assert fixed == ['athena-at-the-door']
+        from storyforge.elaborate import _read_csv_as_map
+        row = _read_csv_as_map(path)['athena-at-the-door']
+        assert row['key_actions'] == ('the assembly meets; must: Athena takes the shape of '
+                                      'Mentes')
+        # #644: key_dialogue is the author's; the fix never rewrites it
+        assert row['key_dialogue'] == 'must: Athena: "Go"'
+        out = capsys.readouterr().out
+        assert 'put back the author\'s must item(s)' in out
+        assert 'left out must: item(s) the author did not write: must: Athena arrives' in out
+
+    def test_dialogue_drift_is_reported_never_rewritten(self, adapted, fake_api, monkeypatch,
+                                                        capsys):
+        """#644's review TD-1, CR-3, SF-3: key_dialogue is the author's. Its
+        drift is a NOTE for the author; a scene whose only drift is there is
+        left alone, with no model call."""
+        from storyforge import cmd_revise
+        monkeypatch.setattr(cmd_revise, '_source_drift_scenes', lambda p: {
+            'athena-at-the-door': ['brief key_dialogue: "Go" is not in the source']})
+        (fixed, skipped), prompts = self._fix(adapted, monkeypatch, self.FIX)
+        assert fixed == [] and prompts == []
+        assert 'key_dialogue' in skipped['athena-at-the-door']
+        assert ('NOTE: athena-at-the-door: source drift in key_dialogue, the author\'s '
+                'notes, is not rewritten (#644)') in capsys.readouterr().out
+
+    def test_the_fix_shows_key_dialogue_but_never_asks_for_it(self, adapted, fake_api,
+                                                              monkeypatch):
+        from storyforge import cmd_revise
+        from storyforge.elaborate import AUTHOR_NOTE_COLUMNS, _read_csv_as_map
+        assert not set(cmd_revise._SOURCE_FIX_FIELDS) & set(AUTHOR_NOTE_COLUMNS)
+        monkeypatch.setattr(cmd_revise, '_source_drift_scenes', lambda p: {
+            'athena-at-the-door': ['brief outcome: drifted',
+                                   'brief key_dialogue: "Go" is not in the source']})
+        (fixed, _), prompts = self._fix(adapted, monkeypatch, self.FIX)
+        assert fixed == ['athena-at-the-door']
+        assert 'KEY_DIALOGUE: [rewritten' not in prompts[0]
+        assert ('The author\'s key dialogue notes (theirs, not yours to rewrite or repeat): '
+                'Go\n') in prompts[0]
+        assert '- brief outcome: drifted' in prompts[0]
+        assert 'brief key_dialogue' not in prompts[0]
+        row = _read_csv_as_map(os.path.join(adapted, 'reference', 'scene-briefs.csv'))[
+            'athena-at-the-door']
+        assert row['key_dialogue'] == 'Go'      # the reply's KEY_DIALOGUE is ignored
+
     def test_drift_fix_with_a_bad_outcome_is_refused(self, adapted, fake_api, monkeypatch):
         _run(adapted)
         (fixed, skipped), _ = self._fix(adapted, monkeypatch,
@@ -435,6 +493,24 @@ class TestKnowledgeAndNotedFields:
             'knowledge_in|knowledge_out\n'
             'athena-at-the-door|g|c|yes|c|d|a|"x"|odysseus-on-ogygia|odysseus-on-ogygia\n')})
         assert 'knowledge_out' not in sf.target_text(adapted, 'athena-at-the-door', 'brief')
+
+    def test_a_brief_with_no_goal_is_still_a_brief(self, adapted):
+        """#643's review CR-1: goal is a craft-framework field, optional since
+        #643, so a brief without one is scored, not skipped as 'no brief'."""
+        _write(adapted, {'reference/scene-briefs.csv': (
+            'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
+            'knowledge_in|knowledge_out\n'
+            'athena-at-the-door||||||she knocks|"Go"||\n')})
+        text = sf.target_text(adapted, 'athena-at-the-door', 'brief')
+        assert text and '**key_actions:** she knocks' in text
+        assert _plan(adapted, 'athena-at-the-door').skip != 'no brief'
+
+    def test_an_empty_brief_row_is_no_brief(self, adapted):
+        _write(adapted, {'reference/scene-briefs.csv': (
+            'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
+            'knowledge_in|knowledge_out\n'
+            'athena-at-the-door|||||||||\n')})
+        assert sf.target_text(adapted, 'athena-at-the-door', 'brief') is None
 
     def test_the_prompt_says_carried_facts_are_left_out(self, adapted):
         assert 'facts carried in from earlier scenes are left out' in \

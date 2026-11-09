@@ -96,8 +96,14 @@ def test_extraction_phase_3_asks_for_labelled_lines():
 
 
 def test_the_briefs_stage_asks_for_labelled_lines(project_dir):
+    """#644: the stage writes no key_dialogue, and key_actions are events, not
+    lines; an existing must: item that quotes one keeps its label (its
+    review C9: never read as permission to quote)."""
     p = pe.build_briefs_prompt(project_dir, PLUGIN)
-    line = next(x for x in p.splitlines() if x.startswith('- **key_dialogue**'))
+    assert '- **key_dialogue**' not in p
+    assert 'Where a key_actions item does quote a line' not in p
+    line = next(x for x in p.splitlines()
+                if x.startswith('- Where an existing `must:` key_actions item quotes a line'))
     assert LABEL_RULE in line
 
 
@@ -193,7 +199,10 @@ GRAPHIC_NOVEL = {   # key_dialogue is matched verbatim in the panel script
     'prompts_page_prompt.py', 'script_format.py',
 }
 NO_PROMPT_WRITES = {   # data, checks, scoring, or source text shown as context
-    'checker.py', 'brief_names.py', 'cmd_enrich.py', 'elaborate.py', 'gate.py',
+    'checker.py', 'brief_names.py', 'cmd_check.py', 'cmd_elaborate.py', 'cmd_enrich.py',
+    'cmd_score.py', 'cmd_write.py',
+    'elaborate.py', 'gate.py',
+    'must.py',
     'prompts_source.py', 'schema.py', 'scoring_boundary.py', 'scoring.py',
     'scoring_story_power.py', 'source_fidelity.py', 'speaker_labels.py', 'structural.py',
     'scoring/brief-fidelity.md', 'scoring/source-fidelity.md',
@@ -245,9 +254,9 @@ def test_no_graphic_novel_prompt_carries_it(module):
 def test_the_drafting_prompt_says_what_a_label_means(project_dir):
     from storyforge.prompts import build_scene_prompt_from_briefs
     p = build_scene_prompt_from_briefs('act1-sc01', project_dir, PLUGIN, 'full')
-    checklist = p.split('**Key dialogue checklist', 1)[1]
-    assert LABEL_READING in checklist.split('\n', 1)[0]
-    assert '- [ ] Dorren privately: "Acceptable is not the same as explained"' in checklist
+    notes = p.split('**Key dialogue notes', 1)[1]
+    assert LABEL_READING in notes.split('\n', 1)[0]
+    assert '  - Dorren privately: "Acceptable is not the same as explained"' in notes
 
 
 def test_a_label_in_key_actions_alone_gets_the_note(project_dir):
@@ -256,17 +265,20 @@ def test_a_label_in_key_actions_alone_gets_the_note(project_dir):
     _set_brief(project_dir, 'act1-sc01', key_dialogue='',
                key_actions='Reviews maps;Tessa: "You filed it as error?";Makes a note')
     p = build_scene_prompt_from_briefs('act1-sc01', project_dir, PLUGIN, 'full')
-    assert LABEL_READING in p and '**Key dialogue checklist' not in p
+    assert LABEL_READING in p and '**Key dialogue' not in p
 
 
 def test_no_label_no_note(project_dir):
     from storyforge.prompts import build_scene_prompt_from_briefs
     p = build_scene_prompt_from_briefs('act1-sc02', project_dir, PLUGIN, 'full')
-    assert '**Key dialogue checklist' in p and LABEL_READING not in p
+    assert '**Key dialogue notes' in p and LABEL_READING not in p
 
 
 def test_the_revision_prompt_says_what_a_label_means(project_dir):
     from storyforge.revision import build_revision_prompt
+    # #644: only a must: line is protected, so the labelled line is marked
+    _set_dialogue(project_dir, 'act1-sc01',
+                  'must: Dorren privately: "Acceptable is not the same as explained"')
     p = build_revision_prompt('prose-tightening', 'Tighten prose', 'act1-sc01', project_dir)
     section = p.split('## Intent-Beat Protection', 1)[1]
     assert LABEL_READING in section.split('**act1-sc01:**', 1)[0]

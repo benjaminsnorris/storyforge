@@ -724,10 +724,17 @@ def apply_enrich_result(scene_id: str, result: dict,
             continue
 
         # Skip if already populated (unless force)
-        if not force:
-            current = read_csv_field(csv_file, scene_id, field)
-            if current:
-                continue
+        current = read_csv_field(csv_file, scene_id, field)
+        if current and not force:
+            continue
+        if current:
+            # #642: a `must` beat is the author's; a forced re-read keeps it
+            from storyforge.common import log
+            from storyforge.must import keep_must_fields
+            kept, notes = keep_must_fields({field: current}, {field: new_val})
+            new_val = kept[field]
+            for note in notes:
+                log(f'NOTE: {scene_id}: {note}')
 
         if update_csv_field(csv_file, scene_id, field, new_val):
             updated += 1

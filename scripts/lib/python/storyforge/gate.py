@@ -24,10 +24,23 @@ For one scene's prose, `gate_scene` runs:
    another finds. Measured (E8, E4, 2026-11-01): stricter, not more
    convergent (a re-check after the fix still finds things neither first
    reading did), and no gain yet in E4's errors committed.
+   A broken promise is `advisory` (#642): reported, kept in
+   working/gate-advisory.csv, never fixed or blocking, since a brief is a
+   plan and the prose wins. One of a beat the brief marks `must:`
+   (`storyforge.must`, `_is_must`) still blocks, as does one of a registry
+   fact the ledger sets up in this scene (`_set_up_here`), and a `must`
+   beat's quoted words are checked word for word by code
+   (`_verbatim_findings`).
+   With `GATE_CHECK_METHOD` `questions` (#649, `storyforge check
+   --questions`), the question layer (`questions.check_questions`) checks
+   the scene in the open checker's place: narrow yes/no questions from the
+   ledger about who is in the scene, each asked twice, a finding only when
+   both say yes and the quote verifies.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
-   not, other than contradictions already in the book before the pass
+   not, other than advisory broken promises and contradictions already in
+   the book before the pass
    (`gate_scene(before=)`: `inherited`, reported as `ALREADY IN THE SCENE`
    and kept in working/gate-reported.csv; the commitments stating them are
    held back): the
@@ -76,6 +89,34 @@ GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMIT
 #: Whether the gate reads each scene's blocking too (`blocking.check_blocking`,
 #: #626): one more call per scene, on the checker's model
 GATE_BLOCKING = True
+#: How the gate checks blocking (#647): `read`, the whole-scene blocking read
+#: (`blocking.check_blocking`), the default until the stage sheet matches its
+#: recall on the blocking set (#646); or `stage-sheet`
+#: (`stage_sheet.check_stage_sheet`: a small model records the stage, code
+#: checks it), which `storyforge check --stage-sheet` chooses for its run.
+#: Either way the findings are BLK against the scene itself
+BLOCKING_METHODS = ('read', 'stage-sheet')
+GATE_BLOCKING_METHOD = 'read'
+#: Whether the gate runs the continuity checks (#648, plan A2:
+#: `continuity.check_continuity`): one structured call on a small model
+#: reads the scene's typed state (none on a re-check of unchanged prose,
+#: which reads its saved file), and code compares it with the book. Its
+#: findings join the check's and block like any continuity error; what it
+#: couldn't check goes to `GateResult.state_notes`, reported, never blocking
+GATE_CONTINUITY = True
+#: How the gate checks a scene against the book (#649): `open`, the open
+#: checker (`checker.check_scene`, `GATE_READINGS` readings, their union),
+#: the default until the question layer and the typed checks match its
+#: recall on the frozen E4 and E8; or `questions` (`questions.check_questions`:
+#: narrow yes/no questions from the ledger about who is in the scene, each
+#: asked twice on a small model, kept only when both say yes and the quote
+#: verifies), which `storyforge check --questions` chooses for its run. The
+#: question layer takes the scene's cast from its typed state, so it needs
+#: `GATE_CONTINUITY`. What it doesn't do (brief promises, filling the quotes
+#: of registry facts the prose establishes) is said in
+#: `GateResult.question_notes`
+CHECK_METHODS = ('open', 'questions')
+GATE_CHECK_METHOD = 'open'
 
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
@@ -195,6 +236,26 @@ class GateResult:
     #: (plan conflict, whether its speaker was checked and why not), for
     #: the report (`_plan_conflict`)
     speaker_notes: list[tuple[Finding, str]] = field(default_factory=list)
+    #: broken promises that don't stop the scene (#642): every broken
+    #: promise, verified or not, except one of a beat the brief marks
+    #: `must:` (`_is_must`) or of a registry fact the ledger sets up in this
+    #: scene (`_set_up_here`). A brief is a plan, and the prose wins.
+    #: Reported (`ADVISORY`), kept in `ADVISORY_PATH`, never sent to the
+    #: fix. Set by `_classify`; disjoint from `findings` and `unverified`
+    advisory: list[Finding] = field(default_factory=list)
+    #: (broken promise, why it blocks) for each one that isn't advisory: a
+    #: `must` beat (`MUST_BEAT`) or a registry fact set up in this scene
+    #: (`SET_UP_HERE`); set by `_classify`, for the report
+    promise_why: list[tuple[Finding, str]] = field(default_factory=list)
+    #: brief items that are only the `must:` marker (`field (n)`): they
+    #: mark nothing, and are reported
+    bare_must: list[str] = field(default_factory=list)
+    #: scripted words of `must` items too short to find by code
+    #: (`field: "words"`, `_verbatim_findings`): left to the check, reported
+    short_must: list[str] = field(default_factory=list)
+    #: brief items whose `must:` marks nothing (`field: item`): written
+    #: after other words, or in a field that takes no marker; reported
+    misplaced_must: list[str] = field(default_factory=list)
     #: on commit: (statement, inherited finding) for each extracted
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
@@ -224,28 +285,41 @@ class GateResult:
     source_ruled: bool = False
     #: committed without a pass (`commit_provisional`, `write --keep-going`)
     provisional: bool = False
-    #: #631: the prose has had a blocking read (`check_blocking`): this run
-    #: made one, or skipped it as already made on the same prose; recorded
-    #: with the prose on commit (`record_prose`)
-    blocking_read: bool = False
+    #: #631/#647: how the prose's blocking was checked (one of
+    #: `BLOCKING_METHODS`; '' when it wasn't): this run checked it, or skipped
+    #: it as already checked the same way on the same prose; recorded with
+    #: the prose on commit (`record_prose`)
+    blocking_method: str = ''
     #: #631: this re-check skipped the blocking read (the prose is the gated
     #: prose, which had one); the scene's reported blocking findings are kept
     blocking_skipped: bool = False
     #: #631: on a re-check, whether the blocking read ran and why, for the log
     #: and the report
     blocking_note: str = ''
+    #: #647: what the stage sheet couldn't check (`StageResult.notes`), for
+    #: the log and the report; never blocking
+    stage_notes: list[str] = field(default_factory=list)
+    #: #648: what the continuity checks couldn't check, and advisory names
+    #: (`ContinuityResult.notes`), for the log and the report; never blocking
+    state_notes: list[str] = field(default_factory=list)
+    #: #649: with `GATE_CHECK_METHOD` `questions`, what the question layer
+    #: couldn't ask or answer, and what it doesn't check, for the log and the
+    #: report; never blocking
+    question_notes: list[str] = field(default_factory=list)
     #: what `_commit` needs from the run (`_CommitContext`); None until the
     #: run reaches the check
     _ctx: 'object' = field(default=None, repr=False, compare=False)
 
     @property
     def findings(self) -> list[Finding]:
-        """The check's verified findings, less `inherited` and `source_backed`."""
+        """The check's verified findings, less `inherited`, `source_backed`
+        and `advisory`."""
         if not self.check:
             return []
         backed = [f for f, _ in self.source_backed]
         return [f for f in self.check.findings
-                if not _among(f, self.inherited) and not _among(f, backed)]
+                if not _among(f, self.inherited) and not _among(f, backed)
+                and not _among(f, self.advisory)]
 
     @property
     def fixable(self) -> list[Finding]:
@@ -255,8 +329,11 @@ class GateResult:
     @property
     def unverified(self) -> list[Finding]:
         """Findings whose quotes didn't hold up: not shown to be wrong, so
-        they block the commit like any other finding."""
-        return self.check.unverified if self.check else []
+        they block the commit like any other finding. Less `advisory`: a
+        broken promise that wouldn't block verified doesn't block unverified."""
+        if not self.check:
+            return []
+        return [f for f in self.check.unverified if not _among(f, self.advisory)]
 
     @property
     def unresolved(self) -> list[str]:
@@ -673,33 +750,47 @@ def _brief_lines(project_dir: str, scene_id: str, cast: Cast | None = None) -> l
     (a `Name:` label naming a character is taken off, so the phrase can
     match the prose, but not read as its speaker: quote the line to label
     it). An unquoted action or outcome is a paraphrase, not words
-    the prose must use, so it isn't one. Phrases under `_MIN_BRIEF_WORDS`
-    words are left out. A scene with no brief row scripts nothing."""
-    from storyforge.checker import PROMISE_FIELDS, _split_cell
+    the prose must use, so it isn't one. A `must:` marker (#642) is not
+    part of an item. Phrases under `_MIN_BRIEF_WORDS` words are left out.
+    A scene with no brief row scripts nothing."""
+    from storyforge.checker import PROMISE_FIELDS
     from storyforge.elaborate import get_scene
+    from storyforge.must import items
     scene = get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
     lines: list[Scripted] = []
+    holder = [cast]
     for col in PROMISE_FIELDS:
-        for item in _split_cell(scene.get(col) or ''):
-            spans = list(re.finditer(r'"([^"]+)"|“([^”]+)”', item))
-            if not spans:
-                if col == 'key_dialogue':
-                    label = re.match(r'\s*([^:]{1,80}):\s*(\S.*)$', item, re.S)
-                    if label:
-                        if cast is None:
-                            cast = _cast(project_dir)
-                        if _named(label.group(1), cast)[0]:
-                            item = label.group(2)
-                    lines.append(Scripted(item, None, _NO_QUOTES))
-                continue
-            if cast is None:
-                cast = _cast(project_dir)
-            for i, m in enumerate(spans):
-                before = item[spans[i - 1].end() if i else 0:m.start()]
-                after = item[m.end():spans[i + 1].start() if i + 1 < len(spans) else len(item)]
-                who, why = _label_speaker(before, after, cast)
-                lines.append(Scripted(m.group(1) or m.group(2), who, why))
+        for item in items(scene.get(col) or ''):
+            lines += _item_lines(project_dir, col, item.text, holder)
     return [p for p in lines if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
+
+
+def _item_lines(project_dir: str, col: str, item: str,
+                holder: list['Cast | None']) -> list[Scripted]:
+    """`_brief_lines` for one item of `col` (its marker already off), short
+    phrases included. `holder[0]` is the cast, read into it when first
+    needed."""
+    def cast() -> Cast:
+        if holder[0] is None:
+            holder[0] = _cast(project_dir)
+        return holder[0]
+    if not item:
+        return []
+    spans = list(re.finditer(r'"([^"]+)"|“([^”]+)”', item))
+    if not spans:
+        if col != 'key_dialogue':
+            return []
+        label = re.match(r'\s*([^:]{1,80}):\s*(\S.*)$', item, re.S)
+        if label and _named(label.group(1), cast())[0]:
+            item = label.group(2)
+        return [Scripted(item, None, _NO_QUOTES)]
+    out = []
+    for i, m in enumerate(spans):
+        before = item[spans[i - 1].end() if i else 0:m.start()]
+        after = item[m.end():spans[i + 1].start() if i + 1 < len(spans) else len(item)]
+        who, why = _label_speaker(before, after, cast())
+        out.append(Scripted(m.group(1) or m.group(2), who, why))
+    return out
 
 
 def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
@@ -968,8 +1059,199 @@ def _unchanged_since(project_dir: str, snap: Snapshot, source: str, scene_id: st
     return len(found) == 1 and _sha1(found[0]) == old
 
 
+# ============================================================================
+# Advisory promises and `must` beats (#642)
+# ============================================================================
+
+def _brief_row(project_dir: str, scene_id: str) -> dict[str, str]:
+    from storyforge.elaborate import get_scene
+    return get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
+
+
+def _must_beats(scene: dict[str, str]) -> dict[str, list]:
+    """The brief's `must` items (`must.Item`s that name a beat), by field."""
+    from storyforge.must import MUST_FIELDS, must_items
+    return {col: must_items(scene.get(col) or '') for col in MUST_FIELDS}
+
+
+def _misplaced_must(scene: dict[str, str]) -> list[str]:
+    """`GateResult.misplaced_must` for the brief row `scene`: `field: item`
+    for each item whose `must:` marks nothing (`must.misplaced`)."""
+    from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    from storyforge.must import misplaced
+    return [f'{col}: {item}' for col in (*PROMISE_FIELDS, *REGISTRY_PROMISE_FIELDS)
+            for item in misplaced(scene.get(col) or '', col)]
+
+
+def _bare_must(scene: dict[str, str]) -> list[str]:
+    """`GateResult.bare_must` for the brief row `scene`."""
+    from storyforge.must import MUST_FIELDS, bare_markers
+    return [f'{col} ({n})' for col in MUST_FIELDS
+            for n in [bare_markers(scene.get(col) or '')] if n]
+
+
+def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
+    """Whether the broken promise `f` is of a `must` beat. With no `must`
+    beat in the brief, never. Otherwise, in this order:
+
+    1. a quote that is one whole item of the brief is that item, marked or
+       not (its own field first, then any promise field);
+    2. a quote found in its own field when that field takes no marker
+       (`outcome`, the registry fields: a verified promise of one) is not;
+    3. a quote that names a `must` beat (`must.names_beat`) is;
+    4. a quote that names an unmarked item of its own field (of any field,
+       for a made-up id) is not;
+    5. anything else (a paraphrase, a short partial quote, words that name
+       no item) is: in doubt, `must`. A wrong stop costs a look; a wrong
+       pass loses the author's beat (#642's review TD-1, CR-2)."""
+    from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    from storyforge.must import MUST_FIELDS, items, names_beat, strip_marker
+    if not any(beats.values()):
+        return False
+    said = f.established_quote or ''
+    quote = _words(strip_marker(said))
+    fields = list(PROMISE_FIELDS) + list(REGISTRY_PROMISE_FIELDS)
+    own = [f.fact_id] if f.fact_id in fields else []
+    if quote.strip():
+        for col in own + [c for c in fields if c not in own]:
+            for item in items(scene.get(col) or ''):
+                if _words(item.text) == quote:
+                    return item.beat
+        if own and own[0] not in MUST_FIELDS and quote in _words(scene.get(own[0]) or ''):
+            return False
+    if any(names_beat(said, b.text) for col in MUST_FIELDS for b in beats.get(col, [])):
+        return True
+    return not any(names_beat(said, item.text) for col in (own or fields)
+                   for item in items(scene.get(col) or '') if not item.must)
+
+
+def _set_up_here(project_dir: str, scene_id: str,
+                 rows: list[dict[str, str]] | None = None) -> set[str]:
+    """The binding registry facts (knowledge, physical) the ledger says
+    `scene_id` sets up (#642's review CR-1): a broken promise of one stops
+    the scene, for the prose is the fact's only evidence and later scenes
+    are read against it as set up here. `rows`: the ledger (read when
+    None)."""
+    if rows is None:
+        rows = ledger.load(project_dir)
+    return {r['id'] for r in rows
+            if (r.get('scene_id') or '').strip() == scene_id
+            and r.get('status') == 'binding' and not ledger.is_commitment(r)
+            and r.get('type') in ledger.VIEW_COLUMNS}
+
+
+#: Why a broken promise stops the scene (`GateResult.promise_why`)
+MUST_BEAT = 'the brief marks this beat must:'
+SET_UP_HERE = ('the ledger sets up {id} in this scene, and later scenes are read against it: '
+               'establish it in the prose, or move or reject the fact')
+
+
+#: How many words of narration (a speech tag) may stand between two quoted
+#: parts of a `must` line (`_verbatim_in`: `"Sing," he said, "goddess"`)
+_TAG_GAP = 6
+
+#: A quotation in the prose: straight or curly double quotes, within a line
+_QUOTATION = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
+
+
+def _verbatim_in(line: str, prose: str) -> bool:
+    """Whether the brief's `line` is in `prose` word for word (case,
+    punctuation and spacing aside, `_found_in`), or split by speech tags:
+    the words of consecutive quotations of one paragraph, joined, with at
+    most `_TAG_GAP` words of narration between each two. Only narration
+    outside the quotation marks counts as a tag: words inside a quotation
+    are the line's own, so a line with words put inside it isn't the line
+    (#642's review CR-3). A paragraph without double quotes (single-quoted
+    dialogue, or none) is matched whole only."""
+    if _found_in(line, prose):
+        return True
+    want = _words(line)
+    if not want.strip():
+        return False
+    for para in re.split(r'\n\s*\n', prose):
+        chain: list[str] = []
+        end = None
+        for m in _QUOTATION.finditer(para):
+            if end is not None and _count(_words(para[end:m.start()])) > _TAG_GAP:
+                if len(chain) > 1 and want in _words(' '.join(chain)):
+                    return True
+                chain = []
+            chain.append(m.group(1) or m.group(2))
+            end = m.end()
+        if len(chain) > 1 and want in _words(' '.join(chain)):
+            return True
+    return False
+
+
+def _line_forms(col: str, text: str) -> list[str]:
+    """The ways an unquoted `key_dialogue` line may stand in the prose: as
+    `_item_lines` gives it, and without a leading `Label:` it kept because
+    the label names no one in characters.csv (a role: `The old man: ...`;
+    #642's review T3)."""
+    label = re.match(r'\s*([^:"“]{1,80}):\s*(\S.*)$', text, re.S)
+    if col != 'key_dialogue' or not label:
+        return [text]
+    return [text, label.group(2)]
+
+
+#: The code of a broken promise the gate finds by code (`_verbatim_findings`),
+#: not the checker: a `must` line not in the prose word for word (#642's
+#: review TD-5)
+MUST_CODE = 'MST'
+
+
+def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
+                       check: CheckResult,
+                       short_lines: list[str] | None = None) -> list[Finding]:
+    """A broken promise, found by code, for each `must` item of the brief
+    whose scripted words (`_item_lines`: its quoted spans, or a
+    `key_dialogue` line that quotes nothing; `_MIN_BRIEF_WORDS` words or
+    more) aren't in `prose` word for word (`_verbatim_in`), unless the
+    check already reported a broken promise of that item. A faithful
+    adaptation marks the source lines it keeps verbatim this way (#642).
+    An unquoted action is a paraphrase: the check judges whether it is
+    kept. A scripted part under `_MIN_BRIEF_WORDS` words is too short to
+    find by code: it goes into `short_lines` (`field: "words"`), for a
+    NOTE, and is left to the check (#642's review CR-5). The findings'
+    code is `MUST_CODE`."""
+    from storyforge.must import names_beat
+    scene = _brief_row(project_dir, scene_id)
+    beats = _must_beats(scene)
+    if not any(beats.values()):
+        return []
+    # only a reported promise that stays the must beat's covers it: one of
+    # an unmarked item goes to advisory (#642's review SF-1, T1)
+    reported = [f for f in check.findings + check.unverified
+                if f.kind == 'broken-promise' and _is_must(f, scene, beats)]
+    holder: list[Cast | None] = [None]
+    out, short = [], []
+    for col, items_ in beats.items():
+        for item in items_:
+            lines = _item_lines(project_dir, col, item.text, holder)
+            short += [f'{col}: "{p.text}"' for p in lines
+                      if _count(_words(p.text)) < _MIN_BRIEF_WORDS]
+            lines = [p for p in lines if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
+            missing = [p.text for p in lines
+                       if not any(_verbatim_in(form, prose)
+                                  for form in (_line_forms(col, p.text)
+                                               if p.why == _NO_QUOTES else [p.text]))]
+            if not missing or any(names_beat(f.established_quote, item.text)
+                                  for f in reported):
+                continue
+            out.append(Finding(
+                'broken-promise', MUST_CODE, '', '', item.raw, col,
+                'the brief marks this beat must:, and the scene does not have its words '
+                'word for word: ' + '; '.join(f'"{line}"' for line in missing)))
+    if holder[0] is not None:
+        _warn_once(holder[0].warnings)
+    if short_lines is not None:
+        short_lines[:] = short
+    return out
+
+
 def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
-              reported: list[dict[str, str]], prose: str = '') -> None:
+              reported: list[dict[str, str]], prose: str = '',
+              rows: list[dict[str, str]] | None = None) -> None:
     """Sort the check's verified contradictions into `inherited` and
     `plan_conflicts` (each set anew).
 
@@ -986,10 +1268,30 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
     Plan conflict: its words are the brief's own (`_is_plan_conflict`;
     a split line's speech tags must fit the speaker the brief names).
 
-    Broken promises and unverified findings are neither."""
+    Broken promises and unverified findings are neither. A broken promise,
+    verified or not, is `advisory` (#642) unless it is of a beat the brief
+    marks `must:` (`_is_must`) or of a registry fact the ledger sets up in
+    this scene (`_set_up_here`); those block, and `promise_why` says why.
+    `rows`: the ledger (read when None)."""
     result.inherited, result.plan_conflicts, result.speaker_notes = [], [], []
+    result.advisory, result.bare_must, result.promise_why = [], [], []
+    result.misplaced_must = []
     if not result.check:
         return
+    scene = _brief_row(project_dir, result.scene_id)
+    beats = _must_beats(scene)
+    result.bare_must = _bare_must(scene)
+    result.misplaced_must = _misplaced_must(scene)
+    here = _set_up_here(project_dir, result.scene_id, rows)
+    for f in result.check.findings + result.check.unverified:
+        if f.kind != 'broken-promise':
+            continue
+        if f.fact_id in here:
+            result.promise_why.append((f, SET_UP_HERE.format(id=f.fact_id)))
+        elif _is_must(f, scene, beats):
+            result.promise_why.append((f, MUST_BEAT))
+        else:
+            result.advisory.append(f)
     old = before.scenes.get(result.scene_id) if before else None
     known = {(r['source'], _words(r['quote'])) for r in reported}
     phrases = None
@@ -1344,47 +1646,66 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 f'{scene_id}: "{r.get("quote") or r.get("statement")}" restates {rid}, '
                 f'which the author rejected')
         result.halts = audit.halting_conditions(result.proposed, rows)
-    try:
-        result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
-                                   log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),
-                                   rows=rows, disputes=_disputes(result, rows),
-                                   readings=GATE_READINGS)
-    except CheckError as e:
-        error = GateError(str(e))
-        error.run = getattr(e, 'run', None)
-        raise error from e
+    disputes = _disputes(result, rows)
+    if GATE_CHECK_METHOD not in CHECK_METHODS:
+        raise GateError(f'GATE_CHECK_METHOD is {GATE_CHECK_METHOD!r}, not one of '
+                        f'{", ".join(CHECK_METHODS)}')
+    if GATE_CHECK_METHOD == 'questions':
+        if not GATE_CONTINUITY:
+            raise GateError(f'{scene_id}: the question layer asks about who is in the scene, '
+                            f'from its typed state, so it needs the continuity checks '
+                            f'(GATE_CONTINUITY)')
+        # filled after the typed state is read (`_ask_questions`)
+        result.check = CheckResult(scene_id)
+    else:
+        try:
+            result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
+                                       log_file=os.path.join(log_dir,
+                                                             f'gate-check-{scene_id}.json'),
+                                       rows=rows, disputes=disputes, readings=GATE_READINGS)
+        except CheckError as e:
+            error = GateError(str(e))
+            error.run = getattr(e, 'run', None)
+            raise error from e
     skip, why_not = (blocking_read_before(project_dir, scene_id, prose)
                      if GATE_BLOCKING and command == 'recheck' else (False, ''))
+    what = 'stage sheet' if GATE_BLOCKING_METHOD == 'stage-sheet' else 'blocking read'
     if skip:
         # #631: a re-check runs because an earlier scene changed; the
-        # blocking read takes the scene alone, so on the gated prose it can
+        # blocking check takes the scene alone, so on the gated prose it can
         # only read the same words again (and word them otherwise)
-        result.blocking_read = result.blocking_skipped = True
-        result.blocking_note = ('blocking read skipped: the prose is unchanged since its '
-                                'last gate, which read its blocking')
+        result.blocking_method = GATE_BLOCKING_METHOD
+        result.blocking_skipped = True
+        result.blocking_note = (f'{what} skipped: the prose is unchanged since its last gate, '
+                                + ('which read its blocking' if what == 'blocking read'
+                                   else 'which checked it with the stage sheet'))
     elif GATE_BLOCKING:
         if command == 'recheck':
-            result.blocking_note = f'blocking read run: {why_not}'
+            result.blocking_note = f'{what} run: {why_not}'
         # The scene against itself (#626): the checker reads it against the
         # book; this reads its blocking alone. Its findings join the check's,
         # so they are sorted, reported, fixed and accepted the same way
-        try:
-            blocked = check_blocking(project_dir, scene_id, prose=prose, model=check_model,
-                                     log_file=os.path.join(log_dir,
-                                                           f'gate-blocking-{scene_id}.json'))
-        except BlockingError as e:
-            raise GateError(str(e)) from e
+        blocked = _read_blocking(project_dir, scene_id, prose, check_model, log_dir, result)
         result.check.findings.extend(blocked.findings)
         result.check.unverified.extend(blocked.unverified)
-        result.blocking_read = True
+        result.blocking_method = GATE_BLOCKING_METHOD
     if result.blocking_note:
         from storyforge.common import log
         log(f'  {scene_id}: {result.blocking_note}')
-    _classify(result, project_dir, before, already_reported, prose=prose)
+    if GATE_CONTINUITY:
+        records = _check_continuity(project_dir, scene_id, prose, rows, log_dir, result)
+        if GATE_CHECK_METHOD == 'questions':
+            _ask_questions(project_dir, scene_id, prose, rows, records, disputes, log_dir,
+                           result)
+    # #642: a `must` line's words, checked by code
+    result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check,
+                                                    short_lines=result.short_must))
+    _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
                   extract_model or select_model('evaluation'), old_rows)
+    _note_advisory(project_dir, scene_id, command, result, prose=prose)
     if not result.passed:
         _note_blocked(project_dir, scene_id, command, result)
         return result
@@ -1427,8 +1748,8 @@ PROVISIONAL = 'provisional'
 
 def can_commit_provisionally(result: GateResult) -> str:
     """Why `result` can't be committed provisionally ('' when it can): only
-    the check's findings stopped it (contradictions, broken promises, plan
-    conflicts, unverified ones). A halt (a fixed fact changed), an
+    the check's findings stopped it (contradictions, broken `must` beats and
+    registry facts set up here, plan conflicts, unverified ones). A halt (a fixed fact changed), an
     extraction problem or an unruled dispute would commit a wrong row."""
     if result.passed or result.committed:
         return 'it was committed'
@@ -1582,7 +1903,7 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
     """What follows a written commit: the prose recorded, the source-fix,
     reported, blocked and pending lists updated (a failure is a WARNING:
     the ledger is written)."""
-    note = record_prose(project_dir, scene_id, prose, blocking=result.blocking_read)
+    note = record_prose(project_dir, scene_id, prose, blocking=result.blocking_method)
     if note:
         result.prose_notes.append(f'{scene_id}: {note}')
     if fixed_toward_source:
@@ -1826,13 +2147,13 @@ def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, 
 #: blob of its text (#558): what `steady_facts` diffs a later version
 #: against. Rows replaced on each commit
 PROSE_PATH = 'working/gate-prose.csv'
-#: `blocking`: `BLOCKING_READ` when the gate run that committed the prose
-#: had a blocking read of it (#631), so a re-check of the same prose skips
-#: it; blank for a scene gated before #626, or with the read off
+#: `blocking`: how the gate run that committed the prose checked its
+#: blocking, one of `BLOCKING_METHODS` (`read`, #631; `stage-sheet`, #647),
+#: so a re-check of the same prose by the same method skips it; blank for a
+#: scene gated before #626, or with the check off
 _PROSE_COLUMNS = ['scene_id', 'blob', 'blocking']
 #: the header before #631, still read (its rows had no blocking read)
 _OLD_PROSE_COLUMNS = ['scene_id', 'blob']
-BLOCKING_READ = 'read'
 
 
 def _git_out(project_dir: str, *args: str, data: bytes | None = None) -> bytes | None:
@@ -1894,12 +2215,16 @@ def gated_prose(project_dir: str, scene_id: str) -> tuple[str | None, str]:
     return out.decode('utf-8', errors='replace'), ''
 
 
-def blocking_read_before(project_dir: str, scene_id: str, prose: str) -> tuple[bool, str]:
+def blocking_read_before(project_dir: str, scene_id: str, prose: str,
+                         method: str | None = None) -> tuple[bool, str]:
     """#631: whether `prose` is the prose `scene_id` was last committed with
-    (`PROSE_PATH`: the same git blob) and that commit's gate run had a
-    blocking read of it, and why not. The blocking read takes the scene
-    alone, so on the same prose another read can only add noise (a new
-    reading of the same words), never a finding a change elsewhere made."""
+    (`PROSE_PATH`: the same git blob) and that commit's gate run checked its
+    blocking by `method` (default `GATE_BLOCKING_METHOD`; #647: a scene
+    checked by the stage sheet still gets the read, and the other way
+    round), and why not. The blocking check takes the scene alone, so on
+    the same prose another one can only add noise (a new reading of the
+    same words), never a finding a change elsewhere made."""
+    method = method or GATE_BLOCKING_METHOD
     try:
         row = _prose_table(project_dir).get(scene_id)
     except (OSError, UnicodeDecodeError, ValueError) as e:
@@ -1911,8 +2236,10 @@ def blocking_read_before(project_dir: str, scene_id: str, prose: str) -> tuple[b
         return False, 'git can\'t compare the prose with the gated one'
     if blob.decode().strip() != row['blob']:
         return False, 'its prose changed since its last gate'
-    if row['blocking'] != BLOCKING_READ:
+    if not row['blocking']:
         return False, 'its last gate had no blocking read (gated before it existed)'
+    if row['blocking'] != method:
+        return False, f'its last gate checked its blocking by {row["blocking"]}, not {method}'
     return True, ''
 
 
@@ -1972,12 +2299,16 @@ def _prose_from_history(project_dir: str, scene_id: str) -> str | None:
     return None
 
 
-def record_prose(project_dir: str, scene_id: str, prose: str, blocking: bool = False) -> str:
+def record_prose(project_dir: str, scene_id: str, prose: str, blocking: str = '') -> str:
     """Record `prose` as what `scene_id`'s commitments were read from: its
-    git blob, written to the object store, in `PROSE_PATH`, with whether the
-    gate run had a blocking read of it (`blocking`, #631). Returns why it
-    couldn't be ('' when it was); its row goes then, so a later gate never
-    diffs against the wrong prose."""
+    git blob, written to the object store, in `PROSE_PATH`, with how the
+    gate run checked its blocking (`blocking`: one of `BLOCKING_METHODS`,
+    or '' for not at all; #631, #647). Returns why it couldn't be ('' when
+    it was); its row goes then, so a later gate never diffs against the
+    wrong prose."""
+    if blocking not in ('',) + BLOCKING_METHODS:
+        raise ValueError(f'blocking must be one of {", ".join(BLOCKING_METHODS)} or blank, '
+                         f'not {blocking!r}')
     blob = _git_out(project_dir, 'hash-object', '-w', '--stdin', data=prose.encode('utf-8'))
     blob_id = blob.decode().strip() if blob else ''
     try:
@@ -1985,7 +2316,7 @@ def record_prose(project_dir: str, scene_id: str, prose: str, blocking: bool = F
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return f'{PROSE_PATH} not updated ({e}); the next re-check counts every reworded fact'
     if blob_id:
-        rows[scene_id] = {'blob': blob_id, 'blocking': BLOCKING_READ if blocking else ''}
+        rows[scene_id] = {'blob': blob_id, 'blocking': blocking}
     elif rows.pop(scene_id, None) is None:
         return ''   # no git, and nothing recorded to take back
     path = os.path.join(project_dir, PROSE_PATH)
@@ -2349,8 +2680,9 @@ def problems_to_fix(result: GateResult) -> list[str]:
     unverified findings, marked as such with why their quotes failed. An
     extraction problem isn't a prose problem, so it isn't here: the re-check
     extracts again. Neither is a plan conflict (the brief's own words: an
-    edit would break the promise) or an inherited contradiction (the
-    author's, from before the pass)."""
+    edit would break the promise), an inherited contradiction (the
+    author's, from before the pass) or an advisory broken promise (#642:
+    the prose wins over a beat the brief doesn't mark `must:`)."""
     proposed = {r['id']: r for r in result.proposed}
     lines = []
     for h in result.halts:
@@ -3081,6 +3413,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                     notes.append(loose)
                 # the blocked list is the kept run's, for `check --accept`
                 blocked_stale = _note_blocked(project_dir, scene_id, command, result)
+                # and so is the advisory list (#642)
+                _note_advisory(project_dir, scene_id, command, result, prose=current)
                 if blocked_stale:
                     notes.append(f'WARNING: {blocked_stale}; it lists the discarded fix\'s '
                                  f'contradictions, which `check --accept` refuses')
@@ -3249,6 +3583,118 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
     return again, run_dir, Reextraction.of(run, again)
 
 
+def _read_blocking(project_dir: str, scene_id: str, prose: str, check_model: str | None,
+                   log_dir: str, result: 'GateResult'):
+    """The scene's blocking, by `GATE_BLOCKING_METHOD`: the blocking read
+    on the checker's model, or the stage sheet on its own small model
+    (#647), whose sheet is saved for the next scene to carry over and whose
+    notes (what it couldn't check) go to `result.stage_notes`, logged and
+    reported. Either failing is a `GateError`."""
+    if GATE_BLOCKING_METHOD not in BLOCKING_METHODS:
+        raise GateError(f'GATE_BLOCKING_METHOD is {GATE_BLOCKING_METHOD!r}, not one of '
+                        f'{", ".join(BLOCKING_METHODS)}')
+    if GATE_BLOCKING_METHOD == 'stage-sheet':
+        from storyforge.stage_sheet import StageSheetError, check_stage_sheet
+        from storyforge.world_table import WorldTableError
+        try:
+            sheet = check_stage_sheet(project_dir, scene_id, prose=prose, save=True,
+                                      log_file=os.path.join(log_dir,
+                                                            f'gate-stage-{scene_id}.json'))
+        except (StageSheetError, WorldTableError) as e:
+            raise GateError(str(e)) from e
+        result.stage_notes = list(sheet.notes)
+        if sheet.notes:
+            from storyforge.common import log
+            log(f'  {scene_id}: stage sheet, not checked: {"; ".join(sheet.notes)}')
+        return sheet
+    try:
+        return check_blocking(project_dir, scene_id, prose=prose, model=check_model,
+                              log_file=os.path.join(log_dir, f'gate-blocking-{scene_id}.json'))
+    except BlockingError as e:
+        raise GateError(str(e)) from e
+
+
+def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
+                      log_dir: str, result: 'GateResult') -> list:
+    """The continuity checks (#648): their findings join the check's (a
+    finding on the same words with the same code as one the check or the
+    blocking read already made is left out, so one slip isn't two;
+    for the sun, also a stage sheet's BLK on those words), their
+    notes go to `result.state_notes`, logged and reported. The scene's
+    typed state is read against the ledger without its earlier commitments
+    (`rows`, as the checker reads it) and saved; its records are returned
+    (the question layer's cast, #649). A failure is a `GateError`: the
+    scene can't be checked."""
+    from storyforge.common import log
+    from storyforge.continuity import ContinuityError, check_continuity, overlaps
+    try:
+        got = check_continuity(project_dir, scene_id, prose=prose, rows=rows,
+                               log_file=os.path.join(log_dir, f'gate-state-{scene_id}.json'))
+    except ContinuityError as e:
+        raise GateError(str(e)) from e
+    have = result.check.findings + result.check.unverified
+    for f in got.findings:
+        # the stage sheet checks the sun too (#647): its BLK on these words is this slip
+        same = (f.code, BLOCKING_CODE) if f.explanation.startswith('(typed state, sky)') \
+            else (f.code,)
+        if not any(g.code in same and overlaps(g.scene_quote, f.scene_quote) for g in have):
+            result.check.findings.append(f)
+    result.state_notes = list(got.notes)
+    if got.notes:
+        log(f'  {scene_id}: continuity, not checked or advisory: {"; ".join(got.notes)}')
+    return got.records
+
+
+#: What the question layer doesn't do that the open checker did (#649): a
+#: NOTE on every scene it checks, so a pass doesn't read as more than it is.
+#: It asks about ledger facts and the brief; the open checker reads the book
+QUESTION_LAYER_GAPS = (
+    'contradictions with earlier prose that no ledger fact records, and with the reference '
+    'bibles and the calendar, were not looked for (the questions ask only about ledger '
+    'facts and the brief; the open checker reads the book)',
+)
+
+
+def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
+                   records: list, disputes: list[Dispute], log_dir: str,
+                   result: 'GateResult') -> None:
+    """The question layer in place of the open checker (#649): its
+    contradictions join the check's (one on the same words with the same
+    code as one the blocking check or the continuity checks already made is
+    left out), and so do its broken promises (`unverified`: a `must:` beat
+    in doubt), the promised facts it found established (`kept`, whose quotes
+    the commit fills) and the rest of the brief's report; its rulings on
+    `disputes` become the check's `cleared` and `unruled`; and its notes,
+    with what it doesn't check (`QUESTION_LAYER_GAPS`), go to
+    `result.question_notes`, logged and reported. A failure is a
+    `GateError`."""
+    from storyforge.common import log
+    from storyforge.continuity import overlaps
+    from storyforge.questions import QuestionError, check_questions
+    try:
+        got = check_questions(project_dir, scene_id, prose=prose, rows=rows, records=records,
+                              disputes=disputes,
+                              log_file=os.path.join(log_dir, f'gate-questions-{scene_id}.json'))
+    except QuestionError as e:
+        raise GateError(str(e)) from e
+    have = result.check.findings + result.check.unverified
+    for f in got.findings:
+        if f.kind != 'contradiction' or not any(
+                g.code == f.code and overlaps(g.scene_quote, f.scene_quote) for g in have):
+            result.check.findings.append(f)
+    check = result.check
+    check.unverified += got.unverified
+    check.kept += got.kept
+    check.kept_unverified += got.kept_unverified
+    check.plan_departures += got.plan_departures
+    check.unknown_brief_items += got.unknown_brief_items
+    check.stale_brief_items += got.stale_brief_items
+    check.cleared += got.cleared
+    check.unruled += got.unruled
+    result.question_notes = list(got.notes) + list(QUESTION_LAYER_GAPS)
+    log(f'  {scene_id}: questions: ' + '; '.join(got.notes))
+
+
 def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: str,
                    introduced_by: str | None = None, extract_model: str | None = None,
                    check_model: str | None = None,
@@ -3319,7 +3765,8 @@ def _one_line(text: str) -> str:
 
 #: `report_lines`' prefixes for what is reported either way, not what
 #: stopped the commit
-_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE', 'SOURCE BACKS THIS SCENE')
+_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE', 'SOURCE BACKS THIS SCENE',
+                 'ADVISORY')
 
 
 def blocking_lines(lines: list[str]) -> list[str]:
@@ -3351,6 +3798,33 @@ def reread_lines(result: GateResult) -> list[str]:
     return lines
 
 
+#: What an `ADVISORY` line says (#642)
+ADVISORY_LABEL = ('a broken promise; not blocking: the brief is a plan and the prose stands. '
+                  'Amend the brief, or mark the beat `must:` to require it')
+
+
+def _advisory_message(f: Finding) -> str:
+    """An advisory broken promise in words: the promised item first (a
+    broken promise's scene quote is often empty)."""
+    what = f'the brief\'s {f.fact_id}' if f.fact_id else 'the brief'
+    promised = f' "{f.established_quote}"' if f.established_quote else ''
+    near = f'; nearest words: "{f.scene_quote}"' if f.scene_quote else ''
+    return (f'{f.code} {what} promises{promised}{near} — {f.explanation}'
+            + (f' (unverified: {f.problem})' if f.problem else ''))
+
+
+def advisory_report_lines(result: GateResult) -> list[str]:
+    """The `ADVISORY` lines for `result.advisory`, as `report_lines` words them."""
+    return [f'ADVISORY ({ADVISORY_LABEL}; listed in {ADVISORY_PATH}){_from_reading(f)}: '
+            f'{_one_line(_advisory_message(f))}' for f in result.advisory]
+
+
+def _promise_why(result: GateResult, f: Finding) -> str:
+    """' (blocking: why)' for a broken promise that isn't advisory, else ''."""
+    why = next((w for g, w in result.promise_why if g is f), '')
+    return f' (blocking: {_one_line(why)})' if why else ''
+
+
 def report_lines(result: GateResult) -> list[str]:
     """The gate's verdict on a scene as one-line strings (log lines, list
     items): everything that stopped the commit, then what is reported
@@ -3367,10 +3841,11 @@ def report_lines(result: GateResult) -> list[str]:
                          f'brief or {f.source}){_from_reading(f)}: {_one_line(f.message())}'
                          + (f' ({_one_line(note)})' if note else ''))
         else:
-            lines.append(f'{f.kind.upper()}{_from_reading(f)}: {_one_line(f.message())}')
+            lines.append(f'{f.kind.upper()}{_from_reading(f)}: {_one_line(f.message())}'
+                         + _promise_why(result, f))
     for f in result.unverified:
         lines.append(f'UNVERIFIED ({f.problem}){_from_reading(f)}: '
-                     f'{_one_line(f.message())}')
+                     f'{_one_line(f.message())}' + _promise_why(result, f))
     for d in result.unruled:
         lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
                      f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
@@ -3388,6 +3863,18 @@ def report_lines(result: GateResult) -> list[str]:
                                  for st, why in result.source_dropped))
     for note in result.source_notes:
         lines.append(f'NOTE (source): {_one_line(note)}')
+    lines += advisory_report_lines(result)
+    if result.bare_must:
+        lines.append('NOTE (brief items that are only the must: marker; they mark nothing): '
+                     + ', '.join(result.bare_must))
+    if result.misplaced_must:
+        lines.append('NOTE (brief items with a must: that marks nothing: the marker opens a '
+                     'key_actions or key_dialogue item, before any label; these are advisory): '
+                     + _one_line('; '.join(result.misplaced_must)))
+    if result.short_must:
+        lines.append(f'NOTE (must: lines under {_MIN_BRIEF_WORDS} words; too short to check '
+                     f'word for word, left to the check): '
+                     + _one_line('; '.join(result.short_must)))
     for f in result.inherited:
         lines.append(f'ALREADY IN THE SCENE (before this pass, or reported before; not '
                      f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '
@@ -3436,6 +3923,15 @@ def report_lines(result: GateResult) -> list[str]:
                      + (' ...' if len(result.dropped) > 20 else ''))
     if result.blocking_note:
         lines.append(f'NOTE (re-check): {result.blocking_note}')
+    if result.stage_notes:
+        lines.append('NOTE (stage sheet, not checked): '
+                     + _one_line('; '.join(result.stage_notes)))
+    if result.state_notes:
+        lines.append('NOTE (continuity, not checked or advisory): '
+                     + _one_line('; '.join(result.state_notes)))
+    if result.question_notes:
+        lines.append('NOTE (questions: what was asked, and what was not checked): '
+                     + _one_line('; '.join(result.question_notes)))
     if result.steady:
         lines.append(f'NOTE (kept as they were, read from paragraphs the prose has unchanged): '
                      f'{len(result.steady)} fact(s)')
@@ -3454,8 +3950,9 @@ def report_lines(result: GateResult) -> list[str]:
 # ============================================================================
 
 #: Scenes whose prose is on disk but didn't pass the gate, so their facts
-#: aren't in the ledger. `write` won't draft a scene after one (it would be
-#: drafted from an incomplete ledger); a pass, through `write` or
+#: aren't in the ledger. `write` won't draft a later scene that depends on
+#: one (it would be drafted from an incomplete ledger; `cmd_write.GateBlockers`,
+#: #641), and drafts the others; a pass, through `write` or
 #: `storyforge check`, takes it off.
 PENDING_PATH = 'working/gate-pending.csv'
 _PENDING_COLUMNS = ['scene_id', 'command', 'reason']
@@ -3727,6 +4224,173 @@ def record_blocked(project_dir: str, scene_id: str, command: str,
     _write_rows(project_dir, BLOCKED_PATH, rows)
 
 
+# ============================================================================
+# Broken promises that don't block: working/gate-advisory.csv (#642)
+# ============================================================================
+
+#: The advisory broken promises of each scene's last gate run (#642):
+#: `REPORTED_PATH`'s columns, `source` the brief field (or registry id),
+#: `quote` the promised item, and `paragraphs` what the run read
+#: (`_advisory_stamp`: `prose=<key>;brief=<key>`), so a row the scene or its
+#: brief has since moved past can be told (`read_advisory`). Replaced by
+#: each gate run of the scene that gets to the check, pass or not, and put
+#: back to the kept run's when `gate_and_fix` discards a fix. `status`
+#: lists them, and so do `check`, `write` and `revise` at the end of a run
+#: (`advisory_summary`).
+ADVISORY_PATH = 'working/gate-advisory.csv'
+
+
+def advisories(project_dir: str) -> dict[str, list[dict[str, str]]]:
+    """Scene id → its rows in `ADVISORY_PATH` (`GateError` as `reported`)."""
+    return _read_rows(project_dir, ADVISORY_PATH)
+
+
+def _brief_key(project_dir: str, scene_id: str) -> str:
+    """A key of the scene's brief promises (`_paragraph_key` of their words):
+    the same key, the same promises."""
+    from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    scene = _brief_row(project_dir, scene_id)
+    cells = [f'{c}={scene.get(c) or ""}' for c in (*PROMISE_FIELDS, *REGISTRY_PROMISE_FIELDS)]
+    return _paragraph_key(_words(' | '.join(cells)).split())
+
+
+def _prose_key(prose: str) -> str:
+    return _paragraph_key(_words(prose).split())
+
+
+def _advisory_stamp(project_dir: str, scene_id: str, prose: str) -> str:
+    """`ADVISORY_PATH`'s `paragraphs` for a run that read `prose`."""
+    return f'prose={_prose_key(prose)};brief={_brief_key(project_dir, scene_id)}'
+
+
+def record_advisory(project_dir: str, scene_id: str, command: str,
+                    findings: list[Finding], prose: str = '') -> None:
+    """Replace `scene_id`'s rows in `ADVISORY_PATH` with `findings` (none:
+    its rows go; the file goes when it has no rows). `prose`: what the run
+    read, stamped on each row (`_advisory_stamp`)."""
+    from storyforge.common import csv_safe
+    rows = advisories(project_dir)
+    rows.pop(scene_id, None)
+    if findings:
+        stamp = _advisory_stamp(project_dir, scene_id, prose) if prose else ''
+        rows[scene_id] = [{'scene_id': scene_id, 'command': command,
+                           'source': csv_safe(f.fact_id or ''),
+                           'quote': csv_safe(_one_line(f.established_quote)),
+                           'finding': csv_safe(_one_line(_advisory_message(f))),
+                           'paragraphs': stamp} for f in findings]
+    _write_rows(project_dir, ADVISORY_PATH, rows)
+
+
+def _note_advisory(project_dir: str, scene_id: str, command: str,
+                   result: 'GateResult', prose: str = '') -> str:
+    """Record `result.advisory` (`record_advisory`), stamped with `prose`
+    (the run's, `result._ctx.prose`, when not given). A file that can't be
+    read or written is said, the gate's verdict unchanged (its report lines
+    still name each one), and returned ('' when written)."""
+    if not prose and getattr(result, '_ctx', None) is not None:
+        prose = result._ctx.prose
+    try:
+        record_advisory(project_dir, scene_id, command, result.advisory, prose=prose)
+    except (GateError, OSError) as e:
+        from storyforge.common import log
+        why = f'{ADVISORY_PATH} could not be updated: {e}'
+        log(f'WARNING: {scene_id}: {why}. Its advisory broken promises are only in this log.')
+        return why
+    return ''
+
+
+#: `read_advisory`'s `stale` for a row whose scene or brief changed since
+#: its gate run
+STALE_PROSE = 'the scene has changed since this was found; re-check it'
+STALE_BRIEF = 'the brief has changed since this was found; re-check the scene'
+
+
+class Advisory(NamedTuple):
+    """`read_advisory`'s answer (#642's review TD-2, TD-3, CR-4, SF-5)."""
+    #: one per advisory broken promise, in reading order where known:
+    #: `{scene_id, command, source, quote, finding, stale}`, `stale` '' or
+    #: why the row may no longer hold (`STALE_PROSE`, `STALE_BRIEF`)
+    rows: list[dict[str, str]]
+    #: what couldn't be read (the file, the reading order), one line each:
+    #: never a promise, and never silent
+    problems: list[str]
+
+
+def _stale(project_dir: str, row: dict[str, str]) -> str:
+    stamp = dict(part.split('=', 1) for part in (row.get('paragraphs') or '').split(';')
+                 if '=' in part)
+    if not stamp:
+        return ''
+    from storyforge.illustrations import read_scene_raw
+    try:   # the bytes the gate reads (`gate_scene`), markers and all; None: no file
+        prose = read_scene_raw(project_dir, row['scene_id'])
+    except (OSError, UnicodeDecodeError):
+        prose = None
+    if prose is None or ('prose' in stamp and _prose_key(prose) != stamp['prose']):
+        return STALE_PROSE
+    if 'brief' in stamp and _brief_key(project_dir, row['scene_id']) != stamp['brief']:
+        return STALE_BRIEF
+    return ''
+
+
+def read_advisory(project_dir: str, scene_ids=None) -> Advisory:
+    """The advisory broken promises in `ADVISORY_PATH` (of `scene_ids` only,
+    when given). A file that can't be read gives no rows and one problem; a
+    reading order that can't be read leaves the rows unordered and says so."""
+    try:
+        by_scene = advisories(project_dir)
+    except GateError as e:
+        return Advisory([], [f'{ADVISORY_PATH} could not be read: {e}'])
+    problems = []
+    try:
+        order = ledger.scene_order(project_dir)
+    except (ledger.LedgerError, ValueError, OSError) as e:
+        order = {}
+        problems.append(f'{ADVISORY_PATH}: listed unordered, the reading order could not be '
+                        f'read: {e}')
+    wanted = None if scene_ids is None else set(scene_ids)
+    rows = []
+    for sid in sorted(by_scene, key=lambda s: (order.get(s, 10**9), s)):
+        if wanted is not None and sid not in wanted:
+            continue
+        for row in by_scene[sid]:
+            rows.append({'scene_id': sid, 'command': row['command'],
+                         'source': row['source'], 'quote': row['quote'],
+                         'finding': row['finding'], 'stale': _stale(project_dir, row)})
+    return Advisory(rows, problems)
+
+
+def advisory_line(row: dict[str, str]) -> str:
+    """One `read_advisory` row in words: `scene: finding`, and why it may be
+    stale."""
+    return (f'{row["scene_id"]}: {row["finding"]}'
+            + (f' ({row["stale"]})' if row.get('stale') else ''))
+
+
+def advisory_lines(project_dir: str, scene_ids=None) -> list[str]:
+    """`read_advisory`'s rows, one line each (`advisory_line`); its
+    problems are not among them (`advisory_summary` says those)."""
+    return [advisory_line(r) for r in read_advisory(project_dir, scene_ids).rows]
+
+
+def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
+    """The advisory broken promises of `scene_ids` (every scene when None)
+    in `ADVISORY_PATH` as a WARNING line and one line each, after a WARNING
+    for each thing that couldn't be read; none of either: []. They don't
+    stop a scene (the brief is a plan and the prose stands); `check`,
+    `write` and `revise` list them at the end of a run so the author can
+    amend a brief or mark a beat `must:`."""
+    found = read_advisory(project_dir, scene_ids)
+    lines = [f'WARNING: {p}' for p in found.problems]
+    if found.rows:
+        lines += ([f'WARNING: {len(found.rows)} broken promise(s) the gate reported but did '
+                   f'not stop on (advisory, {ADVISORY_PATH}, as of each scene\'s last gate '
+                   f'run): the prose stands. Amend the brief, or mark the beat `must:` in '
+                   f'key_actions or key_dialogue to require it:']
+                  + [f'  {advisory_line(r)}' for r in found.rows])
+    return lines
+
+
 def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> str:
     """Record the verified contradictions that stopped `result`, for
     `storyforge check --accept`. A file that can't be read or written
@@ -3800,8 +4464,28 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
 #: shared-dark, and a second reading about $0.35 more against a cold cache
 #: (E8, 2026-11-01); rounded up. The blocking reading (#626) is one more
 #: call per reading on the scene alone (`blocking.BLOCKING_READINGS`), about
-#: $0.04 each on gawain (#626); rounded up.
+#: $0.04 each on gawain (#626); rounded up. The continuity checks' typed
+#: state extraction (#648, `GATE_CONTINUITY`) is one more small-model call
+#: on the scene (none when its saved file is current), about $0.01 a scene
+#: at the extraction tier: covered by the rounding.
 RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKING else 0)
+
+#: Under `GATE_CHECK_METHOD` `questions` (#649) the open checker's readings
+#: drop out of a gate run: extraction and persistence on sonnet ($0.13-0.19
+#: a scene from two books' cost ledgers, #649's history; rounded up), the
+#: question layer's four small-model calls (two askings of the facts, two
+#: of the brief's promises: about $0.001-0.01 a scene; rounded up) and the
+#: blocking check as above. A forecast, not measured on a gated book
+QUESTIONS_GATE_COST_PER_SCENE = 0.3 + 0.02 + (0.05 if GATE_BLOCKING else 0)
+
+
+def recheck_cost_per_scene() -> float:
+    """What one gate run is forecast to cost under the run's check method:
+    `RECHECK_COST_PER_SCENE` for the open checker, else
+    `QUESTIONS_GATE_COST_PER_SCENE` (read when called, so `check
+    --questions`'s forecast and threshold stops price what it runs)."""
+    return (QUESTIONS_GATE_COST_PER_SCENE if GATE_CHECK_METHOD == 'questions'
+            else RECHECK_COST_PER_SCENE)
 
 
 #: What `write`'s token-model forecast prices one drafted scene's gate at
@@ -3873,7 +4557,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
 
     Cost (Ben: forecast, and run under the threshold): the forecast is
     logged first; before each scene, `spent_before` plus this call's spend
-    plus the queue left at `RECHECK_COST_PER_SCENE` must be within
+    plus the queue left at `recheck_cost_per_scene()` must be within
     `costs.check_threshold`, otherwise it stops with `over_budget` and
     everything stays pending for `storyforge check --pending`. The
     threshold is one budget for the caller's whole run (`costs.RunBudget`):
@@ -3888,7 +4572,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
         queue = recheck_queue(project_dir, skip)
         if not queue:
             return run
-        run.forecast = run.spent + len(queue) * RECHECK_COST_PER_SCENE
+        run.forecast = run.spent + len(queue) * recheck_cost_per_scene()
         if not check_threshold(run.forecast):
             run.over_budget, run.left = True, queue
             log(f'WARNING: re-checking {len(queue)} scene(s) ({", ".join(queue[:8])}) would '
@@ -3900,13 +4584,13 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             return run
         if not announced:
             log(f'Re-checking {len(queue)} scene(s) whose facts depend on what changed, '
-                f'forecast about ${len(queue) * RECHECK_COST_PER_SCENE:.2f}: {", ".join(queue)}')
+                f'forecast about ${len(queue) * recheck_cost_per_scene():.2f}: {", ".join(queue)}')
             announced = True
         sid = queue[0]
         # #632: why it was listed, so a cascade's cause is in the log
         listed = (pending(project_dir).get(sid) or {}).get('reason', '')
         log(f'Re-checking {sid}...' + (f' ({_one_line(listed)[:300]})' if listed else ''))
-        run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
+        run.spent += recheck_cost_per_scene()   # paid whether or not it finishes
         try:
             logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
             log(f'  logs: {os.path.relpath(logs, project_dir)}')
@@ -3916,7 +4600,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                 extract_model=extract_model, check_model=check_model,
                 introduced_by=_writer(project_dir, sid),
                 afford=lambda: check_threshold(
-                    run.spent + (1 + left) * RECHECK_COST_PER_SCENE))
+                    run.spent + (1 + left) * recheck_cost_per_scene()))
         except GateError as e:
             why = ' '.join(str(e).split())
             mark_pending(project_dir, sid, RECHECK_FAILED, f're-check could not run: {why}')
@@ -3924,7 +4608,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             return run
         if reextraction is not None:
             if not reextraction.error.startswith('not run'):
-                run.spent += RECHECK_COST_PER_SCENE   # the re-extraction is a second run
+                run.spent += recheck_cost_per_scene()   # the re-extraction is a second run
             log(f'  {sid}: {reextraction.summary()}')
         if not result.passed:
             lines = blocking_lines(report_lines(result))

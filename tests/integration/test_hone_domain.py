@@ -591,7 +591,7 @@ class TestDetectGaps:
         }}
         briefs = {'scene-1': {
             'goal': 'test', 'conflict': 'test', 'outcome': 'yes',
-            'crisis': 'test', 'decision': 'go',
+            'crisis': 'test', 'decision': 'go', 'key_actions': 'she goes',
         }}
         results = detect_gaps(scenes, intent, briefs)
         assert len(results) == 0
@@ -785,4 +785,5 @@ class TestBuildIntentFixPrompt:
             issues=issues,
         )
         assert 'testable actions' in prompt  # vague instruction
-        assert 'transition phrase' in prompt  # flat instruction
+        # a flat arc is a craft-framework diagnostic hone never rewrites (#643)
+        assert 'transition phrase' not in prompt

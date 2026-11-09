@@ -316,7 +316,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log('Analyzing gaps...')
 
     from storyforge.elaborate import (
-        analyze_gaps, validate_structure, update_scene, get_scenes, finding_scene_list,
+        analyze_gaps, validate_structure, update_scene, get_scenes,
     )
     from storyforge.api import submit_batch, poll_batch, download_batch_results, invoke, extract_text, build_batch_request
     from storyforge.prompts_elaborate import build_gap_fill_prompt, build_knowledge_fix_prompt, csv_block_to_rows
@@ -369,7 +369,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
         alias_maps = load_registry_alias_maps(project_dir)
 
         # Build shared context once for all gap-fill API calls (prompt caching)
-        system = build_shared_context(project_dir, model=gap_model)
+        # no craft rules (#644's review CR-1): gap-fill writes notes
+        system = build_shared_context(project_dir, model=gap_model, craft_rules=False)
 
         # Parallel gap groups: build single batch
         parallel_groups = {k: v for k, v in groups.items() if v['batch_type'] == 'parallel'}
@@ -526,22 +527,15 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log('Running validation...')
     report = validate_structure(ref_dir)
     validate_passed = report['passed']
-    validate_failures = len(report['failures'])
+    validate_failures = _failure_counts(report['failures'])
     initial_gaps = total_gaps
 
     if validate_passed:
-        log('Validation passed — all gaps filled.')
+        log('Validation passed: no blocking gaps.')
+        _log_advisory_count(report['failures'])
     else:
-        log(f'Validation: {validate_failures} issue(s) remaining (started with {initial_gaps} field gaps)')
-        for f in report['failures']:
-            sev = f.get('severity', 'blocking')
-            scene = f.get('scene_id', '')
-            prefix = f'  [{sev}]'
-            if scene:
-                prefix += f' {scene}:'
-            log(f'{prefix} {f["message"]}')
-            if finding_scene_list(f):
-                log(f'      {finding_scene_list(f)}')
+        log(f'Validation: {validate_failures} remaining (started with {initial_gaps} field gaps)')
+        _log_failures(report['failures'])
         log('')
         log('Run gap-fill again to continue filling remaining gaps.')
 
@@ -558,18 +552,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
         f.write(f'**Passed:** {validate_passed}\n')
         f.write(f'**Checks:** {len(report["checks"])}\n')
         f.write(f'**Failures:** {validate_failures}\n\n')
-        if report['failures']:
-            f.write('## Failures\n\n')
-            for fail in report['failures']:
-                sev = fail.get('severity', 'blocking')
-                scene = fail.get('scene_id', '')
-                msg = fail['message']
-                if scene:
-                    f.write(f'- **[{sev}]** {scene}: {msg}\n')
-                else:
-                    f.write(f'- **[{sev}]** {msg}\n')
-                if finding_scene_list(fail):
-                    f.write(f'  - {finding_scene_list(fail)}\n')
+        _write_failures(f, report['failures'])
 
     commit_and_push(project_dir, 'Elaborate: gap-fill validation report')
 
@@ -581,10 +564,75 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     if validate_passed:
         log('Validation: PASSED')
     else:
-        log(f'Validation: {validate_failures} issue(s) remaining — run again to continue')
+        log(f'Validation: {validate_failures} remaining — run again to continue')
     log('============================================')
 
     print_summary(project_dir, 'elaborate-gap-fill', session_start=session_start)
+
+
+# ============================================================================
+# Validation report helpers
+# ============================================================================
+
+_ADVISORY_HEADING = ('Advisory (diagnostics, not blocking; craft-framework checks '
+                     'are here)')
+
+
+def _failure_line(fail: dict) -> str:
+    scene = fail.get('scene_id', '')
+    return f"[{fail.get('severity', 'blocking')}] " + (f'{scene}: ' if scene else '') + fail['message']
+
+
+def _log_failures(failures: list[dict]) -> None:
+    """Log a stage's validation failures in two groups (#643): the errors
+    that hold the phase, then the advisory diagnostics."""
+    from storyforge.elaborate import finding_scene_list, split_failures
+    blocking, advisory = split_failures(failures)
+    for heading, group in (('Blocking (errors to fix)', blocking),
+                           (_ADVISORY_HEADING, advisory)):
+        if not group:
+            continue
+        log(f'  {heading}:')
+        for fail in group:
+            log(f'    {_failure_line(fail)}')
+            if finding_scene_list(fail):
+                log(f'      {finding_scene_list(fail)}')
+
+
+def _failure_counts(failures: list[dict]) -> str:
+    """`N blocking, M advisory` for a stage's validation failures (#643's
+    review SF-5): a bare total counted advisory findings as things to fix."""
+    from storyforge.elaborate import split_failures
+    blocking, advisory = split_failures(failures)
+    return f'{len(blocking)} blocking, {len(advisory)} advisory'
+
+
+def _log_advisory_count(failures: list[dict]) -> None:
+    """After a pass: how many advisory findings the report file lists, so
+    "passed" never hides them."""
+    from storyforge.elaborate import split_failures
+    _blocking, advisory = split_failures(failures)
+    if advisory:
+        log(f'  {len(advisory)} advisory finding(s), not blocking (listed in the '
+            f'validation report)')
+
+
+def _write_failures(f, failures: list[dict]) -> None:
+    """The report file's failures, in the same two groups as the log."""
+    from storyforge.elaborate import finding_scene_list, split_failures
+    blocking, advisory = split_failures(failures)
+    for heading, group in (('Blocking (errors to fix)', blocking),
+                           (_ADVISORY_HEADING, advisory)):
+        if not group:
+            continue
+        f.write(f'## {heading}\n\n')
+        for fail in group:
+            sev = fail.get('severity', 'blocking')
+            scene = fail.get('scene_id', '')
+            f.write(f'- **[{sev}]** ' + (f'{scene}: ' if scene else '') + f"{fail['message']}\n")
+            if finding_scene_list(fail):
+                f.write(f'  - {finding_scene_list(fail)}\n')
+        f.write('\n')
 
 
 # ============================================================================
@@ -757,7 +805,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
             normalize_fields(row, alias_maps)
             row_sid = row.get('id', sid)
             if row_sid in briefs_map:
-                briefs_map[row_sid].update({k: v for k, v in row.items() if v})
+                briefs_map[row_sid].update(_keep_must(briefs_map[row_sid], row, row_sid))
             else:
                 new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
                 new.update(row)
@@ -1793,6 +1841,65 @@ def _mark_artifacts(project_dir: str, written: list[str]) -> None:
                                   updated=date.today().isoformat())
 
 
+#: The stages whose prompts carry `prompts_elaborate.NOTES_RULE` and get no
+#: craft engine or scoring rubrics in their shared context (#644)
+ELABORATION_NOTE_STAGES = ('spine', 'architecture', 'map', 'briefs')
+
+
+def _drop_unasked_columns(rows: list[dict]) -> tuple[list[str], list[str]]:
+    """Keep only the columns the briefs prompt asks for
+    (`prompts_elaborate.BRIEFS_OUTPUT_HEADER`) in the briefs stage's reply
+    rows, in place. Returns (the author's note columns a row had filled,
+    other filled columns dropped), each in a stable order (#644: the stage
+    writes facts; `elaborate.AUTHOR_NOTE_COLUMNS` are the author's, by hand).
+    An allowlist, so an old-format or drifting reply can't write
+    `motif_details` or a graphic novel's columns either, and an author's own
+    note, or a `must:` line in key_dialogue, is never written over."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    from storyforge.prompts_elaborate import BRIEFS_OUTPUT_HEADER
+    asked = set(BRIEFS_OUTPUT_HEADER.split('|'))
+    notes: list[str] = []
+    other: list[str] = []
+    for row in rows:
+        for col in [c for c in row if c not in asked]:
+            if (row.pop(col) or '').strip():
+                into = notes if col in AUTHOR_NOTE_COLUMNS else other
+                if col not in into:
+                    into.append(col)
+    return ([c for c in AUTHOR_NOTE_COLUMNS if c in notes], sorted(other))
+
+
+def _kept_notes(existing: dict, row: dict, sid: str) -> None:
+    """Log what a regenerated brief keeps that the reply didn't write (#644):
+    the author's note columns already filled (an earlier briefs stage wrote
+    them before #644, so they may be model staging the drafter now reads as
+    the author's; nothing can tell which), and craft notes the reply left
+    empty over an earlier value (an empty cell never clears one)."""
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
+    filled = [c for c in AUTHOR_NOTE_COLUMNS if (existing.get(c) or '').strip()]
+    if filled:
+        log(f'  WARNING: {sid}: kept its {", ".join(filled)} as the author\'s notes; if an '
+            f'earlier briefs stage wrote them, they are model staging that drafting reads '
+            f'as yours: clear them or keep them (#644)')
+    kept = [c for c in ('goal', 'conflict', 'crisis', 'decision')
+            if c in row and not (row.get(c) or '').strip() and (existing.get(c) or '').strip()]
+    if kept:
+        log(f'  NOTE: {sid}: the reply left {", ".join(kept)} empty; the brief\'s earlier '
+            f'value is kept (clear it by hand if the scene has none)')
+
+
+def _keep_must(existing: dict, row: dict, sid: str) -> dict:
+    """The non-empty values of a regenerated brief `row` to write over
+    `existing`, with every `must` item of `existing` kept word for word
+    (#642: a `must` beat is the author's; regenerating a brief never drops
+    or rewords one, `must.keep_must_fields`), each change logged."""
+    from storyforge.must import keep_must_fields
+    values, notes = keep_must_fields(existing, {k: v for k, v in row.items() if v})
+    for note in notes:
+        log(f'  NOTE: {sid}: {note}')
+    return values
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -1852,10 +1959,11 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
     from storyforge.elaborate import (
         _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP, validate_structure,
-        finding_scene_list,
     )
 
-    registries = format_registries_for_prompt(project_dir)
+    # No motifs (#644): a motif is noticed in the draft and recorded after,
+    # never placed by a stage; motif-taxonomy.csv stays for that record
+    registries = format_registries_for_prompt(project_dir, exclude=('motif-taxonomy.csv',))
 
     # An adaptation (#477): a block that can't be read stops here, before any spend
     from storyforge import source as source_mod
@@ -1874,7 +1982,12 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
     # Build shared context once for all stage API calls (prompt caching)
     stage_model = select_model('drafting')  # Opus for creative work
-    system = build_shared_context(project_dir, model=stage_model)
+    # The craft engine's and the rubrics' scene rules ("every scene must
+    # turn") are the drafter's and the scorer's: the stages that write plans
+    # and briefs as terse facts don't get them (#644, its review CR-1); the
+    # voice stage keeps them
+    system = build_shared_context(project_dir, model=stage_model,
+                                  craft_rules=stage not in ELABORATION_NOTE_STAGES)
 
     has_system = bool(system)
 
@@ -2132,16 +2245,26 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 if rows:
                     path = os.path.join(ref_dir, 'scene-briefs.csv')
                     existing = _read_csv_as_map(path)
+                    staged, unasked = _drop_unasked_columns(rows)
+                    if staged:
+                        log(f'  NOTE: left out the reply\'s {", ".join(staged)}: the '
+                            f'author\'s notes, never generated (#644); any the author '
+                            f'wrote are kept')
+                    if unasked:
+                        log(f'  NOTE: left out the reply\'s {", ".join(unasked)}: not '
+                            f'columns the briefs stage writes')
                     for row in rows:
                         normalize_fields(row, alias_maps)
                         sid = row.get('id', '')
                         if not sid:
                             continue
                         if sid in existing:
-                            existing[sid].update({k: v for k, v in row.items() if v})
+                            _kept_notes(existing[sid], row, sid)
+                            existing[sid].update(_keep_must(existing[sid], row, sid))
                         else:
+                            # a must: item the model added is dropped here too
                             new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
-                            new.update(row)
+                            new.update(_keep_must({}, row, sid))
                             existing[sid] = new
                     ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
                     _write_csv(path, ordered, _FILE_MAP['scene-briefs.csv'])
@@ -2285,21 +2408,14 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         if any(f.get('severity', 'blocking') == 'blocking' for f in report['failures']):
             report['passed'] = False
     validate_passed = report['passed']
-    validate_failures = len(report['failures'])
+    validate_failures = _failure_counts(report['failures'])
 
     if validate_passed:
         log('Validation passed')
+        _log_advisory_count(report['failures'])
     else:
-        log(f'Validation found {validate_failures} issue(s):')
-        for fail in report['failures']:
-            sev = fail.get('severity', 'blocking')
-            scene = fail.get('scene_id', '')
-            prefix = f'  [{sev}]'
-            if scene:
-                prefix += f' {scene}:'
-            log(f'{prefix} {fail["message"]}')
-            if finding_scene_list(fail):
-                log(f'      {finding_scene_list(fail)}')
+        log(f'Validation found {validate_failures}:')
+        _log_failures(report['failures'])
 
     # Save validation report
     from datetime import datetime
@@ -2312,18 +2428,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         f.write(f'**Passed:** {validate_passed}\n')
         f.write(f'**Checks:** {len(report["checks"])}\n')
         f.write(f'**Failures:** {validate_failures}\n\n')
-        if report['failures']:
-            f.write('## Failures\n\n')
-            for fail in report['failures']:
-                sev = fail.get('severity', 'blocking')
-                scene = fail.get('scene_id', '')
-                msg = fail['message']
-                if scene:
-                    f.write(f'- **[{sev}]** {scene}: {msg}\n')
-                else:
-                    f.write(f'- **[{sev}]** {msg}\n')
-                if finding_scene_list(fail):
-                    f.write(f'  - {finding_scene_list(fail)}\n')
+        _write_failures(f, report['failures'])
 
     # ========================================================================
     # Commit and update PR
@@ -2382,7 +2487,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     if validate_passed:
         log('Validation: PASSED')
     else:
-        log(f'Validation: {validate_failures} issue(s) — review before advancing')
+        log(f'Validation: {validate_failures} — review before advancing')
     log('============================================')
 
     print_summary(project_dir, f'elaborate-{stage}', session_start=session_start)

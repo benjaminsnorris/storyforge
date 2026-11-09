@@ -95,10 +95,12 @@ class TestDirectMode:
         (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
          'refused the request (cyber)'),
     ])
-    def test_bad_reply_is_not_written_and_stops_the_gated_run(self, setup, monkeypatch,
-                                                              capsys, bad, reason):
-        """A gated run (coaching full) stops at a bad reply: later scenes
-        would be drafted from a ledger without its facts (review of #443)."""
+    def test_bad_reply_is_not_written_and_holds_the_scenes_depending_on_it(
+            self, setup, monkeypatch, capsys, bad, reason):
+        """A bad reply in a gated run (coaching full) holds back the later
+        scenes that depend on it: they would be drafted from a ledger
+        without its facts (review of #443). act1-sc02's brief lists act1-sc01
+        in continuity_deps. It stops only those (#641)."""
         _direct_replies(monkeypatch, {'act1-sc01': bad, 'act1-sc02': _reply(GOOD)})
         with pytest.raises(SystemExit) as exc:
             main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
@@ -108,7 +110,8 @@ class TestDirectMode:
         assert _scene(setup, 'act1-sc02') is None
         out = capsys.readouterr().out
         assert 'not drafted' in out and reason in out
-        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+        assert 'act1-sc02 (not drafted: it waits on act1-sc01' in out
+        assert 'its brief lists act1-sc01 in continuity_deps' in out
 
     def test_cut_off_redraft_keeps_existing_prose(self, setup, monkeypatch):
         old = ' '.join(['original'] * 300) + '.'
@@ -332,17 +335,17 @@ class TestReviseRedraftFromBriefs:
         (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
          'refused the request (cyber)'),
     ])
-    def test_unwritten_redraft_stops_the_run_and_commits(
+    def test_unwritten_redraft_holds_its_dependents_and_commits(
             self, mock_api, mock_git, project_dir, monkeypatch, bad, reason):
-        """A scene not redrafted stops the run (PR #476's review): the scenes
-        after it would be drafted with its stale prose among the earlier
-        scenes, as `write` stops at a bad reply."""
+        """A scene not redrafted holds back the scenes that depend on it
+        (PR #476's review; #641: only those): act1-sc02's brief lists
+        act1-sc01 in continuity_deps."""
         from storyforge.cmd_revise import RedraftError
         old = _scene(project_dir, 'act1-sc01')
         old2 = _scene(project_dir, 'act1-sc02')
         with pytest.raises(RedraftError, match=re.escape(reason)) as e:
             self._run(project_dir, monkeypatch, [bad, _reply(GOOD)])
-        assert 'act1-sc02 (not redrafted: redrafting stops' in str(e.value)
+        assert 'act1-sc02 (not redrafted: it waits on earlier scene(s)' in str(e.value)
         assert _scene(project_dir, 'act1-sc01') == old
         assert _scene(project_dir, 'act1-sc02') == old2
         commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']

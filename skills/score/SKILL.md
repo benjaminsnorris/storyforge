@@ -312,8 +312,11 @@ Deterministic checks per level. No LLM calls.
 - `--level N` (0-6) — run the floor checks for one level
 - `--all-levels` — run every level
 
-Use these to gate progression: a level should pass its own floor before the
-author elaborates downward.
+Use these to gate progression: a level should pass its own floor (its
+non-advisory checks) before the author elaborates downward. A check printed
+with `!` and `(advisory)`, counted as `+ N advisory`, is a craft-framework
+diagnostic (#643: value shift, turning point, action/sequel balance, a
+brief's goal/conflict/crisis/decision) and never gates.
 
 Levels 3 (spine), 4 (architecture), and 5 (scene-map) require a one-sentence
 `summary` column on every row (≤ 35 words for a spine event, ≤ 50 for an

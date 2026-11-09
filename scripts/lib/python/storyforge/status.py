@@ -10,7 +10,9 @@ No LLM, no writes. Pure over project files.
 import os
 from typing import Literal
 
-from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
+from storyforge.scoring_levels import (
+    LEVEL_NAMES, blocking_failed, counts_against_rung, is_advisory_failure, score_all_levels,
+)
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import (
@@ -48,7 +50,8 @@ ELABORATE_STAGE = {
 #: what status recommends for drafting (Storyforge's unattended drafting
 #: passes --keep-going, Ben 2026-11-04)
 WRITE_COMMAND = 'storyforge write --keep-going'
-#: what clears scenes waiting on the gate; `next.stage` 'check' while any wait
+#: what clears scenes waiting on the gate; `next.stage` 'check' while any
+#: wait, unless write can still draft a scene past them (#641)
 CHECK_COMMAND = 'storyforge check --pending'
 
 # Which reference CSV backs each structural rung.
@@ -83,18 +86,49 @@ def artifact_present(project_dir: str, level: int) -> bool:
                for row in rows for v in row.values())
 
 
+#: The `source` of each `advisory` record from a craft-framework floor
+#: check (#643), so consumers tell them from the gate's broken promises
+#: (whose `source` is a fact id or a scene id, never with a space) by a
+#: field, not a string prefix (#643's review TD-2)
+CRAFT_ADVISORY_SOURCE = 'craft framework'
+
+
 def _real_failed(floor: dict) -> int:
-    """Floor failures that the author has NOT accepted via override."""
-    return floor['failed'] - floor['accepted']
+    """Floor failures that keep a rung thin: not accepted by the author via
+    override, and not advisory (a craft-framework check, #643)."""
+    return blocking_failed(floor)
 
 
-def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
+def craft_advisory(floors: list[dict]) -> list[dict[str, str]]:
+    """#643: the failed craft-framework floor checks (value shift, turning
+    point, action/sequel balance, goal/conflict/crisis/decision) of the
+    rungs in `floors` (the caller passes those whose artifact is present),
+    one record each, in `gate.read_advisory`'s shape: `scene_id` '' (a floor
+    check is book-wide; its `finding` names the first scene), `command` the
+    `storyforge score --level N` that lists every scene, `source`
+    `CRAFT_ADVISORY_SOURCE`, `quote` '', `finding` `L<n> <rung>: <check>
+    (<detail>)`, `stale` ''. Reported, never blockers and never the next
+    step: a scene needn't fit a framework."""
+    return [{'scene_id': '', 'command': f"storyforge score --level {r['level']}",
+             'source': CRAFT_ADVISORY_SOURCE, 'quote': '',
+             'finding': (f"L{r['level']} {r['name']}: {c['check']}"
+                         + (f" ({c['detail']})" if c.get('detail') else '')),
+             'stale': ''}
+            for r in floors for c in r['checks'] if is_advisory_failure(c)]
+
+
+def ladder_states(project_dir: str, medium: str = 'novel',
+                  floors: list[dict] | None = None) -> list[dict]:
     """Return per-rung state for levels 0-6, derived from floor checks only.
 
     Coverage/consistency are NOT folded in here — they look downstream and
     would wrongly keep an upstream rung `thin`; they surface as blockers.
+    Advisory (craft-framework) floor checks don't either (#643). `floors`
+    is `score_all_levels`' answer when the caller already has it.
     """
-    floors = {r['level']: r for r in score_all_levels(project_dir, medium)}
+    if floors is None:
+        floors = score_all_levels(project_dir, medium)
+    floors = {r['level']: r for r in floors}
     ladder = []
     for level in LADDER_LEVELS:
         floor = floors[level]
@@ -105,7 +139,7 @@ def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
         else:
             state = 'thin'
             fails = [c['detail'] or c['check'] for c in floor['checks']
-                     if not c['passed'] and not c.get('accepted')]
+                     if counts_against_rung(c)]
             detail = fails[0] if fails else ''
         ladder.append({'level': level, 'name': LEVEL_NAMES[level],
                        'state': state, 'detail': detail})
@@ -263,9 +297,50 @@ def gate_waiting(project_dir: str) -> list[dict[str, str]]:
     return out
 
 
+def gate_advisory(project_dir: str) -> tuple[list[dict[str, str]], list[str]]:
+    """#642: the broken promises the gate reported but didn't stop on
+    (`gate.read_advisory`, working/gate-advisory.csv), one record each
+    (`{scene_id, command, source, quote, finding, stale}`), and what
+    couldn't be read, one line each (a `gate` blocker, never a promise).
+    Not blockers: the prose stands unless the author marks the beat
+    `must:`."""
+    from storyforge import gate
+    found = gate.read_advisory(project_dir)
+    return found.rows, found.problems
+
+
+def free_to_draft(project_dir: str) -> tuple[int, int, list[str]]:
+    """#641's review (CR-2, SF-3, T-1): (the scenes `write --keep-going`
+    would draft, how many of them no scene waiting on the gate holds back,
+    what couldn't be read), by write's own rule (`cmd_write.held_scenes`).
+    What those read logs is caught, not printed (`--json` is the output),
+    and returned for the verdict; anything that stops the reading is
+    returned too, with (0, 0)."""
+    import contextlib
+    import io
+    from storyforge import cmd_write
+    from storyforge.prompts import get_scene_status
+    from storyforge.scene_filter import build_scene_list
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(said):
+            to_draft = [s for s in build_scene_list(
+                os.path.join(project_dir, 'reference', 'scenes.csv'))
+                if get_scene_status(s, project_dir) not in
+                ('drafted', 'revised', 'final', 'unreadable')]
+            held = cmd_write.held_scenes(project_dir, to_draft, keep_going=True)
+    except (Exception, SystemExit) as e:   # status never fails on what it can't read
+        return 0, 0, [line.split('] ', 1)[-1] for line in said.getvalue().splitlines()] \
+            + [f'could not tell which scenes write can draft: {e or type(e).__name__}']
+    notes = [line.split('] ', 1)[-1] for line in said.getvalue().splitlines()
+             if 'WARNING' in line or 'ERROR' in line]
+    return len(to_draft), len(to_draft) - len(held), notes
+
+
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
     """Compose the full next-step verdict. Deterministic, read-only."""
-    ladder = ladder_states(project_dir, medium)
+    floors = score_all_levels(project_dir, medium)   # once (#643's review SF-7)
+    ladder = ladder_states(project_dir, medium, floors)
 
     # Current phase = first rung that is not solid; if all solid, derive from
     # scene draft-state.
@@ -328,21 +403,48 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
 
     nxt, then = _recommend(phase)
     # #556's review: scenes waiting on the gate (a provisional commit from
-    # `write --keep-going` among them) come before the next rung
+    # `write --keep-going` among them) are blockers, and come before the
+    # next rung, except while write can draft a scene (#641): it drafts past
+    # them, holding back only the scenes that depend on one, so drafting
+    # stays next and the check comes after it. When every scene left to
+    # draft is held, write would draft nothing: the check comes first
+    # (#641's review, CR-2)
     waiting = gate_waiting(project_dir)
     for row in waiting:
         blockers.append({'source': 'gate', 'level': -1,
                          'detail': f"{row['scene_id']} ({row['command']}): {row['reason']}"})
     if waiting:
         provisional = sum(r['command'] == 'provisional' for r in waiting)
-        then = nxt
-        # its own stage (TD-6): forge routes on next.stage, and the phase's
-        # stage (voice, draft) would send it to that work instead
-        nxt = {'stage': 'check', 'action': 'Clear the scenes waiting on the gate',
-               'command': CHECK_COMMAND,
-               'reason': (f'{len(waiting)} scene(s) in working/gate-pending.csv'
-                          + (f', {provisional} committed provisionally' if provisional else '')
-                          + ': fix them (or `storyforge check --accept`), then check')}
+        listed = (f'{len(waiting)} scene(s) in working/gate-pending.csv'
+                  + (f', {provisional} committed provisionally' if provisional else ''))
+        # its own stage (TD-6): forge routes on next.stage, and any other
+        # next stage (voice, evaluate, ...) would send it to that work
+        # instead; only draft keeps `next`, while write can draft (#641)
+        check = {'stage': 'check', 'action': 'Clear the scenes waiting on the gate',
+                 'command': CHECK_COMMAND,
+                 'reason': f'{listed}: fix them (or `storyforge check --accept`), then check'}
+        left, free, notes = (free_to_draft(project_dir) if nxt['stage'] == 'draft'
+                             else (0, 0, []))
+        for note in notes:   # what couldn't be read is said, not passed over
+            blockers.append({'source': 'gate', 'level': -1, 'detail': note})
+        if nxt['stage'] == 'draft' and (free or not left):
+            nxt = dict(nxt, reason=(f'{nxt["reason"]}; {listed} (the gate blockers): write '
+                                    f'drafts past them, holding back only the scenes that '
+                                    f'depend on one'
+                                    + (f' ({free} of {left} left to draft can be drafted '
+                                       f'now)' if left else
+                                       ' (could not tell which scenes it can draft'
+                                       + ('; see the blockers)' if notes else ')'))))
+            then = check
+        else:
+            if nxt['stage'] == 'draft':
+                check = dict(check, reason=(f'{check["reason"]}: every one of the {left} '
+                                            f'scene(s) left to draft waits on one of them, '
+                                            f'so write would draft nothing'))
+            then, nxt = nxt, check
+    advisory, unread = gate_advisory(project_dir)
+    for note in unread:   # a file that can't be read is said, not listed as a promise
+        blockers.append({'source': 'gate', 'level': -1, 'detail': note})
     return {
         'phase': phase,
         'phase_declared': declared,
@@ -351,4 +453,9 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'next': nxt,
         'then': then,
         'blockers': blockers,
+        # one list of records, never blockers (#642): the gate's broken
+        # promises, then the craft-framework floor checks of rungs that
+        # exist (#643, `source` CRAFT_ADVISORY_SOURCE)
+        'advisory': advisory + craft_advisory(
+            [f for f in floors if artifact_present(project_dir, f['level'])]),
     }
