@@ -714,12 +714,22 @@ class TestSheetSuite:
     def test_frozen_a_miss_is_stale_and_never_goes_live(self, private_set, tmp_path,
                                                         monkeypatch):
         """Frozen like the read (#645, ported from #670): auto replays it."""
-        from storyforge import api
+        from storyforge import api, stage_sheet
+        monkeypatch.setattr(api, '_live_request', _fake_sheet_api([]))
+        _record(_sheet_suite(), str(tmp_path / 'r'))
+        monkeypatch.setattr(stage_sheet, 'PROMPT', 'A changed prompt. ' + stage_sheet.PROMPT)
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         suite = _sheet_suite()
         assert suite.frozen
         result = harness.run_suite(suite, 'auto', str(tmp_path / 'c'))
         assert result['status'] == 'stale', result.get('error')
+
+    def test_frozen_never_recorded_is_an_error(self, private_set, tmp_path, monkeypatch):
+        """No recordings at all is a missing fixture, not a changed request (#661 review)."""
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        result = harness.run_suite(_sheet_suite(), 'auto', str(tmp_path / 'c'))
+        assert result['status'] == 'error' and 'has no recordings' in result['error']
 
     def test_no_private_set_is_unavailable(self, tmp_path, monkeypatch):
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path / 'nowhere'))
