@@ -42,6 +42,7 @@ and the command exits 1 after importing the rest.
 from __future__ import annotations
 
 import email.utils
+import hashlib
 import os
 import re
 import urllib.parse
@@ -49,6 +50,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Callable
+from xml.parsers import expat
 
 from storyforge import voice_repo as vr
 
@@ -155,14 +157,34 @@ def fetch_url(url: str) -> Fetched:
     return Fetched(final, ctype, body)
 
 
-def _decode(body: bytes, content_type: str = '') -> str:
-    m = re.search(r'charset=([\w-]+)', content_type or '', re.IGNORECASE)
-    for enc in ([m.group(1)] if m else []) + ['utf-8']:
+_DECLARED_RE = (re.compile(rb'<\?xml[^>]*?encoding=["\']([\w.:-]+)', re.IGNORECASE),
+                re.compile(rb'<meta[^>]+?charset=["\']?([\w.:-]+)', re.IGNORECASE))
+
+
+def _decode(body: bytes, content_type: str = '', where: str = '') -> str:
+    """`body` as text in the charset the HTTP header names, else the one the
+    document declares (its XML declaration or `<meta charset>`), else UTF-8.
+    Raises VoiceImportError when none of them decodes it: replacing bytes
+    would put wrong characters in the corpus without a word (a local file
+    that isn't UTF-8 is an ERROR the same way)."""
+    tried = []
+    m = re.search(r'charset=["\']?([\w.:-]+)', content_type or '', re.IGNORECASE)
+    if m:
+        tried.append(m.group(1))
+    head = body[:4096]
+    for rx in _DECLARED_RE:
+        d = rx.search(head)
+        if d:
+            tried.append(d.group(1).decode('ascii'))
+            break
+    tried.append('utf-8')
+    for enc in tried:
         try:
-            return body.decode(enc).lstrip('﻿')
+            return body.decode(enc).lstrip('\ufeff')
         except (LookupError, UnicodeDecodeError):
             continue
-    return body.decode('utf-8', errors='replace').lstrip('﻿')
+    raise VoiceImportError(f'{where or "the page"} isn\'t in the encoding it declares or UTF-8 '
+                           f'(tried {", ".join(dict.fromkeys(tried))}); not imported')
 
 
 # ============================================================================
@@ -209,6 +231,13 @@ _SKIP_TAGS = frozenset({'script', 'style', 'noscript', 'template', 'svg', 'math'
 #: roles that mark boilerplate
 _SKIP_ROLES = frozenset({'navigation', 'banner', 'contentinfo', 'complementary', 'search',
                          'menu', 'menubar', 'dialog'})
+#: elements that hold the page's content: their class and id never skip them
+#: (WordPress puts layout and taxonomy classes on <body> and <article>)
+_CONTAINER_TAGS = frozenset({'html', 'body', 'article', 'main'})
+#: class words that describe the piece, not a part of the page
+#: (`category-social-media`, `tag-ads`, `has-sidebar`, `single-post`)
+_TAXONOMY_CLASS_RE = re.compile(r'^(?:category|tag|has|post-format|format|single|page|postid'
+                                r'|type|status|author)-', re.IGNORECASE)
 #: class or id words that mark boilerplate
 _SKIP_CLASS_RE = re.compile(r'(?:^|[\s_-])(?:comments?|share|sharing|social|related|sidebar'
                             r'|newsletter|subscribe|breadcrumbs?|pagination|navigation|menu'
@@ -263,7 +292,11 @@ class _Extractor(HTMLParser):
             return True
         if a.get('aria-hidden') == 'true' or 'hidden' in a:
             return True
-        return bool(_SKIP_CLASS_RE.search(f'{a.get("class") or ""} {a.get("id") or ""}'))
+        if tag in _CONTAINER_TAGS or _CONTENT_CLASS_RE.search(a.get('class') or ''):
+            return False
+        words = [w for w in f'{a.get("class") or ""} {a.get("id") or ""}'.split()
+                 if not _TAXONOMY_CLASS_RE.match(w)]
+        return bool(_SKIP_CLASS_RE.search(' '.join(words)))
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -507,13 +540,28 @@ class FeedItem:
     related: str = ''
 
 
+def _refuse_dtd(text: str, where: str) -> None:
+    """Raise VoiceImportError if the XML declares a DOCTYPE or an entity
+    anywhere: the parser itself is asked, so a declaration pushed down by
+    comments is still found. A document that isn't well-formed is left for
+    `ET` to report."""
+    def refuse(*_):
+        raise VoiceImportError(f'{where}: the feed declares a DOCTYPE or an entity; not parsed')
+    p = expat.ParserCreate()
+    p.StartDoctypeDeclHandler = refuse
+    p.EntityDeclHandler = refuse
+    try:
+        p.Parse(text, True)
+    except expat.ExpatError:
+        pass
+
+
 def feed_items(xml: str, where: str) -> tuple[str, list[FeedItem], list[str]]:
     """An RSS 2.0 or Atom feed's site link and items, and notes on items
     left out (a WordPress export's pages, drafts and attachments). Raises
     VoiceImportError for a feed with a DOCTYPE or an entity (refused unparsed),
     or one that isn't well-formed XML, RSS or Atom."""
-    if re.search(r'<!DOCTYPE|<!ENTITY', xml[:20000], re.IGNORECASE):
-        raise VoiceImportError(f'{where}: the feed declares a DOCTYPE or an entity; not parsed')
+    _refuse_dtd(xml, where)
     try:
         root = ET.fromstring(xml)
     except ET.ParseError as e:
@@ -538,10 +586,10 @@ def feed_items(xml: str, where: str) -> tuple[str, list[FeedItem], list[str]]:
             html = (body.text or '') if body is not None else ''
             if body is not None and body.get('type') == 'xhtml':
                 html = ''.join(ET.tostring(c, encoding='unicode') for c in body)
+            # <updated> is when it was last changed, not published: never the date
             items.append(FeedItem(
-                _text(e.find(f'{_ATOM}title')), link,
-                _norm_date(_text(e.find(f'{_ATOM}published'))
-                           or _text(e.find(f'{_ATOM}updated'))),
+                _text(e.find(f'{_ATOM}title')), link or _text(e.find(f'{_ATOM}id')),
+                _norm_date(_text(e.find(f'{_ATOM}published'))),
                 tuple(c.get('term', '') for c in e.findall(f'{_ATOM}category')),
                 html, content is None, related))
         return site, items, notes
@@ -590,6 +638,19 @@ def _piece_name(path: str) -> str:
 def _date_from_name(path: str) -> str:
     m = re.match(r'^(\d{4}-\d{2}-\d{2})', os.path.basename(path))
     return m.group(1) if m else ''
+
+
+def _shown(names: list[str], most: int = 5) -> str:
+    return '; '.join(names[:most]) + (f' (and {len(names) - most} more)'
+                                      if len(names) > most else '')
+
+
+def _item_key(where: str, item: FeedItem) -> str:
+    """A feed item's source when it has no link, guid or id: the feed and a
+    hash of the item's title, date and text, so it stays the same when the
+    feed grows (a position would shift and skip a new item as known)."""
+    digest = hashlib.sha1('\n'.join((item.title, item.date, item.html)).encode('utf-8'))
+    return f'{where}#{digest.hexdigest()[:12]}'
 
 
 class _Reader:
@@ -670,7 +731,12 @@ class _Reader:
         except VoiceImportError as e:
             self.report.errors.append(str(e))
             return None
-        return got.url, _decode(got.body, got.content_type), got.content_type
+        try:
+            text = _decode(got.body, got.content_type, url)
+        except VoiceImportError as e:
+            self.report.errors.append(str(e))
+            return None
+        return got.url, text, got.content_type
 
     def url(self, url: str):
         if not is_url(url):
@@ -692,21 +758,25 @@ class _Reader:
             self.report.errors.append(str(e))
             return
         self.report.warnings.extend(notes)
-        site_host = _host(site)
-        truncated = []
-        for n, item in enumerate(items, start=1):
-            source = item.link or f'{where}#{n}'
+        site_host = _host(site) or (_host(where) if is_url(where) else '')
+        truncated, off_site_cut = [], []
+        for item in items:
+            source = item.link or _item_key(where, item)
             kind = kind_of(list(item.categories))
-            if not kind and (item.related or (site_host and item.link
-                                              and _host(item.link) != site_host)):
+            off_site = bool(site_host and is_url(item.link) and _host(item.link) != site_host)
+            if not kind and (item.related or off_site):
                 kind = 'link'
             if _truncated(item):
-                if self.follow and is_url(item.link):
+                if self.follow and is_url(item.link) and site_host and not off_site:
                     got = self.get(item.link)
                     if got is None:
                         continue
                     page = html_page(got[1])
                     body, title = page.body, item.title or page.title
+                elif self.follow and is_url(item.link):
+                    # its page is someone else's, or can't be told to be the author's
+                    off_site_cut.append(item.title or source)
+                    continue
                 else:
                     truncated.append(item.title or source)
                     continue
@@ -716,11 +786,17 @@ class _Reader:
                 body = ''
             self.add(Piece(title, item.date, kind or 'essay', body, source, bool(kind)))
         if truncated:
-            shown = '; '.join(truncated[:5]) + (f' (and {len(truncated) - 5} more)'
-                                                if len(truncated) > 5 else '')
+            shown = _shown(truncated)
             self.report.warnings.append(
                 f'{where}: {len(truncated)} item(s) carry only a cut summary, not imported '
                 f'(pass --follow-links to fetch their pages): {shown}')
+        if off_site_cut:
+            whose = (f'off {site_host}' if site_host
+                     else 'to pages the feed names no site for')
+            self.report.warnings.append(
+                f'{where}: {len(off_site_cut)} item(s) carry only a cut summary and link '
+                f'{whose}, so their pages may be someone else\'s writing; not fetched or '
+                f'imported: {_shown(off_site_cut)}')
 
 
 def read_sources(voice_dir: str, sources: list[str], fetch: Fetch | None = None,
@@ -759,20 +835,65 @@ def slug(text: str, most: int = 60) -> str:
 
 @dataclass
 class Plan:
-    """What an import writes: new index rows with their files' text, and
-    the pieces skipped because their source is already in the index."""
+    """What an import writes: new index rows with their files' text; the
+    pieces skipped because their source is already in the index; and those
+    skipped because the same piece is there under another source (the same
+    text, or the same title and date), as (source, the file that has it)."""
     rows: list[vr.IndexRow] = field(default_factory=list)
     texts: dict[str, str] = field(default_factory=dict)
     already: list[str] = field(default_factory=list)
+    same_piece: list[tuple[str, str]] = field(default_factory=list)
+
+
+def source_key(source: str) -> str:
+    """A source as the index stores it (`csv_safe`), and for a URL without
+    what doesn't change the page: the scheme, `www.`, a trailing `/`."""
+    from storyforge.common import csv_safe
+    s = csv_safe(source)
+    if not is_url(s):
+        return s
+    u = urllib.parse.urlparse(s)
+    return f'{_host(s)}{u.path.rstrip("/")}' + (f'?{u.query}' if u.query else '')
+
+
+def _text_key(body: str) -> str:
+    """A piece's words, lower-cased, without its markup or punctuation,
+    hashed: the same post read from Markdown and from its HTML page match."""
+    words = re.findall(r'\w+', body.lower())
+    return hashlib.sha1(' '.join(words).encode('utf-8')).hexdigest() if words else ''
+
+
+def _title_date_key(title: str, date: str) -> tuple[str, str] | None:
+    title = _collapse(title).lower()
+    return (title, date) if title and re.match(r'^\d{4}-\d{2}-\d{2}$', date or '') else None
+
+
+def _stored_body(text: str) -> str:
+    """A corpus file's body: its `# title` line left out (`Piece.markdown`)."""
+    return re.sub(r'\A#[ \t][^\n]*\n', '', text.replace('\r\n', '\n'))
 
 
 def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
     """Name each new piece's file (`corpus/<date>-<slug>.md`, `-2` and on
-    for a name taken) and skip a piece whose source the index already has,
-    or one this import already has. Raises VoiceRepoError as
-    `voice_repo.read_index`."""
+    for a name taken) and skip a piece the corpus or this import already
+    has: by its source (`source_key`), or, reached another way (a folder,
+    then its feed), by its text or its title and date. Raises
+    VoiceRepoError as `voice_repo.read_index`."""
     existing = vr.read_index(voice_dir)
-    sources = {r.source for r in existing if r.source}
+    sources = {source_key(r.source) for r in existing if r.source}
+    texts: dict[str, str] = {}
+    dated: dict[tuple[str, str], str] = {}
+    for r in existing:
+        key = _title_date_key(r.title, r.date)
+        if key:
+            dated.setdefault(key, r.file)
+        try:
+            with open(os.path.join(voice_dir, r.file), encoding='utf-8-sig') as f:
+                tk = _text_key(_stored_body(f.read()))
+        except (OSError, UnicodeDecodeError):
+            continue    # `voice fingerprint` and the summary report a file that can't be read
+        if tk:
+            texts.setdefault(tk, r.file)
     taken = {os.path.normpath(r.file) for r in existing}
     corpus = os.path.join(voice_dir, vr.CORPUS_DIR)
     if os.path.isdir(corpus):
@@ -780,16 +901,26 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
     plan = Plan()
     ordered = sorted(pieces, key=lambda p: (p.date or '9999', p.source))
     for p in ordered:
-        if p.source in sources:
+        sk = source_key(p.source)
+        if sk in sources:
             plan.already.append(p.source)
             continue
-        sources.add(p.source)
+        tk, dk = _text_key(p.body), _title_date_key(p.title, p.date)
+        twin = (tk and texts.get(tk)) or (dk and dated.get(dk))
+        if twin:
+            plan.same_piece.append((p.source, twin))
+            continue
+        sources.add(sk)
         base = '-'.join(x for x in (p.date, slug(p.title or _piece_name(p.source))) if x)
         name, n = f'{base}.md', 2
         while os.path.normpath(os.path.join(vr.CORPUS_DIR, name)) in taken:
             name, n = f'{base}-{n}.md', n + 1
         rel = f'{vr.CORPUS_DIR}/{name}'
         taken.add(os.path.normpath(rel))
+        if tk:
+            texts[tk] = rel
+        if dk:
+            dated[dk] = rel
         plan.rows.append(vr.IndexRow(rel, _collapse(p.title), p.date, p.kind, p.source, ''))
         plan.texts[rel] = p.markdown()
     return plan

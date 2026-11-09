@@ -142,7 +142,8 @@ def test_atom_items():
     site, items, _ = vi.feed_items(_read('atom.xml'), 'atom.xml')
     assert site == 'https://example.com/'
     assert [(i.title, i.date, i.categories) for i in items] == [
-        ('On Rain', '2017-04-02', ('essay',)), ('A short story', '2017-05-09', ('story',))]
+        ('On Rain', '2017-04-02', ('essay',)), ('A short story', '', ('story',))]
+    # (the story gives only <updated>: when it was changed, not published, so no date)
     assert 'empty' in vi.html_page(items[1].html).body
 
 
@@ -310,7 +311,7 @@ def test_fetch_url_refuses_a_body_too_big(monkeypatch):
 
 def test_plan_names_files_by_date_and_slug_and_skips_known_sources(repo):
     pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'Words.', 'a'),
-              vi.Piece('On Walking', '2019-03-02', 'essay', 'Other words.', 'b'),
+              vi.Piece('On walking!', '2019-03-02', 'essay', 'Other words.', 'b'),
               vi.Piece('Ça va? / Notes', '', 'notes', 'More.', 'c'),
               vi.Piece('Dup', '', 'essay', 'Same source.', 'a')]
     plan = vi.plan_import(repo, pieces)
@@ -388,3 +389,146 @@ def test_cmd_import_needs_a_voice_repo(tmp_path, capsys):
     from storyforge import cmd_voice
     assert cmd_voice.main(['import', FIX, '--dir', str(tmp_path)]) == 1
     assert 'voice init' in capsys.readouterr().out
+
+
+# ============================================================================
+# Review fixes (#669)
+# ============================================================================
+
+@pytest.mark.parametrize('body_attrs, article_attrs', [
+    ('class="single-post has-sidebar"', ''),
+    ('', 'class="post category-social-media tag-ads"'),
+    ('id="menu-open" class="sharing-on"', 'class="post type-post status-publish"'),
+])
+def test_a_wordpress_body_or_article_class_never_skips_the_page(body_attrs, article_attrs):
+    """CR-1: taxonomy and layout classes on <body> or <article> don't drop
+    the page; a real sidebar inside it still goes."""
+    page = vi.html_page(f'<html><body {body_attrs}><article {article_attrs}>'
+                        f'<p>The author\'s own words.</p>'
+                        f'<div class="sidebar">Side stuff</div></article></body></html>')
+    assert page.body == "The author's own words."
+
+
+def test_a_doctype_pushed_down_by_comments_is_still_refused():
+    """CR-2: the refusal asks the parser, not the first 20,000 characters."""
+    xml = ('<?xml version="1.0"?><!--' + 'x' * 25000 + '-->'
+           '<!DOCTYPE rss [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;">]>'
+           '<rss><channel><link>https://e.com</link><item><title>&b;</title>'
+           '<description>t</description></item></channel></rss>')
+    with pytest.raises(vi.VoiceImportError, match='DOCTYPE or an entity'):
+        vi.feed_items(xml, 'padded.xml')
+
+
+def test_follow_links_never_fetches_an_off_site_cut_summary(repo):
+    """CR-3: a cut link post's page is someone else's article: it isn't
+    fetched or imported (even with --kind essay), and the WARNING says why."""
+    xml = ('<rss version="2.0"><channel><link>https://me.com/</link>'
+           '<item><title>Theirs</title><link>https://other.net/their-article</link>'
+           '<description>Read this, it opens with [&#8230;]</description></item>'
+           '<item><title>Mine</title><link>https://www.me.com/mine</link>'
+           '<description>My post starts here [&#8230;]</description></item>'
+           '</channel></rss>')
+    web = FakeWeb({'https://www.me.com/mine': ('text/html', '<article><p>All mine.</p></article>'),
+                   'https://other.net/their-article':
+                       ('text/html', '<article><p>Not the author.</p></article>')})
+    feed = os.path.join(repo, '..', 'feed.xml')
+    with open(feed, 'w', encoding='utf-8') as f:
+        f.write(xml)
+    r = vi.read_sources(repo, [feed], fetch=web, follow_links=True, kind='essay')
+    assert web.asked == ['https://www.me.com/mine']
+    assert [(p.title, p.body) for p in r.pieces] == [('Mine', 'All mine.')]
+    assert any('off me.com' in w and 'Theirs' in w for w in r.warnings)
+
+
+def test_a_feed_in_its_declared_encoding_and_one_that_cant_be_decoded(repo):
+    """CR-4: the XML declaration's or <meta>'s charset is used when the
+    header gives none; bytes no declared charset decodes are an ERROR, not
+    replacement characters."""
+    latin = ('<?xml version="1.0" encoding="ISO-8859-1"?><rss version="2.0"><channel>'
+             '<link>https://e.com/</link><item><title>Caf\xe9</title><link>https://e.com/c</link>'
+             '<content:encoded xmlns:content="http://purl.org/rss/1.0/modules/content/">'
+             '&lt;p&gt;Caf\xe9 society, at length.&lt;/p&gt;</content:encoded></item>'
+             '</channel></rss>').encode('latin-1')
+    meta = '<meta charset="windows-1252"><article><p>Na\xefve r\xe9sum\xe9.</p></article>'
+    bad = b'<article><p>Caf\xe9</p></article>'
+
+    def fetch(url):
+        return {'https://e.com/feed': vi.Fetched(url, 'text/xml', latin),
+                'https://e.com/meta': vi.Fetched(url, 'text/html', meta.encode('cp1252')),
+                'https://e.com/bad': vi.Fetched(url, 'text/html', bad)}[url]
+    r = vi.read_sources(repo, ['https://e.com/feed', 'https://e.com/meta', 'https://e.com/bad'],
+                        fetch=fetch)
+    assert [p.title for p in r.pieces][0] == 'Café'
+    assert r.pieces[0].body == 'Café society, at length.'
+    assert r.pieces[1].body == 'Naïve résumé.'
+    assert len(r.errors) == 1 and 'https://e.com/bad' in r.errors[0]
+    assert 'encoding' in r.errors[0]
+    assert all('\ufffd' not in p.body for p in r.pieces)
+
+
+def test_the_same_post_from_a_folder_then_its_feed_is_skipped(repo, capsys):
+    """SF-1: a piece already in the corpus under another source (a folder,
+    then the blog's feed) isn't imported twice; the summary names it."""
+    from storyforge import cmd_voice
+    posts = os.path.join(repo, '..', 'blog')
+    os.makedirs(posts)
+    with open(os.path.join(posts, '2023-12-30-the-year-in-books.md'), 'w', encoding='utf-8') as f:
+        f.write('---\ntitle: The Year in Books\ndate: 2023-12-30\n---\n'
+                'I read *fewer* books this year than last, and liked more of them.\n\n'
+                'The best was a slim novel about a ferryman, which I finished in a single '
+                'afternoon and then started again.\n')
+    assert cmd_voice.main(['import', posts, '--dir', repo]) == 0
+    capsys.readouterr()
+    assert cmd_voice.main(['import', os.path.join(FIX, 'feed.xml'), '--dir', repo]) == 0
+    out = capsys.readouterr().out
+    assert 'Imported 1 piece(s)' in out                     # the link post only
+    assert '1 already in the corpus under another source' in out
+    assert 'corpus/2023-12-30-the-year-in-books.md <- https://www.example.com/2023/12/' in out
+    assert [r.title for r in vr.read_index(repo)] == ['The Year in Books',
+                                                      "Someone else's great essay"]
+
+
+def test_the_same_title_and_date_in_one_import_is_one_piece(repo):
+    """SF-1: a static-site build folder with both the page and the feed."""
+    pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'From the page.', 'site/on-walking.html'),
+              vi.Piece('On Walking', '2019-03-02', 'essay', 'From the feed.', 'https://e.com/w')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 1 and len(plan.same_piece) == 1
+
+
+@pytest.mark.parametrize('stored, again', [
+    ('https://www.example.com/post/', 'http://example.com/post'),
+    ('notes  draft.md', 'notes draft.md'),
+    ('a|b.md', 'a|b.md'),
+])
+def test_a_source_matches_its_index_row_as_stored(repo, stored, again):
+    """SF-6/TD-6: sources compare as the index stores them (csv_safe), and
+    URLs without scheme, www or a trailing slash."""
+    vi.write_import(repo, vi.plan_import(repo, [vi.Piece('One', '', 'essay', 'Words here.', stored)]))
+    plan = vi.plan_import(repo, [vi.Piece('Other', '', 'essay', 'New words.', again)])
+    assert plan.rows == [] and plan.already == [again]
+
+
+def test_a_linkless_feed_item_keeps_its_source_when_the_feed_grows(repo):
+    """T6/TD-5: an item with no link, guid or id is keyed by its content,
+    not its position, so a new item at the top isn't skipped as known."""
+    def feed(*titles):
+        items = ''.join(f'<item><title>{t}</title><content:encoded>&lt;p&gt;{t} body words.'
+                        f'&lt;/p&gt;</content:encoded></item>' for t in titles)
+        return ('<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">'
+                f'<channel><link>https://e.com/</link>{items}</channel></rss>')
+    path = os.path.join(repo, '..', 'export.xml')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(feed('Old'))
+    vi.write_import(repo, vi.plan_import(repo, vi.read_sources(repo, [path]).pieces))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(feed('New', 'Old'))
+    plan = vi.plan_import(repo, vi.read_sources(repo, [path]).pieces)
+    assert [r.title for r in plan.rows] == ['New'] and len(plan.already) == 1
+
+
+def test_an_atom_entry_without_a_link_takes_its_id():
+    xml = ('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>T</title>'
+           '<id>tag:e.com,2020:1</id><content type="html">x</content></entry></feed>')
+    _, items, _ = vi.feed_items(xml, 'a.xml')
+    assert items[0].link == 'tag:e.com,2020:1'

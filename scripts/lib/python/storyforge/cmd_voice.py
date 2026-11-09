@@ -177,6 +177,12 @@ def _import(voice_dir: str, args) -> int:
     verb = 'Would import' if args.dry_run else 'Imported'
     log(f'{verb} {len(plan.rows)} piece(s)'
         + (f'; {len(plan.already)} already in the corpus, skipped' if plan.already else ''))
+    if plan.same_piece:
+        shown = '; '.join(f'{f} <- {s}' for s, f in plan.same_piece[:10])
+        more = len(plan.same_piece) - 10
+        log(f'  {len(plan.same_piece)} already in the corpus under another source (the same '
+            f'text, or the same title and date), skipped: {shown}'
+            + (f' (and {more} more)' if more > 0 else ''))
     kinds: dict[str, int] = {}
     for r in plan.rows:
         kinds[r.kind] = kinds.get(r.kind, 0) + 1
