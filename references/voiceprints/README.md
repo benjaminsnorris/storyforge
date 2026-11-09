@@ -48,10 +48,25 @@ paragraph per line. Configs:
   byte-identical to the evals' `manuscript.md`.
 - `tests/fixtures/voiceprint/others/<book>/01.md`..`10.md`: ten chunks of
   about 2,000 words (`voiceprint.chunks`), evenly spaced through each of the
-  evals' manuscripts of *The Age of Innocence* (Wharton), *The Brimming Cup*
-  (Dorothy Canfield Fisher), *A Christmas Carol* (Dickens), *The Great
-  Gatsby* (Fitzgerald), *Middlemarch* (Eliot), *The Plastic Age* (Percy
-  Marks) and *Self-Control* (Mary Brunton, 1811, Austen's contemporary).
+  evals' manuscripts (normalized from Project Gutenberg, header and licence
+  stripped):
+
+  | Book | Gutenberg | Published | Author died |
+  |---|---|---|---|
+  | *The Age of Innocence*, Edith Wharton | 541 | 1920 | 1937 |
+  | *The Brimming Cup*, Dorothy Canfield Fisher | 14957 | 1921 | 1958 |
+  | *A Christmas Carol*, Charles Dickens | 46 | 1843 | 1870 |
+  | *The Great Gatsby*, F. Scott Fitzgerald | 64317 | 1925 | 1940 |
+  | *Middlemarch*, George Eliot | 145 | 1872 | 1880 |
+  | *The Plastic Age*, Percy Marks | 16532 | 1924 | 1956 |
+  | *Self-Control*, Mary Brunton (Austen's contemporary) | 41196 | 1811 | 1818 |
+
+**Public domain.** Every text here was published in the United States
+before 1930 (or is a translation of that age), so it is in the US public
+domain, which is the basis Project Gutenberg distributes them on. Two are
+not yet out of copyright everywhere under life plus 70 years: *The Plastic
+Age* (Marks died 1956: until 2027) and *The Brimming Cup* (Fisher died 1958:
+until 2029). Each is a 20,000-word excerpt used as a test fixture.
 
 Together the texts here and in the fixtures are about 4 MB (2.0 MB of Austen
 and baseline, 0.9 MB of Verne, 0.9 MB of excerpts).
@@ -69,8 +84,19 @@ from `https://www.gutenberg.org/cache/epub/<n>/pg<n>.txt` into an empty
 folder, then:
 
 ```python
-texts = {name: vp.population_text(open(path, encoding='utf-8').read()) for name, path in ...}
-json.dump(vp.build_baseline(texts), open(vp.BASELINE_REL, 'w'), indent=1, ensure_ascii=False)
+import glob, json, re
+from storyforge import voiceprint as vp
+texts = {}
+for path in glob.glob('<folder>/pg*.txt'):
+    raw = open(path, encoding='utf-8').read().replace('\r\n', '\n')
+    gid = re.search(r'pg(\d+)', path).group(1)
+    title = re.search(r'^Title: (.*)$', raw, re.M).group(1).strip()
+    author = re.search(r'^Author: (.*)$', raw, re.M).group(1).strip()
+    # the key is the `sources` name: "Gutenberg 33: Nathaniel Hawthorne, The Scarlet Letter"
+    texts[f'Gutenberg {gid}: {author}, {title}'] = vp.population_text(raw)
+texts = dict(sorted(texts.items(), key=lambda kv: int(kv[0].split()[1].rstrip(':'))))
+with open(vp.BASELINE_REL, 'w', encoding='utf-8', newline='\n') as f:
+    f.write(json.dumps(vp.build_baseline(texts), indent=1, ensure_ascii=False) + '\n')
 ```
 
 It's a 19th- and early 20th-century baseline. A modern writer's phrases
@@ -80,8 +106,14 @@ writers, not its level.
 
 ## The tests and their numbers
 
-`tests/test_voiceprint_reference.py`, free, about 6 s. Measured 2026-11-08;
+`tests/test_voiceprint_reference.py`, free, about 10 s. Measured 2026-11-08;
 each floor sits below the result with a margin.
+
+**These numbers are in-sample.** The distance's design, `OTHER_WEIGHT`,
+`SAME_VOICE_MAX` and `OUTLIER_SEPARATION` were chosen on these same texts
+(`docs/history.md`), so the floors show the fingerprint fits them and catch
+a regression; they don't show how it finds a voice it has never seen. A
+held-out validation set (more Austen, Burney, Edgeworth) would.
 
 | Test | Measured | Floor or threshold |
 |---|---|---|

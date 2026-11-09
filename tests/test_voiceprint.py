@@ -132,12 +132,14 @@ def test_measures_count_what_they_say():
     assert m['closing_exclamation_share'] == pytest.approx(1.0)   # "Yes!"
 
 
-def test_every_measure_has_a_group_and_no_prose_gives_zeros():
+def test_every_measure_has_a_group_and_no_prose_is_refused():
     names = vp.measure_names()
     assert len(names) == len(set(names))
     assert {vp.measure_group(n) for n in names} == set(vp.GROUPS)
     assert all(f'fw_{w}' in names for w in vp.FUNCTION_WORDS)
-    assert vp.measure('# Only a heading\n\n* * *') == {n: 0.0 for n in names}
+    # all zeros would read as a profile (#662 review SF4)
+    with pytest.raises(vp.VoiceprintError, match='no prose'):
+        vp.measure('# Only a heading\n\n* * *')
 
 
 def test_latinate_and_adjective_heuristics():
@@ -153,8 +155,15 @@ def test_latinate_and_adjective_heuristics():
 # ============================================================================
 
 def test_fingerprint_refuses_a_small_corpus():
-    with pytest.raises(vp.VoiceprintError, match='at least 3 chunks'):
+    with pytest.raises(vp.VoiceprintError, match='at least 3 chunks \\(about 5000 words\\)'):
         vp.fingerprint(_prose(1, paragraphs=100), ngrams=False)   # ~2,500 words
+
+
+def test_fingerprint_refuses_a_piece_with_no_prose():
+    """An empty corpus file is named, not skipped: the fingerprint would
+    silently stand for less of the corpus (#662 review SF5)."""
+    with pytest.raises(vp.VoiceprintError, match='no prose: empty.md'):
+        vp.fingerprint({'a.md': _prose(1, 300), 'empty.md': '# Chapter 1\n\n'}, ngrams=False)
 
 
 def test_profile_refuses_too_few_chunks():
@@ -319,9 +328,22 @@ def test_compare_text_with_no_prose_is_refused():
         vp.compare(fp, '# heading only')
 
 
-def test_same_voice_uses_the_threshold():
+def test_compare_refuses_a_text_too_short_for_the_chunk_scale():
+    """A five-word text measured against chunk centers is noise, not a
+    verdict (#662 review SF3); `compare_values` stays open to the caller."""
+    fp = vp.fingerprint(_prose(7, 400), ngrams=False)
+    with pytest.raises(vp.VoiceprintError, match=f'at least {vp.MIN_COMPARE_WORDS}'):
+        vp.compare(fp, 'She smiled. He went home.')
+    assert vp.compare_values(fp, vp.measure('She smiled. He went home.')).distance > 0
+
+
+def test_same_voice_uses_the_threshold(monkeypatch):
     fp = vp.fingerprint(_prose(8, 400), ngrams=False)
     assert vp.same_voice(fp, fp).same
+    # at the threshold the same voice, just past it not (#662 review T6)
+    for d, same in ((vp.SAME_VOICE_MAX, True), (vp.SAME_VOICE_MAX + 1e-9, False)):
+        monkeypatch.setattr(vp, 'compare', lambda a, b, base=None, d=d: vp.Comparison(d, {}, ()))
+        assert vp.same_voice(fp, fp).same is same
 
 
 def test_baseline_covers_every_measure_and_says_where_it_came_from():
@@ -364,6 +386,11 @@ def test_malformed_baseline_is_refused(tmp_path, change, match):
     bad.write_text('[]')
     with pytest.raises(vp.VoiceprintError, match='JSON object'):
         vp.load_baseline(str(bad))
+
+
+def test_build_baseline_refuses_no_texts():
+    with pytest.raises(vp.VoiceprintError, match='at least one'):
+        vp.build_baseline({})
 
 
 def test_population_text_strips_gutenberg_boilerplate():

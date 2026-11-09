@@ -52,7 +52,9 @@ EQUAL_SIZE_CONTIGUOUS_FLOOR = 0.85
 SEEDED_FLAGGED_FLOOR = 0.75
 #: ... the seeded chunks named among all seeded chunks (63/84 = 0.750) ...
 SEEDED_RECALL_FLOOR = 0.6
-#: ... and no Austen chunk named (0)
+#: ... and no Austen chunk named (0). Zero on purpose: naming the writer's
+#: own piece as another voice is the error an author can't shrug off, so a
+#: change that trades one for recall fails here
 SEEDED_FALSE_MAX = 0
 
 
