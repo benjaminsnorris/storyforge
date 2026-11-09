@@ -41,6 +41,7 @@ from storyforge.audit import COLUMNS as AUDIT_COLUMNS
 from storyforge.schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
+from storyforge import world_table
 
 
 # ============================================================================
@@ -140,6 +141,10 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # CRLF endings are caught; optional, since a project that has never
     # written the ledger has no log yet.
     'working/audit-log.csv': list(AUDIT_COLUMNS),
+    # The world table (#647, shared with #648): directions, the sun by time of
+    # day, sight ranges, distances. Optional (the defaults apply without it);
+    # its rows are checked by _check_world_table
+    f'reference/{world_table.WORLD_FILE}': list(world_table.COLUMNS),
 }
 
 #: Registered for header checking but never required to exist, in any medium.
@@ -147,6 +152,7 @@ ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
     'reference/visual-state.csv',
     'working/audit-log.csv',
+    f'reference/{world_table.WORLD_FILE}',
     # Written by elaborate or extract phase 5; projects predating both lack it
     'reference/themes.csv',
 }
@@ -171,7 +177,8 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     'reference/scene-briefs.csv': {'motif_details'},
 }
 EXPECTED_WORKING_DIRS = set(
-    'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
+    'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup '
+    'stage-sheets'.split()
 )
 
 # Graphic-novel schema overrides — these replace/augment the base schemas for
@@ -2573,6 +2580,24 @@ def _check_unreadable_inputs(project_dir: str) -> list[dict]:
     return []
 
 
+def _check_world_table(project_dir: str) -> list[dict]:
+    """Report the world table's bad rows (#647): an unknown kind, a value
+    that isn't a compass direction or a number of metres, a distance not
+    named `A > B`, a fact given twice. A check that reads the table refuses
+    a malformed one, so each is an error. Its header and readability are
+    `report_csv_schema`'s, so they aren't repeated here. Never repaired."""
+    rel = f'reference/{world_table.WORLD_FILE}'
+    found = [p for p in world_table.problems(os.path.join(project_dir, rel))
+             if not p.startswith(('header is', 'could not be read'))]
+    return [{
+        'type': 'world_table_row', 'file': rel, 'category': 'integrity',
+        'detail': csv_safe(f'{rel}: {p}'),
+        'action': f'Fix the row in {rel}: kinds are {", ".join(world_table.KINDS)} (see '
+                  f'references/scene-schema.md); the stage sheet check stops until it is fixed',
+        'severity': 'error',
+    } for p in found]
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Report CRLF line endings in the CSVs and in `storyforge.yaml`.
 
@@ -2879,6 +2904,9 @@ def build_cleanup_report(project_dir: str) -> dict:
         if finding:
             finding['category'] = 'unexpected'
             all_findings.append(finding)
+
+    # --- The world table's rows (#647) ---
+    all_findings.extend(_check_world_table(project_dir))
 
     # --- Canon files (graphic-novel projects only) ---
     all_findings.extend(report_canon_files(project_dir))

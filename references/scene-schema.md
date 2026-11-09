@@ -60,6 +60,30 @@ print(dump_schema_markdown())
 | `motif-taxonomy.csv` | id, name, aliases, tier | motifs |
 | `mice-threads.csv` | id, name, type, aliases | mice_threads |
 
+### world.csv — directions, light and distances (optional)
+
+`reference/world.csv` (`storyforge.world_table`, #647; shared with the geography and sky check) holds the few world facts the blocking checks need. Columns `kind|name|value|note`, one fact a row. Without the file the defaults apply; with it, a malformed row stops the stage sheet check and `storyforge cleanup` reports it (never repaired).
+
+| kind | name | value | example |
+|------|------|-------|---------|
+| `direction` | a landmark | the compass direction it lies in from the book's usual standpoint | `direction\|Ida\|east\|seen from Troy` |
+| `sun` | a time of day | where the sun is then: a compass direction, or `none` when it's down (replaces the default: dawn and morning east, noon south, afternoon southwest, evening and dusk west, night none) | `sun\|noon\|north\|southern hemisphere` |
+| `sight` | `face` or `figure` | the farthest, in metres, that detail can be made out (defaults: face 30, figure 300) | `sight\|face\|20\|` |
+| `distance` | two places, `A > B` (either order) | metres between them | `distance\|the wall > the ships\|2000\|` |
+
+Compass directions: north, northeast, east, southeast, south, southwest, west, northwest (or N, NE, ...).
+
+### Stage sheets (`working/stage-sheets/<scene>.json`)
+
+The stage sheet (`storyforge.stage_sheet`, #647; plan A4) is each scene's blocking as state: who is present, posture, what each hand holds, what is worn, position, facing, lights, doors, the time and the sun. `storyforge check --stage-sheet` (and `--blocking --stage-sheet`) writes one per scene from the prose; a writer will write the same format while drafting (#655). JSON, format 1:
+
+- `format` (1), `scene_id`, `source` (`extracted` or `writer`), `model`, `prose_sha256` (the prose it describes), `cast`.
+- `opening`: the state before the first beat, as entries `{"who", "field", "item", "value", "quote"}` (`who` empty for the scene's own fields; `item` names the garment, light or door). An entry carried from the previous scene's sheet has `"origin": "carried"`.
+- `beats`: in the scene's order, each `{"quote", "event": {"who", "field", "item", "from", "to"}, "set": [entries], "cleared"?}`: the event, the entries it set, and `cleared: true` at a break in time (every state ends there but what is worn).
+- `end`: the state after the last beat, which the next scene carries over.
+
+Fields: `posture` (standing, sitting, kneeling, lying, crouching, mounted, other), `hand_left`, `hand_right` (what the hand holds, or `empty`), `worn` (`on`/`off`), `present` (`here`/`gone`), `position`, `facing`, `light` (`lit`/`out`), `door` (`open`/`shut`), `time`, `sun` (a compass direction). Events also use `hand_either`, `sees`, `shadow` and `break`.
+
 ### scenes.csv — structural identity
 
 | Column | Constraint | Stage | Description |

@@ -81,6 +81,14 @@ GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMIT
 #: Whether the gate reads each scene's blocking too (`blocking.check_blocking`,
 #: #626): one more call per scene, on the checker's model
 GATE_BLOCKING = True
+#: How the gate checks blocking (#647): `read`, the whole-scene blocking read
+#: (`blocking.check_blocking`), the default until the stage sheet matches its
+#: recall on the blocking set (#646); or `stage-sheet`
+#: (`stage_sheet.check_stage_sheet`: a small model records the stage, code
+#: checks it), which `storyforge check --stage-sheet` chooses for its run.
+#: Either way the findings are BLK against the scene itself
+BLOCKING_METHODS = ('read', 'stage-sheet')
+GATE_BLOCKING_METHOD = 'read'
 
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
@@ -248,6 +256,9 @@ class GateResult:
     #: #631: on a re-check, whether the blocking read ran and why, for the log
     #: and the report
     blocking_note: str = ''
+    #: #647: what the stage sheet couldn't check (`StageResult.notes`), for
+    #: the log and the report; never blocking
+    stage_notes: list[str] = field(default_factory=list)
     #: what `_commit` needs from the run (`_CommitContext`); None until the
     #: run reaches the check
     _ctx: 'object' = field(default=None, repr=False, compare=False)
@@ -1517,12 +1528,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         # The scene against itself (#626): the checker reads it against the
         # book; this reads its blocking alone. Its findings join the check's,
         # so they are sorted, reported, fixed and accepted the same way
-        try:
-            blocked = check_blocking(project_dir, scene_id, prose=prose, model=check_model,
-                                     log_file=os.path.join(log_dir,
-                                                           f'gate-blocking-{scene_id}.json'))
-        except BlockingError as e:
-            raise GateError(str(e)) from e
+        blocked = _read_blocking(project_dir, scene_id, prose, check_model, log_dir, result)
         result.check.findings.extend(blocked.findings)
         result.check.unverified.extend(blocked.unverified)
         result.blocking_read = True
@@ -3404,6 +3410,37 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
     return again, run_dir, Reextraction.of(run, again)
 
 
+def _read_blocking(project_dir: str, scene_id: str, prose: str, check_model: str | None,
+                   log_dir: str, result: 'GateResult'):
+    """The scene's blocking, by `GATE_BLOCKING_METHOD`: the blocking read
+    on the checker's model, or the stage sheet on its own small model
+    (#647), whose sheet is saved for the next scene to carry over and whose
+    notes (what it couldn't check) go to `result.stage_notes`, logged and
+    reported. Either failing is a `GateError`."""
+    if GATE_BLOCKING_METHOD not in BLOCKING_METHODS:
+        raise GateError(f'GATE_BLOCKING_METHOD is {GATE_BLOCKING_METHOD!r}, not one of '
+                        f'{", ".join(BLOCKING_METHODS)}')
+    if GATE_BLOCKING_METHOD == 'stage-sheet':
+        from storyforge.stage_sheet import StageSheetError, check_stage_sheet
+        from storyforge.world_table import WorldTableError
+        try:
+            sheet = check_stage_sheet(project_dir, scene_id, prose=prose, save=True,
+                                      log_file=os.path.join(log_dir,
+                                                            f'gate-stage-{scene_id}.json'))
+        except (StageSheetError, WorldTableError) as e:
+            raise GateError(str(e)) from e
+        result.stage_notes = list(sheet.notes)
+        if sheet.notes:
+            from storyforge.common import log
+            log(f'  {scene_id}: stage sheet, not checked: {"; ".join(sheet.notes)}')
+        return sheet
+    try:
+        return check_blocking(project_dir, scene_id, prose=prose, model=check_model,
+                              log_file=os.path.join(log_dir, f'gate-blocking-{scene_id}.json'))
+    except BlockingError as e:
+        raise GateError(str(e)) from e
+
+
 def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: str,
                    introduced_by: str | None = None, extract_model: str | None = None,
                    check_model: str | None = None,
@@ -3617,6 +3654,9 @@ def report_lines(result: GateResult) -> list[str]:
                      + (' ...' if len(result.dropped) > 20 else ''))
     if result.blocking_note:
         lines.append(f'NOTE (re-check): {result.blocking_note}')
+    if result.stage_notes:
+        lines.append('NOTE (stage sheet, not checked): '
+                     + _one_line('; '.join(result.stage_notes)))
     if result.steady:
         lines.append(f'NOTE (kept as they were, read from paragraphs the prose has unchanged): '
                      f'{len(result.steady)} fact(s)')
