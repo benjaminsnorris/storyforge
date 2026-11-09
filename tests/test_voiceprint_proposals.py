@@ -258,8 +258,33 @@ def test_passage_range_is_deterministic_and_judges(voice_dir):
 
 def test_passage_range_refuses_a_corpus_too_small(voice_dir):
     voice = vpp.load_voice(voice_dir)
-    with pytest.raises(vpp.ProposalError, match='too few'):
-        vpp.passage_range(voice.fingerprint, {'x': _head(3000)})
+    with pytest.raises(vpp.ProposalError, match='too few passages of any length'):
+        vpp.passage_range(voice.fingerprint, {'x': _head(600)})
+
+
+def _long_paragraphs(text, size=210):
+    """`text`'s paragraphs merged into paragraphs of at least `size` words."""
+    out, cur = [], []
+    for para in vpp.prose_paragraphs(text):
+        cur.append(para)
+        if len(vp.words(' '.join(cur))) >= size:
+            out.append(' '.join(cur))
+            cur = []
+    return '\n\n'.join(out) + '\n'
+
+
+def test_passage_range_leaves_a_thin_band_unjudged(voice_dir):
+    """CR-1/SF-1: a corpus of long paragraphs has no run of 100-149 words.
+    That band gets no limit and a passage in it isn't judged; it doesn't
+    stop the range."""
+    voice = vpp.load_voice(voice_dir)
+    rng = vpp.passage_range(voice.fingerprint, {'x': _long_paragraphs(_head(24000))})
+    assert 100 in rng.thin and rng.counts[100] < vpp.RANGE_MIN_WINDOWS
+    assert 200 in rng.limits
+    assert '100-149 words' in rng.thin_warning()
+    p = vpp.Passage('x-1-1', 'quiet', 'x', '1-1', 120, _head(130))
+    assert rng.judge(p).typical is None and rng.judge(p).distance is None
+    assert rng.limit(120) is None
 
 
 def _p(pid, typical, distance=0.5, limit=0.8, job='quiet'):
@@ -410,7 +435,7 @@ def test_accept_exemplars_replaces_its_own_files_and_notes_others(voice_dir):
     passages = _shortlisted(voice_dir, k=22)
     vpp.set_picks(voice_dir, [p.id for p in passages[:3]])
     done = vpp.accept_exemplars(voice_dir)
-    assert any('WARNING: 3 exemplars' in n for n in done.notes)
+    assert any('WARNING: the bank holds 3 exemplars' in n for n in done.notes)
     assert any('no exemplar for the job(s)' in n for n in done.notes)
     hand = os.path.join(voice_dir, vpp.EXEMPLARS_DIR, 'mine.md')
     with open(hand, 'w') as f:
@@ -579,3 +604,174 @@ def test_rejudge_rewrites_the_figures_and_keeps_picks(voice_dir, capsys):
 def test_voice_is_a_registered_command():
     from storyforge.__main__ import COMMANDS
     assert COMMANDS['voice'] == 'storyforge.cmd_voice'
+
+
+# ============================================================================
+# Review fixes (#665): paying before failing, failed calls, the bank
+# ============================================================================
+
+def test_cmd_propose_fails_before_paying_when_no_band_has_a_range(voice_dir, fake_api,
+                                                                   monkeypatch, capsys):
+    """CR-1/SF-1: the typical range is measured before the paid calls."""
+    from storyforge import cmd_voice
+    calls, _ = fake_api
+
+    def no_range(fp, texts, baseline=None):
+        raise vpp.ProposalError('the corpus gives too few passages of any length')
+    monkeypatch.setattr(vpp, 'passage_range', no_range)
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5',
+                           '--dry-run']) == 1
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5']) == 1
+    assert calls == [] and 'too few passages' in capsys.readouterr().out
+    # the description alone needs no range
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5',
+                           '--only', 'description']) == 0
+    assert len(calls) == 1
+
+
+def test_cmd_propose_warns_of_a_thin_band_before_paying(voice_dir, fake_api, monkeypatch,
+                                                        capsys):
+    from storyforge import cmd_voice
+    real = vpp.passage_range
+
+    def thin(fp, texts, baseline=None):
+        r = real(fp, texts, baseline)
+        return vpp.PassageRange(r.fingerprint, {b: v for b, v in r.limits.items() if b != 100},
+                                {**r.counts, 100: 3}, r.baseline)
+    monkeypatch.setattr(vpp, 'passage_range', thin)
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5',
+                           '--dry-run']) == 0
+    assert '100-149 words (3)' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('failure', ['refusal', 'http'])
+def test_cmd_propose_reports_a_failed_call_and_the_spend(voice_dir, fake_api, monkeypatch,
+                                                         capsys, failure):
+    """SF-2/CR-4/T6: the shortlist call refused or failed after the claims
+    were written: exit 1, no traceback, what was written, the spend."""
+    import storyforge.api as api
+    from storyforge import cmd_voice
+    calls, state = fake_api
+    answer = api.invoke
+
+    def invoke(prompt, model, **kw):
+        if kw.get('output_schema') is vpp.SHORTLIST_SCHEMA:
+            if failure == 'refusal':
+                raise api.RefusalError({'stop_reason': 'refusal', 'content': [],
+                                        'stop_details': {'category': 'cyber'}})
+            raise RuntimeError('API returned HTTP 529: overloaded')
+        return answer(prompt, model, **kw)
+    monkeypatch.setattr(api, 'invoke', invoke)
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5']) == 1
+    out = capsys.readouterr().out
+    assert 'ERROR: the shortlist call failed' in out
+    assert 'Not written (left as they were): proposals/shortlist.csv' in out
+    assert 'Spent $' in out
+    assert len(vpp.read_claims(voice_dir)) == 6
+    saved = os.path.join(voice_dir, vpp.REPLIES_DIR, 'shortlist.json')
+    assert os.path.isfile(saved) == (failure == 'refusal')
+
+
+def test_cmd_propose_names_a_shortlist_too_long_or_short_of_the_ask(voice_dir, fake_api,
+                                                                    capsys):
+    """SF-5: a reply naming more than SHORTLIST_MAX is an ERROR like one under
+    SHORTLIST_MIN; one naming fewer than asked is a WARNING."""
+    from storyforge import cmd_voice
+    calls, state = fake_api
+    sample = vpp.build_sample(vpp.load_voice(voice_dir).texts)
+    state['shortlist'] = _shortlist_reply(sample, 24)
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5',
+                           '--only', 'shortlist']) == 0
+    assert 'asked for 30 passages; the reply named 24' in capsys.readouterr().out
+    many = _runs_of(sample)
+    assert len(many) > vpp.SHORTLIST_MAX
+    state['shortlist'] = {'passages': [{'first': a, 'last': b, 'job': 'quiet', 'why': ''}
+                                       for a, b in many[:vpp.SHORTLIST_MAX + 1]]}
+    assert cmd_voice.main(['propose', '--dir', voice_dir, '--model', 'claude-opus-5-5',
+                           '--only', 'shortlist', '--force']) == 1
+    assert f'{vpp.SHORTLIST_MAX + 1} usable passages' in capsys.readouterr().out
+
+
+def test_accept_exemplars_keeps_an_exemplar_the_author_added(voice_dir):
+    """TD1: an index row accept didn't write survives an accept."""
+    passages = _shortlisted(voice_dir, k=22)
+    folder = os.path.join(voice_dir, vpp.EXEMPLARS_DIR)
+    os.makedirs(folder)
+    with open(os.path.join(folder, 'mine.md'), 'w') as f:
+        f.write('My own passage.\n')
+    with open(os.path.join(voice_dir, vpp.EXEMPLARS_INDEX), 'w') as f:
+        f.write('id|job|source|paragraphs|words|why\nmine|quiet|corpus/x.md|1-2|200|mine\n')
+    done = vpp.accept_exemplars(voice_dir, [p.id for p in passages[:21]])
+    index = vpp._read_rows(os.path.join(voice_dir, vpp.EXEMPLARS_INDEX), vpp.EXEMPLAR_COLUMNS)
+    assert index[0] == {'id': 'mine', 'job': 'quiet', 'source': 'corpus/x.md',
+                        'paragraphs': '1-2', 'words': '200', 'why': 'mine'}
+    assert [r['id'] for r in index[1:]] == [p.id for p in passages[:21]]
+    assert os.path.isfile(os.path.join(folder, 'mine.md'))
+    assert any('kept 1 exemplar' in n for n in done.notes)
+    # unpicking a shortlisted passage takes it out; the author's row stays
+    vpp.accept_exemplars(voice_dir, [p.id for p in passages[1:21]])
+    index = vpp._read_rows(os.path.join(voice_dir, vpp.EXEMPLARS_INDEX), vpp.EXEMPLAR_COLUMNS)
+    assert index[0]['id'] == 'mine' and passages[0].id not in {r['id'] for r in index}
+    assert not os.path.exists(os.path.join(folder, f'{passages[0].id}.md'))
+
+
+def test_accept_exemplars_refuses_to_overwrite_a_file_the_index_doesnt_name(voice_dir):
+    """TD2: a picked id whose file is already in exemplars/, unindexed."""
+    passages = _shortlisted(voice_dir, k=22)
+    folder = os.path.join(voice_dir, vpp.EXEMPLARS_DIR)
+    os.makedirs(folder)
+    theirs = os.path.join(folder, f'{passages[0].id}.md')
+    with open(theirs, 'w') as f:
+        f.write('Written by hand.\n')
+    with pytest.raises(vpp.ProposalError, match='index doesn.t name'):
+        vpp.accept_exemplars(voice_dir, [p.id for p in passages[:21]])
+    with open(theirs) as f:
+        assert f.read() == 'Written by hand.\n'
+    assert not os.path.exists(os.path.join(voice_dir, vpp.EXEMPLARS_INDEX))
+    assert not any(p.pick for p in vpp.read_shortlist(voice_dir))   # picks not written
+
+
+def test_accept_exemplars_with_picks_writes_the_column_only_on_success(voice_dir):
+    """CR-5/SF-8: a refused accept leaves the author's picks as they were."""
+    passages = _shortlisted(voice_dir, k=22)
+    vpp.set_picks(voice_dir, [passages[0].id])
+    with open(os.path.join(voice_dir, vpp.SHORTLIST_DIR, f'{passages[1].id}.md'), 'w') as f:
+        f.write('Too short now.\n')
+    with pytest.raises(vpp.ProposalError, match='Nothing written'):
+        vpp.accept_exemplars(voice_dir, [p.id for p in passages[:3]])
+    assert [p.id for p in vpp.read_shortlist(voice_dir) if p.pick] == [passages[0].id]
+    with pytest.raises(vpp.ProposalError, match='holds no passage nope'):
+        vpp.accept_exemplars(voice_dir, ['nope'])
+
+
+def test_cmd_accept_auto_pick_guards_the_authors_picks(voice_dir, capsys):
+    """T7: --auto-pick won't replace picks without --force, and means nothing
+    with --only description."""
+    from storyforge import cmd_voice
+    passages = _shortlisted(voice_dir, k=24)
+    vpp.set_picks(voice_dir, [passages[0].id])
+    assert cmd_voice.main(['accept', '--dir', voice_dir, '--only', 'exemplars',
+                           '--auto-pick']) == 1
+    assert 'already holds picks' in capsys.readouterr().out
+    assert [p.id for p in vpp.read_shortlist(voice_dir) if p.pick] == [passages[0].id]
+    assert cmd_voice.main(['accept', '--dir', voice_dir, '--only', 'exemplars',
+                           '--auto-pick', '--force']) == 0
+    assert [p.id for p in vpp.read_shortlist(voice_dir) if p.pick] == vpp.auto_picks(passages)
+    assert cmd_voice.main(['accept', '--dir', voice_dir, '--only', 'description',
+                           '--auto-pick']) == 1
+    assert 'does nothing with --only description' in capsys.readouterr().out
+
+
+def test_writes_go_through_a_temporary_file(voice_dir, monkeypatch):
+    """SF-9: an interrupted write leaves the old file whole and no temp file."""
+    path = os.path.join(voice_dir, 'description.md')
+    vpp._write_text(path, 'old\n')
+
+    def boom(src, dst):
+        raise OSError('disk full')
+    monkeypatch.setattr(vpp.os, 'replace', boom)
+    with pytest.raises(OSError):
+        vpp._write_text(path, 'new\n')
+    with open(path) as f:
+        assert f.read() == 'old\n'
+    assert not os.path.exists(path + '.tmp')

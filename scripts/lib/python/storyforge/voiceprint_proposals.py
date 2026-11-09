@@ -100,7 +100,7 @@ REPLIES_DIR = os.path.join('working', 'voice-replies')
 CLAIM_COLUMNS = ('id', 'section', 'claim', 'example', 'mark')
 SHORTLIST_COLUMNS = ('id', 'job', 'source', 'paragraphs', 'words', 'distance', 'limit',
                      'typical', 'why', 'pick')
-EXEMPLAR_COLUMNS = ('id', 'job', 'source', 'paragraphs', 'words')
+EXEMPLAR_COLUMNS = ('id', 'job', 'source', 'paragraphs', 'words', 'why')
 
 
 class ProposalError(Exception):
@@ -653,7 +653,9 @@ def band_of(words: int) -> int:
 class PassageRange:
     """Per band, the distance from the fingerprint at or under which a
     passage of that size is typical (`limits`: the corpus's own passages'
-    `TYPICAL_QUANTILE`), and how many corpus passages gave it (`counts`).
+    `TYPICAL_QUANTILE`), and how many corpus passages each band had
+    (`counts`, every band). A band with under `RANGE_MIN_WINDOWS` corpus
+    passages has no limit (`thin`), and a passage in it can't be judged.
     Short passages vary more than the fingerprint's 2,000-word chunks, so a
     passage is judged against passages, not chunks."""
     fingerprint: vp.Fingerprint
@@ -661,17 +663,35 @@ class PassageRange:
     counts: dict[int, int]
     baseline: vp.Baseline = field(repr=False, default=None)
 
-    def limit(self, words: int) -> float:
-        return self.limits[band_of(words)]
+    @property
+    def thin(self) -> tuple[int, ...]:
+        """The bands with too few corpus passages for a limit."""
+        return tuple(b for b in PASSAGE_BANDS if b not in self.limits)
+
+    def thin_warning(self) -> str:
+        """A WARNING line naming the thin bands ('' when there are none)."""
+        if not self.thin:
+            return ''
+        bands = ', '.join(f'{lo}-{hi} words ({self.counts.get(b, 0)})'
+                          for b in self.thin for lo, hi in [_band_bounds(b)])
+        return (f'WARNING: the corpus has too few passages of {bands} for a typical '
+                f'range (at least {RANGE_MIN_WINDOWS} each); a shortlisted passage of '
+                f'that length can\'t be judged, so read it before picking it')
+
+    def limit(self, words: int) -> float | None:
+        """The limit for a passage of `words` words; None in a thin band."""
+        return self.limits.get(band_of(words))
 
     def distance(self, text: str) -> float:
         return _passage_distance(self.fingerprint, text, self.baseline)
 
     def judge(self, passage: Passage) -> Passage:
         """`passage` with its distance, its band's limit and whether it's
-        typical."""
-        d = self.distance(passage.text)
+        typical; unjudged (all three None) when its band is thin."""
         lim = self.limit(passage.words)
+        if lim is None:
+            return replace(passage, distance=None, limit=None, typical=None)
+        d = self.distance(passage.text)
         return replace(passage, distance=round(d, 4), limit=round(lim, 4),
                        typical=d <= lim)
 
@@ -690,8 +710,11 @@ def passage_range(fp: vp.Fingerprint, texts: Mapping[str, str],
     paragraphs of the corpus (`texts`, the fingerprinted pieces), each
     started at an evenly spaced paragraph and grown until it reaches the
     band, kept when it ends inside it; each run's distance from `fp`; the
-    band's limit their `TYPICAL_QUANTILE`. Deterministic. Raises
-    ProposalError when a band has under `RANGE_MIN_WINDOWS` runs."""
+    band's limit their `TYPICAL_QUANTILE`. Deterministic. A band with
+    under `RANGE_MIN_WINDOWS` runs gets no limit (`PassageRange.thin`): a
+    corpus of long paragraphs may have no run of 100-149 words, and a
+    passage that short can hardly be cut from it either. Raises
+    ProposalError when no band has enough runs."""
     base = baseline or vp.load_baseline()
     pieces = [(prose_paragraphs(t), [len(vp.words(p)) for p in prose_paragraphs(t)])
               for t in texts.values()]
@@ -709,11 +732,13 @@ def passage_range(fp: vp.Fingerprint, texts: Mapping[str, str],
                 j += 1
             if lo <= n <= hi:
                 dists.append(_passage_distance(fp, '\n\n'.join(paras[i:j]), base))
-        if len(dists) < RANGE_MIN_WINDOWS:
-            raise ProposalError(f'the corpus gives {len(dists)} passages of {lo}-{hi} words, '
-                                f'too few for a typical range (at least {RANGE_MIN_WINDOWS})')
-        limits[band] = _quantile(dists, TYPICAL_QUANTILE)
         counts[band] = len(dists)
+        if len(dists) >= RANGE_MIN_WINDOWS:
+            limits[band] = _quantile(dists, TYPICAL_QUANTILE)
+    if not limits:
+        raise ProposalError(f'the corpus gives too few passages of any length for a typical '
+                            f'range (at least {RANGE_MIN_WINDOWS} a band; '
+                            + ', '.join(f'{b}: {n}' for b, n in counts.items()) + ')')
     return PassageRange(fp, limits, counts, base)
 
 
@@ -721,10 +746,13 @@ def auto_picks(passages: Sequence[Passage], least: int = SHORTLIST_MIN) -> list[
     """The ids picked by the rule the reference voiceprint's exemplars were
     chosen by: every typical passage; if fewer than `least`, the rest
     nearest their limit (distance over limit) until `least`. In shortlist
-    order. Every passage must have been judged."""
-    if any(p.typical is None for p in passages):
-        raise ProposalError('every passage must be judged (PassageRange.judge) before '
-                            'auto_picks')
+    order. Every passage must have been judged: raises ProposalError
+    naming those that aren't."""
+    unjudged = [p.id for p in passages if p.typical is None]
+    if unjudged:
+        raise ProposalError(f'not judged: {", ".join(unjudged)}. Run `storyforge voice judge` '
+                            f'first; a passage still unjudged after it is in a band too thin '
+                            f'for a range, so pick by hand')
     picked = {p.id for p in passages if p.typical}
     rest = sorted((p for p in passages if not p.typical),
                   key=lambda p: (p.distance / p.limit, p.id))
@@ -737,13 +765,25 @@ def auto_picks(passages: Sequence[Passage], least: int = SHORTLIST_MIN) -> list[
 # Files
 # ============================================================================
 
+def _write_text(path: str, text: str) -> None:
+    """Write `text` to `path` (UTF-8, LF) through a temporary file beside
+    it, so an interrupted write never leaves a truncated file."""
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    tmp = f'{path}.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
 def _write_rows(path: str, columns: Sequence[str], rows: Sequence[Mapping[str, str]]) -> None:
     """A pipe-delimited file, LF, no quoting; every cell through csv_safe."""
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     lines = ['|'.join(columns)]
     lines += ['|'.join(csv_safe(str(r.get(c, ''))) for c in columns) for r in rows]
-    with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write('\n'.join(lines) + '\n')
+    _write_text(path, '\n'.join(lines) + '\n')
 
 
 def _read_rows(path: str, columns: Sequence[str]) -> list[dict[str, str]]:
@@ -814,9 +854,7 @@ def write_shortlist(voice_dir: str, passages: Sequence[Passage]) -> str:
         if name.endswith('.md') and name not in keep:
             os.remove(os.path.join(folder, name))
     for p in passages:
-        with open(os.path.join(folder, f'{p.id}.md'), 'w', encoding='utf-8',
-                  newline='\n') as f:
-            f.write(p.text.strip() + '\n')
+        _write_text(os.path.join(folder, f'{p.id}.md'), p.text.strip() + '\n')
     _write_rows(path, SHORTLIST_COLUMNS, [_passage_row(p) for p in passages])
     return path
 
@@ -863,16 +901,18 @@ def set_picks(voice_dir: str, ids: Sequence[str]) -> list[Passage]:
     return passages
 
 
-def rejudge(voice_dir: str) -> list[Passage]:
+def rejudge(voice_dir: str) -> tuple[PassageRange, list[Passage]]:
     """Measure the shortlist's passages against the current fingerprint and
     rewrite their `distance`, `limit` and `typical` (free; after the
-    fingerprint changes). Picks and passage files are left as they are."""
+    fingerprint changes, or after the author trims a passage). Picks and
+    passage files are left as they are. Returns the range (its `thin`
+    bands) and the passages."""
     voice = load_voice(voice_dir)
     rng = passage_range(voice.fingerprint, voice.texts)
     passages = [rng.judge(p) for p in read_shortlist(voice_dir)]
     _write_rows(os.path.join(voice_dir, SHORTLIST_FILE), SHORTLIST_COLUMNS,
                 [_passage_row(p) for p in passages])
-    return passages
+    return rng, passages
 
 
 # ============================================================================
@@ -925,22 +965,36 @@ def accept_description(voice_dir: str) -> Accepted:
         raise ProposalError(f'{CLAIMS_FILE}: no claim is marked yes, so there is no '
                             f'description to write. Nothing written.')
     path = os.path.join(voice_dir, DESCRIPTION_FILE)
-    text = render_description(claims, _author(voice_dir))
-    with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(text)
+    _write_text(path, render_description(claims, _author(voice_dir)))
     return Accepted(path, len(kept), len(claims))
 
 
-def accept_exemplars(voice_dir: str) -> Accepted:
-    """Copy the picked passages to exemplars/ with their index. Raises
-    ProposalError, nothing written, when a pick isn't yes, no or blank, no
-    passage is picked, or a picked passage (perhaps trimmed by the author)
-    is outside `PASSAGE_MIN`..`PASSAGE_MAX` words. Exemplar files an
-    earlier accept wrote (named in the old index) that aren't picked now
-    are removed; files the index never named are left alone and noted.
-    Fewer than `SHORTLIST_MIN` or more than `SHORTLIST_MAX` picks is a
-    WARNING note: the plan's bank is 20 to 40 passages."""
+def accept_exemplars(voice_dir: str, picks: Sequence[str] | None = None) -> Accepted:
+    """Copy the picked passages to exemplars/ and update their index.
+
+    `picks`, when given, are the ids to pick in place of the `pick` column;
+    the column is rewritten to them only once the exemplars are written.
+    Raises ProposalError, nothing written, when a pick isn't yes, no or
+    blank, `picks` names a passage the shortlist doesn't hold, no passage is
+    picked, a picked passage (perhaps trimmed by the author) is outside
+    `PASSAGE_MIN`..`PASSAGE_MAX` words, or a picked passage's file in
+    exemplars/ exists without an index row (someone else's file).
+
+    Accept owns only the shortlist's passages: a shortlisted passage that's
+    picked is written (replacing its earlier copy), and one that isn't
+    picked is taken out of the bank if an earlier accept put it there. Every
+    other index row (an earlier shortlist's picks, or an exemplar the author
+    added) is kept as it is. Files in exemplars/ the index doesn't name are
+    left alone and noted. A bank of fewer than `SHORTLIST_MIN` or more than
+    `SHORTLIST_MAX` exemplars is a WARNING note: the plan's bank is 20 to 40
+    passages."""
     passages = read_shortlist(voice_dir)
+    if picks is not None:
+        unknown = sorted(set(picks) - {p.id for p in passages})
+        if unknown:
+            raise ProposalError(f'{SHORTLIST_FILE} holds no passage {", ".join(unknown)}. '
+                                f'Nothing written.')
+        passages = [replace(p, pick='yes' if p.id in set(picks) else '') for p in passages]
     bad = [f'{p.id} ({p.pick!r})' for p in passages if p.pick.lower() not in ('', *MARKS)]
     if bad:
         raise ProposalError(f'{SHORTLIST_FILE}: `pick` is yes, no or blank, not '
@@ -955,30 +1009,45 @@ def accept_exemplars(voice_dir: str) -> Accepted:
                             f'{", ".join(wrong)}. Nothing written.')
     folder = os.path.join(voice_dir, EXEMPLARS_DIR)
     index = os.path.join(voice_dir, EXEMPLARS_INDEX)
-    old = [r['id'] for r in _read_rows(index, EXEMPLAR_COLUMNS)] if os.path.isfile(index) else []
-    os.makedirs(folder, exist_ok=True)
+    old = _read_rows(index, EXEMPLAR_COLUMNS) if os.path.isfile(index) else []
+    old_ids = {r['id'] for r in old}
+    clash = [p.id for p in picked if p.id not in old_ids
+             and os.path.exists(os.path.join(folder, f'{p.id}.md'))]
+    if clash:
+        raise ProposalError(f'{EXEMPLARS_DIR}/ already holds '
+                            f'{", ".join(c + ".md" for c in clash)}, which its index doesn\'t '
+                            f'name; move it or add it to {EXEMPLARS_INDEX}. Nothing written.')
+    shortlisted = {p.id for p in passages}
     keep = {p.id for p in picked}
-    for oid in old:
-        f = os.path.join(folder, f'{oid}.md')
-        if oid not in keep and os.path.isfile(f):
+    carried = [r for r in old if r['id'] not in shortlisted]
+    os.makedirs(folder, exist_ok=True)
+    for r in old:
+        f = os.path.join(folder, f'{r["id"]}.md')
+        if r['id'] in shortlisted and r['id'] not in keep and os.path.isfile(f):
             os.remove(f)
     for p in picked:
-        with open(os.path.join(folder, f'{p.id}.md'), 'w', encoding='utf-8', newline='\n') as f:
-            f.write(p.text.strip() + '\n')
-    _write_rows(index, EXEMPLAR_COLUMNS,
-                [{'id': p.id, 'job': p.job, 'source': p.source, 'paragraphs': p.paragraphs,
-                  'words': str(p.words)} for p in picked])
+        _write_text(os.path.join(folder, f'{p.id}.md'), p.text.strip() + '\n')
+    rows = carried + [{'id': p.id, 'job': p.job, 'source': p.source,
+                       'paragraphs': p.paragraphs, 'words': str(p.words), 'why': p.why}
+                      for p in picked]
+    _write_rows(index, EXEMPLAR_COLUMNS, rows)
+    if picks is not None:
+        _write_rows(os.path.join(voice_dir, SHORTLIST_FILE), SHORTLIST_COLUMNS,
+                    [_passage_row(p) for p in passages])
     notes = []
-    known = keep | set(old)
+    named = {r['id'] for r in rows}
     unlisted = sorted(n for n in os.listdir(folder)
-                      if n.endswith('.md') and n[:-3] not in known)
+                      if n.endswith('.md') and n[:-3] not in named)
     if unlisted:
-        notes.append(f'NOTE: {EXEMPLARS_DIR}/ also holds {", ".join(unlisted)}, which no '
-                     f'accept wrote; left as they are')
-    if not SHORTLIST_MIN <= len(picked) <= SHORTLIST_MAX:
-        notes.append(f'WARNING: {len(picked)} exemplars picked; the bank is meant to be '
+        notes.append(f'NOTE: {EXEMPLARS_DIR}/ also holds {", ".join(unlisted)}, which its '
+                     f'index doesn\'t name; left as they are')
+    if carried:
+        notes.append(f'NOTE: kept {len(carried)} exemplar(s) the shortlist doesn\'t hold '
+                     f'({", ".join(r["id"] for r in carried)})')
+    if not SHORTLIST_MIN <= len(rows) <= SHORTLIST_MAX:
+        notes.append(f'WARNING: the bank holds {len(rows)} exemplars; it is meant to be '
                      f'{SHORTLIST_MIN} to {SHORTLIST_MAX}')
-    jobs = {p.job for p in picked}
+    jobs = {r['job'] for r in rows}
     missing = [j for j in JOBS if j not in jobs]
     if missing:
         notes.append(f'NOTE: no exemplar for the job(s) {", ".join(missing)}')
@@ -1012,15 +1081,23 @@ def forecast(system: Sequence[dict], model: str, calls: Sequence[str] = ('descri
     return total
 
 
-def _call(system: list[dict], prompt: str, schema: dict, model: str, tokens: int,
-          label: str, reply_file: str | None) -> str:
-    from storyforge import api
-    response = api.invoke(prompt, model, max_tokens=tokens, label=label, system=system,
-                          output_schema=schema)
+def _save_reply(reply_file: str | None, response: dict) -> None:
     if reply_file:
         os.makedirs(os.path.dirname(reply_file), exist_ok=True)
         with open(reply_file, 'w', encoding='utf-8') as f:
             json.dump(response, f, indent=1)
+
+
+def _call(system: list[dict], prompt: str, schema: dict, model: str, tokens: int,
+          label: str, reply_file: str | None) -> str:
+    from storyforge import api
+    try:
+        response = api.invoke(prompt, model, max_tokens=tokens, label=label, system=system,
+                              output_schema=schema)
+    except api.RefusalError as e:
+        _save_reply(reply_file, e.response)     # a refusal is paid for too
+        raise
+    _save_reply(reply_file, response)
     problem = api.stop_problem(response)
     if problem:
         raise ProposalError(f'the {label} reply is unusable: {problem}')

@@ -64,7 +64,10 @@ def parse_args(argv):
                      help='Accept one of the two')
     acc.add_argument('--auto-pick', action='store_true',
                      help='Pick the exemplars by the reference voiceprint\'s rule '
-                          '(voiceprint_proposals.auto_picks), replacing the pick column')
+                          '(voiceprint_proposals.auto_picks) and write them to the pick '
+                          'column once accepted')
+    acc.add_argument('--force', action='store_true',
+                     help='With --auto-pick, replace picks already in the shortlist')
     return parser.parse_args(argv)
 
 
@@ -78,10 +81,13 @@ def main(argv=None):
         if args.action == 'propose':
             return _propose(voice_dir, args)
         if args.action == 'judge':
-            passages = vpp.rejudge(voice_dir)
+            rng, passages = vpp.rejudge(voice_dir)
+            if rng.thin:
+                log(rng.thin_warning())
             typical = sum(1 for p in passages if p.typical)
             log(f'{vpp.SHORTLIST_FILE}: {typical} of {len(passages)} passages inside the '
                 f'fingerprint\'s typical range')
+            _log_unjudged(passages)
             return 0
         return _accept(voice_dir, args)
     except vpp.ProposalError as e:
@@ -121,10 +127,15 @@ def _propose(voice_dir: str, args) -> int:
     system = vpp.system_blocks(voice, sample)
     model = args.model or select_model(vpp.MODEL_TASK)
     estimate = vpp.forecast(system, model, calls)
+    # the typical range is free: measure it before paying, so a corpus that
+    # can't give one fails here, not after the shortlist call
+    rng = vpp.passage_range(voice.fingerprint, voice.texts) if 'shortlist' in calls else None
     log(f'Sample: {sample.windows} passages, {len(sample.paragraphs)} paragraphs, '
         f'{sample.words:,} words of {sum(p.get("words", 0) for p in voice.fingerprint.pieces):,} '
         f'fingerprinted')
     log(f'Forecast: ${estimate:.2f} on {model} ({", ".join(calls)})')
+    if rng and rng.thin:
+        log(rng.thin_warning())
     if args.dry_run:
         log('Dry run: no call made.')
         return 0
@@ -134,39 +145,82 @@ def _propose(voice_dir: str, args) -> int:
         return 1
 
     status = 0
+    written = []
     replies = os.path.join(voice_dir, vpp.REPLIES_DIR)
     with api.metered() as meter:
-        if 'description' in calls:
-            claims, problems = vpp.propose_description(
-                system, model, os.path.join(replies, 'description.json'))
-            path = vpp.write_claims(voice_dir, claims)
-            log(f'{len(claims)} claims -> {os.path.relpath(path, voice_dir)}: mark each '
-                f'yes or no in the `mark` column')
-            for p in problems:
-                log(f'WARNING: {p}')
-        if 'shortlist' in calls:
-            passages, refused = vpp.propose_shortlist(
-                system, sample, model, os.path.join(replies, 'shortlist.json'))
-            rng = vpp.passage_range(voice.fingerprint, voice.texts)
-            passages = [rng.judge(p) for p in passages]
-            path = vpp.write_shortlist(voice_dir, passages)
-            typical = sum(1 for p in passages if p.typical)
-            log(f'{len(passages)} passages ({typical} inside the fingerprint\'s typical '
-                f'range) -> {os.path.relpath(path, voice_dir)}: write yes in `pick` for '
-                f'each to keep')
-            for r in refused:
-                log(f'WARNING: refused {r}')
-            if len(passages) < vpp.SHORTLIST_MIN:
-                log(f'ERROR: only {len(passages)} usable passages; the shortlist should '
-                    f'hold {vpp.SHORTLIST_MIN} to {vpp.SHORTLIST_MAX}. Run it again '
-                    f'(--only shortlist), or add passages by hand.')
+        for call in calls:
+            reply_file = os.path.join(replies, f'{call}.json')
+            try:
+                if call == 'description':
+                    status |= _propose_description(voice_dir, system, model, reply_file,
+                                                   written)
+                else:
+                    status |= _propose_shortlist(voice_dir, system, sample, model, rng,
+                                                 reply_file, written)
+            except (api.RefusalError, RuntimeError, vpp.ProposalError) as e:
+                # RefusalError is a RuntimeError; RuntimeError is also the API's
+                # HTTP failure after retries and a missing API key
+                log(f'ERROR: the {call} call failed: {e}')
+                if os.path.isfile(reply_file):
+                    log(f'Its raw reply is in {os.path.relpath(reply_file, voice_dir)}')
                 status = 1
-    log(f'Spent ${meter.cost():.2f}')
+                break
+    unwritten = [vpp.CLAIMS_FILE if c == 'description' else vpp.SHORTLIST_FILE
+                 for c in calls if c not in written]
+    if status and unwritten:
+        log(f'Not written (left as they were): {", ".join(unwritten)}')
+    log(f'Spent ${meter.cost():.2f} (not ledgered: a voice repo has no cost ledger)')
     return status
+
+
+def _propose_description(voice_dir, system, model, reply_file, written) -> int:
+    from storyforge import voiceprint_proposals as vpp
+    claims, problems = vpp.propose_description(system, model, reply_file)
+    path = vpp.write_claims(voice_dir, claims)
+    written.append('description')
+    log(f'{len(claims)} claims -> {os.path.relpath(path, voice_dir)}: mark each '
+        f'yes or no in the `mark` column')
+    for p in problems:
+        log(f'WARNING: {p}')
+    return 0
+
+
+def _propose_shortlist(voice_dir, system, sample, model, rng, reply_file, written) -> int:
+    from storyforge import voiceprint_proposals as vpp
+    passages, refused = vpp.propose_shortlist(system, sample, model, reply_file)
+    named = len(passages) + len(refused)
+    passages = [rng.judge(p) for p in passages]
+    path = vpp.write_shortlist(voice_dir, passages)
+    written.append('shortlist')
+    typical = sum(1 for p in passages if p.typical)
+    log(f'{len(passages)} passages ({typical} inside the fingerprint\'s typical '
+        f'range) -> {os.path.relpath(path, voice_dir)}: write yes in `pick` for '
+        f'each to keep')
+    for r in refused:
+        log(f'WARNING: refused {r}')
+    _log_unjudged(passages)
+    if named != vpp.SHORTLIST_ASK:
+        log(f'WARNING: asked for {vpp.SHORTLIST_ASK} passages; the reply named {named}')
+    if not vpp.SHORTLIST_MIN <= len(passages) <= vpp.SHORTLIST_MAX:
+        log(f'ERROR: {len(passages)} usable passages; the shortlist should hold '
+            f'{vpp.SHORTLIST_MIN} to {vpp.SHORTLIST_MAX}. Run it again (--only shortlist), '
+            f'or add or drop passages by hand.')
+        return 1
+    return 0
+
+
+def _log_unjudged(passages) -> None:
+    unjudged = [f'{p.id} ({p.words} words)' for p in passages if p.typical is None]
+    if unjudged:
+        log(f'WARNING: not judged (their length\'s band is too thin for a typical range): '
+            f'{", ".join(unjudged)}')
 
 
 def _accept(voice_dir: str, args) -> int:
     from storyforge import voiceprint_proposals as vpp
+    if args.auto_pick and args.only == 'description':
+        log('ERROR: --auto-pick picks exemplars; it does nothing with --only description')
+        return 1
     status = 0
     if args.only != 'exemplars':
         try:
@@ -177,11 +231,16 @@ def _accept(voice_dir: str, args) -> int:
             status = 1
     if args.only != 'description':
         try:
+            picks = None
             if args.auto_pick:
-                ids = vpp.auto_picks(vpp.read_shortlist(voice_dir))
-                vpp.set_picks(voice_dir, ids)
-                log(f'Picked {len(ids)} passages by the reference rule (auto_picks)')
-            done = vpp.accept_exemplars(voice_dir)
+                shortlist = vpp.read_shortlist(voice_dir)
+                if not args.force and any(p.pick for p in shortlist):
+                    raise vpp.ProposalError(
+                        f'{vpp.SHORTLIST_FILE} already holds picks; --auto-pick would replace '
+                        f'them. Pass --force to replace them.')
+                picks = vpp.auto_picks(shortlist)
+                log(f'Picking {len(picks)} passages by the reference rule (auto_picks)')
+            done = vpp.accept_exemplars(voice_dir, picks)
             log(f'{vpp.EXEMPLARS_DIR}/: {done.kept} of {done.total} shortlisted passages')
             for note in done.notes:
                 log(note)
