@@ -83,6 +83,32 @@ def bare_markers(cell: str) -> int:
     return sum(1 for i in items(cell) if i.must and not i.text)
 
 
+#: The fewest words a quote and a beat must share, one inside the other,
+#: for `names_beat` to read them as the same beat (a word or two is in
+#: everything)
+MIN_SHARED_WORDS = 4
+
+
+def _words(text: str) -> str:
+    import unicodedata
+    text = unicodedata.normalize('NFC', text or '')
+    return ' ' + ' '.join(re.findall(r'\w+', text.lower())) + ' '
+
+
+def names_beat(quote: str, beat: str) -> bool:
+    """Whether `quote` (a check's or a judge's words for a broken promise)
+    is about the beat `beat`: the same words, the marker, case and
+    punctuation aside, or one inside the other, word for word, the shorter
+    `MIN_SHARED_WORDS` words or more."""
+    q, b = _words(strip_marker(quote)), _words(strip_marker(beat))
+    if not q.strip() or not b.strip():
+        return False
+    if q == b:
+        return True
+    short, long_ = sorted((q, b), key=len)
+    return len(short.split()) >= MIN_SHARED_WORDS and short in long_
+
+
 def _key(text: str) -> str:
     return ' '.join(text.split())
 

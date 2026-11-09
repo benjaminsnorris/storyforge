@@ -1023,26 +1023,14 @@ def _bare_must(scene: dict[str, str]) -> list[str]:
             for n in [bare_markers(scene.get(col) or '')] if n]
 
 
-def _names_beat(quote: str, text: str) -> bool:
-    """Whether a broken promise quoting `quote` is about the beat `text`:
-    the same words (the marker, case and punctuation aside), or one inside
-    the other (`_quoted_in`: four words or more)."""
-    from storyforge.must import strip_marker
-    quote = strip_marker(quote)
-    if not _words(quote).strip():
-        return False
-    return (_words(quote) == _words(text) or _quoted_in(text, quote)
-            or _quoted_in(quote, text))
-
-
 def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
     """Whether the broken promise `f` is of a `must` beat. A quote that is
     one whole item of the brief's field is that item, marked or not;
-    otherwise it is a `must` beat's when it names one (`_names_beat`) in
+    otherwise it is a `must` beat's when it names one (`must.names_beat`) in
     its field, or in any field when `f` names one without `must` beats (an
     unverified finding's made-up id). In doubt it is a `must` beat's: a
     wrong stop costs a look, a wrong pass loses the author's beat."""
-    from storyforge.must import items, strip_marker
+    from storyforge.must import items, names_beat, strip_marker
     if not any(beats.values()):
         return False
     quote = _words(strip_marker(f.established_quote))
@@ -1051,7 +1039,7 @@ def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
         for item in items(scene.get(col) or ''):
             if quote.strip() and _words(item.text) == quote:
                 return item.must and bool(item.text)
-    return any(_names_beat(f.established_quote, b.text)
+    return any(names_beat(f.established_quote, b.text)
                for col in fields for b in beats[col])
 
 
@@ -1096,6 +1084,7 @@ def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
     adaptation marks the source lines it keeps verbatim this way (#642).
     An unquoted action is a paraphrase: the check judges whether it is
     kept."""
+    from storyforge.must import names_beat
     scene = _brief_row(project_dir, scene_id)
     beats = _must_beats(scene)
     if not any(beats.values()):
@@ -1108,7 +1097,7 @@ def _verbatim_findings(project_dir: str, scene_id: str, prose: str,
             lines = [p.text for p in _item_lines(project_dir, col, item.text, holder)
                      if _count(_words(p.text)) >= _MIN_BRIEF_WORDS]
             missing = [line for line in lines if not _verbatim_in(line, prose)]
-            if not missing or any(_names_beat(f.established_quote, item.text)
+            if not missing or any(names_beat(f.established_quote, item.text)
                                   for f in reported):
                 continue
             out.append(Finding(

@@ -105,3 +105,16 @@ class TestKeepMust:
                                       'round the walls')
         assert out['goal'] == 'flee'          # only MUST_FIELDS carry the marker
         assert len(notes) == 1 and notes[0].startswith('key_actions: put back')
+
+
+@pytest.mark.parametrize('quote, beat, same', [
+    ('Searches removal logs', 'Searches removal logs', True),
+    ('must: searches removal logs.', 'Searches removal logs', True),       # marker, case
+    ('Searches the removal logs twice', 'Searches the removal logs twice over', True),
+    ('the logs', 'Searches the removal logs', False),                     # too few words
+    ('Burns the archive to the ground', 'Searches the removal logs', False),
+    ('', 'Searches removal logs', False),
+    ('must:', 'must:', False),                                             # no beat
+])
+def test_names_beat(quote, beat, same):
+    assert must.names_beat(quote, beat) is same
