@@ -272,15 +272,17 @@ def test_shortlist_spans_the_jobs(shortlist):
 def test_typical_range_tells_austen_from_others(voice):
     """The range means something: held-out Austen passages (Emma) fall
     inside it far more often than other authors' (the test fixtures'
-    excerpts), at the shortlist's sizes."""
+    excerpts), in every band: passages are grown to each band's lower
+    bound in turn (100, 150, 200, 300 words)."""
     rng = vpp.passage_range(voice.fingerprint, voice.texts)
 
     def share(text):
         paras = vpp.prose_paragraphs(text)
         hits = n = 0
-        for i in range(0, len(paras), 9):
+        for t, i in enumerate(range(0, len(paras), 9)):
+            target = vpp.PASSAGE_BANDS[t % len(vpp.PASSAGE_BANDS)]
             words, j = 0, i
-            while j < len(paras) and words < 150:
+            while j < len(paras) and words < target:
                 words += len(vp.words(paras[j]))
                 j += 1
             if vpp.PASSAGE_MIN <= words <= vpp.PASSAGE_MAX:
@@ -298,7 +300,8 @@ def test_typical_range_tells_austen_from_others(voice):
             with open(os.path.join(d, name), encoding='utf-8') as f:
                 texts.append(f.read())
     others = share('\n\n'.join(texts))
-    # measured 2026-11-08: Emma 0.888, the others 0.143
+    # measured 2026-11-09 (the bands' runs spread across each band): Emma
+    # 0.831, the others 0.086
     assert emma >= 0.8 and others <= 0.3, (emma, others)
 
 

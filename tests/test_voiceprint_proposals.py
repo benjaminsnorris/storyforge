@@ -942,3 +942,20 @@ def test_accept_exemplars_warns_of_a_passage_edited_beyond_a_trim(voice_dir):
     done = vpp.accept_exemplars(voice_dir, [p.id for p in passages])
     edited = [n for n in done.notes if 'edited, not only trimmed' in n]
     assert len(edited) == 1 and passages[1].id in edited[0]
+
+
+def test_passage_range_measures_runs_across_each_band(voice_dir, monkeypatch):
+    """T3: a band's corpus passages reach its top as well as its foot, so a
+    260-word passage isn't judged by 205-word runs alone."""
+    voice = vpp.load_voice(voice_dir)
+    lengths = []
+    real = vpp._passage_distance
+
+    def spy(fp, text, base):
+        lengths.append(len(vp.words(text)))
+        return real(fp, text, base)
+    monkeypatch.setattr(vpp, '_passage_distance', spy)
+    vpp.passage_range(voice.fingerprint, voice.texts)
+    band200 = [n for n in lengths if 200 <= n <= 299]
+    assert sum(band200) / len(band200) > 235
+    assert sum(1 for n in band200 if n >= 260) > len(band200) / 5

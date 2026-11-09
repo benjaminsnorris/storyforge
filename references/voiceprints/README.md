@@ -203,9 +203,11 @@ other writers', and makes two calls (`storyforge.voiceprint_proposals`,
 A passage is **typical** when its distance from the fingerprint is at most
 the 90th percentile of the corpus's own passages of its size (bands of 100,
 150, 200 and 300 words; short passages vary far more than the fingerprint's
-2,000-word chunks). On Austen the limits are 0.95, 0.90, 0.87 and 0.82;
-held-out *Emma* passages of about 150 words fall inside 89% of the time, the
-seven other authors' 14%. A band the corpus has fewer than 20 passages of (a
+2,000-word chunks; the corpus passages behind each band are grown to four
+lengths spread across it, so its limit speaks for a passage near its top as
+well as one near its foot). On Austen the limits are 0.93, 0.88, 0.83 and
+0.80; held-out *Emma* passages of each band's size fall inside 83% of the
+time, the seven other authors' 9%. A band the corpus has fewer than 20 passages of (a
 corpus of long paragraphs may have no run of 100-149 words) gets no limit:
 `voice propose` says so before paying, and a passage in it is left unjudged.
 `storyforge voice judge` measures the shortlist again after the fingerprint
@@ -226,7 +228,7 @@ claims or pick passages, so both follow the rule the tests define:
   `description.md` keeps all 22.
 - **Exemplars** are `voiceprint_proposals.auto_picks` (`voice accept
   --auto-pick`): every typical passage, topped up to 20 with the nearest of
-  the rest. 27 of the 30 are typical, so 27 are exemplars, spanning all six
+  the rest. 25 of the 30 are typical, so 25 are exemplars, spanning all six
   jobs.
 
 An author's own marks and picks replace both.
@@ -267,7 +269,7 @@ The misses are the patterns', not the model's: the committed claims say
 list stays as it was fixed; it's a floor on a keyword proxy, not a reading.
 
 **Test 5, the shortlist** (free): 20 to 40 passages of 100 to 400 words, each
-the corpus as written; at least 75% typical (measured 27 of 30, 90%); at
+the corpus as written; at least 75% typical (measured 25 of 30, 83%); at
 least five of the six jobs and none over 40% (measured all six, five
 passages each).
 

@@ -711,6 +711,10 @@ TYPICAL_QUANTILE = 0.9
 RANGE_WINDOWS = 400
 #: a band with fewer corpus passages than this can't give a range
 RANGE_MIN_WINDOWS = 20
+#: corpus passages are grown to this many lengths spread evenly across their
+#: band, in turn, so a band's limit speaks for its long passages as well as
+#: its short ones (a short passage varies more)
+RANGE_SPREAD = 4
 
 
 def _passage_distance(fp: vp.Fingerprint, text: str, base: vp.Baseline) -> float:
@@ -792,9 +796,10 @@ def passage_range(fp: vp.Fingerprint, texts: Mapping[str, str],
                   baseline: vp.Baseline | None = None) -> PassageRange:
     """The typical range of a passage of each band's size: runs of whole
     paragraphs of the corpus (`texts`, the fingerprinted pieces), each
-    started at an evenly spaced paragraph and grown until it reaches the
-    band, kept when it ends inside it; each run's distance from `fp`; the
-    band's limit their `TYPICAL_QUANTILE`. Deterministic. A band with
+    started at an evenly spaced paragraph and grown until it reaches a
+    target length (the targets spread across the band, `RANGE_SPREAD`, taken
+    in turn), kept when it ends inside the band; each run's distance from
+    `fp`; the band's limit their `TYPICAL_QUANTILE`. Deterministic. A band with
     under `RANGE_MIN_WINDOWS` runs gets no limit (`PassageRange.thin`): a
     corpus of long paragraphs may have no run of 100-149 words, and a
     passage that short can hardly be cut from it either. Raises
@@ -808,10 +813,11 @@ def passage_range(fp: vp.Fingerprint, texts: Mapping[str, str],
         lo, hi = _band_bounds(band)
         step = max(1, len(starts) // RANGE_WINDOWS)
         dists = []
-        for k, i in starts[::step]:
+        for t, (k, i) in enumerate(starts[::step]):
             paras, lens = pieces[k]
+            target = lo + (hi - lo) * ((t % RANGE_SPREAD) + 0.5) / RANGE_SPREAD
             n, j = 0, i
-            while j < len(paras) and n < lo:
+            while j < len(paras) and n < target:
                 n += lens[j]
                 j += 1
             if lo <= n <= hi:
