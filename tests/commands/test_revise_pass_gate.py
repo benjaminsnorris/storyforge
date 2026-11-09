@@ -254,7 +254,7 @@ class TestGatePassScenes:
         _scenes(project_dir, 'act1-sc01', 'act1-sc02')
         gated, _ = _stub_gate(monkeypatch)
 
-        def bad(pd, sid):
+        def bad(pd, sid, **kw):
             raise gate.GateError('bad header')
         monkeypatch.setattr(cmd_write, '_gate_blockers', bad)
         out = _gate_pass(project_dir, ['act1-sc01', 'act1-sc02'])

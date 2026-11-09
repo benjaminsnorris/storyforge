@@ -56,7 +56,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
-from storyforge.illustrations import count_prose_words, read_scene_prose
+from storyforge.illustrations import count_prose_words, read_scene_prose, read_scene_raw
 
 
 def parse_args(argv):
@@ -449,24 +449,145 @@ def _resolve_filter(args) -> tuple:
     sys.exit(1)
 
 
-def _gate_blockers(project_dir: str, scene_id: str, keep_going: bool = False) -> list[str]:
+def _gate_blockers(project_dir: str, scene_id: str, keep_going: bool = False,
+                   narrow: bool = False) -> list[str]:
     """Scenes waiting on the gate (`gate.pending`) that come before
     `scene_id` in reading order, as `id: reason`. A pending id that is no
     longer a scene can't block; it is named in a WARNING instead. With
     `keep_going`, a scene committed provisionally (`gate.PROVISIONAL`: its
-    facts are in the ledger) doesn't block either."""
-    from storyforge import gate, ledger
-    waiting = gate.pending(project_dir)
-    order = ledger.scene_order(project_dir)
-    gone = sorted(s for s in waiting if s not in order)
-    if gone:
-        log(f'WARNING: {gate.PENDING_PATH} lists id(s) that are no longer scenes: '
-            f'{", ".join(gone)}. Delete those rows.')
-    at = order.get(scene_id, 0)
-    return [f'{s}: {waiting[s]["reason"]}' for s in sorted(
-        (s for s in waiting if s in order and s != scene_id and order[s] < at
-         and not (keep_going and waiting[s]['command'] == gate.PROVISIONAL)),
-        key=order.get)]
+    facts are in the ledger) doesn't block either. `narrow` (revise, #633)
+    keeps only the scenes `scene_id` waits on (`GateBlockers`).
+
+    Raises:
+        gate.GateError: `gate.PENDING_PATH` is malformed."""
+    return GateBlockers(project_dir, keep_going=keep_going, narrow=narrow).of(scene_id)
+
+
+#: The pending commands whose scene's facts may still be what its prose
+#: says: a re-check or a check of the prose failed, and neither commits or
+#: removes a fact (#633)
+_REREAD_COMMANDS = ('recheck-failed', 'advisor')
+
+
+class GateBlockers:
+    """Which earlier scenes waiting on the gate stop a scene from being
+    drafted or gated (`of`), read once for several scenes.
+
+    By default (`write`) every earlier pending scene does: the ledger lacks
+    what it says. With `narrow` (revise, #633) an earlier pending scene
+    stops a scene only when
+    - it isn't a re-check or check that failed (`recheck-failed`,
+      `advisor`) on prose unchanged since its facts were read
+      (`gate.gated_prose`) with those facts still in the ledger: a failed
+      re-reading of the same prose doesn't make the ledger wrong; and
+    - one of the scene's binding facts depends on one of its commitments
+      (`ledger.dependents`, run from the waiting scene's facts), named in
+      the line ("waits on it: fact F ... depends on its fact G ..."). When
+      either scene has no commitments in the ledger, what depends on what
+      can't be told, and it stops the scene as before.
+    A ledger or registry that can't be read narrows nothing (WARNING)."""
+
+    def __init__(self, project_dir: str, keep_going: bool = False, narrow: bool = False):
+        from storyforge import gate, ledger
+        self.project_dir = project_dir
+        self.keep_going = keep_going
+        self.waiting = gate.pending(project_dir)
+        self.order = ledger.scene_order(project_dir)
+        gone = sorted(s for s in self.waiting if s not in self.order)
+        if gone:
+            log(f'WARNING: {gate.PENDING_PATH} lists id(s) that are no longer scenes: '
+                f'{", ".join(gone)}. Delete those rows.')
+        self.narrow = narrow and bool(self.waiting) and self._load()
+        self._through: dict[str, bool] = {}
+        self._depending: dict[str, list[str]] = {}
+
+    def _load(self) -> bool:
+        from storyforge import ledger
+        try:
+            rows = ledger.load(self.project_dir)
+            self.names, _ = ledger.subject_names(self.project_dir)
+        except (ledger.LedgerError, ledger.NotMigratedError, OSError,
+                UnicodeDecodeError) as e:
+            log(f'WARNING: {e}; every earlier scene waiting on the gate holds back the '
+                f'later ones, whatever they depend on.')
+            return False
+        self.rows = rows
+        self.facts: dict[str, list[dict[str, str]]] = {}
+        for r in rows:
+            if ledger.is_commitment(r) and r.get('status') != 'planned':
+                self.facts.setdefault((r.get('scene_id') or '').strip(), []).append(r)
+        return True
+
+    def of(self, scene_id: str) -> list[str]:
+        """The earlier pending scenes that stop `scene_id`, in reading order,
+        as `id: reason` (narrowed: with why it waits on each)."""
+        from storyforge import gate
+        at = self.order.get(scene_id, 0)
+        earlier = sorted(
+            (s for s, row in self.waiting.items()
+             if s in self.order and s != scene_id and self.order[s] < at
+             and not (self.keep_going and row['command'] == gate.PROVISIONAL)),
+            key=self.order.get)
+        out = []
+        for s in earlier:
+            line = f'{s}: {self.waiting[s]["reason"]}'
+            if not self.narrow:
+                out.append(line)
+                continue
+            if self._let_through(s):
+                continue
+            why = self._waits(scene_id, s)
+            if why:
+                out.append(f'{line} ({scene_id} waits on it: {why})')
+        return out
+
+    def _let_through(self, sid: str) -> bool:
+        """Whether `sid`'s failed re-reading leaves its facts as its prose says."""
+        if sid not in self._through:
+            from storyforge import gate
+            ok = False
+            if self.waiting[sid]['command'] in _REREAD_COMMANDS and self.facts.get(sid):
+                earlier, _ = gate.gated_prose(self.project_dir, sid)
+                try:   # the exact text: gated_prose is the file as gated, markers and all
+                    prose = read_scene_raw(self.project_dir, sid)
+                except (OSError, UnicodeDecodeError):
+                    prose = None
+                ok = earlier is not None and prose is not None \
+                    and earlier.rstrip() == prose.rstrip()
+            self._through[sid] = ok
+        return self._through[sid]
+
+    def _waits(self, scene_id: str, sid: str) -> str:
+        """Why `scene_id` waits on the earlier `sid` ('' when it doesn't)."""
+        from storyforge import ledger
+        theirs = self.facts.get(sid, [])
+        if not theirs:
+            return (f'{sid}\'s facts are not in the ledger, so what depends on it '
+                    f'can\'t be told')
+        mine = [r for r in self.facts.get(scene_id, []) if r.get('status') == 'binding']
+        if not mine:
+            return (f'{scene_id} has no binding facts in the ledger to tell whether any '
+                    f'depends on {sid}')
+        if sid not in self._depending:
+            self._depending[sid] = ledger.dependents(
+                self.rows, [r['id'] for r in theirs], self.order, names=self.names).scenes
+        if scene_id not in self._depending[sid]:
+            return ''
+        for f in theirs:
+            if (f.get('resolves') or '').strip() == scene_id:
+                return f'its fact {f["id"]} ({_said(f)}) ends in {scene_id}'
+            for r in mine:
+                if scene_id in ledger.dependents([f, r], [f['id']], self.order,
+                                                 names=self.names).scenes:
+                    return (f'fact {r["id"]} ({_said(r)}) depends on its fact '
+                            f'{f["id"]} ({_said(f)})')
+        return f'a fact of {scene_id} depends on its facts'
+
+
+def _said(row: dict[str, str], width: int = 60) -> str:
+    """A fact's statement, quoted and cut to `width` characters."""
+    text = ' '.join((row.get('statement') or '').split())
+    return '"' + (text if len(text) <= width else text[:width - 3] + '...') + '"'
 
 
 def _exit_if_gate_pending(project_dir: str, to_draft: list[str],

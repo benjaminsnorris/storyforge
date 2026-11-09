@@ -154,7 +154,7 @@ def test_revise_gated_pass_keeps_the_markers(illustrated, monkeypatch):
             f.write(REWRITE)
         return True, ''
     monkeypatch.setattr(cmd_write, '_gate_drafted_scene', gate_drops_the_marker)
-    monkeypatch.setattr(cmd_write, '_gate_blockers', lambda *a: [])
+    monkeypatch.setattr(cmd_write, '_gate_blockers', lambda *a, **k: [])
     monkeypatch.setattr(cmd_revise, '_commit', lambda *a, **k: None)
     monkeypatch.setattr(gate, 'clear_pending', lambda *a: None)
     monkeypatch.setattr(cmd_revise, '_recheck_after', lambda *a, **k: None)
