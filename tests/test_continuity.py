@@ -1,6 +1,7 @@
 """Tests for storyforge.typed_state and storyforge.continuity (#648): typed
 records, their extraction (API mocked at `api._api_request`) and file, and
-each deterministic check on synthetic books; the `frame` column; the
+each deterministic check on synthetic books; time_mode's memory, dream
+and ghost; the
 world table's `speed`; the gate's use of the checks. Every scene, name and
 place here is invented for the tests."""
 
@@ -34,9 +35,9 @@ def R(type_, who='', item='', value='', detail='', quote=None, verified=True, or
 
 
 def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, world=None,
-              frame_column=True, forbidden=None, known=None):
+              time_mode_column=True, forbidden=None, known=None):
     """`scenes`: id → overrides of a row (`timeline_day`, `time_of_day`,
-    `pov`, `frame`, `time_mode`, `location`); reading order is the dict's.
+    `pov`, `time_mode`, `location`); reading order is the dict's.
     `recs`: id → records, numbered in order."""
     scenes = scenes or {s: {} for s in recs}
     rows_ = {}
@@ -48,7 +49,7 @@ def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, 
                 places=dict(PLACES), place_names={'harbour': 'Harbour', 'mill': 'Mill',
                                                   'tower': 'Tower'},
                 world=world or World(), rows=list(rows or []), briefs=dict(briefs or {}),
-                has_frame_column=frame_column, forbidden=dict(forbidden or {}),
+                has_time_mode=time_mode_column, forbidden=dict(forbidden or {}),
                 known_names=known)
     for sid, rs in recs.items():
         for n, r in enumerate(rs):
@@ -98,27 +99,37 @@ class TestLife:
                               's3': {'timeline_day': '2'}})
         assert continuity.check_life(b)[0] == []
 
-    @pytest.mark.parametrize('over', [{'frame': 'dream'}, {'frame': 'Ghost '},
-                                      {'time_mode': 'vision'}, {'frame': 'memory'}])
+    @pytest.mark.parametrize('over', [{'time_mode': 'dream'}, {'time_mode': 'Ghost '},
+                                      {'time_mode': 'vision'}, {'time_mode': 'memory'},
+                                      {'time_mode': 'frame'}])
     def test_a_scene_off_the_present_is_exempt(self, over):
         b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]},
                       scenes={'s1': {}, 's2': over})
         assert continuity.check_life(b)[0] == []
 
-    def test_an_unknown_frame_value_is_the_present(self):
+    @pytest.mark.parametrize('over', [{'time_mode': 'flashback'}, {'time_mode': 'summary'},
+                                      {'frame': 'dream'}])
+    def test_an_unknown_mode_or_a_frame_column_is_the_present(self, over):
+        # #648's review (CR-1): one column; a `frame` cell is nothing
         b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]},
-                      scenes={'s1': {}, 's2': {'frame': 'flashback'}})
+                      scenes={'s1': {}, 's2': over})
         assert codes(continuity.check_life(b)[0]) == ['PHY']
 
-    def test_without_a_frame_column_it_is_reported_and_says_so(self):
-        b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]},
-                      frame_column=False)
+    def test_the_hint_names_time_mode(self):
+        b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]})
         f, _ = continuity.check_life(b)
-        assert 'frame column (scenes.csv has none' in f[0].explanation
+        assert 'set its time_mode in scenes.csv' in f[0].explanation
+        assert 'no time_mode column' not in f[0].explanation
+
+    def test_without_a_time_mode_column_it_is_reported_and_says_so(self):
+        b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]},
+                      time_mode_column=False)
+        f, _ = continuity.check_life(b)
+        assert 'no time_mode column: every scene is read as the present' in f[0].explanation
 
     def test_a_death_in_a_dream_is_not_a_death(self):
         b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]},
-                      scenes={'s1': {'frame': 'dream'}, 's2': {}})
+                      scenes={'s1': {'time_mode': 'dream'}, 's2': {}})
         assert continuity.check_life(b)[0] == []
 
     def test_brought_back(self):
@@ -533,7 +544,7 @@ class TestSky:
                                      'behind Varn" (Varn is not in world.csv)']
 
     def test_a_dream_is_not_checked(self):
-        b = make_book('s1', {'s1': []}, scenes={'s1': {'frame': 'dream'}},
+        b = make_book('s1', {'s1': []}, scenes={'s1': {'time_mode': 'dream'}},
                       world=World(directions={'kesh': 'east'}))
         assert continuity.check_sky(b, 'the sun went down behind Kesh') == ([], [])
 
@@ -546,7 +557,7 @@ class TestRunChecks:
     def test_an_off_present_scene_says_only_names_were_checked(self):
         b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')],
                              's2': [R('at', 'Oren', quote='Oren')]},
-                      scenes={'s1': {}, 's2': {'frame': 'ghost'}},
+                      scenes={'s1': {}, 's2': {'time_mode': 'ghost'}},
                       forbidden={'Juno': 'storyforge.yaml'})
         f, notes = continuity.run_checks(b, 'Oren came. Juno wept.')
         assert codes(f) == ['WLD'] and 'marked ghost' in notes[0]
@@ -746,68 +757,99 @@ def test_the_conftest_turns_the_checks_off():
 
 
 # ============================================================================
-# scenes.csv's frame column, world.csv's speed
+# scenes.csv's time_mode (memory, dream, ghost), world.csv's speed
 # ============================================================================
 
-class TestFrameColumn:
-    def test_schema_and_helpers(self):
-        from storyforge.elaborate import FRAMES, _FILE_MAP, frame, off_present
-        from storyforge.schema import COLUMN_SCHEMA, VALID_FRAMES
-        assert 'frame' in _FILE_MAP['scenes.csv'] and VALID_FRAMES == set(FRAMES)
-        assert COLUMN_SCHEMA['frame']['type'] == 'enum'
-        assert frame({'frame': ' Dream '}) == 'dream' and frame({}) == ''
-        assert off_present({'frame': 'memory'}) and off_present({'time_mode': 'frame'})
-        assert not off_present({'frame': 'nap'}) and not off_present({})
+class TestInnerModes:
+    """#648's review (CR-1): memory, dream and ghost are time_mode values,
+    not a second `frame` column."""
 
-    def test_validate_reports_a_bad_value(self, project_dir):
+    def test_schema_and_helpers(self):
+        from storyforge.elaborate import (INNER_MODES, OFF_PRESENT_MODES, _FILE_MAP,
+                                          off_present)
+        from storyforge.schema import COLUMN_SCHEMA, VALID_TIME_MODES
+        assert 'frame' not in _FILE_MAP['scenes.csv']
+        assert 'frame' not in COLUMN_SCHEMA
+        assert INNER_MODES == {'memory', 'dream', 'ghost'}
+        assert INNER_MODES | OFF_PRESENT_MODES <= VALID_TIME_MODES
+        assert not INNER_MODES & OFF_PRESENT_MODES   # the calendar reads them as scenes
+        assert off_present({'time_mode': ' Dream '}) and off_present({'time_mode': 'frame'})
+        assert off_present({'time_mode': 'vision'}) and off_present({'time_mode': 'ghost'})
+        assert not off_present({'time_mode': 'summary'}) and not off_present({})
+        assert not off_present({'frame': 'memory'})
+
+    def test_validate_reports_a_bad_value_and_takes_the_new_ones(self, project_dir):
+        from storyforge.elaborate import _read_csv, _write_csv
         from storyforge.schema import validate_schema
         path = os.path.join(project_dir, 'reference', 'scenes.csv')
-        with open(path) as f:
-            lines = f.read().splitlines()
-        lines[0] += '|frame'
-        lines[1] += '|flashback'
-        lines[2] += '|dream'
-        lines[3:] = [l + '|' for l in lines[3:]]
-        with open(path, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
+        rows = _read_csv(path)
+        header = list(rows[0])
+        if 'time_mode' not in header:
+            header.append('time_mode')
+        for row, mode in zip(rows, ['flashback', 'dream', 'ghost', 'memory']):
+            row['time_mode'] = mode
+        _write_csv(path, rows, header)
         result = validate_schema(os.path.join(project_dir, 'reference'), project_dir)
-        bad = [e for e in result.get('errors', []) if e.get('column') == 'frame']
+        bad = [e for e in result.get('errors', []) if e.get('column') == 'time_mode']
         assert [e.get('value') for e in bad] == ['flashback']
 
-    def test_cleanup_reports_a_bad_value_and_not_a_missing_column(self, project_dir):
-        from storyforge.cmd_cleanup import _check_scene_frames, OPTIONAL_CSV_COLUMNS
-        assert 'frame' in OPTIONAL_CSV_COLUMNS['reference/scenes.csv']
-        assert _check_scene_frames(project_dir) == []
-        path = os.path.join(project_dir, 'reference', 'scenes.csv')
-        with open(path) as f:
-            lines = f.read().splitlines()
-        lines = [lines[0] + '|frame', lines[1] + '|nap'] + [l + '|' for l in lines[2:]]
-        with open(path, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
-        found = _check_scene_frames(project_dir)
-        assert len(found) == 1 and found[0]['severity'] == 'error'
-        assert 'act1-sc01: frame "nap" is not one of memory, dream, vision, ghost' \
-            in found[0]['detail']
+    def test_the_calendar_reads_them_as_scenes(self):
+        from storyforge.prompts import scene_when
+        assert scene_when({'timeline_day': '3', 'time_mode': 'dream'}) == \
+            "day 3, a dream that night: not the present's action"
 
-    def test_the_map_stage_asks_for_it(self):
+    def test_the_timeline_pass_keeps_an_inner_mode(self, project_dir, monkeypatch):
+        from storyforge import timeline
+        from storyforge.elaborate import _read_csv, _write_csv
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = _read_csv(path)
+        header = list(rows[0]) + ([] if 'time_mode' in rows[0] else ['time_mode'])
+        for row in rows:
+            row['time_mode'] = ''
+        rows[0]['time_mode'] = 'dream'
+        rows[1]['time_mode'] = 'memory'
+        _write_csv(path, rows, header)
+        ids = [r['id'] for r in rows]
+        monkeypatch.setattr(timeline, 'read_cues', lambda p: {})
+        monkeypatch.setattr(timeline, 'scene_items', lambda p, c: [{'id': i} for i in ids])
+        placed = {i: (n + 1, 'scene', 'test') for n, i in enumerate(ids)}
+        placed[ids[1]] = (2, 'vision', 'test')
+        monkeypatch.setattr(timeline, 'assign_calendar', lambda *a, **k: dict(placed))
+        monkeypatch.setattr(timeline, 'repair_spikes', lambda items, p: (p, []))
+        monkeypatch.setattr(timeline, 'pin_month_anchors', lambda items, p: (p, [], None))
+        monkeypatch.setattr(timeline, 'check_timeline', lambda *a, **k: [], raising=False)
+        timeline.run_assignment(project_dir, 'm', str(project_dir), force=True)
+        after = {r['id']: r['time_mode'] for r in _read_csv(path)}
+        assert after[ids[0]] == 'dream'       # the calendar's scene never replaces it
+        assert after[ids[1]] == 'vision'      # a calendar mode does
+        assert after[ids[2]] == 'scene'
+
+    def test_cleanup_has_no_frame_column(self):
+        from storyforge import cmd_cleanup
+        assert 'frame' not in cmd_cleanup.OPTIONAL_CSV_COLUMNS['reference/scenes.csv']
+        assert not hasattr(cmd_cleanup, '_check_scene_frames')
+
+    def test_the_map_stage_asks_for_them_in_time_mode(self):
         from storyforge import prompts_elaborate
         import inspect
         src = inspect.getsource(prompts_elaborate)
-        assert '|architecture_scene|told_by|frame\n(all scenes' in src
-        assert '- frame: memory (a past relived), dream' in src
+        assert '|architecture_scene|told_by\n(all scenes' in src
+        assert 'or memory, dream or ghost (the scene sits on its day' in src
+        assert '- frame:' not in src
 
-    def test_extraction_reads_it(self):
+    def test_extraction_reads_them(self):
         from storyforge import extract
-        assert extract.SKELETON_SCHEMA['properties']['frame']['enum'] == [
-            '', 'memory', 'dream', 'vision', 'ghost']
+        assert 'frame' not in extract.SKELETON_SCHEMA['properties']
+        assert extract.SKELETON_SCHEMA['properties']['time_mode']['enum'] == [
+            '', 'dream', 'ghost', 'memory']
         prompt = extract.build_skeleton_prompt('s1', 'Text.', {})
-        assert '- frame: "memory"' in prompt
+        assert '- time_mode: "memory"' in prompt
         base = {k: '' for k in extract.SKELETON_SCHEMA['properties']}
         base.update({'told': False, 'time_relation': 'unclear', 'location': [],
-                     'title': 'T', 'frame': 'dream'})
-        assert extract.parse_skeleton_response(json.dumps(base), 's1')['frame'] == 'dream'
-        base['frame'] = ''
-        assert 'frame' not in extract.parse_skeleton_response(json.dumps(base), 's1')
+                     'title': 'T', 'time_mode': 'dream'})
+        assert extract.parse_skeleton_response(json.dumps(base), 's1')['time_mode'] == 'dream'
+        base['time_mode'] = ''
+        assert 'time_mode' not in extract.parse_skeleton_response(json.dumps(base), 's1')
 
 
 class TestWorldSpeed:

@@ -36,10 +36,9 @@ def _structural(scenes, intent=None):
 
 
 class TestSchema:
-    def test_the_column_is_after_the_older_columns(self):
+    def test_the_column_is_in_scenes_csv_last(self):
         from storyforge.elaborate import _FILE_MAP
-        # only #648's frame comes after it
-        assert _FILE_MAP['scenes.csv'][-2:] == ['told_by', 'frame']
+        assert _FILE_MAP['scenes.csv'][-1] == 'told_by'
 
     def test_it_names_scene_ids(self):
         from storyforge.schema import COLUMN_SCHEMA
@@ -52,7 +51,7 @@ class TestSchema:
 
     def test_the_template_has_it(self):
         with open(os.path.join(PLUGIN_DIR, 'templates', 'reference', 'scenes.csv')) as f:
-            assert f.readline().strip().split('|')[-2:] == ['told_by', 'frame']
+            assert f.readline().strip().split('|')[-1] == 'told_by'
 
     def test_an_unknown_scene_fails_the_schema(self, project_dir):
         from storyforge.elaborate import update_scene
@@ -327,7 +326,7 @@ class TestElaboratePrompts:
     def test_the_map_writes_the_column(self, project_dir):
         from storyforge.prompts_elaborate import build_map_prompt
         prompt = build_map_prompt(project_dir, PLUGIN_DIR)
-        assert '|architecture_scene|told_by|frame\n' in prompt
+        assert '|architecture_scene|told_by\n' in prompt
         assert '- told_by: for an embedded tale' in prompt
 
     def test_the_briefs_know_a_told_scene(self, project_dir):

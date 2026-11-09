@@ -6,11 +6,10 @@ calendar and the world table, free and the same every run:
 
 - **life** (PHY): a dead character present, acting or spoken to as present,
   in a later scene of the story's present. Deaths come from `alive` records
-  and characters.csv's `death_scene`. A scene marked off the present
-  (scenes.csv `frame`: memory, dream, vision, ghost; or a `time_mode` of
-  frame or vision) is exempt, and so is a flashback, whose `timeline_day`
-  comes before the death. An unmarked scene is reported, never assumed to
-  be a memory.
+  and characters.csv's `death_scene`. A scene off the present (scenes.csv
+  `time_mode` frame, vision, memory, dream or ghost: `elaborate.off_present`)
+  is exempt, and so is a flashback, whose `timeline_day` comes before the
+  death. An unmarked scene is reported, never assumed to be a memory.
 - **possession** (PHY): an object in two people's hands at once, or held,
   given or used after it was given away, lost or destroyed, unless a fact
   between moves it (`gets`). A saved stage sheet's hands (#647) count for
@@ -103,7 +102,8 @@ class Book:
     world: object = None
     rows: list[dict] = field(default_factory=list)
     briefs: dict[str, dict] = field(default_factory=dict)
-    has_frame_column: bool = False
+    #: scenes.csv has a `time_mode` column (without one every scene is the present)
+    has_time_mode: bool = False
     #: forbidden name → where it is ruled out (a file name)
     forbidden: dict[str, str] = field(default_factory=dict)
     #: lower-case names a person may be called by; None: no registry
@@ -208,10 +208,10 @@ def check_life(book: Book) -> tuple[list[Finding], list[str]]:
             continue
         seen.add(who)
         where = 'earlier in this scene' if death.scene_id == sid else _where(book, death.scene_id)
-        hint = ('; if this scene is a memory, dream, vision or ghost scene, mark it in '
-                'scenes.csv\'s frame column' + ('' if book.has_frame_column else
-                                                  ' (scenes.csv has none: every scene is '
-                                                  'read as the present)'))
+        hint = ('; if this scene is a memory, dream, vision or ghost scene, set its '
+                'time_mode in scenes.csv' + ('' if book.has_time_mode else
+                                             ' (scenes.csv has no time_mode column: every '
+                                             'scene is read as the present)'))
         if death.origin == 'registry':
             findings.append(_finding('life', r.quote, 'characters.csv', death.quote,
                                      f'{r.who} is present here, but characters.csv gives '
@@ -917,7 +917,7 @@ def load_book(project_dir: str, scene_id: str, *, rows: list[dict] | None = None
                 chars=load_alias_map(os.path.join(ref, 'characters.csv')), places=places,
                 place_names=place_names, world=world, rows=rows,
                 briefs=_read_csv_as_map(os.path.join(ref, 'scene-briefs.csv')),
-                has_frame_column=bool(header) and 'frame' in header[0],
+                has_time_mode=bool(header) and 'time_mode' in header[0],
                 forbidden=forbidden, known_names=known_names(project_dir, rows))
     missing, stale = [], []
     for sid in sorted(order, key=order.get):
@@ -947,9 +947,8 @@ def run_checks(book: Book, prose: str, sheet_records: list[Record] | None = None
     (a record's verified quote always is) and counted."""
     findings, notes = [], []
     if book.off_present(book.scene_id):
-        from storyforge.elaborate import frame, time_mode
-        row = book.row(book.scene_id)
-        notes.append(f'the scene is marked {frame(row) or time_mode(row)} (not the story\'s '
+        from storyforge.elaborate import time_mode
+        notes.append(f'the scene is marked {time_mode(book.row(book.scene_id))} (not the story\'s '
                      f'present): only names were checked')
     for check in (check_life, check_knowledge, lambda b: check_possession(b, sheet_records),
                   check_place, check_time, check_injury, lambda b: check_names(b, prose),

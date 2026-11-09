@@ -76,7 +76,7 @@ def test_the_map_prompt_asks_for_the_cells(project_dir):
     from storyforge.prompts_elaborate import build_map_prompt
     plugin = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     p = build_map_prompt(project_dir, plugin)
-    assert '|status|architecture_scene|told_by|frame\n' in p
+    assert '|status|architecture_scene|told_by\n' in p
     assert 'for a scene split off one' in p
     assert 'exactly one of morning, afternoon, evening, night, dawn, dusk' in p
     assert 'Key Decisions records a scene count' in p
