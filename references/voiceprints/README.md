@@ -9,7 +9,7 @@ measure and the API).
 | Path | What |
 |---|---|
 | `baseline.json` | The general baseline: each measure's mean and standard deviation over a population of writers (the distance's scale) and the population's n-gram rates (what a writer says more often than writers do). Built by `voiceprint.build_baseline` |
-| `austen/` | The reference voiceprint, in the author voice repo layout (B0): `voice.yaml`, `corpus/`, `fingerprint.json`, `description.md`, `exemplars/`, and `proposals/` (the model's draft claims and shortlist they came from). Storyforge's worked example and the fixture of `tests/test_voiceprint_reference.py` and `tests/test_voiceprint_description.py` |
+| `austen/` | The reference voiceprint, in the author voice repo layout (B0): `voice.yaml`, `corpus/` (with its `index.csv`), `fingerprint.json`, `description.md`, `exemplars/`, and `proposals/` (the model's draft claims and shortlist they came from). Storyforge's worked example and the fixture of `tests/test_voiceprint_reference.py` and `tests/test_voiceprint_description.py` |
 
 The tests' other texts are in `tests/fixtures/voiceprint/`: `verne/` (two
 translations) and `others/` (excerpts from seven other authors).
@@ -161,6 +161,78 @@ Brunton is flagged in one of three (`BRUNTON_FLAGGED_MIN` 1):
 The Verne pair is two voices because what the fingerprint reads in a
 translation is the translator's English. A real author's corpus can mix
 voices the same way: ghostwritten posts, quoted material, a decade of drift.
+
+## The author voice repo (B0, B1, #652)
+
+A voiceprint belongs to an author, not a book: it lives in the author's own
+repo (`storyforge.voice_repo`), made once, and every book points to it.
+
+```
+storyforge voice init --dir ../ben-voice --author "Ben Norris"
+cd ../ben-voice
+storyforge voice import ~/blog/_posts            # or a feed, a URL, a .txt list of URLs
+storyforge voice fingerprint
+storyforge voice propose && storyforge voice accept   # B3, B4 (below)
+```
+
+`voice init` makes `voice.yaml`, `corpus/index.csv`, `exemplars/` and
+`fiction/` (`fingerprint.json` and `description.md` come from the later
+steps). It refuses inside a book and replaces nothing.
+
+**`voice.yaml`** holds the author's name and which pieces count:
+
+```yaml
+author: "Ben Norris"
+kinds:          # essay, fiction, notes, link
+  - essay
+  - fiction
+min_words: 500  # a piece with less prose than this doesn't count
+```
+
+**`corpus/index.csv`** lists every piece, one row each
+(`file|title|date|kind|source|use`, pipe-delimited): its path in the repo
+(the name the fingerprint gives it), title, date (`YYYY-MM-DD`, `YYYY-MM`,
+`YYYY`, or blank when unknown), kind, where it came from, and `use`, the
+author's override for that piece: blank (voice.yaml decides), `in`, `out`,
+or `held-out` (kept out of the fingerprint to test it on). The Austen
+reference holds out *Emma* and *Persuasion* that way, so `voice fingerprint`
+there recomputes its `fingerprint.json` exactly.
+
+**`voice import`** (`storyforge.voice_import`) takes Markdown or HTML files
+or folders, an RSS or Atom feed (a blog's export too: WordPress exports
+RSS), a URL, or a `.txt` list of URLs. It keeps each piece's title, date and
+kind, and drops what isn't the author's running prose: navigation,
+headers, footers, scripts, sidebars, comments, share buttons, code, tables,
+captions and **block quotes**, which hold someone else's words. The kind comes
+from the piece itself (front matter, a feed's categories, a feed item that
+links off the site is a link post); with no sign it's filed as an essay and
+counted in the summary, so the author can correct the index (`--kind` sets
+one kind for a whole import). A feed item that carries only a cut summary
+isn't imported unless `--follow-links` fetches its page. A source already in
+the index is skipped. It ends with what the corpus holds and what counts,
+and warns when what counts is under `MIN_CORPUS_WORDS` (75,000 words).
+Fetched pages are data only: http(s) only, a size cap, a generic
+User-Agent, and a feed with a DOCTYPE or entity refused unparsed.
+
+**A book** names the repo in its `storyforge.yaml`, read in place, never
+copied:
+
+```yaml
+voice:
+  author: ../ben-voice           # relative to the book
+  narrator: fiction/close-third  # optional: the fiction anchor (#654)
+```
+
+Its drafting prompt (full coaching) then carries the author's voice:
+`description.md`, the exemplars by job, the fiction anchor's files, and the
+book's own `reference/voice/book.md` (the narrator's stance and period
+register particular to this book) when it has one. A book without the block
+gets exactly the prompt it got before. `score --voice` with neither
+`--fingerprint` nor `--voice-repo` measures against the block's repo. A block
+that can't be used (the repo isn't there or isn't a voice repo, it has no
+description or exemplars yet, the narrator folder is missing or empty) stops
+`write` before anything is spent. The corpus never goes in a drafting
+prompt: only the description and the passages the author chose.
 
 ## The described voice and the exemplars (B3, B4, #651)
 
