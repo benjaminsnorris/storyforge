@@ -405,8 +405,8 @@ class TestSuite:
         assert result['metrics']['caught'] == 1 and result['metrics']['left_flagged'] == 1
         assert os.path.isdir(os.path.join(private_set, 'cassettes', 'blocking-set'))
         assert not (tmp_path / 'public-cassettes').exists()
-        assert result['status'] == 'fail'               # FLOORS not recorded yet
-        assert any('no floor recorded' in n for n in result['notes'])
+        # the synthetic set's values aren't the real set's recorded FLOORS
+        assert result['status'] == 'fail'
 
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         replayed = harness.run_suite(suite, 'replay', str(tmp_path / 'public-cassettes'))
@@ -564,8 +564,14 @@ class TestFloorGates:
     def _metrics(self, suite):
         return {name: 0.5 for name in suite.run.__globals__['FLOORS']}
 
-    def test_every_shipped_floor_unset_fails_and_says_what_to_write(self):
+    def test_every_shipped_floor_is_recorded(self):
+        """The baseline was recorded 2026-11-09: no floor is left unset."""
+        floors = _suite().run.__globals__['FLOORS']
+        assert floors and all(v is not None for v in floors.values())
+
+    def test_an_unset_floor_fails_and_says_what_to_write(self, monkeypatch):
         suite = _suite()
+        _with_floors(monkeypatch, suite, **{k: None for k in suite.run.__globals__['FLOORS']})
         gates, notes = _floor_gates(suite, self._metrics(suite))
         assert gates and not any(g.passed for g in gates)
         assert all('no floor recorded' in n for n in notes)
