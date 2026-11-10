@@ -12,12 +12,17 @@ with a finding on that correct statement. Decision 5 retires the open
 checker when `gate-set-questions` matches this suite's recall.
 
 Private like the blocking set: the set and its recordings live in the
-storyforge-evals repo (`gate-set/`, `gate-set/cassettes/gate-set/`); notes
-carry counts and ids only, and without that checkout the suite is reported
-unavailable (``stale``). Frozen (#645): recorded on purpose, as three runs
-(``--mode record --suite gate-set --runs 3``). Needs the corpus books cloned
-under ``STORYFORGE_CORPUS_DIR``, as E8 does. **Not recorded yet**: record it
-when the question layer is a candidate to replace the open checker.
+storyforge-evals repo (`gate-set/`; recordings in `gate-set/cassettes/gate-set/`
+and, for runs 2 and 3, `gate-set/cassettes/run2/gate-set/` and `run3/`);
+notes carry counts and ids only, and without that checkout the suite is
+reported unavailable (``stale``). Frozen (#645): recorded on purpose, as
+three runs. Needs the corpus books cloned under ``STORYFORGE_CORPUS_DIR``, as
+E8 does. **Not recorded yet**: record it when the question layer is a
+candidate to replace the open checker; the first recording has no forecast
+in the baseline, so it needs ``--over-budget`` with Ben's approval
+(`gate_set.runner.record_command`). Until then a replay is unavailable
+(``stale``, "not recorded yet"); once `FLOORS` are set, missing recordings
+are the harness's error.
 """
 
 from __future__ import annotations
@@ -27,8 +32,9 @@ from gate_set import runner
 from harness import Suite
 
 NAME = 'gate-set'
-#: Below this the set has lost most of its positives (75 at build, less 29
-#: of the three cases E8 excludes)
+#: The set has 46 positives (built 2026-11-09); a rebuild that loses more
+#: than six (a recording or a case gone) fails this gate rather than
+#: measuring a smaller set against the same floors
 MIN_POSITIVES = 40
 
 #: The recorded values, each held exactly (#488); None until recorded

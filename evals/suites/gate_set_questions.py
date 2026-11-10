@@ -4,9 +4,10 @@ way as `gate-set` (see it). Decision 5 retires the open checker once this
 suite's recall matches `gate-set`'s.
 
 Private and frozen like `gate-set`; its recordings are
-`gate-set/cassettes/gate-set-questions/` in the storyforge-evals repo.
-Extraction's requests are the same as `gate-set`'s, but each suite keeps
-its own recordings. **Not recorded yet.**
+`gate-set/cassettes/gate-set-questions/` (and `run2/`, `run3/`) in the
+storyforge-evals repo. Extraction's requests are the same as `gate-set`'s,
+but each suite keeps its own recordings. **Not recorded yet**; recording
+it the first time needs ``--over-budget``, as `gate-set` does.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from gate_set import runner
 from harness import Suite
 
 NAME = 'gate-set-questions'
-MIN_POSITIVES = 40
+MIN_POSITIVES = 40   # as gate-set's
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
