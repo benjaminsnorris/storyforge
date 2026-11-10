@@ -159,21 +159,27 @@ retired (plan A4;
 `blocking-set-sheet` below). The two suites share `evals/blocking_set/runner.py`.
 
 The suite is **frozen** (#645): `auto` and `record` replay it, and a miss is
-`stale`. **Not recorded yet** (forecast about $6.60 a run; needs Ben's
-approval). To record:
+`stale`. **Recorded 2026-11-09** as three runs ($20.31, Ben's approval over
+the monthly budget): `cassettes/blocking-set/` and `cassettes/run2/`,
+`run3/` beside the set, with run 1's per-case outcomes frozen in
+`baseline-cases.json` there (storyforge-evals `blocking-set-baseline`).
+`FLOORS` hold run 1's values. Over the three runs:
 
-1. Check out the evals PR's branch (`blocking-set-646`) at `~/Developer/evals`,
-   or point `STORYFORGE_PRIVATE_EVALS_DIR` at a checkout of it.
-2. `python3 evals/run.py --mode record --suite blocking-set --runs 3` (three
-   runs, about $20, so the spread is known: `cassettes/blocking-set/` and
-   `cassettes/run2/`, `run3/` beside the set). Commit the cassettes there.
-3. Replay run 1 (`python3 evals/run.py --suite blocking-set`), copy the
-   private `results/latest.json` to `baseline-cases.json` there and commit it
-   (the frozen per-case outcomes), and set `FLOORS` in
-   `evals/suites/blocking_set.py` from the report.
-4. `python3 evals/run.py --baseline` writes `baseline.json`. It needs a full
-   run with no suite in `error`; on this branch's base E3, E5 and the re-check
-   set error in replay, so that waits for them.
+| metric | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| recall (117 in-scene slips) | 0.615 | 0.650 | 0.650 |
+| recall, slips people found (34) | 0.324 | 0.382 | 0.412 |
+| recall, slips a read found (83) | 0.735 | 0.759 | 0.747 |
+| false alarms per 10k clean words | 1.27 | 1.27 | 0.85 |
+| flags | 99 | 101 | 96 |
+
+The categories move most between runs (light 0.33 / 0.50 / 0.17 on 6
+cases, posture 0.91 / 0.55 / 0.82 on 11). The stage sheet's 0.22 recall
+and 15.65 false alarms per 10k (below) are far from the read's, so the read
+stays the gate's default. To re-record (only when a decision depends on
+it): `python3 evals/run.py --mode record --suite blocking-set --runs 3`,
+then replay run 1, copy the private `results/latest.json` to
+`baseline-cases.json`, and set `FLOORS` from the report.
 
 ### The stage sheet on the set (#647)
 
