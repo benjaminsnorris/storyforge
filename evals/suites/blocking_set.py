@@ -37,8 +37,9 @@ FLOORS: dict[str, float | None] = {
     # Recorded 2026-11-09 (three runs, $20.31, opus, two readings a scene),
     # gated on run 1's values. Across the three runs: recall 0.6154 / 0.6496
     # / 0.6496, readers' 0.3235 / 0.3824 / 0.4118, false alarms per 10k
-    # 1.27 / 1.27 / 0.85, flags 99 / 101 / 96; the categories move most
-    # (light 0.33 / 0.5 / 0.17 on 6 cases, posture 0.91 / 0.55 / 0.82 on 11)
+    # 1.27 / 1.27 / 0.85, flags 99 / 101 / 96; the small categories move
+    # most (sightline 0.33 / 0.67 / 0.75 on 12 cases, light 0.33 / 0.50 /
+    # 0.17 on 6, posture 0.91 / 0.55 / 0.82 on 11)
     'recall': 0.6154,
     'recall_hands': 0.7353, 'recall_posture': 0.9091, 'recall_sightline': 0.3333,
     'recall_worn': 0.4545, 'recall_position': 0.6129, 'recall_light': 0.3333,
@@ -51,8 +52,16 @@ FLOORS: dict[str, float | None] = {
 }
 
 
+#: The set and the recordings FLOORS were measured on (#679 review): a
+#: different set errors, and a replay with fewer recordings (run 1's) is
+#: unavailable, naming the checkout, not read as a changed request.
+#: Re-recording sets both again (`blocking_set.fingerprint`, `.recordings`)
+RECORDED = {'set': '3244134c57b027323561416afdfc3d70119e9f8330ed5fe91ffab1b7997053fb',
+            'recordings': 185}
+
+
 def run(ctx):
-    return runner.run(ctx, 'read', FLOORS, MIN_CASES)
+    return runner.run(ctx, 'read', FLOORS, MIN_CASES, RECORDED)
 
 
 SUITE = Suite(NAME, 'Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; '

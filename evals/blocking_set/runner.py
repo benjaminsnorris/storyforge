@@ -14,7 +14,7 @@ import json
 import os
 
 import blocking_set
-from harness import Gate, SuiteOutput
+from harness import Gate, SuiteOutput, SuiteUnavailable
 
 #: What each method's per-case outcomes file is called in `results/`
 OUTCOMES = {'read': 'latest.json', 'stage-sheet': 'latest-stage-sheet.json'}
@@ -172,8 +172,36 @@ def compare(path: str, cases, outcomes, other: str = 'read') -> list[str]:
     return lines
 
 
-def run(ctx, method: str, floors: dict, min_cases: int) -> SuiteOutput:
+def check_recorded(ctx, path: str, recorded: dict | None) -> None:
+    """Hold a recorded suite to the set and recordings its FLOORS were
+    measured on (#679 review). `recorded` is ``{"set": fingerprint,
+    "recordings": count}``, or None before the baseline.
+
+    A different set errors: the floors mean nothing on it (re-record, or
+    check out the set they were recorded on). Fewer recordings than were
+    made, on a replay, is a checkout without them (the private repo on a
+    branch that lacks them): unavailable, saying so, rather than the
+    harness's "a request changed" reading of the misses that would follow."""
+    if recorded is None:
+        return
+    found = blocking_set.fingerprint(path)
+    if found != recorded['set']:
+        raise RuntimeError(
+            f'the blocking set at {path} is not the one FLOORS were recorded on (fingerprint '
+            f'{found[:12]}, recorded {recorded["set"][:12]}): check out the private repo '
+            f'commit they were recorded on, or re-record and set FLOORS and RECORDED again')
+    if ctx.mode == 'replay':
+        have = blocking_set.recordings(ctx.cassette_dir)
+        if have < recorded['recordings']:
+            raise SuiteUnavailable(
+                f'{have} of the {recorded["recordings"]} recordings FLOORS were measured on are '
+                f'at {ctx.cassette_dir}: check out the storyforge-evals branch that has them')
+
+
+def run(ctx, method: str, floors: dict, min_cases: int,
+        recorded: dict | None = None) -> SuiteOutput:
     path = blocking_set.set_dir()
+    check_recorded(ctx, path, recorded)
     cases, scenes = blocking_set.load(path)
     problems = blocking_set.validate(cases, scenes)
     if problems:

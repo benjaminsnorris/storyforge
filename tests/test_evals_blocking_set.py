@@ -377,6 +377,9 @@ def private_set(tmp_path, monkeypatch):
     monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(root))
     monkeypatch.delenv('STORYFORGE_CASSETTE', raising=False)
     monkeypatch.setenv('STORYFORGE_PARALLEL', '1')
+    # The synthetic set isn't the one FLOORS were recorded on; the pin
+    # itself is tested in TestRecordedPin
+    monkeypatch.setattr(runner, 'check_recorded', lambda *a: None)
     return path
 
 
@@ -405,8 +408,9 @@ class TestSuite:
         assert result['metrics']['caught'] == 1 and result['metrics']['left_flagged'] == 1
         assert os.path.isdir(os.path.join(private_set, 'cassettes', 'blocking-set'))
         assert not (tmp_path / 'public-cassettes').exists()
-        # the synthetic set's values aren't the real set's recorded FLOORS
+        # 3 cases against MIN_CASES 100 (and floors recorded on the real set)
         assert result['status'] == 'fail'
+        assert any(g['name'] == 'cases' and not g['passed'] for g in result['gates'])
 
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         replayed = harness.run_suite(suite, 'replay', str(tmp_path / 'public-cassettes'))
@@ -494,6 +498,7 @@ class TestSuite:
         root = tmp_path / 'private'
         _write_set(root, cases=[_case('tale-001', quotes=('not in the scene at all',))])
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(root))
+        monkeypatch.setattr(runner, 'check_recorded', lambda *a: None)  # a synthetic set
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'error'
         assert 'tale-001: quote 1 is not in its scene' in result['error']
@@ -557,17 +562,82 @@ def _floor_gates(suite, metrics):
     return runner.floor_gates(metrics, suite.run.__globals__['FLOORS'])
 
 
+class TestRecordedPin:
+    """#679 review: FLOORS hold only for the set and recordings they were
+    measured on."""
+
+    def _ctx(self, tmp_path, mode='replay', recordings=0):
+        d = tmp_path / f'cassettes-{mode}-{recordings}'
+        d.mkdir(exist_ok=True)
+        for n in range(recordings):
+            (d / f'{n}.json.gz').write_bytes(b'')
+        return harness.SuiteContext('blocking-set', mode, str(d), str(tmp_path / 'w'))
+
+    def test_the_fingerprint_changes_with_a_label_or_a_scene(self, tmp_path):
+        path = _write_set(tmp_path)
+        first = blocking_set.fingerprint(path)
+        assert blocking_set.fingerprint(path) == first
+        cases = json.loads(open(os.path.join(path, 'cases.json')).read())
+        cases['cases'][3]['verdict'] = 'fixed'          # a label no gate may move
+        open(os.path.join(path, 'cases.json'), 'w').write(json.dumps(cases))
+        second = blocking_set.fingerprint(path)
+        assert second != first
+        with open(os.path.join(path, 'scenes', 'tale', 'rain.md'), 'a') as f:
+            f.write(' More.')
+        assert blocking_set.fingerprint(path) not in (first, second)
+
+    def test_a_different_set_errors(self, tmp_path):
+        path = _write_set(tmp_path)
+        with pytest.raises(RuntimeError, match='not the one FLOORS were recorded on'):
+            runner.check_recorded(self._ctx(tmp_path, recordings=5), path,
+                                  {'set': 'not-this-one', 'recordings': 5})
+
+    def test_missing_recordings_are_unavailable_naming_the_checkout(self, tmp_path):
+        path = _write_set(tmp_path)
+        recorded = {'set': blocking_set.fingerprint(path), 'recordings': 5}
+        with pytest.raises(harness.SuiteUnavailable, match='3 of the 5 recordings'):
+            runner.check_recorded(self._ctx(tmp_path, recordings=3), path, recorded)
+
+    def test_recording_and_unpinned_suites_are_not_held(self, tmp_path):
+        path = _write_set(tmp_path)
+        recorded = {'set': blocking_set.fingerprint(path), 'recordings': 5}
+        runner.check_recorded(self._ctx(tmp_path, mode='record'), path, recorded)
+        runner.check_recorded(self._ctx(tmp_path), path, None)
+
+    @pytest.mark.parametrize('suite_file', ['blocking_set.py', 'blocking_set_sheet.py'])
+    def test_both_suites_pin_their_set_and_recordings(self, suite_file):
+        suite = next(s for s in harness.discover(str(SUITE_FILE.parent))
+                     if s.run.__module__.endswith(suite_file[:-3]))
+        recorded = suite.run.__globals__['RECORDED']
+        assert len(recorded['set']) == 64 and recorded['recordings'] > 0
+
+
 class TestFloorGates:
-    """The shipped FLOORS keys, on the path before the baseline (all None)
-    and after (#670 review: an absent metric passed as -1 == -1)."""
+    """The shipped FLOORS keys: recorded, pinned, and gated (#670 review: an
+    absent metric passed as -1 == -1)."""
 
     def _metrics(self, suite):
         return {name: 0.5 for name in suite.run.__globals__['FLOORS']}
 
-    def test_every_shipped_floor_is_recorded(self):
-        """The baseline was recorded 2026-11-09: no floor is left unset."""
+    #: The recorded floors (2026-11-09). Lowering one accepts a loss, so it
+    #: takes an edit here too: recall may only rise, the rest only fall
+    RECORDED_FLOORS = {
+        'recall': 0.6154, 'recall_hands': 0.7353, 'recall_posture': 0.9091,
+        'recall_sightline': 0.3333, 'recall_worn': 0.4545, 'recall_position': 0.6129,
+        'recall_light': 0.3333, 'recall_other': 0.5833, 'recall_book_gawain': 0.4318,
+        'recall_book_wrath': 0.726, 'recall_found_by_readers': 0.3235,
+        'recall_found_by_tool': 0.7349, 'false_alarms_per_10k': 1.27, 'left_flagged': 1,
+        'flags': 99,
+    }
+
+    def test_floors_never_move_the_wrong_way_from_the_recorded_values(self):
         floors = _suite().run.__globals__['FLOORS']
-        assert floors and all(v is not None for v in floors.values())
+        assert set(floors) == set(self.RECORDED_FLOORS)
+        for name, value in self.RECORDED_FLOORS.items():
+            if name.startswith('recall'):
+                assert floors[name] >= value, name
+            else:
+                assert floors[name] is not None and floors[name] <= value, name
 
     def test_an_unset_floor_fails_and_says_what_to_write(self, monkeypatch):
         suite = _suite()
@@ -593,7 +663,9 @@ class TestFloorGates:
 
     @pytest.mark.parametrize('name,value,word', [
         ('recall', 0.6, 'a gain'), ('recall', 0.4, 'a loss'),
-        ('false_alarms_per_10k', 0.4, 'a gain'), ('false_alarms_per_10k', 0.6, 'a loss')])
+        ('false_alarms_per_10k', 0.4, 'a gain'), ('false_alarms_per_10k', 0.6, 'a loss'),
+        ('flags', 0.4, 'a gain'), ('flags', 0.6, 'a loss'),
+        ('left_flagged', 0.4, 'a gain'), ('left_flagged', 0.6, 'a loss')])
     def test_a_gain_is_a_rise_for_recall_and_a_fall_for_false_alarms(self, monkeypatch, name,
                                                                      value, word):
         suite = _suite()
