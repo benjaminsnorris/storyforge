@@ -7,10 +7,12 @@ Reads every recorded E8 judge call (the main cassettes and E6's runs 2 and
 the scene), and writes each distinct (case, prose) with the judge's verdict
 to the private set (`gate_set` doc: layout and roles). Data-family judge calls
 (``CSV_JUDGE_PROMPT``) aren't gated, so they're left out. A judge call that
-matches no case, or whose verdict won't parse, is counted and named by its
-recording file, never guessed at.
+matches no case, whose verdict won't parse, or that judged the same prose as
+another call with a different verdict stops the build: each is named by its
+recording file and nothing is written. Every other call it skips is
+counted in the summary.
 
-Prints counts only: the set is private prose.
+Prints counts and recording file names only: the set is private prose.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ def read_recordings(dirs: dict[str, str], cases: list[dict]) -> tuple[list[dict]
     fr = frames(cases)
     items: dict[str, dict] = {}
     skipped = {'other calls': 0, 'data-family judge calls': 0, 'unmatched': [],
-               'unparsed verdict': [], 'duplicates': 0}
+               'unparsed verdict': [], 'conflicting verdicts': [], 'duplicates': 0}
     for label, d in dirs.items():
         for path in sorted(glob.glob(os.path.join(d, '**', '*.json*'), recursive=True)):
             opener = gzip.open if path.endswith('.gz') else open
@@ -93,6 +95,8 @@ def read_recordings(dirs: dict[str, str], cases: list[dict]) -> tuple[list[dict]
                 continue
             iid = gate_set.item_id(case['id'], prose)
             if iid in items:
+                if items[iid]['verdict'] != verdict['verdict']:
+                    skipped['conflicting verdicts'].append(name)
                 skipped['duplicates'] += 1
                 continue
             from e8 import family
@@ -123,18 +127,23 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     out = args.out or os.path.join(private_dir(), gate_set.SET_NAME)
     items, skipped = read_recordings(RECORDINGS, load_cases())
-    if skipped['unmatched'] or skipped['unparsed verdict']:
+    stops = ('unmatched', 'unparsed verdict', 'conflicting verdicts')
+    if any(skipped[k] for k in stops):
         # an unmatched judge call is a case renamed or a prompt changed since
-        # the recording: name them, and build nothing over a partial read
-        for key in ('unmatched', 'unparsed verdict'):
+        # the recording; two verdicts on the same prose are a label nobody
+        # can pick between: name them, and build nothing over a partial read
+        for key in stops:
             for name in skipped[key][:10]:
                 print(f'ERROR: {key}: {name}', file=sys.stderr)
-        print(f'ERROR: {len(skipped["unmatched"])} unmatched and '
-              f'{len(skipped["unparsed verdict"])} unparsed judge call(s); nothing written',
+        print('ERROR: ' + ', '.join(f'{len(skipped[k])} {k}' for k in stops)
+              + ' judge call(s); nothing written', file=sys.stderr)
+        return 1
+    if not items:
+        print('ERROR: no gated judge call found in E8\'s recordings; nothing written',
               file=sys.stderr)
         return 1
     gate_set.assign_roles(items)
-    problems = gate_set.validate(items)
+    problems = gate_set.validate(items, {c['id']: c for c in load_cases()})
     if problems:
         for p in problems[:10]:
             print(f'ERROR: {p}', file=sys.stderr)
@@ -147,7 +156,8 @@ def main(argv=None) -> int:
     print(f'wrote {len(items)} item(s) to {out}: {roles}; verdicts {verdicts}; '
           f'{len({i["case"] for i in items if i["role"] == "positive"})} case(s) with a positive; '
           f'skipped {skipped["data-family judge calls"]} data-family judge call(s), '
-          f'{skipped["duplicates"]} duplicate(s)')
+          f'{skipped["other calls"]} other call(s) (not judge calls), '
+          f'{skipped["duplicates"]} duplicate(s) of the same verdict')
     return 0
 
 

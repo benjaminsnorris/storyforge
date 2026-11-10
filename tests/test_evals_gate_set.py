@@ -160,6 +160,37 @@ class TestValidate:
         problems = gate_set.validate(items)
         assert any(expected in p for p in problems), problems
 
+    def test_a_relabelled_role_is_named(self):
+        """TD-1: a positive stored as spare would drop a miss from recall."""
+        items = _items()
+        items[0]['role'] = 'spare'
+        assert any(p.startswith(f'{items[0]["id"]}: role spare, but the rule gives positive')
+                   for p in gate_set.validate(items))
+
+    def test_evidence_at_two_places_makes_no_positive(self):
+        """TD-2: a finding at either place would count."""
+        twice = 'A week at sea. They said it again: a week at sea.'
+        items = [_item(twice, 'reintroduced', 'a week at sea')]
+        gate_set.assign_roles(items)
+        assert items[0]['role'] == 'spare'
+        items[0]['role'] = 'positive'
+        assert any('evidence is not in its prose' in p for p in gate_set.validate(items))
+
+    @pytest.mark.parametrize('cases,expected', [
+        ({}, 'E1 has no case tale-001'),
+        ({'tale-001': {**CASE, 'code': 'KNO'}}, 'family or code changed'),
+    ])
+    def test_a_case_out_of_step_with_e1_is_named(self, cases, expected):
+        problems = gate_set.validate(_items(), cases)
+        assert any(expected in p for p in problems), problems
+
+    def test_a_case_e8_now_excludes_is_named(self, monkeypatch):
+        import e8
+        items = _items()
+        monkeypatch.setitem(e8.EXCLUDED_CASES, 'tale-001', 'already in the book')
+        problems = gate_set.validate(items, {'tale-001': CASE})
+        assert any('E8 now excludes tale-001' in p for p in problems), problems
+
     def test_a_positive_must_be_reintroduced(self):
         items = _items()
         control = next(i for i in items if i['role'] == 'control')
@@ -245,20 +276,32 @@ def _suite(name='gate-set'):
     return next(s for s in harness.discover(str(SUITES_DIR)) if s.name == name)
 
 
+def _gate_catching_wrong(item, work_dir):
+    return _result(blocking=['after a week at sea'] if item['prose'] == WRONG else [])
+
+
+@pytest.fixture
+def private_set(tmp_path, monkeypatch):
+    """The synthetic set, recorded, with E1 knowing its one case."""
+    path = _write_set(tmp_path, _items())
+    monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+    monkeypatch.setattr('e1.load_cases', lambda *a: [CASE])
+    return path
+
+
 class TestSuite:
     @pytest.mark.parametrize('name,method', [('gate-set', 'open'),
                                              ('gate-set-questions', 'questions')])
-    def test_gates_each_run_item_with_its_method_then_restores_it(self, tmp_path, monkeypatch,
-                                                                 name, method):
+    def test_gates_each_run_item_with_its_method_then_restores_it(self, private_set, tmp_path,
+                                                                 monkeypatch, name, method):
         from storyforge import gate
-        items = _items()
-        path = _write_set(tmp_path, items)
-        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+        # conftest turns the typed state off; the question layer needs it
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
         seen = []
 
         def fake_gate(item, work_dir):
             seen.append((item['role'], gate.GATE_CHECK_METHOD))
-            return _result(blocking=['after a week at sea'] if item['prose'] == WRONG else [])
+            return _gate_catching_wrong(item, work_dir)
         monkeypatch.setattr(runner, 'gate_one', fake_gate)
         before = gate.GATE_CHECK_METHOD
         result = harness.run_suite(_suite(name), 'replay', str(tmp_path / 'c'))
@@ -268,15 +311,24 @@ class TestSuite:
         # no floor recorded yet: every floor gate fails until the baseline
         assert result['status'] == 'fail'
         assert any('no floor recorded' in n for n in result['notes'])
-        outcomes = json.loads((path / 'results' / runner.OUTCOMES[method]).read_text())
+        outcomes = json.loads((private_set / 'results' / runner.OUTCOMES[method]).read_text())
         assert len(outcomes['items']) == 3
         # notes carry ids, never the prose
         assert not any(WRONG in n or 'a week at sea' in n for n in result['notes'])
 
-    def test_the_gate_raising_errors_the_suite_naming_ids_not_prose(self, tmp_path, monkeypatch):
-        _write_set(tmp_path, _items())
-        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+    def test_passes_on_its_recorded_floors(self, private_set, tmp_path, monkeypatch):
+        """The suite can pass: on floors equal to the run's values."""
+        monkeypatch.setattr(runner, 'gate_one', _gate_catching_wrong)
+        suite = _suite()
+        first = harness.run_suite(suite, 'replay', str(tmp_path / 'c'))
+        floors = {k: first['metrics'][k] for k in suite.run.__globals__['FLOORS']}
+        monkeypatch.setitem(suite.run.__globals__, 'FLOORS', floors)
+        monkeypatch.setitem(suite.run.__globals__, 'MIN_POSITIVES', 2)
+        result = harness.run_suite(suite, 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'pass', [g for g in result['gates'] if not g['passed']]
 
+    def test_the_gate_raising_errors_the_suite_naming_ids_not_prose(self, private_set, tmp_path,
+                                                                   monkeypatch):
         def boom(item, work_dir):
             raise RuntimeError(f'reply quoted {item["prose"]}')
         monkeypatch.setattr(runner, 'gate_one', boom)
@@ -284,6 +336,57 @@ class TestSuite:
         assert result['status'] == 'error'
         assert 'the gate raised on 3 item(s)' in result['error']
         assert WRONG not in result['error']
+
+    def test_an_unfinished_item_is_a_stop_named_in_the_notes(self, private_set, tmp_path,
+                                                            monkeypatch):
+        """SF-1: a GateError is counted and named, never silent."""
+        def gate(item, work_dir):
+            if item['prose'] == WRONG_2:
+                return runner.Unfinished('the ledger could not be read')
+            return _gate_catching_wrong(item, work_dir)
+        monkeypatch.setattr(runner, 'gate_one', gate)
+        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['metrics']['unfinished'] == 1
+        assert any('could not finish (1' in n for n in result['notes'])
+        saved = json.loads((private_set / 'results' / 'latest.json').read_text())
+        assert [i['unfinished'] for i in saved['items'] if 'unfinished' in i] == [
+            'the ledger could not be read']
+
+    def test_none_finished_errors_rather_than_reading_as_all_stopped(self, private_set, tmp_path,
+                                                                     monkeypatch):
+        """SF-1: a gate that can't run at all would score every scene stopped."""
+        monkeypatch.setattr(runner, 'gate_one', lambda *a: runner.Unfinished('misconfigured'))
+        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'error'
+        assert 'could not finish any of the 3' in result['error']
+
+    def test_questions_without_the_typed_state_errors_up_front(self, private_set, tmp_path,
+                                                               monkeypatch):
+        from storyforge import gate
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
+        monkeypatch.setattr(runner, 'gate_one', lambda *a: pytest.fail('gated'))
+        result = harness.run_suite(_suite('gate-set-questions'), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'error' and 'GATE_CONTINUITY' in result['error']
+
+    def test_a_cassette_miss_writes_no_outcome_and_is_stale(self, private_set, tmp_path,
+                                                            monkeypatch):
+        """SF-4: the gate turns a miss into a GateError; the run must stop
+        before writing outcomes as if they were measured."""
+        def missing(item, work_dir):
+            with open(os.environ['STORYFORGE_CASSETTE_LOG'], 'a') as f:
+                f.write(json.dumps({'error': 'CassetteMiss: a changed request'}) + '\n')
+            return runner.Unfinished('cassette miss')
+        monkeypatch.setattr(runner, 'gate_one', missing)
+        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'stale' and not result.get('unavailable'), result
+        assert not (private_set / 'results' / 'latest.json').exists()
+
+    def test_a_set_out_of_step_with_e1_errors_naming_the_rebuild(self, private_set, tmp_path,
+                                                                 monkeypatch):
+        monkeypatch.setattr('e1.load_cases', lambda *a: [OTHER])
+        monkeypatch.setattr(runner, 'gate_one', lambda *a: pytest.fail('gated'))
+        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'error' and 'rebuild the set' in result['error']
 
     def test_not_recorded_yet_is_unavailable_never_an_error(self, tmp_path, monkeypatch):
         """Left unrecorded on purpose until a decision needs it (#677): a
@@ -296,7 +399,36 @@ class TestSuite:
             result = harness.run_suite(_suite(), mode, str(tmp_path / 'c'))
             assert result['status'] == 'stale' and result['unavailable'] is True, result
             assert 'not recorded yet' in result['stale']
-            assert '--mode record --suite gate-set --runs 3' in result['stale']
+            assert '--mode record --suite gate-set --runs 3 --over-budget' in result['stale']
+
+    def test_recording_goes_past_the_not_recorded_guard(self, tmp_path, monkeypatch):
+        _write_set(tmp_path, _items(), recorded=())
+        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+        monkeypatch.setattr('e1.load_cases', lambda *a: [CASE])
+        seen = []
+        monkeypatch.setattr(runner, 'gate_one',
+                            lambda item, wd: seen.append(item['id']) or _result())
+        harness.run_suite(_suite(), 'record', str(tmp_path / 'c'), record_frozen=True)
+        assert len(seen) == 3
+
+    def test_once_floors_are_set_missing_recordings_are_the_harness_error(self, tmp_path,
+                                                                         monkeypatch):
+        """SF-2: after the baseline, a misplaced directory must not read as
+        'not recorded yet'."""
+        _write_set(tmp_path, _items(), recorded=())
+        monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
+        monkeypatch.setattr('e1.load_cases', lambda *a: [CASE])
+        suite = _suite()
+        monkeypatch.setitem(suite.run.__globals__, 'FLOORS',
+                            {k: 0.5 for k in suite.run.__globals__['FLOORS']})
+        from storyforge import cassette
+
+        def miss(item, work_dir):
+            cassette._fail(cassette.CassetteMiss('nothing recorded'))
+            return runner.Unfinished('miss')
+        monkeypatch.setattr(runner, 'gate_one', miss)
+        result = harness.run_suite(suite, 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'error' and 'has no recordings' in result['error']
 
     def test_no_private_set_is_unavailable_naming_where_it_goes(self, tmp_path, monkeypatch):
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path / 'nowhere'))
@@ -311,3 +443,130 @@ class TestSuite:
             assert _suite(name).cassettes('run2') == os.path.join(
                 str(tmp_path), gate_set.SET_NAME, 'cassettes', 'run2', name)
             assert not (PLUGIN_DIR / 'evals' / 'fixtures' / 'cassettes' / name).exists()
+
+
+class TestGateOne:
+    """T-1: gate_one gates as revise does, with e8.prepare and the gate stubbed."""
+
+    @pytest.fixture
+    def book(self, tmp_path, monkeypatch):
+        import e8
+        project = tmp_path / 'book'
+        (project / 'scenes').mkdir(parents=True)
+        (project / 'scenes' / 'island.md').write_text('The pre-pass prose.')
+        monkeypatch.setattr(e8, 'prepare', lambda case, wd: (str(project), 'island'))
+        monkeypatch.setattr(runner, 'e1_case', lambda cid: CASE)
+        return project
+
+    @pytest.mark.parametrize('family,command', [('redraft-from-brief', 'redraft'),
+                                                ('naturalness-upstream', 'redraft'),
+                                                ('revision-plan', 'revise')])
+    def test_snapshots_the_book_before_writing_the_prose(self, book, tmp_path, monkeypatch,
+                                                         family, command):
+        from storyforge import gate
+        calls = {}
+        monkeypatch.setattr(gate, 'snapshot', lambda p: (
+            calls.setdefault('snapshot_saw', (book / 'scenes' / 'island.md').read_text())))
+
+        def gate_scene(project, scene_id, **kw):
+            calls.update(kw, file=(book / 'scenes' / 'island.md').read_text())
+            return _result()
+        monkeypatch.setattr(gate, 'gate_scene', gate_scene)
+        item = _item(WRONG, 'reintroduced', 'a week at sea', family=family)
+        assert isinstance(runner.gate_one(item, str(tmp_path / 'w')), gate.GateResult)
+        assert calls['snapshot_saw'] == 'The pre-pass prose.'
+        assert calls['before'] == 'The pre-pass prose.'
+        assert calls['file'] == WRONG and calls['prose'] == WRONG
+        assert calls['command'] == command
+
+    def test_a_gate_error_is_unfinished_with_its_reason(self, book, tmp_path, monkeypatch):
+        from storyforge import gate
+
+        def fails(*a, **kw):
+            raise gate.GateError('extraction cut off')
+        monkeypatch.setattr(gate, 'gate_scene', fails)
+        out = runner.gate_one(_item(WRONG, 'reintroduced', 'a week'), str(tmp_path / 'w'))
+        assert out == runner.Unfinished('extraction cut off')
+
+    def test_any_other_error_raises(self, book, tmp_path, monkeypatch):
+        from storyforge import gate
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **kw: 1 / 0)
+        with pytest.raises(ZeroDivisionError):
+            runner.gate_one(_item(WRONG, 'reintroduced', 'a week'), str(tmp_path / 'w'))
+
+
+class TestFloorDirection:
+    """CR-1: a fall in a higher-is-better metric is a loss, whatever its name."""
+
+    @pytest.mark.parametrize('name,value,word', [
+        ('cases_caught', 4, 'a loss'), ('cases_caught', 6, 'a gain'),
+        ('stop_rate_positive', 0.4, 'a loss'), ('recall_per_case', 0.6, 'a gain'),
+        ('false_alarm_on_fact', 3, 'a loss'), ('false_alarm_on_fact', 1, 'a gain'),
+        ('unfinished', 0, 'a gain'),
+    ])
+    def test_gate_set_metrics(self, name, value, word):
+        from blocking_set.runner import floor_gates
+        _, notes = floor_gates({name: value}, {name: 5 if name == 'cases_caught' else (
+            2 if name in ('false_alarm_on_fact',) else (1 if name == 'unfinished' else 0.5))},
+            gate_set.HIGHER_IS_BETTER)
+        assert word in notes[0], notes
+
+    def test_the_default_still_reads_names_starting_recall(self):
+        from blocking_set.runner import floor_gates
+        _, notes = floor_gates({'recall': 0.4, 'flags': 9}, {'recall': 0.5, 'flags': 10})
+        assert 'a loss' in notes[0] and 'a gain' in notes[1]
+
+
+def test_commands_cover_exactly_the_gated_families():
+    """T-3: every prose family E8 replays maps to a gate command."""
+    import e8
+    from storyforge import gate
+    assert set(gate_set.COMMANDS) == set(e8.FAMILIES) - set(e8.DATA_FAMILIES)
+    assert set(gate_set.COMMANDS.values()) <= set(gate.GATE_COMMANDS)
+
+
+class TestBuildMain:
+    def _recordings(self, tmp_path, monkeypatch, *calls):
+        from e8 import judge_prompt
+        d = str(tmp_path / 'e8')
+        for n, (case, prose, reply) in enumerate(calls):
+            _record(d, f'r{n}', judge_prompt(case, prose), reply)
+        monkeypatch.setattr(build, 'RECORDINGS', {'cassettes': d})
+        monkeypatch.setattr('e1.load_cases', lambda *a: [CASE, OTHER])
+
+    def test_writes_a_set_that_loads_and_validates_and_prints_no_prose(self, tmp_path,
+                                                                      monkeypatch, capsys):
+        self._recordings(tmp_path, monkeypatch,
+                         (CASE, WRONG, '{"verdict": "reintroduced", '
+                                       '"evidence": "They landed after a week at sea."}'),
+                         (CASE, RIGHT, '{"verdict": "consistent", '
+                                       '"evidence": "They landed after three days at sea."}'))
+        out = tmp_path / 'set'
+        assert build.main(['--out', str(out)]) == 0
+        printed = capsys.readouterr()
+        assert 'wrote 2 item(s)' in printed.out
+        assert 'a week at sea' not in printed.out + printed.err
+        items = gate_set.load(str(out))
+        assert gate_set.validate(items, {CASE['id']: CASE}) == []
+        assert sorted(i['role'] for i in items) == ['control', 'positive']
+
+    def test_two_verdicts_on_the_same_prose_stop_the_build(self, tmp_path, monkeypatch, capsys):
+        from e8 import judge_prompt
+        for run, verdict in (('r1', 'reintroduced'), ('r2', 'consistent')):
+            _record(str(tmp_path / run), 'a', judge_prompt(CASE, WRONG),
+                    json.dumps({'verdict': verdict, 'evidence': 'a week at sea'}))
+        monkeypatch.setattr(build, 'RECORDINGS', {'cassettes': str(tmp_path / 'r1'),
+                                                  'run2': str(tmp_path / 'r2')})
+        monkeypatch.setattr('e1.load_cases', lambda *a: [CASE])
+        out = tmp_path / 'set'
+        assert build.main(['--out', str(out)]) == 1
+        assert 'conflicting verdicts' in capsys.readouterr().err
+        assert not out.exists()
+
+    def test_no_judge_call_at_all_writes_nothing(self, tmp_path, monkeypatch, capsys):
+        d = str(tmp_path / 'e8')
+        _record(d, 'a', 'Extract every commitment the scene makes', '{}')
+        monkeypatch.setattr(build, 'RECORDINGS', {'cassettes': d})
+        monkeypatch.setattr('e1.load_cases', lambda *a: [CASE])
+        assert build.main(['--out', str(tmp_path / 'set')]) == 1
+        assert not (tmp_path / 'set').exists()

@@ -19,7 +19,8 @@ and the tests never quote it; what this repo keeps is code, counts and ids.
 
 Layout of `gate-set/` (written by `build.py`, from E8's cassettes):
 
-- `cases.json`: ``{"items": [<item>, ...]}``, an item being::
+- `cases.json`: ``{"source": "<where it was built from>", "items": [<item>, ...]}``,
+  an item being::
 
       {"id": "<E1 case id>-<sha1 of the prose, 8>",
        "case": "<E1 case id>",
@@ -32,24 +33,36 @@ Layout of `gate-set/` (written by `build.py`, from E8's cassettes):
 
 - `prose/<id>.md`: the judged prose.
 
-**Roles.** Every `reintroduced` item whose evidence is in its prose is a
-`positive`, except for a case in `e8.EXCLUDED_CASES` (its pre-pass book
-already has the error, so every item of it is `spare`). For each positive, one `consistent` item of the same case (the
-judge found the fact stated, and stated right) is a `control`, in id order,
-while the case has one; the rest are `spare`, kept but not run. A control's
-evidence sentence states the fact correctly, so a finding landing on it is a
-false alarm on that very fact. `not_present` items don't touch the fact, so
-they are spare too.
+**Roles** (`assign_roles`; `validate` checks the stored roles against it).
+A `reintroduced` item whose evidence falls at exactly one place in its prose
+is a `positive`. Each positive pairs with at most one `consistent` item of
+the same case whose evidence also falls at one place, taken in id order: a
+`control`. A case has as many controls as it has such items, up to its
+positives, so the set has fewer controls than positives. Everything else
+is `spare`, kept but not run: `not_present` items (they don't touch the
+fact), items whose evidence is paraphrased or at several places, and every
+item of a case in `e8.EXCLUDED_CASES` (E8 doesn't replay those: for most,
+the pre-pass book already has the error, so the gate is right to pass it).
+A control's evidence sentence states the fact correctly, so a finding
+landing on it is a false alarm on that very fact.
 
 **What is measured.** Each run item's pre-pass book is materialized
 (`e8.prepare`), its prose written in, and the gate run once on it
 (`gate.gate_scene`, no fix loop), with `before` the book before the prose,
 as revise passes it. A positive is `caught` when a verified finding that
-blocks (`GateResult.findings`) has its scene quote on the evidence sentence
-(matched by place, `blocking_set.places`), and `stopped` when the gate
-didn't pass the scene at all (E8's measure: a stop for any reason). A
-finding on the evidence that the gate classed as already in the book
-(`inherited`) is counted apart: it was seen, and doesn't block.
+blocks (`GateResult.findings`) has its scene quote overlapping the evidence
+sentence's place in the normalized prose (`blocking_set.spans` and
+`overlaps`: a quote sharing any words of that place counts), and `stopped`
+when the gate didn't pass the scene at all (E8's measure: a stop for any
+reason). A finding with no scene quote (a broken promise, under either check
+method) is about the brief, not the case's error, so it can stop a scene
+but never catch. A finding on the evidence that the gate classed as already
+in the book (`inherited`) is counted apart: it was seen, and doesn't block.
+
+Stated simplification: a `naturalness-upstream` replay (revise rewrites the
+brief, then redrafts) is gated against the pre-pass brief, not the rewritten
+one, which the recording doesn't keep. Its contradictions are checked
+against the book and the ledger, which the brief rewrite doesn't change.
 """
 
 from __future__ import annotations
@@ -67,6 +80,10 @@ ROLES = ('positive', 'control', 'spare')
 #: write and revise gate them
 COMMANDS = {'redraft-from-brief': 'redraft', 'naturalness-upstream': 'redraft',
             'revision-plan': 'revise'}
+#: The metrics where a rise is a gain (for `floor_gates`); for the rest
+#: (false alarms, control stops, unfinished) a fall is
+HIGHER_IS_BETTER = frozenset({'recall', 'recall_per_case', 'cases_caught',
+                              'stop_rate_positive'})
 
 
 class SetMissing(SuiteUnavailable):
@@ -118,20 +135,31 @@ def load(path: str) -> list[dict]:
 
 
 def evidence_place(prose: str, evidence: str) -> list[tuple[int, int]]:
-    """The character ranges, in the normalized prose, where the judge's
-    evidence falls; empty when it isn't there (the judge paraphrased)."""
+    """The character ranges, in the normalized prose, of the one place the
+    judge's evidence falls; empty when it isn't there (the judge
+    paraphrased) or falls at several places (a finding at any of them would
+    count, as the blocking set refuses for its quotes)."""
     from storyforge.quotes import normalize
-    return blocking_set.spans(normalize(prose), evidence) if evidence.strip() else []
+    if not evidence.strip():
+        return []
+    found = blocking_set.places(normalize(prose), evidence)
+    return found[0] if len(found) == 1 else []
 
 
-def validate(items: list[dict]) -> list[str]:
+def validate(items: list[dict], cases: dict[str, dict] | None = None) -> list[str]:
     """The structural problems that would make scoring wrong, naming ids,
-    never the prose. Empty when sound."""
-    from e8 import VERDICTS
+    never the prose. Empty when sound. With `cases` (E1's, by id), each
+    item's case must still exist with the item's family and code: a case
+    renamed, relabelled or newly excluded since the build means a rebuild."""
+    import copy
+
+    from e1 import ERROR_CODES
+    from e8 import EXCLUDED_CASES, VERDICTS, family
     problems = []
     if not any(i.get('role') == 'positive' for i in items):
         problems.append('the set has no positive item')
     seen = set()
+    sound = []
     for n, item in enumerate(items, 1):
         iid = item.get('id')
         if not (isinstance(iid, str) and iid):
@@ -140,12 +168,17 @@ def validate(items: list[dict]) -> list[str]:
         if iid in seen:
             problems.append(f'{iid}: listed twice')
         seen.add(iid)
+        before = len(problems)
         if item.get('role') not in ROLES:
             problems.append(f'{iid}: role must be one of {ROLES}')
         if item.get('verdict') not in VERDICTS:
             problems.append(f'{iid}: verdict must be one of {VERDICTS}')
         if item.get('family') not in COMMANDS:
             problems.append(f'{iid}: family must be one of {tuple(COMMANDS)}')
+        if item.get('code') not in ERROR_CODES:
+            problems.append(f'{iid}: code must be one of {ERROR_CODES}')
+        if not isinstance(item.get('evidence', ''), str):
+            problems.append(f'{iid}: evidence must be a string')
         if not item.get('prose', '').strip():
             problems.append(f'{iid}: no prose (prose/{iid}.md)')
             continue
@@ -157,15 +190,30 @@ def validate(items: list[dict]) -> list[str]:
             problems.append(f'{iid}: a control must be consistent')
         if item.get('role') in ('positive', 'control') and not evidence_place(
                 item['prose'], str(item.get('evidence', ''))):
-            problems.append(f'{iid}: its evidence is not in its prose')
+            problems.append(f'{iid}: its evidence is not in its prose at exactly one place')
+        if cases is not None and item.get('role') != 'spare':
+            case = cases.get(str(item.get('case')))
+            if case is None:
+                problems.append(f'{iid}: E1 has no case {item.get("case")}; rebuild the set')
+            elif case['id'] in EXCLUDED_CASES:
+                problems.append(f'{iid}: E8 now excludes {case["id"]}; rebuild the set')
+            elif family(case) != item.get('family') or case.get('code') != item.get('code'):
+                problems.append(f'{iid}: {case["id"]}\'s family or code changed; rebuild the set')
+        if len(problems) == before:
+            sound.append(item)
+    # The stored roles must be the ones the rule gives: a positive relabelled
+    # spare would leave recall's denominator without a miss
+    expected = copy.deepcopy(sound)
+    assign_roles(expected)
+    for item, want in zip(sound, expected):
+        if item['role'] != want['role']:
+            problems.append(f'{item["id"]}: role {item["role"]}, but the rule gives '
+                            f'{want["role"]}; rebuild the set')
     return problems
 
 
 def assign_roles(items: list[dict]) -> None:
-    """Set each item's `role` (see the module doc), in place. A case in
-    `e8.EXCLUDED_CASES` is all spare: its pre-pass book already carries the
-    error (#614's audit), so the gate is right to pass a replay that writes
-    it, and `e8.prepare` refuses it."""
+    """Set each item's `role` (the module doc's rule), in place."""
     from e8 import EXCLUDED_CASES
     positives: dict[str, int] = {}
     for item in sorted(items, key=lambda i: i['id']):
@@ -187,15 +235,23 @@ def assign_roles(items: list[dict]) -> None:
 
 # --- scoring ----------------------------------------------------------------
 
+def _outcome(iid: str, *, finished: bool, stopped: bool, caught: bool,
+             inherited_on: bool, findings: int) -> dict:
+    """The one shape of an item's outcome, for `score` and the results file."""
+    return {'id': iid, 'finished': finished, 'stopped': stopped, 'caught': caught,
+            'inherited_on': inherited_on, 'findings': findings}
+
+
 def outcome(item: dict, result) -> dict:
     """What the gate did with one item (a `gate.GateResult`, or None when it
     couldn't finish): `stopped`, `caught` (a blocking verified finding on
     the evidence), `inherited_on` (a finding on the evidence the gate classed
-    as already in the book), `findings` (blocking, verified)."""
+    as already in the book), `findings` (blocking, verified). A finding with
+    no scene quote (a broken promise) can't land on the evidence."""
     from storyforge.quotes import normalize
     if result is None:
-        return {'id': item['id'], 'finished': False, 'stopped': True, 'caught': False,
-                'inherited_on': False, 'findings': 0}
+        return _outcome(item['id'], finished=False, stopped=True, caught=False,
+                        inherited_on=False, findings=0)
     place = evidence_place(item['prose'], item.get('evidence', ''))
     norm = normalize(item['prose'])
 
@@ -203,10 +259,10 @@ def outcome(item: dict, result) -> dict:
         return any(blocking_set.overlaps(blocking_set.spans(norm, f.scene_quote), place)
                    for f in findings if f.scene_quote)
 
-    return {'id': item['id'], 'finished': True, 'stopped': not result.passed,
-            'caught': on_evidence(result.findings),
-            'inherited_on': on_evidence(result.inherited),
-            'findings': len(result.findings)}
+    return _outcome(item['id'], finished=True, stopped=not result.passed,
+                    caught=on_evidence(result.findings),
+                    inherited_on=on_evidence(result.inherited),
+                    findings=len(result.findings))
 
 
 def _rate(hit: int, of: int) -> float:
@@ -250,7 +306,7 @@ def score(items: list[dict], outcomes: dict[str, dict]) -> tuple[dict, dict]:
         'stop_rate_control': _rate(count(ctl, 'stopped'), len(ctl)),
         'unfinished': sum(1 for i in run if not outcomes[i['id']]['finished']),
     }
-    by_code: dict[str, dict[str, float]] = {}
+    by_code: dict[str, dict[str, int | float]] = {}
     for i in pos:
         row = by_code.setdefault(i['code'], {'positives': 0, 'caught': 0})
         row['positives'] += 1
