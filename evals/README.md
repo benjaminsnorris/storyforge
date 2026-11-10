@@ -167,19 +167,29 @@ the monthly budget): `cassettes/blocking-set/` and `cassettes/run2/`,
 
 | metric | run 1 | run 2 | run 3 |
 |---|---|---|---|
-| recall (117 in-scene slips) | 0.615 | 0.650 | 0.650 |
+| recall (117 in-scene slips; the 118th needs other scenes) | 0.615 | 0.650 | 0.650 |
 | recall, slips people found (34) | 0.324 | 0.382 | 0.412 |
 | recall, slips a read found (83) | 0.735 | 0.759 | 0.747 |
 | false alarms per 10k clean words | 1.27 | 1.27 | 0.85 |
 | flags | 99 | 101 | 96 |
 
-The categories move most between runs (light 0.33 / 0.50 / 0.17 on 6
-cases, posture 0.91 / 0.55 / 0.82 on 11). The stage sheet's 0.22 recall
-and 15.65 false alarms per 10k (below) are far from the read's, so the read
-stays the gate's default. To re-record (only when a decision depends on
-it): `python3 evals/run.py --mode record --suite blocking-set --runs 3`,
-then replay run 1, copy the private `results/latest.json` to
-`baseline-cases.json`, and set `FLOORS` from the report.
+The small categories (6 to 12 cases each) move most between runs:
+sightline 0.33 / 0.67 / 0.75, other 0.58 / 0.92 / 0.83, posture 0.91 / 0.55
+/ 0.82, light 0.33 / 0.50 / 0.17. The stage sheet's recall of 0.22 and 15.65
+false alarms per 10k (its `FLOORS` in `evals/suites/blocking_set_sheet.py`)
+are far from the read's, so the read stays the gate's default.
+
+`RECORDED` in each suite pins the set (`blocking_set.fingerprint`: the
+labels and every scene) and the number of recordings the floors were
+measured on. A different set errors; a replay with fewer recordings (the
+private repo on a branch without them) is unavailable and says which
+checkout to use, rather than reading the misses as a changed request.
+
+To re-record (only when a decision depends on it):
+`python3 evals/run.py --mode record --suite blocking-set --runs 3`, then
+replay run 1, copy the private `results/latest.json` to
+`baseline-cases.json`, and set `FLOORS` and `RECORDED` from the report and
+`blocking_set.fingerprint` / `.recordings`.
 
 ### The stage sheet on the set (#647)
 

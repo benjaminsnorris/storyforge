@@ -34,7 +34,7 @@ stale.
 
 **The blocking-set baseline is recorded** (2026-11-09, three runs, $20.31;
 Ben approved going over the monthly budget). The blocking read catches 0.62
-to 0.65 of the 117 known slips (0.32 to 0.41 of the 34 people found) with
+to 0.65 of the 117 in-scene known slips (0.32 to 0.41 of the 34 people found) with
 about 1 false alarm per 10k clean words. The stage sheet's 0.22 and 15.65
 are far behind it, so the read stays the default.
 
@@ -45,7 +45,7 @@ $40 a run open, $20 with `--questions`) once the question layer is a
 candidate to replace the open checker. The E4 half follows.
 
 **Ben's voice repo** (`benjaminsnorris/ben-voice`, private): bennorris.com's
-posts imported (686 pieces; 170 count, 159k words), fingerprinted, and
+posts imported (686 pieces; 170 count toward the fingerprint, 159k words), fingerprinted, and
 `voice propose` run ($0.43): 22 description claims and a 30-passage
 exemplar shortlist wait for Ben's marks (`proposals/`), then `voice accept`.
 
