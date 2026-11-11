@@ -29,26 +29,39 @@ MIN_CASES = 100
 #: The gates: the recorded baseline's values, each to be held exactly
 #: (#488). For recall a rise is a gain, for false alarms, left_flagged and
 #: flags a fall is; a gain moves the value here in the same commit, a loss
-#: is a decision. `None` until the baseline is recorded: the gate then
-#: fails and the note says what to write here. A metric the run doesn't
-#: emit fails its gate either way (a category or book gone from the set).
+#: is a decision. A metric the run doesn't emit fails its gate (a
+#: category or book gone from the set).
 #: `recall_found_by_readers` is the independent number (slips people
 #: found); `recall_found_by_tool` is partly the read agreeing with itself.
 FLOORS: dict[str, float | None] = {
-    'recall': None,
-    'recall_hands': None, 'recall_posture': None, 'recall_sightline': None,
-    'recall_worn': None, 'recall_position': None, 'recall_light': None,
-    'recall_other': None,
-    'recall_book_gawain': None, 'recall_book_wrath': None,
-    'recall_found_by_readers': None, 'recall_found_by_tool': None,
-    'false_alarms_per_10k': None,
-    'left_flagged': None,
-    'flags': None,
+    # Recorded 2026-11-09 (three runs, $20.31, opus, two readings a scene),
+    # gated on run 1's values. Across the three runs: recall 0.6154 / 0.6496
+    # / 0.6496, readers' 0.3235 / 0.3824 / 0.4118, false alarms per 10k
+    # 1.27 / 1.27 / 0.85, flags 99 / 101 / 96; the small categories move
+    # most (sightline 0.33 / 0.67 / 0.75 on 12 cases, light 0.33 / 0.50 /
+    # 0.17 on 6, posture 0.91 / 0.55 / 0.82 on 11)
+    'recall': 0.6154,
+    'recall_hands': 0.7353, 'recall_posture': 0.9091, 'recall_sightline': 0.3333,
+    'recall_worn': 0.4545, 'recall_position': 0.6129, 'recall_light': 0.3333,
+    'recall_other': 0.5833,
+    'recall_book_gawain': 0.4318, 'recall_book_wrath': 0.726,
+    'recall_found_by_readers': 0.3235, 'recall_found_by_tool': 0.7349,
+    'false_alarms_per_10k': 1.27,
+    'left_flagged': 1,
+    'flags': 99,
 }
 
 
+#: The set and the recordings FLOORS were measured on (#679 review): a
+#: different set errors, and a replay with fewer recordings (run 1's) is
+#: unavailable, naming the checkout, not read as a changed request.
+#: Re-recording sets both again (`blocking_set.fingerprint`, `.recordings`)
+RECORDED = {'set': '3244134c57b027323561416afdfc3d70119e9f8330ed5fe91ffab1b7997053fb',
+            'recordings': 185}
+
+
 def run(ctx):
-    return runner.run(ctx, 'read', FLOORS, MIN_CASES)
+    return runner.run(ctx, 'read', FLOORS, MIN_CASES, RECORDED)
 
 
 SUITE = Suite(NAME, 'Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; '

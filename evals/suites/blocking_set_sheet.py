@@ -34,7 +34,7 @@ MIN_CASES = 100
 
 #: The sheet's own recorded values, each held exactly (#488: a gain moves its
 #: floor in the same commit). The plan's target is the read's values
-#: (`blocking-set`'s FLOORS, not recorded yet): recall at least its, false
+#: (`blocking-set`'s FLOORS: recall 0.6154, false alarms 1.27 per 10k): recall at least its, false
 #: alarms no higher. Recall is still far below the read's three-scene check
 #: (26 of 117), and false alarms rose with it once hands kept their state
 FLOORS: dict[str, float | None] = {
@@ -57,8 +57,16 @@ FLOORS: dict[str, float | None] = {
 }
 
 
+#: The set and the recordings FLOORS were measured on (#679 review): a
+#: different set errors, and a replay with fewer recordings (the main run's) is
+#: unavailable, naming the checkout, not read as a changed request.
+#: Re-recording sets both again (`blocking_set.fingerprint`, `.recordings`)
+RECORDED = {'set': '3244134c57b027323561416afdfc3d70119e9f8330ed5fe91ffab1b7997053fb',
+            'recordings': 273}
+
+
 def run(ctx):
-    return runner.run(ctx, 'stage-sheet', FLOORS, MIN_CASES)
+    return runner.run(ctx, 'stage-sheet', FLOORS, MIN_CASES, RECORDED)
 
 
 SUITE = Suite(NAME, 'Stage sheet (#647) vs the known blocking slips and clean scenes of the '

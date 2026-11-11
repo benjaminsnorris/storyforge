@@ -148,6 +148,30 @@ def load(path: str) -> tuple[list[dict], list[dict]]:
     return cases, scenes
 
 
+def fingerprint(path: str) -> str:
+    """A hash of the set as scored: `cases.json`, `scenes.json` and every
+    scene file under `scenes/`. Floors recorded on one set mean nothing on
+    another, and a label edit that moves no gated number would otherwise
+    pass unnoticed (#679 review)."""
+    import hashlib
+    h = hashlib.sha256()
+    files = ['cases.json', 'scenes.json'] + sorted(
+        os.path.relpath(os.path.join(root, f), path)
+        for root, _dirs, names in os.walk(os.path.join(path, 'scenes')) for f in names)
+    for rel in files:
+        h.update(rel.encode('utf-8') + b'\0')
+        with open(os.path.join(path, rel), 'rb') as f:
+            h.update(f.read())
+        h.update(b'\0')
+    return h.hexdigest()
+
+
+def recordings(cassette_dir: str) -> int:
+    """How many recordings `cassette_dir` holds."""
+    return sum(1 for _root, _dirs, files in os.walk(cassette_dir)
+               for f in files if f.endswith(('.json.gz', '.json')))
+
+
 def scene_file(path: str, scene: dict) -> str:
     return os.path.join(path, 'scenes', str(scene.get('book')), f'{scene.get("scene")}.md')
 
