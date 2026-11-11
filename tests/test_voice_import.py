@@ -627,6 +627,41 @@ def test_a_title_and_date_match_left_unmade_is_named(repo):
                    'blog/n2.md': 'both are files of one folder'}
 
 
+def _imported(repo, *pieces):
+    vi.write_import(repo, vi.plan_import(repo, list(pieces)))
+
+
+def test_a_new_same_day_post_in_the_folder_already_imported_is_its_own_piece(repo):
+    """#681 review T-2: re-importing a folder holding a new post with an
+    existing post's title and date (a stored row's source, as csv_safe
+    keeps it, against a new piece's)."""
+    _imported(repo, vi.Piece('Untitled', '2017-04-01', 'notes', 'First.', '../blog/a.md'))
+    plan = vi.plan_import(repo, [vi.Piece('Untitled', '2017-04-01', 'notes', 'Second.',
+                                          '../blog/b.md')])
+    assert len(plan.rows) == 1 and plan.same_piece == []
+    assert [w for _s, _f, w in plan.title_date_kept] == ['both are files of one folder']
+
+
+def test_a_feed_copy_of_a_post_already_imported_from_its_folder_is_skipped(repo):
+    """#681 review T-3: the #669 match across imports, by title and date alone."""
+    _imported(repo, vi.Piece('Untitled', '2017-04-01', 'notes', 'The post.', '../blog/a.md'))
+    plan = vi.plan_import(repo, [vi.Piece('Untitled', '2017-04-01', 'notes', 'A summary.',
+                                          'https://e.com/x')])
+    assert plan.rows == [] and plan.same_piece == [('https://e.com/x',
+                                                    'corpus/2017-04-01-untitled.md')]
+
+
+def test_a_title_is_generic_by_the_dates_already_in_the_corpus_too(repo):
+    """#681 review T-4: the index's dates count toward a generic title."""
+    _imported(repo, vi.Piece('Untitled', '2017-04-01', 'notes', 'First.', '../blog/a.md'))
+    plan = vi.plan_import(repo, [
+        vi.Piece('Untitled', '2017-04-02', 'notes', 'Second.', '../blog/b.md'),
+        vi.Piece('Untitled', '2017-04-01', 'notes', 'Something else.', 'https://e.com/y')])
+    assert len(plan.rows) == 2 and plan.same_piece == []
+    assert ('https://e.com/y', 'corpus/2017-04-01-untitled.md',
+            'its title is used on other dates') in plan.title_date_kept
+
+
 @pytest.mark.parametrize('stored, again', [
     ('https://www.example.com/post/', 'http://example.com/post'),
     ('notes  draft.md', 'notes draft.md'),
