@@ -227,6 +227,63 @@ blocking-set-sheet --runs 3`), and without the private checkout it is
 identically. The recordings so far are the main run only (made before the
 suite was frozen).
 
+## The gate set (#677)
+
+Decision 5 removes the open checker once the typed checks (#648) and the
+question layer (#649) match its recall on the frozen E4 and E8. Re-recording
+those (about $240) mostly redrafts prose. The gate set measures the gate
+alone on prose E8 already recorded and judged: every past E8 recording's
+judge calls (the main cassettes and E6's runs 2 and 3) hold a replayed
+scene and a verdict on one known error, an E1 `tool-introduced` case.
+
+- **Built for free** by `python3 evals/gate_set/build.py`, which finds each
+  judge call's case by its prompt (`e8.judge_prompt` around the scene) and
+  writes the set to the private storyforge-evals repo (`gate-set/`, private
+  like the blocking set: the prose is the corpus books'). A judge call no
+  case frames, or a verdict that won't parse, stops the build. Data-family
+  judge calls aren't gated, so they're left out.
+- **Roles.** A `reintroduced` replay whose evidence sentence falls at
+  exactly one place in its prose is a `positive`. Each positive pairs with
+  at most one `consistent` replay of the same case (its evidence also at one
+  place): a `control`, so there are fewer controls than positives. The rest
+  are `spare`: `not_present` replays, paraphrased or repeated evidence, and
+  every replay of a case in `e8.EXCLUDED_CASES` (E8 doesn't replay those;
+  for most, the pre-pass book already has the error). `validate` checks the
+  stored roles against this rule. Built 2026-11-09: 351 items, 46 positives
+  over 15 cases (TRT 20, TIM 14, PHY 8, KNO 3, REL 1; no WLD), 31 controls.
+- **Measured.** Each run item's pre-pass book is materialized
+  (`e8.prepare`, so the corpus books must be cloned as for E8), the prose
+  written in and gated once (`gate.gate_scene`, no fix loop, `before` the
+  book before it). `recall`: positives with a blocking verified finding
+  whose quote overlaps the evidence sentence's place (as the blocking set
+  matches; a broken promise has no quote, so it can't catch);
+  `recall_per_case` weighs each case the same, since positives cluster
+  (the most has 6); `stop_rate_positive` is E8's own measure (not passed,
+  for any reason); `false_alarm_on_fact` counts controls with a finding on
+  their correct statement of the fact. A stop for another reason isn't
+  scored: the label covers one error.
+- **Two suites**: `gate-set` (the open checker, today's default) and
+  `gate-set-questions` (`check --questions`), each with its own recordings
+  under `gate-set/cassettes/` and outcomes in `gate-set/results/`.
+- **Not recorded yet, on purpose.** Both are frozen and recorded only when
+  the question layer is a candidate to replace the open checker (three
+  runs each; forecast from the gate's per-scene cost: about $40 a run for
+  `gate-set`, about $20 for `gate-set-questions`). The first recording has
+  no forecast in the baseline, so `run.py` refuses it without
+  `--over-budget` and Ben's approval. Until then a replay is `stale`
+  (unavailable, "not recorded yet", with the record command), not the
+  harness's no-recordings error, so a full run and `--baseline` aren't held
+  up by a suite left unrecorded deliberately. Once `FLOORS` are set, missing
+  recordings are that error again (a misplaced directory).
+- **Fails loudly.** A gate that can't finish an item counts as a stop and
+  is named in the notes, but if it finishes none the suite errors; the
+  question layer without the typed state errors up front; a cassette miss
+  during a run errors before any outcome is written. Each recorded run
+  overwrites the private `results/` file.
+- **Labels.** E8's judge is one Opus reading, tied to a known error, so
+  these labels are firmer than E4's (an Opus judge against an Opus checker).
+  The E4 half (shared-dark Act 1 drafts gated in order) is a follow-up.
+
 ## The question set (#649)
 
 `question-set` measures the gate's question layer (`storyforge.questions`,

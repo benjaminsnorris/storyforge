@@ -94,12 +94,18 @@ def check_all(scenes: list[dict], work_dir: str, method: str = 'read'
     return flags, by_key
 
 
-def floor_gates(metrics: dict, floors: dict) -> tuple[list[Gate], list[str]]:
-    """A gate per floor, holding the metric to it exactly (#488). For recall
-    a rise is a gain, for false alarms, left_flagged and flags a fall is; a
-    gain moves the floor in the same commit, a loss is a decision. A floor
-    the run has no metric for fails, set or not (a category or book gone
-    from the set)."""
+def floor_gates(metrics: dict, floors: dict, higher_is_better=None
+                ) -> tuple[list[Gate], list[str]]:
+    """A gate per floor, holding the metric to it exactly (#488). For the
+    metrics in `higher_is_better` (default: every name starting `recall`) a
+    rise is a gain, for the rest (false alarms, left_flagged, flags) a fall
+    is; a gain moves the floor in the same commit, a loss is a decision. A
+    floor the run has no metric for fails, set or not (a category or book
+    gone from the set)."""
+    def rises_well(name: str) -> bool:
+        return name in higher_is_better if higher_is_better is not None \
+            else name.startswith('recall')
+
     gates, notes = [], []
     for name, floor in floors.items():
         value = metrics.get(name)
@@ -114,7 +120,7 @@ def floor_gates(metrics: dict, floors: dict) -> tuple[list[Gate], list[str]]:
             notes.append(f'{name} {value}: no floor recorded; set FLOORS[{name!r}] = {value} '
                          f'with the baseline')
         elif value != floor:
-            gain = (value > floor) == name.startswith('recall')
+            gain = (value > floor) == rises_well(name)
             notes.append(f'{name} {value}, FLOORS {floor}: '
                          + ('a gain: move FLOORS to it in the same commit' if gain
                             else 'a loss; moving the floor is a decision (see FLOORS)'))
