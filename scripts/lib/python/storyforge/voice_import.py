@@ -19,7 +19,10 @@ matter (YAML `---` or Hugo's TOML `+++`: `kind`, `type`, `layout`,
 `categories`, `tags`; a `link`, `link_url` or `external_url` key makes it a
 link post), a feed item's categories, or a feed item that links off the
 feed's own site (a link post, recorded as `KIND_OFF_SITE` and named, since
-a moved blog does this too). `--kind` sets one kind for the whole import.
+a moved blog does this too). A tag or a feed category (feeds carry a
+blog's tags as categories) never makes a piece fiction by saying `story`
+or `stories`: a post tagged `story` tells one about the author's week
+(`FORM_ONLY_WORDS`, #680). `--kind` sets one kind for the whole import.
 With no sign, a piece is filed as an essay and the summary counts how many
 were, so the author can correct `corpus/index.csv`.
 
@@ -50,7 +53,9 @@ generic User-Agent and nothing about the user.
 Nothing is replaced: a piece whose source is already in the index
 (`source_key`), or that is already there under another source (the same
 words, or the same title and date: a folder, then the blog's feed), is
-skipped and named. A source that can't be read or fetched is an ERROR, and
+skipped and named. Title and date match only when the title isn't used on
+other dates (a default like "Microblog post") and the two copies aren't
+files in one folder, which never holds one post twice (#680). A source that can't be read or fetched is an ERROR, and
 the command exits 1 after importing the rest; a write that fails removes
 what it wrote.
 """
@@ -65,7 +70,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from typing import Callable
+from typing import Callable, Iterable
 from xml.parsers import expat
 
 from storyforge import voice_repo as vr
@@ -92,6 +97,11 @@ KIND_WORDS = {
     'link': 'link', 'links': 'link', 'linked': 'link', 'link-post': 'link',
     'linkpost': 'link', 'bookmark': 'link', 'bookmarks': 'link',
 }
+#: words that name a kind only in a front-matter field about the piece's
+#: form (kind, type, layout, post_type, category, categories), never as a
+#: tag or a feed category (a feed carries the blog's tags as categories):
+#: a post tagged `story` tells a story about the author's week (#680)
+FORM_ONLY_WORDS = frozenset({'story', 'stories'})
 #: front-matter keys that make a piece a link post
 LINK_KEYS = ('link', 'link_url', 'external_url', 'linkurl')
 #: how a truncated feed summary ends
@@ -131,6 +141,9 @@ class Piece:
     body: str
     source: str
     kind_from: str = KIND_SAID
+    #: its tags or feed categories said `story` (`FORM_ONLY_WORDS`), which
+    #: wasn't taken as fiction: the import names these (#680)
+    story_tag: bool = False
 
     def markdown(self) -> str:
         head = f'# {self.title}\n\n' if self.title else ''
@@ -540,14 +553,17 @@ def markdown_piece(text: str, source: str, fallback_title: str = '') -> Piece:
         title = title or _collapse(m.group(1))
         body = body[m.end():]
     words = []
-    for k in ('kind', 'type', 'layout', 'post_type', 'category', 'categories', 'tags'):
+    for k in ('kind', 'type', 'layout', 'post_type', 'category', 'categories'):
         words += _as_list(meta.get(k))
+    tags = _as_list(meta.get('tags'))
+    words += [t for t in tags if t.strip().lower() not in FORM_ONLY_WORDS]
     kind = kind_of(words)
     if not kind and any(meta.get(k) for k in LINK_KEYS):
         kind = 'link'
     date = _norm_date(str(meta.get('date') or meta.get('published') or meta.get('pubdate') or ''))
     return Piece(title or fallback_title, date, kind or 'essay', body, source,
-                 KIND_SAID if kind else KIND_GUESSED)
+                 KIND_SAID if kind else KIND_GUESSED,
+                 story_tag=not kind and any(t.strip().lower() in FORM_ONLY_WORDS for t in tags))
 
 
 def html_piece(html: str, source: str, fallback_title: str = '') -> Piece:
@@ -826,7 +842,10 @@ class _Reader:
         truncated, off_site_cut, summary_only = [], [], []
         for item in items:
             source = item.link or _item_key(where, item)
-            kind = kind_of(list(item.categories))
+            kind = kind_of([c for c in item.categories
+                            if c.strip().lower() not in FORM_ONLY_WORDS])
+            story_tag = not kind and any(c.strip().lower() in FORM_ONLY_WORDS
+                                         for c in item.categories)
             off_site = bool(site_host and is_url(item.link) and _host(item.link) != site_host)
             kind_from = KIND_SAID if kind or item.related else \
                 KIND_OFF_SITE if off_site else KIND_GUESSED
@@ -856,7 +875,8 @@ class _Reader:
                     summary_only.append(item.title or source)
             if body.lstrip('#').strip() == title:
                 body = ''
-            self.add(Piece(title, item.date, kind or 'essay', body, source, kind_from))
+            self.add(Piece(title, item.date, kind or 'essay', body, source, kind_from,
+                           story_tag=story_tag and kind_from == KIND_GUESSED))
         if truncated:
             shown = _shown(truncated)
             self.report.warnings.append(
@@ -895,7 +915,7 @@ def read_sources(voice_dir: str, sources: list[str], fetch: Fetch | None = None,
             report.errors.append(f'{src}: not a folder, a file or an http(s) URL')
     if kind:
         for p in report.pieces:
-            p.kind, p.kind_from = kind, KIND_SAID
+            p.kind, p.kind_from, p.story_tag = kind, KIND_SAID, False
     return report
 
 
@@ -916,11 +936,17 @@ class Plan:
     """What an import writes: new index rows with their files' text; the
     pieces skipped because their source is already in the index; and those
     skipped because the same piece is there under another source (the same
-    text, or the same title and date), as (source, the file that has it)."""
+    text, or the same title and date as `plan_import` matches them), as
+    (source, the file that has it)."""
     rows: list[vr.IndexRow] = field(default_factory=list)
     texts: dict[str, str] = field(default_factory=dict)
     already: list[str] = field(default_factory=list)
     same_piece: list[tuple[str, str]] = field(default_factory=list)
+    #: imported although a piece in the corpus or this import has the same
+    #: title and date, as (source, that file, why): the title is used on
+    #: other dates, or both are files of one folder. Named, so a double
+    #: that slipped through can be found (#680)
+    title_date_kept: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def source_key(source: str) -> str:
@@ -941,9 +967,53 @@ def _text_key(body: str) -> str:
     return hashlib.sha1(' '.join(words).encode('utf-8')).hexdigest() if words else ''
 
 
-def _title_date_key(title: str, date: str) -> tuple[str, str] | None:
-    title = _collapse(title).lower()
-    return (title, date) if title and re.match(r'^\d{4}-\d{2}-\d{2}$', date or '') else None
+def _title_norm(title: str) -> str:
+    return _collapse(title).lower()
+
+
+def _full_date(date: str) -> bool:
+    return bool(re.match(r'^\d{4}-\d{2}-\d{2}$', date or ''))
+
+
+def _title_date_key(title: str, date: str,
+                    generic: frozenset[str] = frozenset()) -> tuple[str, str] | None:
+    """(title, date) for matching one piece reached two ways, or None: no
+    title, no full date, or a `generic` title (one used on more than one
+    full date, like a blog's default "Microblog post"), which names no one
+    piece (#680)."""
+    title = _title_norm(title)
+    if not title or title in generic or not _full_date(date):
+        return None
+    return title, date
+
+
+def _generic_titles(pairs: Iterable[tuple[str, str]]) -> frozenset[str]:
+    """The titles, of (title, date) `pairs`, used on more than one full
+    date: the dates `_title_date_key` would key on (an undated copy of a
+    post doesn't make its title generic)."""
+    dates: dict[str, set[str]] = {}
+    for title, date in pairs:
+        t = _title_norm(title)
+        if t and _full_date(date):
+            dates.setdefault(t, set()).add(date)
+    return frozenset(t for t, ds in dates.items() if len(ds) > 1)
+
+
+def _folder(source: str) -> str | None:
+    """A file source's folder and extension (as `csv_safe` stores the
+    source, so a stored row and a new piece compare), or None for a URL or
+    a feed item. Two files of one type in one folder with one title and
+    date are two pieces: a folder of posts never holds one post twice
+    (#680). URLs get no such exemption: one host can serve a post
+    under two URLs (a tracking query, a redirect, a short link), which only
+    the title and date catch."""
+    from storyforge.common import csv_safe
+    if is_url(source) or '#' in source:
+        return None     # a URL, or a feed item keyed by its feed (`_item_key`)
+    s = csv_safe(source)
+    # the extension too: a post's Markdown and its rendered page side by
+    # side are one piece in two forms
+    return f'{os.path.normpath(os.path.dirname(s))}|{os.path.splitext(s)[1].lower()}'
 
 
 def _stored_body(text: str) -> str:
@@ -955,14 +1025,23 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
     """Name each new piece's file (`corpus/<date>-<slug>.md`, `-2` and on
     for a name taken) and skip a piece the corpus or this import already
     has: by its source (`source_key`), or, reached another way (a folder,
-    then its feed), by its text or its title and date. Raises
+    then its feed), by its text or its title and date (`_title_date_key`:
+    not a title used on other dates, and not two files in one folder,
+    `_folder`). Raises
     VoiceRepoError as `voice_repo.read_index`."""
     existing = vr.read_index(voice_dir)
     sources = {source_key(r.source) for r in existing if r.source}
+    generic = _generic_titles([(r.title, r.date) for r in existing]
+                              + [(p.title, p.date) for p in pieces])
     texts: dict[str, str] = {}
     dated: dict[tuple[str, str], str] = {}
+    folder_of = {r.file: _folder(r.source) for r in existing if r.source}
+    any_dated: dict[tuple[str, str], str] = {}   # the same, with no title generic
     for r in existing:
-        key = _title_date_key(r.title, r.date)
+        raw = _title_date_key(r.title, r.date)
+        if raw:
+            any_dated.setdefault(raw, r.file)
+        key = _title_date_key(r.title, r.date, generic)
         if key:
             dated.setdefault(key, r.file)
         try:
@@ -983,8 +1062,19 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
         if sk in sources:
             plan.already.append(p.source)
             continue
-        tk, dk = _text_key(p.body), _title_date_key(p.title, p.date)
-        twin = (tk and texts.get(tk)) or (dk and dated.get(dk))
+        tk, dk = _text_key(p.body), _title_date_key(p.title, p.date, generic)
+        dated_twin = dk and dated.get(dk)
+        folder = _folder(p.source)
+        kept_why = ''
+        if dated_twin and folder is not None and folder_of.get(dated_twin) == folder:
+            dated_twin, kept_why = None, 'both are files of one folder'
+        raw = _title_date_key(p.title, p.date)
+        if raw and not dk and any_dated.get(raw):
+            kept_why = 'its title is used on other dates'
+        twin = (tk and texts.get(tk)) or dated_twin
+        if not twin and kept_why:
+            plan.title_date_kept.append(
+                (p.source, dated.get(dk) or any_dated.get(raw) or '', kept_why))
         if twin:
             plan.same_piece.append((p.source, twin))
             continue
@@ -999,6 +1089,9 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
             texts[tk] = rel
         if dk:
             dated[dk] = rel
+        if raw:
+            any_dated.setdefault(raw, rel)
+        folder_of[rel] = _folder(p.source)
         plan.rows.append(vr.IndexRow(rel, _collapse(p.title), p.date, p.kind, p.source, ''))
         plan.texts[rel] = p.markdown()
     return plan

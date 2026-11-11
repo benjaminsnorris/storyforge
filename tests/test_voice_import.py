@@ -497,6 +497,171 @@ def test_the_same_title_and_date_in_one_import_is_one_piece(repo):
     assert len(plan.rows) == 1 and len(plan.same_piece) == 1
 
 
+def test_two_same_day_posts_in_one_folder_are_two_pieces(repo):
+    """#680: a folder never holds one post twice, so two files with one
+    title and date there are two pieces (a blog's untitled micro posts)."""
+    pieces = [vi.Piece('Microblog post', '2017-04-01', 'notes', 'A sketch of one talk.',
+                       'blog/_posts/2017-04-01-1838.md'),
+              vi.Piece('Microblog post', '2017-04-01', 'notes', 'A sketch of another.',
+                       'blog/_posts/2017-04-01-1841.md')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 2 and plan.same_piece == []
+
+
+def test_a_title_used_on_several_dates_names_no_one_piece(repo):
+    """#680: a default title ("Microblog post") on many dates doesn't match
+    a feed item to a folder post by title and date; the same text still does."""
+    pieces = [vi.Piece('Microblog post', '2017-04-01', 'notes', 'First words.', 'blog/a.md'),
+              vi.Piece('Microblog post', '2017-04-02', 'notes', 'Second words.', 'blog/b.md'),
+              vi.Piece('Microblog post', '2017-04-01', 'notes', 'Other words.', 'https://e.com/c'),
+              vi.Piece('Microblog post', '2017-04-02', 'notes', 'Second words.', 'https://e.com/b')]
+    plan = vi.plan_import(repo, pieces)
+    assert [r.source for r in plan.rows] == ['blog/a.md', 'https://e.com/c', 'blog/b.md']
+    assert plan.same_piece == [('https://e.com/b', plan.rows[2].file)]
+
+
+def test_a_specific_title_from_another_origin_is_still_one_piece(repo):
+    """The #669 case stays: one post as a folder file and as a feed item."""
+    pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'From the page.', 'blog/walk.md'),
+              vi.Piece('On Walking', '2019-03-02', 'essay', 'A cut summary…', 'https://e.com/w')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 1 and plan.same_piece == [('https://e.com/w', plan.rows[0].file)]
+
+
+@pytest.mark.parametrize('front, kind, said', [
+    ('category: Mental Work Health\ntags:\n- weekly\n- story', 'essay', False),
+    ('tags:\n- stories', 'essay', False),
+    ('category: Stories', 'fiction', True),
+    ('layout: story', 'fiction', True),
+    ('tags:\n- fiction', 'fiction', True),
+    ('tags:\n- short-story', 'fiction', True),
+])
+def test_a_story_tag_is_a_topic_not_fiction(front, kind, said):
+    """#680: a post tagged `story` tells a story about the author's week."""
+    piece = vi.markdown_piece(f'---\ntitle: T\ndate: 2022-07-22\n{front}\n---\nWords.\n', 'x.md')
+    assert piece.kind == kind
+    assert (piece.kind_from == vi.KIND_SAID) is said
+
+
+def _rss(*items):
+    """An RSS feed of (title, link or '', date, categories, text) items."""
+    body = ''.join(
+        f'<item><title>{t}</title>' + (f'<link>{link}</link>' if link else '')
+        + f'<pubDate>{d}</pubDate>' + ''.join(f'<category>{c}</category>' for c in cats)
+        + f'<description>&lt;p&gt;{text}&lt;/p&gt;</description></item>'
+        for t, link, d, cats, text in items)
+    return f'<rss version="2.0"><channel><link>https://e.com/</link>{body}</channel></rss>'
+
+
+def test_a_story_category_in_a_feed_is_a_topic_not_fiction(repo, tmp_path):
+    """#681 review: feeds carry a blog's tags as categories."""
+    feed = tmp_path / 'feed.xml'
+    feed.write_text(_rss(('Weighted jacket', 'https://e.com/w', 'Fri, 22 Jul 2022 10:00:00 GMT',
+                          ['Mental Work Health', 'story'], 'Words about a jacket.'),
+                         ('A tale', 'https://e.com/t', 'Sat, 23 Jul 2022 10:00:00 GMT',
+                          ['fiction'], 'Once upon a time.')))
+    r = vi.read_sources(repo, [str(feed)], fetch=_no_network)
+    got = {p.title: (p.kind, p.story_tag) for p in r.pieces}
+    assert got == {'Weighted jacket': ('essay', True), 'A tale': ('fiction', False)}
+
+
+def test_the_summary_names_story_tagged_pieces_apart_from_guesses(repo, tmp_path, capsys):
+    from storyforge import cmd_voice
+    posts = tmp_path / 'posts'
+    posts.mkdir()
+    (posts / 'a.md').write_text('---\ntitle: Jacket\ndate: 2022-07-22\ntags:\n- story\n---\nWords.\n')
+    (posts / 'b.md').write_text('---\ntitle: Plain\ndate: 2022-07-23\n---\nWords too.\n')
+    assert cmd_voice.main(['import', str(posts), '--dir', repo]) == 0
+    out = capsys.readouterr().out
+    assert '1 said nothing of their kind' in out
+    assert '1 tagged story (a topic, not a form) were filed as essays' in out and 'Jacket' in out
+
+
+def test_a_feed_item_without_a_link_in_the_posts_folder_is_still_one_piece(repo):
+    """#681 review: its source is the feed's path plus a hash, in the same
+    folder as the post, but it's a second copy, not a second post."""
+    pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'The whole post.', 'blog/walk.md'),
+              vi.Piece('On Walking', '2019-03-02', 'essay', 'A summary.', 'blog/feed.xml#ab12')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 1 and len(plan.same_piece) == 1
+
+
+def test_a_post_and_its_rendered_page_side_by_side_are_one_piece(repo):
+    pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'The post.', 'site/walk.md'),
+              vi.Piece('On Walking', '2019-03-02', 'essay', 'The post. Footer.', 'site/walk.html')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 1 and len(plan.same_piece) == 1
+
+
+def test_one_host_can_serve_one_post_twice(repo):
+    """#681 review: a tracking query or a redirect gives one post two URLs;
+    only the title and date catch it, so URLs get no same-origin exemption."""
+    vi.write_import(repo, vi.plan_import(repo, [vi.Piece(
+        'On Walking', '2019-03-02', 'essay', 'The full page.', 'https://medium.com/@me/walk')]))
+    plan = vi.plan_import(repo, [vi.Piece('On Walking', '2019-03-02', 'essay', 'The feed summary.',
+                                          'https://medium.com/@me/walk?source=rss-1')])
+    assert plan.rows == [] and len(plan.same_piece) == 1
+
+
+def test_an_undated_copy_doesnt_make_a_title_generic(repo):
+    """#681 review: only full dates count toward a generic title."""
+    pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'The post.', 'blog/walk.md'),
+              vi.Piece('On Walking', '2019-03-02', 'essay', 'A summary.', 'https://e.com/w'),
+              vi.Piece('On Walking', '', 'essay', 'A build page.', 'site/walk.html')]
+    plan = vi.plan_import(repo, pieces)
+    assert [r.source for r in plan.rows] == ['blog/walk.md', 'site/walk.html']
+    assert plan.same_piece == [('https://e.com/w', plan.rows[0].file)]
+
+
+def test_a_title_and_date_match_left_unmade_is_named(repo):
+    """#681 review: a double that slips through must be findable."""
+    pieces = [vi.Piece('Microblog post', '2017-04-01', 'notes', 'First.', 'blog/a.md'),
+              vi.Piece('Microblog post', '2017-04-02', 'notes', 'Second.', 'blog/b.md'),
+              vi.Piece('Microblog post', '2017-04-01', 'notes', 'Other.', 'https://e.com/c'),
+              vi.Piece('Note', '2017-05-01', 'notes', 'One.', 'blog/n1.md'),
+              vi.Piece('Note', '2017-05-01', 'notes', 'Two.', 'blog/n2.md')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 5
+    why = {s: w for s, _f, w in plan.title_date_kept}
+    assert why == {'https://e.com/c': 'its title is used on other dates',
+                   'blog/n2.md': 'both are files of one folder'}
+
+
+def _imported(repo, *pieces):
+    vi.write_import(repo, vi.plan_import(repo, list(pieces)))
+
+
+def test_a_new_same_day_post_in_the_folder_already_imported_is_its_own_piece(repo):
+    """#681 review T-2: re-importing a folder holding a new post with an
+    existing post's title and date (a stored row's source, as csv_safe
+    keeps it, against a new piece's)."""
+    _imported(repo, vi.Piece('Untitled', '2017-04-01', 'notes', 'First.', '../blog/a.md'))
+    plan = vi.plan_import(repo, [vi.Piece('Untitled', '2017-04-01', 'notes', 'Second.',
+                                          '../blog/b.md')])
+    assert len(plan.rows) == 1 and plan.same_piece == []
+    assert [w for _s, _f, w in plan.title_date_kept] == ['both are files of one folder']
+
+
+def test_a_feed_copy_of_a_post_already_imported_from_its_folder_is_skipped(repo):
+    """#681 review T-3: the #669 match across imports, by title and date alone."""
+    _imported(repo, vi.Piece('Untitled', '2017-04-01', 'notes', 'The post.', '../blog/a.md'))
+    plan = vi.plan_import(repo, [vi.Piece('Untitled', '2017-04-01', 'notes', 'A summary.',
+                                          'https://e.com/x')])
+    assert plan.rows == [] and plan.same_piece == [('https://e.com/x',
+                                                    'corpus/2017-04-01-untitled.md')]
+
+
+def test_a_title_is_generic_by_the_dates_already_in_the_corpus_too(repo):
+    """#681 review T-4: the index's dates count toward a generic title."""
+    _imported(repo, vi.Piece('Untitled', '2017-04-01', 'notes', 'First.', '../blog/a.md'))
+    plan = vi.plan_import(repo, [
+        vi.Piece('Untitled', '2017-04-02', 'notes', 'Second.', '../blog/b.md'),
+        vi.Piece('Untitled', '2017-04-01', 'notes', 'Something else.', 'https://e.com/y')])
+    assert len(plan.rows) == 2 and plan.same_piece == []
+    assert ('https://e.com/y', 'corpus/2017-04-01-untitled.md',
+            'its title is used on other dates') in plan.title_date_kept
+
+
 @pytest.mark.parametrize('stored, again', [
     ('https://www.example.com/post/', 'http://example.com/post'),
     ('notes  draft.md', 'notes draft.md'),

@@ -196,10 +196,20 @@ def _import(voice_dir: str, args) -> int:
         log('  by kind: ' + ', '.join(f'{n} {k}' for k, n in sorted(kinds.items())))
     new_sources = {r.source for r in plan.rows}
     new = [p for p in report.pieces if p.source in new_sources]
-    guessed = sum(1 for p in new if p.kind_from == vi.KIND_GUESSED)
+    if plan.title_date_kept:
+        shown = '; '.join(f'{s} ({why}; {f})' for s, f, why in plan.title_date_kept[:10])
+        more = len(plan.title_date_kept) - 10
+        log(f'  {len(plan.title_date_kept)} share a title and date with another piece but '
+            f'were imported as separate pieces: check {vr.INDEX_FILE} for a double: {shown}'
+            + (f' (and {more} more)' if more > 0 else ''))
+    story = [p.title or p.source for p in new if p.story_tag]
+    guessed = sum(1 for p in new if p.kind_from == vi.KIND_GUESSED and not p.story_tag)
     if guessed:
         log(f'  {guessed} said nothing of their kind and were filed as essays: correct '
             f'{vr.INDEX_FILE}\'s kind column where that\'s wrong')
+    if story:
+        log(f'  {len(story)} tagged story (a topic, not a form) were filed as essays: where one '
+            f'is fiction, correct {vr.INDEX_FILE}\'s kind column: {vi._shown(story)}')
     off_site = [p.title or p.source for p in new if p.kind_from == vi.KIND_OFF_SITE]
     if off_site:
         log(f'  {len(off_site)} filed as link posts only because they link off the feed\'s '
