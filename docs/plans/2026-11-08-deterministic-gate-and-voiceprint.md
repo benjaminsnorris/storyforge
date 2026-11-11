@@ -242,6 +242,20 @@ The feature is for writers who have a voice but can't name it, and
 especially for people with a large body of published writing (Ben has
 years of posts on bennorris.com).
 
+**What the blog showed (Ben, 2026-11-10).** `ben-voice` was built from
+bennorris.com (686 posts; 170 count toward the fingerprint, 159k words) and
+`voice propose` described it. Ben judged the claims accurate but not
+relevant to a novel: they described how he writes about mental health (the
+topic, therapy vocabulary, the weekly series' shape), and he has no fiction
+of his own. A non-fiction corpus's most distinctive traits are its subject
+and register, which a novel's narrator doesn't inherit. So for an author
+without fiction, **the voice is chosen, not extracted**: B5's blind samples,
+blending influences the author names, are the main route, and their kept
+passages are the exemplar bank. The author's own corpus is at most a loose
+check (the fingerprint), and its description isn't accepted as the voice.
+B0 to B4 stand for an author with a body of fiction. The proposals are kept
+unaccepted (`ben-voice` PR #1).
+
 **A voiceprint belongs to an author, not a book.** It's made once per
 author, in the author's own repo, and every book points to it. It works
 the way `series.canon` points a book at `../homer`: read in place, never
@@ -769,7 +783,7 @@ at a fraction of the cost.
 ## Decisions (Ben, 2026-11-08)
 
 Ben agreed with the recommendations below, except where a decision is
-recorded instead. Only question 20 is still open.
+recorded instead. Every question is now decided (20 and 21 on 2026-11-10).
 
 **Direction**
 
@@ -867,5 +881,14 @@ recorded instead. Only question 20 is still open.
     interpretation decisions exist, and the current draft is the comparison
     for the voice suite.
 20. **Which influences and narrator stance start the voice samples?**
-    *Open.* Ben names them. If he'd rather react first, round one is
-    four contrasting stances on one scene.
+    *Decided (Ben, 2026-11-10):* Brandon Sanderson, Steven Pressfield,
+    David Gemmell (the *Troy* trilogy), Glen Cook (*The Black Company*) and
+    Mary Renault; novels, not poetry. He also likes Orson Scott Card and
+    Terry Goodkind. Round one (iliad-adult PR #10) is five blind blends of
+    the farewell at the Scaean Gate, varying the narrator's stance,
+    distance and tense, written in session; `voice sample` (#654) is built
+    after a round or two shows what it should produce.
+21. **Is an author's non-fiction corpus their novel's voice?**
+    *Decided (Ben, 2026-11-10):* no, not for Ben. See Part B's opening:
+    the voice is chosen through samples, and the blog's description is
+    left unaccepted.
