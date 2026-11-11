@@ -497,6 +497,52 @@ def test_the_same_title_and_date_in_one_import_is_one_piece(repo):
     assert len(plan.rows) == 1 and len(plan.same_piece) == 1
 
 
+def test_two_same_day_posts_in_one_folder_are_two_pieces(repo):
+    """#680: a folder never holds one post twice, so two files with one
+    title and date there are two pieces (a blog's untitled micro posts)."""
+    pieces = [vi.Piece('Microblog post', '2017-04-01', 'notes', 'A sketch of one talk.',
+                       'blog/_posts/2017-04-01-1838.md'),
+              vi.Piece('Microblog post', '2017-04-01', 'notes', 'A sketch of another.',
+                       'blog/_posts/2017-04-01-1841.md')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 2 and plan.same_piece == []
+
+
+def test_a_title_used_on_several_dates_names_no_one_piece(repo):
+    """#680: a default title ("Microblog post") on many dates doesn't match
+    a feed item to a folder post by title and date; the same text still does."""
+    pieces = [vi.Piece('Microblog post', '2017-04-01', 'notes', 'First words.', 'blog/a.md'),
+              vi.Piece('Microblog post', '2017-04-02', 'notes', 'Second words.', 'blog/b.md'),
+              vi.Piece('Microblog post', '2017-04-01', 'notes', 'Other words.', 'https://e.com/c'),
+              vi.Piece('Microblog post', '2017-04-02', 'notes', 'Second words.', 'https://e.com/b')]
+    plan = vi.plan_import(repo, pieces)
+    assert [r.source for r in plan.rows] == ['blog/a.md', 'https://e.com/c', 'blog/b.md']
+    assert plan.same_piece == [('https://e.com/b', plan.rows[2].file)]
+
+
+def test_a_specific_title_from_another_origin_is_still_one_piece(repo):
+    """The #669 case stays: one post as a folder file and as a feed item."""
+    pieces = [vi.Piece('On Walking', '2019-03-02', 'essay', 'From the page.', 'blog/walk.md'),
+              vi.Piece('On Walking', '2019-03-02', 'essay', 'A cut summary…', 'https://e.com/w')]
+    plan = vi.plan_import(repo, pieces)
+    assert len(plan.rows) == 1 and plan.same_piece == [('https://e.com/w', plan.rows[0].file)]
+
+
+@pytest.mark.parametrize('front, kind, said', [
+    ('category: Mental Work Health\ntags:\n- weekly\n- story', 'essay', False),
+    ('tags:\n- stories', 'essay', False),
+    ('category: Stories', 'fiction', True),
+    ('layout: story', 'fiction', True),
+    ('tags:\n- fiction', 'fiction', True),
+    ('tags:\n- short-story', 'fiction', True),
+])
+def test_a_story_tag_is_a_topic_not_fiction(front, kind, said):
+    """#680: a post tagged `story` tells a story about the author's week."""
+    piece = vi.markdown_piece(f'---\ntitle: T\ndate: 2022-07-22\n{front}\n---\nWords.\n', 'x.md')
+    assert piece.kind == kind
+    assert (piece.kind_from == vi.KIND_SAID) is said
+
+
 @pytest.mark.parametrize('stored, again', [
     ('https://www.example.com/post/', 'http://example.com/post'),
     ('notes  draft.md', 'notes draft.md'),

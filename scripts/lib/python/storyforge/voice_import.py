@@ -92,6 +92,10 @@ KIND_WORDS = {
     'link': 'link', 'links': 'link', 'linked': 'link', 'link-post': 'link',
     'linkpost': 'link', 'bookmark': 'link', 'bookmarks': 'link',
 }
+#: words that name a kind only in a field about the piece's form (kind,
+#: type, layout, category), never as a tag: a post tagged `story` tells
+#: a story about the author's week; it isn't fiction (#680)
+FORM_ONLY_WORDS = frozenset({'story', 'stories'})
 #: front-matter keys that make a piece a link post
 LINK_KEYS = ('link', 'link_url', 'external_url', 'linkurl')
 #: how a truncated feed summary ends
@@ -540,8 +544,10 @@ def markdown_piece(text: str, source: str, fallback_title: str = '') -> Piece:
         title = title or _collapse(m.group(1))
         body = body[m.end():]
     words = []
-    for k in ('kind', 'type', 'layout', 'post_type', 'category', 'categories', 'tags'):
+    for k in ('kind', 'type', 'layout', 'post_type', 'category', 'categories'):
         words += _as_list(meta.get(k))
+    words += [t for t in _as_list(meta.get('tags'))
+              if t.strip().lower() not in FORM_ONLY_WORDS]
     kind = kind_of(words)
     if not kind and any(meta.get(k) for k in LINK_KEYS):
         kind = 'link'
@@ -941,9 +947,36 @@ def _text_key(body: str) -> str:
     return hashlib.sha1(' '.join(words).encode('utf-8')).hexdigest() if words else ''
 
 
-def _title_date_key(title: str, date: str) -> tuple[str, str] | None:
+def _title_date_key(title: str, date: str,
+                    generic: frozenset[str] = frozenset()) -> tuple[str, str] | None:
+    """(title, date) for matching one piece reached two ways, or None: no
+    title, no full date, or a `generic` title (one used on more than one
+    date, like a blog's default "Microblog post"), which names no one piece
+    (#680)."""
     title = _collapse(title).lower()
-    return (title, date) if title and re.match(r'^\d{4}-\d{2}-\d{2}$', date or '') else None
+    if not title or title in generic:
+        return None
+    return (title, date) if re.match(r'^\d{4}-\d{2}-\d{2}$', date or '') else None
+
+
+def _generic_titles(pairs) -> frozenset[str]:
+    """The titles, of (title, date) `pairs`, used on more than one date."""
+    dates: dict[str, set[str]] = {}
+    for title, date in pairs:
+        t = _collapse(title).lower()
+        if t:
+            dates.setdefault(t, set()).add(date or '')
+    return frozenset(t for t, ds in dates.items() if len(ds) > 1)
+
+
+def _origin(source: str) -> str:
+    """Where a source came from: a URL's host, or a file's folder. Two
+    pieces with one title and date from the same origin are two pieces (a
+    folder never holds one post twice); from two origins (a folder, then
+    the blog's feed), one piece reached twice (#680)."""
+    if is_url(source):
+        return _host(source)
+    return os.path.normpath(os.path.dirname(source))
 
 
 def _stored_body(text: str) -> str:
@@ -959,10 +992,13 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
     VoiceRepoError as `voice_repo.read_index`."""
     existing = vr.read_index(voice_dir)
     sources = {source_key(r.source) for r in existing if r.source}
+    generic = _generic_titles([(r.title, r.date) for r in existing]
+                              + [(p.title, p.date) for p in pieces])
     texts: dict[str, str] = {}
     dated: dict[tuple[str, str], str] = {}
+    origin_of = {r.file: _origin(r.source) for r in existing if r.source}
     for r in existing:
-        key = _title_date_key(r.title, r.date)
+        key = _title_date_key(r.title, r.date, generic)
         if key:
             dated.setdefault(key, r.file)
         try:
@@ -983,8 +1019,11 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
         if sk in sources:
             plan.already.append(p.source)
             continue
-        tk, dk = _text_key(p.body), _title_date_key(p.title, p.date)
-        twin = (tk and texts.get(tk)) or (dk and dated.get(dk))
+        tk, dk = _text_key(p.body), _title_date_key(p.title, p.date, generic)
+        dated_twin = dk and dated.get(dk)
+        if dated_twin and origin_of.get(dated_twin) == _origin(p.source):
+            dated_twin = None   # the same origin holds two pieces, not one twice
+        twin = (tk and texts.get(tk)) or dated_twin
         if twin:
             plan.same_piece.append((p.source, twin))
             continue
@@ -999,6 +1038,7 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
             texts[tk] = rel
         if dk:
             dated[dk] = rel
+        origin_of[rel] = _origin(p.source)
         plan.rows.append(vr.IndexRow(rel, _collapse(p.title), p.date, p.kind, p.source, ''))
         plan.texts[rel] = p.markdown()
     return plan
