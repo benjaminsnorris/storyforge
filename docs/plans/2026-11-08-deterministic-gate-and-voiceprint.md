@@ -1,8 +1,8 @@
 # A deterministic gate, a voiceprint, long writing sessions, a shorter ladder, and cheaper evals
 
 Status: **accepted** (Ben, 2026-11-08). Ben agreed with the recommendations;
-the decisions are listed at the end, and only the voice-sample influences
-are still open. Implementation is tracked in GitHub issues, one per phase
+the decisions are listed at the end, all decided (20 and 21 on
+2026-11-10). Implementation is tracked in GitHub issues, one per phase
 item (see Phasing). It builds on the gate-and-ledger design
 (`2026-10-30-gate-ledger-design.md`) and does not replace the ledger.
 
@@ -243,7 +243,7 @@ especially for people with a large body of published writing (Ben has
 years of posts on bennorris.com).
 
 **What the blog showed (Ben, 2026-11-10).** `ben-voice` was built from
-bennorris.com (686 posts; 170 count toward the fingerprint, 159k words) and
+bennorris.com (686 pieces; 170 count toward the fingerprint, 159k words) and
 `voice propose` described it. Ben judged the claims accurate but not
 relevant to a novel: they described how he writes about mental health (the
 topic, therapy vocabulary, the weekly series' shape), and he has no fiction
@@ -884,7 +884,8 @@ recorded instead. Every question is now decided (20 and 21 on 2026-11-10).
     *Decided (Ben, 2026-11-10):* Brandon Sanderson, Steven Pressfield,
     David Gemmell (the *Troy* trilogy), Glen Cook (*The Black Company*) and
     Mary Renault; novels, not poetry. He also likes Orson Scott Card and
-    Terry Goodkind. Round one (iliad-adult PR #10) is five blind blends of
+    Terry Goodkind. Narrator stance is left to the samples to find: round
+    one varies it. Round one (iliad-adult PR #10) is five blind blends of
     the farewell at the Scaean Gate, varying the narrator's stance,
     distance and tense, written in session; `voice sample` (#654) is built
     after a round or two shows what it should produce.

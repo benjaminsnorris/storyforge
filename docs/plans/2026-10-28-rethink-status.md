@@ -51,7 +51,8 @@ claims accurate but irrelevant to a novel** (they describe his mental-health
 writing; he has no fiction of his own), so they stay unaccepted (PR #1). For
 an author without fiction the voice is chosen, not extracted: the plan's
 Part B now says so (decision 21). The import's kind and duplicate guesses
-were fixed on the way (#680).
+were fixed on the way (#680, PR #681), and `ben-voice`'s index corrected
+(20 posts filed as fiction are essays).
 
 **The voice samples have started** (decision 20): influences Sanderson,
 Pressfield, Gemmell, Cook and Renault. Round one is iliad-adult PR #10,
