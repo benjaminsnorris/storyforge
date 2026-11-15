@@ -1,6 +1,6 @@
 # Ready to draft: what *Wrath Like Smoke*'s voice work teaches, and what's left
 
-Status: proposed (2026-11-14). It refines
+Status: accepted with Ben's answers (2026-11-14; see Decisions). It refines
 `2026-11-08-deterministic-gate-and-voiceprint.md` (Parts B and C, issues
 #654, #655, #656) with what the iliad-adult voice rounds found, and lists
 what Storyforge and the book still need before the redraft starts.
@@ -99,10 +99,15 @@ As the issue says, with these changes from the rounds:
 - After each scene: the free checks, the stage sheet and the question layer.
   Hard findings go back into the session as short notes. The open checker
   isn't the default.
-- `checks.md` runs on each finished scene as a read that **flags lines for
-  the author** with the item it matches. It never rewrites. Revision is by
-  reaction: the author marks lines (keep, cut, more like this, a note), and
-  the session revises them.
+- `checks.md` runs on each finished scene in two separate agents (Ben). A
+  **reviewer** reads the scene against `checks.md` and flags lines, naming
+  the check and quoting the line. A **reviser**, in a fresh context with
+  `book.md` and the anchors (never `checks.md` as a rule list), rewrites only
+  the flagged lines toward the anchors. With full coaching that runs by
+  itself; with coach or strict coaching the flags go to the author and
+  nothing is rewritten. The goal (Ben): agent writing at full coaching that
+  matches the voice. The author's own marks (keep, cut, more like this, a
+  note) go to the same reviser.
 - `--dry-run` forecasts the cost. Default: stop after the first 3 scenes for
   a read before going on.
 
@@ -131,10 +136,18 @@ blind read of the old draft against the session pilot).
   (Chryses opens; deaths seen by the man dying; the gods' scenes). Claude
   proposes, Ben decides.
 - Fill `tense` from POV (gods past, mortals present).
-- **Ben's call:** what to do with the old briefs. Either re-brief lean (about
-  $14, after the POV pass), or keep them and rely on the session reading only
-  the fact columns.
+- The old briefs stay (Ben, 2026-11-14). The session reads only their fact
+  columns.
 - The two `status` items: six summaries over 50 words, and the knowledge fact
   `commitments.csv` lacks.
 - Pilot: `write --session --dry-run` on Act 1, then the first 3 scenes, and
   Ben reads them before the rest of the act.
+
+## Decisions (Ben, 2026-11-14)
+
+1. **Old briefs:** keep them, and have the session read only the fact
+   columns. No re-brief.
+2. **Voice checks:** one agent identifies the problems and a separate agent
+   rewrites, aiming for quality writing at full coaching.
+3. **Order:** build #654 and #655 in Storyforge first. Ben then uses them on
+   Wrath. The Wrath items above are his, done afterwards.
