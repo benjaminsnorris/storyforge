@@ -241,9 +241,9 @@ def step5_transform_scenes_csv(
 
     # Reset status to 'mapped' EXCEPT for terminal editorial states.
     # Normalize the value (strip whitespace, lowercase) before comparing so
-    # ' cut ' or 'CUT' don't slip through. (cut/merged are deliberate authorial
-    # decisions and must survive migration.)
-    TERMINAL_STATUSES = {'cut', 'merged'}
+    # ' cut ' or 'CUT' don't slip through. (cut, merged and archived are
+    # deliberate authorial decisions and must survive migration.)
+    from storyforge.schema import INACTIVE_STATUSES as TERMINAL_STATUSES
     reset_count = 0
     for row in rows:
         status = (row.get('status') or '').strip().lower()

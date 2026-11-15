@@ -1551,7 +1551,7 @@ def check_chapter_map_freshness(project_dir: str) -> tuple[bool, list[str], list
 
     # Get active scene IDs from scenes.csv
     active_ids = set()
-    excluded_statuses = {'cut', 'merged', 'archived'}
+    from storyforge.schema import INACTIVE_STATUSES as excluded_statuses
     if os.path.isfile(scenes_csv):
         all_ids = get_column(scenes_csv, 'id')
         all_statuses = get_column(scenes_csv, 'status')
