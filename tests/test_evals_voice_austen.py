@@ -17,6 +17,7 @@ sys.path.insert(0, str(PLUGIN_DIR / 'evals'))
 
 import harness  # noqa: E402
 from suites import voice_austen as va  # noqa: E402
+from suites import voice_austen_control as vc  # noqa: E402
 
 #: names in the samples as their authors wrote them (a judge that sees them
 #: knows the book: #689 review SF-1)
@@ -152,6 +153,43 @@ def test_draft_sends_the_voice_and_notes_the_model(tmp_path, opus, monkeypatch):
     assert 'no scene markers' in notes[-1]
 
 
+def test_control_project_has_no_voice_block(tmp_path):
+    from storyforge import voice_repo
+    proj = va.project(str(tmp_path), voiced=False)
+    assert voice_repo.voice_ref(proj) is None
+    text = _read(os.path.join(proj, 'storyforge.yaml'))
+    assert 'voice:' not in text and 'AUTHOR_REPO' not in text
+    assert 'title: "The Lodge at Hartwell"' in text
+
+
+def test_control_sends_the_same_request_less_the_voice(tmp_path, opus, monkeypatch):
+    """The control differs from the voiced draft only by the voice block."""
+    import storyforge.api as api
+    seen = []
+
+    def fake(prompt, model, **kw):
+        seen.append((prompt, model, kw))
+        return _response('She played her card. ' * 300)
+
+    monkeypatch.setattr(api, 'invoke', fake)
+    va.draft(va.project(str(tmp_path / 'v')))
+    prose, notes = va.draft(va.project(str(tmp_path / 'c'), voiced=False), voiced=False)
+    (vp_, vm, vkw), (cp, cm, ckw) = seen
+    assert (cp, cm, ckw['max_tokens']) == (vp_, vm, vkw['max_tokens'])
+    voiced = [b['text'] for b in vkw['system']]
+    control = [b['text'] for b in ckw['system']]
+    assert [x for x in voiced if '=== The Voice ===' not in x] == control
+    assert len(voiced) == len(control) + 1
+    assert notes[0].startswith('Voice: none (the control')
+
+
+def test_control_refuses_a_context_that_carries_a_voice(tmp_path, opus, monkeypatch):
+    import storyforge.api as api
+    monkeypatch.setattr(api, 'invoke', lambda *a, **k: pytest.fail('a paid call was made'))
+    with pytest.raises(RuntimeError, match='control\'s shared context carries a voice'):
+        va.draft(va.project(str(tmp_path)), voiced=False)
+
+
 # ============================================================================
 # The judge
 # ============================================================================
@@ -248,7 +286,7 @@ def _run(tmp_path, monkeypatch, prose, austen_named):
     picks = [{'austen_at': c, 'pick': c, 'model': 'm', 'reason': 'r',
               'author': va.AUSTEN_NAME if i < austen_named else 'George Eliot'}
              for i, c in enumerate('ABCD')]
-    monkeypatch.setattr(va, 'draft', lambda proj: (prose, ['Voice: Jane Austen']))
+    monkeypatch.setattr(va, 'draft', lambda proj, voiced=True: (prose, ['Voice: Jane Austen']))
     monkeypatch.setattr(va, 'judge', lambda prose: picks)
     ctx = harness.SuiteContext('voice-austen', 'replay', str(tmp_path / 'c'),
                                str(tmp_path / 'w'))
@@ -280,3 +318,25 @@ def test_run_metrics_when_another_author_is_nearer(tmp_path, monkeypatch):
     assert out.metrics['meter_rank'] > 1 and out.metrics['meter_margin'] < 0
     assert not {g.name: g for g in out.gates}['meter_rank'].passed
     assert any('further from her than any of her own chunks' in n for n in out.notes)
+
+
+def test_control_run_gates_hold_the_recorded_values_in_the_comparison_direction(
+        tmp_path, monkeypatch):
+    prose = _read(os.path.join(va.OTHERS_DIR, 'christmas-carol', '05.md'))
+    seen = []
+    monkeypatch.setattr(va, 'draft', lambda proj, voiced=True: (
+        seen.append((proj, voiced)) or (prose, ['Voice: none (the control)'])))
+    monkeypatch.setattr(va, 'judge', lambda prose: [
+        {'austen_at': c, 'pick': c, 'model': 'm', 'reason': 'r', 'author': 'George Eliot'}
+        for c in 'ABCD'])
+    ctx = harness.SuiteContext('voice-austen-control', 'replay', str(tmp_path / 'c'),
+                               str(tmp_path / 'w'))
+    out = vc.run(ctx)
+    assert seen[0][1] is False
+    from storyforge import voice_repo
+    assert voice_repo.voice_ref(seen[0][0]) is None
+    gates = {g.name: g for g in out.gates}
+    assert (gates['meter_rank'].op, gates['meter_rank'].threshold) == ('>=', vc.RECORDED_RANK)
+    assert (gates['judge_austen'].op, gates['judge_austen'].threshold) == (
+        '<=', vc.RECORDED_JUDGE)
+    assert out.metrics['judge_austen'] == 0 and out.metrics['meter_rank'] > 1

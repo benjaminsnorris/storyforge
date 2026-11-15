@@ -137,7 +137,7 @@ def test_the_real_frozen_suites():
     frozen = {s.name for s in harness.discover(eval_run.SUITES_DIR) if s.frozen}
     assert frozen == {'e4-generation', 'e8-revision-safety', 'blocking-set',
                       'blocking-set-sheet', 'gate-set', 'gate-set-questions',
-                      'voice-austen'}
+                      'voice-austen', 'voice-austen-control'}
 
 
 def test_a_prompt_change_makes_a_frozen_suite_stale_spends_nothing_and_exits_0(

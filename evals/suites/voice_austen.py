@@ -106,22 +106,34 @@ JUDGE_SCHEMA = {
 }
 
 
+#: the end of the fixture's storyforge.yaml: `project` points it at Austen, or
+#: cuts it for the control
+VOICE_BLOCK = 'voice:\n  author: AUTHOR_REPO\n'
+
+
 def _read(path):
     with open(path, encoding='utf-8') as f:
         return f.read()
 
 
-def project(work_dir: str) -> str:
+def project(work_dir: str, voiced: bool = True) -> str:
     """A working copy of the fixture book, its `voice:` block pointed at the
-    Austen reference."""
+    Austen reference, or (not `voiced`: the control) with no `voice:` block.
+
+    Raises:
+        RuntimeError: the fixture's `storyforge.yaml` doesn't end with the
+            block (`VOICE_BLOCK`) holding the AUTHOR_REPO placeholder.
+    """
     dest = os.path.join(work_dir, 'voice-austen')
     shutil.copytree(FIXTURE, dest)
     path = os.path.join(dest, 'storyforge.yaml')
     text = _read(path)
-    if 'AUTHOR_REPO' not in text:
-        raise RuntimeError(f'{path}: no AUTHOR_REPO placeholder in the voice: block')
+    if not text.endswith(VOICE_BLOCK):
+        raise RuntimeError(f'{path}: doesn\'t end with the voice: block and its AUTHOR_REPO '
+                           'placeholder')
+    text = text.replace('AUTHOR_REPO', AUSTEN) if voiced else text[:-len(VOICE_BLOCK)]
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(text.replace('AUTHOR_REPO', AUSTEN))
+        f.write(text)
     return dest
 
 
@@ -153,14 +165,16 @@ def check_voice(project_dir: str, system: list[dict]) -> list[str]:
     return lines
 
 
-def draft(project_dir: str) -> tuple[str, list[str]]:
+def draft(project_dir: str, voiced: bool = True) -> tuple[str, list[str]]:
     """The scene, drafted as `write` drafts it in direct mode (no gate: the
     voice is what's measured), and notes on it (the voice read, the model).
+    Not `voiced` (the control): the same request with no voice in the shared
+    context, which `write` itself refuses to send.
 
     Raises:
-        RuntimeError: the voice isn't carried whole (`check_voice`), the
-            reply was refused or cut off, ends mid-sentence, or is too short
-            for the meter.
+        RuntimeError: the voice isn't carried whole (`check_voice`), or for
+            the control the context has one; the reply was refused or cut
+            off, ends mid-sentence, or is too short for the meter.
     """
     from storyforge import voiceprint as vp
     from storyforge.api import extract_text, invoke, stop_problem
@@ -170,12 +184,18 @@ def draft(project_dir: str) -> tuple[str, list[str]]:
 
     model = select_model('drafting')
     system = build_shared_context(project_dir, model=model)
-    notes = check_voice(project_dir, system)
+    if voiced:
+        notes = check_voice(project_dir, system)
+    elif any('=== The Voice ===' in b.get('text', '') for b in system):
+        raise RuntimeError('the control\'s shared context carries a voice')
+    else:
+        notes = ['Voice: none (the control: the same request with no voice block)']
     prompt = _build_prompt(SCENE, project_dir, 'full', use_briefs=True, system_context=True)
     if not prompt:
         raise RuntimeError(f'could not build a drafting prompt for {SCENE}')
     response = invoke(prompt, model, max_tokens=DRAFT_MAX_TOKENS,
-                      label=f'voice-austen draft {SCENE}', system=system)
+                      label=f'voice-austen{"" if voiced else "-control"} draft {SCENE}',
+                      system=system)
     problem = stop_problem(response)
     if problem:
         raise RuntimeError(f'the draft: {problem}')
@@ -321,9 +341,11 @@ def judge(prose: str) -> list[dict]:
     return out
 
 
-def run(ctx):
-    proj = project(ctx.work_dir)
-    prose, draft_notes = draft(proj)
+def measure(ctx, voiced: bool = True) -> tuple[dict, list[str]]:
+    """Draft the scene (`voiced`, or the control), meter it and judge it:
+    the metrics and notes both suites report."""
+    proj = project(ctx.work_dir, voiced)
+    prose, draft_notes = draft(proj, voiced)
     with open(os.path.join(proj, 'scenes', f'{SCENE}.md'), 'w', encoding='utf-8') as f:
         f.write(prose)
     m = meter(prose)
@@ -342,19 +364,24 @@ def run(ctx):
         'furthest from her: ' + '; '.join(f'{d.name} {d.z:+.1f} sd' for d in m['furthest'])]
     notes += [f'judge ({p["model"]}), Austen at {p["austen_at"]}: named {p["author"]} '
               f'({p["pick"]}): {p["reason"][:300]}' for p in picks]
+    notes.append('Opening of the draft: ' + ' '.join(prose.split()[:80]))
+    return ({'words': len(prose.split()),
+             'meter_rank': rank,
+             'meter_distance_austen': round(dist['austen'], 4),
+             'meter_margin': round(nearest_other - dist['austen'], 4),
+             'austen_held_out_median': round(m['held_out_median'], 4),
+             'judge_austen': named,
+             'judge_asked': len(picks)}, notes)
+
+
+def run(ctx):
+    metrics, notes = measure(ctx)
     notes.append('Plan target (B7 test 6): meter_rank 1 and the judge naming Austen. The '
                  'gates hold what run 1 recorded (#488).')
-    notes.append('Opening of the draft: ' + ' '.join(prose.split()[:80]))
     return SuiteOutput(
-        metrics={'words': len(prose.split()),
-                 'meter_rank': rank,
-                 'meter_distance_austen': round(dist['austen'], 4),
-                 'meter_margin': round(nearest_other - dist['austen'], 4),
-                 'austen_held_out_median': round(m['held_out_median'], 4),
-                 'judge_austen': named,
-                 'judge_asked': len(picks)},
-        gates=[Gate('meter_rank', rank, '<=', RECORDED_RANK),
-               Gate('judge_austen', named, '>=', RECORDED_JUDGE)],
+        metrics=metrics,
+        gates=[Gate('meter_rank', metrics['meter_rank'], '<=', RECORDED_RANK),
+               Gate('judge_austen', metrics['judge_austen'], '>=', RECORDED_JUDGE)],
         notes=notes,
     )
 
