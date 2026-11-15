@@ -129,9 +129,9 @@ Each scene is then gated against the book as it was before the run, and
 committed on a revise branch. A revision the gate rejects, and that can't
 be committed provisionally, is rolled back: the old prose stays, and the
 record is committed so you can see what was tried. `--dry-run` counts each scene's lines to revise and keeps, and
-spends nothing. The marks come from the file only: `voice sample` (#654)
-will read a sample round's marks from a PR's comments, but reading a
-drafted scene's marks from a PR isn't planned in an issue yet.
+spends nothing. The marks come from the file only: `voice sample` reads a
+sample round's marks from a PR's comments, but reading a drafted scene's
+marks from a PR isn't planned in an issue yet.
 
 `checks.md` never goes into a writing prompt. Writing from a list of things
 to avoid makes flat prose: the writer steers away from the list instead of
@@ -178,8 +178,87 @@ people and tense still belong in `book.md`.
 
 ## Finding anchors
 
-`storyforge voice sample` (#654, coming) will run blind sample rounds as a
-PR. Until it exists, the `elaborate` skill's Voice Stage runs them by hand:
-one scene written several ways, unlabelled, one sentence per line so you can
-mark sentences in the PR. Later takes revise toward what you kept. You
-finish the winner by hand and save it in `anchors/`.
+`storyforge voice sample` runs blind sample rounds, in the book, as PRs. One
+scene is written several ways, you mark sentences, the next round writes
+toward what you kept, and the winner becomes an anchor. The scene must be in
+`scenes.csv`; its plan comes from the briefs, as in a writing session. The
+book needs no voice yet: round 1 is how it is found. It works for a book in
+a subfolder of its repo. At coach or strict coaching Claude writes no
+samples; running the command is your choice.
+
+1. **Round 1:** `storyforge voice sample --scene <id>`. One call writes
+   `--variants` versions (default 5, 2 to 8) that vary `--vary` (default
+   narrator stance, distance, tense), optionally blending `--influences
+   "Pressfield, Renault"`. A reply without exactly that many versions, each
+   with text, is an error (run it again); nothing is written. They're
+   shuffled and labelled `Sample A`, `Sample B`... in
+   `working/voice-samples/round-<n>.md`, one sentence per line, committed
+   on a branch with a draft PR. `--no-pr` commits without the PR;
+   `--dry-run` says what the round would do and spends nothing. Its cost
+   line is a rough guess (about $1 for the round, and $0.30 to $0.60 a
+   sample for the checks), not a forecast.
+2. **Mark it in the PR's Files changed:** a comment on a sentence (keep, cut,
+   more like this, a reason), a `suggestion` with your own wording (an empty
+   one cuts the line; every suggestion block in a comment is kept), a
+   comment on a sample's heading or word-count line for the whole sample, or
+   a general reaction in a review, the conversation, or a comment on the
+   whole file. **Submit the review**: comments in a review not yet submitted
+   can't be read. Every page of comments is read.
+3. **The next round:** `storyforge voice sample --from-pr <N>`. It reads the
+   marks on the latest round in `working/voice-samples/` (so `N` is that
+   round's PR, and it must change that file) and writes a new round toward
+   the keeps and your wordings, not away from the cuts: a round that only
+   avoided the cuts came out flat. The scene, influences and vary list carry
+   over from the last round unless given.
+4. **A take:** `--from-pr <N> --take B --versions "present tense;past
+   tense"` revises one marked sample toward its marks, in versions that
+   differ only in that one named thing (or two points of view). Name at
+   least two, all different; `--take` needs `--versions`. Each version is
+   headed by its name (`## present tense`), so the next round, or
+   `--promote --sample "present tense"`, names it. After a round or two a
+   take teaches more than another five blends.
+5. **The winner:** `--promote working/voice-samples/round-<n>.md --sample B
+   --name <name> [--kind K] [--tense present|past] [--pov P]` saves it as
+   `anchors/<name>.md`, with those header lines, and commits it on a branch
+   (never `main`). It reads the round file as it is now, so finish the
+   sample by hand in the file first, and pull the branch if you edited it
+   on GitHub. The sample is checked as an anchor before anything is
+   written: an empty one is refused, even with `--force`, which otherwise
+   replaces an anchor of that name. `--dry-run` writes nothing. Then say in
+   `book.md` what it does, quoting it.
+
+**How the marks are read.** `--from-pr` reads the round file as it is at
+the PR's head, and refuses if your copy differs (edits or suggestions
+committed on GitHub): pull the branch first, so the marks are read against
+the same text. Only the PR author's comments count; a bot's or anyone
+else's are left out and counted in a NOTE. General comments made before
+the round was committed are left out (an earlier round's reactions). A
+line comment is placed only when its line still says what GitHub showed;
+one on a line since changed is counted and left out. A PR with none of its
+author's marks on the round is refused, unless `--allow-unmarked`. A
+latest round file that isn't committed as it is is refused.
+
+**The key is kept outside the repo**, under
+`~/.storyforge/voice-sample-keys/<book folder>-<hash of its path>/round-<n>.json`:
+the round, its scene, what it varied and blended, what each sample tried,
+the take, the round it came from, and a hash of its samples. Another clone
+or worktree of the book has its own. It is saved only after the round is
+committed, and no command shows it to you: you mark blind; the next round's
+writer is given it. A round with no key here (made elsewhere) still runs,
+from your marks without what each sample tried (a NOTE), and needs
+`--scene`. A key whose hash doesn't match the round's samples (the round
+was edited or remade) isn't used (a NOTE). A key that can't be read is an
+error.
+
+**Each sample is checked before you see it:** the blocking read (one
+reading, for physical slips: hands, what is held, where people are) and,
+when `checks.md` has checks, the voice review against it. A separate
+reviser rewrites only the flagged lines. What was found, fixed and left
+out (flags whose words aren't in the sample, unverified findings, any
+check that didn't finish) is listed in the PR's description. The round's
+spend is logged as `voice-sample`, the blocking reads as
+`voice-sample-check`, the reviews as `voice-review`.
+
+Each round is its own branch and PR: off `main`, or, run from a round's
+branch, off that branch. If the branch or the PR can't be made, it's an
+error (exit 1); the round is committed by then if only the PR failed.
