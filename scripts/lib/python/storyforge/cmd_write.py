@@ -1889,7 +1889,8 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
             + (f', stopping after {stop_after} for a read' if stop_after else ''))
         said: list[str] = []
         print(session.scene_plan(project_dir, pending_ids[0], notes=notes_wanted,
-                                 anchors=anchors, carried=carried, said=said))
+                                 anchors=anchors, carried=carried, said=said,
+                                 sheets_sent=set()))
         for note in said:
             log(f'  NOTE: {pending_ids[0]}: {note}')
         return DraftOutcome(0, 0, [])
@@ -1904,6 +1905,10 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
 
     def stop_rest(i: int, why: str) -> None:
         failed.extend(f'{s} (not attempted: {why})' for s in pending_ids[i:])
+
+    # the series' character sheets the writer has had this session: each
+    # comes once, with its character's first scene (`session.scene_plan`)
+    sheets_sent: set[str] = set()
 
     for i, sid in enumerate(pending_ids):
         for s in span[:span.index(sid)]:
@@ -1928,7 +1933,7 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
         said: list[str] = []
         try:
             plan = session.scene_plan(project_dir, sid, notes=notes_wanted, anchors=anchors,
-                                      carried=carried, said=said)
+                                      carried=carried, said=said, sheets_sent=sheets_sent)
             for note in said:
                 log(f'  NOTE: {note}')
             draft = sess.write(sid, plan)

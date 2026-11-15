@@ -256,6 +256,10 @@ class Book:
     earlier: list[str] = field(default_factory=list)
     #: whether `earlier` is every earlier scene with prose (False: the window)
     whole: bool = True
+    #: the series' character sheets for the checked scene's cast
+    #: (`series.cast_sheets`), by `series.SHEET_NAME`; in the scene's own
+    #: prompt, since the system prompt is the same for every scene
+    sheets: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, project_dir: str, scene_id: str, prose: str | None = None,
@@ -282,8 +286,15 @@ class Book:
             raise CheckError(f'{scene_id} has no prose to check')
         earlier = prior_scenes(scene_id, project_dir, 'full', purpose='the check')
         every = [sid for sid in texts if order[sid] < order[scene_id] and texts[sid].strip()]
+        from storyforge.elaborate import get_scene
+        from storyforge.series import SeriesError, cast_sheets
+        try:
+            sheets = dict(cast_sheets(project_dir, get_scene(scene_id, ref_dir) or {}))
+        except SeriesError as e:
+            raise CheckError(f'the series character sheets can\'t be read ({e}); '
+                             f'the checker needs them') from e
         return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows,
-                   reference_docs(project_dir), earlier, len(earlier) == len(every))
+                   reference_docs(project_dir), earlier, len(earlier) == len(every), sheets)
 
     def when(self, sid: str) -> str:
         """The scene's place in the story's calendar: `prompts.scene_when` of
@@ -420,6 +431,17 @@ def _calendar_note(book: Book, at: str) -> str:
 
 
 def _reference_note(book: Book) -> str:
+    note = _reference_files_note(book)
+    if book.sheets:
+        note += (' The character sheets with the scene (' + ', '.join(book.sheets)
+                 + ') establish how those characters look: a scene that contradicts one '
+                 'is a contradiction (TRT), with `established_scene` the sheet\'s name and '
+                 '`established_quote` its exact words. A detail a sheet doesn\'t give is '
+                 'not a contradiction.')
+    return note
+
+
+def _reference_files_note(book: Book) -> str:
     if not book.reference:
         return ('The book has no reference material (no character, world or systems '
                 'bible with its own text), so check against the other scenes and the '
@@ -707,6 +729,15 @@ def brief_from(rows: list[dict[str, str]], project_dir: str, at: str) -> Brief:
     return brief
 
 
+def _sheets_text(book: Book) -> str:
+    if not book.sheets:
+        return ''
+    from storyforge.series import SHEETS_NOTE
+    return ("\n## How this scene's characters look\n\n" + SHEETS_NOTE + '\n\n'
+            + '\n\n'.join(f'<reference file="{name}">\n{text.strip()}\n</reference>'
+                            for name, text in book.sheets.items()) + '\n')
+
+
 def _disputes_text(disputes: list[Dispute]) -> str:
     if not disputes:
         return ''
@@ -747,7 +778,7 @@ def build_prompt(book: Book, at: str, brief_text: str,
 Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('location') or '-'}{'; ' + book.when(at) if book.when(at) else ''}
 
 {book.prose[at]}
-{brief_text}{_disputes_text(disputes or [])}
+{brief_text}{_sheets_text(book)}{_disputes_text(disputes or [])}
 ## Every scene, in reading order
 
 {_scene_index(book, at)}
@@ -811,9 +842,10 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
         f.established_scene = CALENDAR
         return ('' if book.in_calendar(f.established_quote)
                 else 'its established quote is not a dated scene\'s line in the scene list')
-    if name in book.reference:
+    refs = {**book.reference, **book.sheets}
+    if name in refs:
         f.established_scene = name
-        return ('' if _contains(book.reference[name], f.established_quote)
+        return ('' if _contains(refs[name], f.established_quote)
                 else f'its established quote is not in {name}')
     if name in REFERENCE_DOCS:
         return f'{name} was not given to the checker (missing, empty or still the template)'
