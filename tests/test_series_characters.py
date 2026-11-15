@@ -190,3 +190,25 @@ def test_validate_summary_names_the_sheets(project_dir, sheets):
     _configure(project_dir, sheets)
     lines = series.summary_lines(project_dir)
     assert any(l.startswith('Series character sheets: 3 in ') for l in lines)
+
+
+class TestSession:
+    """The long-session writer keeps one conversation: a character's sheet
+    comes once a session, with their first scene."""
+
+    def test_a_sheet_comes_once_a_session(self, project_dir, sheets):
+        from storyforge import session
+        _configure(project_dir, sheets)
+        sent = set()
+        first = session.scene_plan(project_dir, 'act1-sc01', notes=False, sheets_sent=sent)
+        assert '## How the characters new to this session look' in first
+        assert 'burn scar on the left palm' in first and 'Not in this book' not in first
+        assert sent == {'series-character-dorren-hayle.md', 'series-character-tessa-merrin.md'}
+        again = session.scene_plan(project_dir, 'act1-sc02', notes=False, sheets_sent=sent)
+        assert 'burn scar on the left palm' not in again
+
+    def test_without_a_record_the_plan_is_as_it_was(self, project_dir, sheets):
+        from storyforge import session
+        _configure(project_dir, sheets)
+        assert 'characters new to this session' not in session.scene_plan(
+            project_dir, 'act1-sc01', notes=False)

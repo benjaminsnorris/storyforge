@@ -290,10 +290,20 @@ def brief_notes_wanted(project_dir: str) -> bool:
 
 
 def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
-               carried: str = '', said: list[str] | None = None) -> str:
+               carried: str = '', said: list[str] | None = None,
+               sheets_sent: set[str] | None = None) -> str:
     """The plan the writer gets for one scene. What it leaves out that the
     scene has (a tense that isn't one, a craft-label outcome, a fact id the
-    ledger lacks) is appended to `said`, for the log."""
+    ledger lacks) is appended to `said`, for the log.
+
+    With `sheets_sent` (the session's record), the plan carries the series'
+    character sheet (`series.cast_sheets`) of each of the scene's cast the
+    session hasn't sent yet, and adds them to it: the conversation keeps a
+    sheet, so a character's comes once a session, with their first scene.
+
+    Raises:
+        series.SeriesError: a character sheet can't be read.
+    """
     said = said if said is not None else []
     from storyforge.elaborate import AUTHOR_NOTE_COLUMNS, get_scene
     from storyforge.prompts import scene_when
@@ -352,6 +362,15 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
         lines += ['', source]
     if carried:
         lines += ['', '## The stage as the last scene left it', carried]
+    if sheets_sent is not None:
+        from storyforge.series import SHEETS_NOTE, cast_sheets
+        new = [(name, text) for name, text in cast_sheets(project_dir, scene)
+               if name not in sheets_sent]
+        if new:
+            lines += ['', '## How the characters new to this session look', '',
+                      SHEETS_NOTE + ' Each comes once a session; keep it for their later scenes.']
+            lines += [f'\n<reference file="{name}">\n{text}\n</reference>' for name, text in new]
+            sheets_sent.update(name for name, _ in new)
     return '\n'.join(lines)
 
 
