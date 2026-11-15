@@ -91,8 +91,10 @@ NEUTRAL = ('Ashby', 'Birtles', 'Colville', 'Darrow', 'Eskdale', 'Faulds', 'Gorri
            'Kershaw', 'Lund', 'Marsden', 'Nuttall', 'Oddy', 'Pickles', 'Rhodes', 'Sowerby',
            'Thewlis', 'Uttley', 'Waddington', 'Yeadon')
 
-#: what was recorded (run 1); the gates hold these (#488)
-RECORDED_RANK = 1
+#: what run 1 recorded (2026-11-15); the gates hold these (#488). The plan's
+#: target is rank 1: runs 1 and 2 put Austen second (behind Dickens, then
+#: Brunton), run 3 first (evals/README.md, "Writing in the voice")
+RECORDED_RANK = 2
 RECORDED_JUDGE = 4
 
 JUDGE_SCHEMA = {

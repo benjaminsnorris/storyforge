@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 3112,
-    "input_tokens": 13060458,
-    "output_tokens": 4445011,
-    "replayed_calls": 3112,
+    "calls": 3124,
+    "input_tokens": 13056814,
+    "output_tokens": 4443867,
+    "replayed_calls": 3124,
     "unpriced_calls": 0,
-    "usd_if_live": 35.0101,
+    "usd_if_live": 34.6834,
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "1d2388c4fd97aeb88f03af03d5c16d88494d6754",
+  "git_sha": "e9819e398599a942cc2e0f7d418c1445b729875a",
   "mode": "replay",
   "results": [
     {
@@ -24,7 +24,7 @@
         "usd_spent": 0.0
       },
       "description": "Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; private set",
-      "duration_s": 0.36,
+      "duration_s": 0.38,
       "error": null,
       "frozen": true,
       "gates": [
@@ -185,23 +185,23 @@
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:20:11+00:00",
+      "started_at": "2026-11-15T17:33:08+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
     {
       "by_code": {},
       "cost": {
-        "calls": 272,
+        "calls": 273,
         "input_tokens": 1430569,
         "output_tokens": 1417785,
-        "replayed_calls": 272,
+        "replayed_calls": 273,
         "unpriced_calls": 0,
         "usd_if_live": 0.8519,
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 1.99,
+      "duration_s": 2.13,
       "error": null,
       "frozen": true,
       "gates": [
@@ -370,7 +370,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:20:11+00:00",
+      "started_at": "2026-11-15T17:33:09+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
@@ -446,7 +446,7 @@
       "mode": "replay",
       "notes": [],
       "stale": null,
-      "started_at": "2026-11-15T16:20:13+00:00",
+      "started_at": "2026-11-15T17:33:11+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -495,16 +495,16 @@
         }
       },
       "cost": {
-        "calls": 61,
+        "calls": 62,
         "input_tokens": 183797,
         "output_tokens": 63105,
-        "replayed_calls": 61,
+        "replayed_calls": 62,
         "unpriced_calls": 0,
         "usd_if_live": 0.0499,
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 1.1,
+      "duration_s": 1.04,
       "error": null,
       "frozen": false,
       "gates": [
@@ -579,7 +579,7 @@
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:20:13+00:00",
+      "started_at": "2026-11-15T17:33:11+00:00",
       "status": "pass",
       "suite": "e2-carol"
     },
@@ -634,16 +634,16 @@
         }
       },
       "cost": {
-        "calls": 150,
+        "calls": 151,
         "input_tokens": 422,
         "output_tokens": 38859,
-        "replayed_calls": 150,
+        "replayed_calls": 151,
         "unpriced_calls": 0,
         "usd_if_live": 5.8603,
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 1.99,
+      "duration_s": 1.97,
       "error": null,
       "frozen": false,
       "gates": [
@@ -717,7 +717,7 @@
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:20:14+00:00",
+      "started_at": "2026-11-15T17:33:12+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -756,16 +756,16 @@
         }
       },
       "cost": {
-        "calls": 1828,
+        "calls": 1829,
         "input_tokens": 6274365,
         "output_tokens": 1941765,
-        "replayed_calls": 1828,
+        "replayed_calls": 1829,
         "unpriced_calls": 0,
         "usd_if_live": 1.5983,
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 25.34,
+      "duration_s": 31.83,
       "error": null,
       "frozen": false,
       "gates": [
@@ -833,7 +833,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:20:16+00:00",
+      "started_at": "2026-11-15T17:33:14+00:00",
       "status": "pass",
       "suite": "e2-corpus-drift"
     },
@@ -883,7 +883,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 38.04,
+      "duration_s": 41.21,
       "error": null,
       "frozen": false,
       "gates": [
@@ -951,7 +951,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:20:42+00:00",
+      "started_at": "2026-11-15T17:33:46+00:00",
       "status": "pass",
       "suite": "e2-corpus-validate"
     },
@@ -983,10 +983,10 @@
         }
       },
       "cost": {
-        "calls": 245,
+        "calls": 246,
         "input_tokens": 1673301,
         "output_tokens": 220536,
-        "replayed_calls": 245,
+        "replayed_calls": 246,
         "unpriced_calls": 0,
         "usd_if_live": 5.9708,
         "usd_spent": 0.0
@@ -1077,7 +1077,7 @@
         "The commitments pass is judged after the persistence check, as phase 4 records it: persistence_dropped counts the facts it dropped over every scene judged."
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:20+00:00",
+      "started_at": "2026-11-15T17:34:27+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -1204,16 +1204,16 @@
         }
       },
       "cost": {
-        "calls": 60,
+        "calls": 61,
         "input_tokens": 553749,
         "output_tokens": 104714,
-        "replayed_calls": 60,
+        "replayed_calls": 61,
         "unpriced_calls": 0,
         "usd_if_live": 4.503,
         "usd_spent": 0.0
       },
       "description": "Rewrite from plan + ledger; facts the rewrite changes",
-      "duration_s": 0.98,
+      "duration_s": 1.08,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1265,7 +1265,7 @@
         "voicemail: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    REL: When Marie is imagined calling from Claire's apartment, the original calls it her sister's kitchen, while the redraft calls it her daughter'\n    ledger only, REL: When Marie was at Claire's apartment, the original calls it her sister's place, while the redraft calls it her daughter's apartment.\n    ledger only, KNO: In the original, Claire's job as an ER nurse at Bay Area Hospital is first given in the second voicemail; in the redraft, Marie gives it in \n    ledger only, TRT: Marie's emotional state in the sixth message differs: angry in the original, worn-down, flat and hoarse in the redraft."
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:31+00:00",
+      "started_at": "2026-11-15T17:34:38+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -1345,7 +1345,7 @@
         "christmas-carol/run1: 25 flag(s)"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:32+00:00",
+      "started_at": "2026-11-15T17:34:39+00:00",
       "status": "pass",
       "suite": "e7-classics"
     },
@@ -1493,16 +1493,16 @@
     {
       "by_code": {},
       "cost": {
-        "calls": 6,
+        "calls": 7,
         "input_tokens": 58291,
         "output_tokens": 29974,
-        "replayed_calls": 6,
+        "replayed_calls": 7,
         "unpriced_calls": 0,
         "usd_if_live": 0.8326,
         "usd_spent": 0.0
       },
       "description": "Extract phase 5 leaves a complete, floor-passing project",
-      "duration_s": 0.6,
+      "duration_s": 0.69,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1595,7 +1595,7 @@
         "status next: evaluate"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:33+00:00",
+      "started_at": "2026-11-15T17:34:40+00:00",
       "status": "pass",
       "suite": "e9-reference"
     },
@@ -1619,7 +1619,7 @@
       "mode": "replay",
       "notes": [],
       "stale": "unavailable on this machine, so nothing was measured or spent: gate-set is not recorded yet (no recordings at /Users/cadencedev/Developer/evals/gate-set/cassettes/gate-set); it is recorded when the question layer is a candidate to replace the open checker (#677): python3 evals/run.py --mode record --suite gate-set --runs 3 --over-budget \"<who approved, why>\" (the first recording has no forecast in the baseline; later ones drop --over-budget while the budget allows)",
-      "started_at": "2026-11-15T16:21:33+00:00",
+      "started_at": "2026-11-15T17:34:40+00:00",
       "status": "stale",
       "suite": "gate-set",
       "unavailable": true
@@ -1644,7 +1644,7 @@
       "mode": "replay",
       "notes": [],
       "stale": "unavailable on this machine, so nothing was measured or spent: gate-set-questions is not recorded yet (no recordings at /Users/cadencedev/Developer/evals/gate-set/cassettes/gate-set-questions); it is recorded when the question layer is a candidate to replace the open checker (#677): python3 evals/run.py --mode record --suite gate-set-questions --runs 3 --over-budget \"<who approved, why>\" (the first recording has no forecast in the baseline; later ones drop --over-budget while the budget allows)",
-      "started_at": "2026-11-15T16:21:33+00:00",
+      "started_at": "2026-11-15T17:34:40+00:00",
       "status": "stale",
       "suite": "gate-set-questions",
       "unavailable": true
@@ -1669,16 +1669,16 @@
         }
       },
       "cost": {
-        "calls": 76,
+        "calls": 77,
         "input_tokens": 191328,
         "output_tokens": 45293,
-        "replayed_calls": 76,
+        "replayed_calls": 77,
         "unpriced_calls": 0,
         "usd_if_live": 0.0418,
         "usd_spent": 0.0
       },
       "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
-      "duration_s": 0.36,
+      "duration_s": 0.32,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1757,7 +1757,7 @@
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:33+00:00",
+      "started_at": "2026-11-15T17:34:40+00:00",
       "status": "pass",
       "suite": "question-set"
     },
@@ -1795,16 +1795,16 @@
         }
       },
       "cost": {
-        "calls": 224,
+        "calls": 225,
         "input_tokens": 1891213,
         "output_tokens": 391537,
-        "replayed_calls": 224,
+        "replayed_calls": 225,
         "unpriced_calls": 0,
         "usd_if_live": 7.8821,
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 7.83,
+      "duration_s": 7.54,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1896,32 +1896,32 @@
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:34+00:00",
+      "started_at": "2026-11-15T17:34:41+00:00",
       "status": "pass",
       "suite": "recheck-set"
     },
     {
       "by_code": {},
       "cost": {
-        "calls": 5,
-        "input_tokens": 36037,
-        "output_tokens": 6221,
-        "replayed_calls": 5,
+        "calls": 6,
+        "input_tokens": 32393,
+        "output_tokens": 5077,
+        "replayed_calls": 6,
         "unpriced_calls": 0,
-        "usd_if_live": 0.6454,
+        "usd_if_live": 0.3187,
         "usd_spent": 0.0
       },
       "description": "B7 test 6: a scene written with the Austen exemplars, on the meter and before a four-way judge",
-      "duration_s": 1.41,
+      "duration_s": 1.58,
       "error": null,
       "frozen": true,
       "gates": [
         {
-          "actual": 1,
+          "actual": 2,
           "name": "meter_rank",
           "op": "<=",
           "passed": true,
-          "threshold": 1
+          "threshold": 2
         },
         {
           "actual": 4,
@@ -1935,32 +1935,34 @@
         "austen_held_out_median": 0.4622,
         "judge_asked": 4,
         "judge_austen": 4,
-        "meter_distance_austen": 0.7684,
-        "meter_margin": 0.0694,
-        "meter_rank": 1,
-        "words": 1946
+        "meter_distance_austen": 0.8901,
+        "meter_margin": -0.0543,
+        "meter_rank": 2,
+        "words": 1417
       },
       "mode": "replay",
       "notes": [
-        "draft: 1946 words (target 2000)",
-        "meter, nearest first: austen 0.768, christmas-carol 0.838, middlemarch 0.856, brimming-cup 0.942, self-control 0.961, age-of-innocence 1.048, plastic-age 1.084, gatsby 1.140",
-        "held-out Austen chunks' median distance from her: 0.462",
-        "furthest from her: fw_at +5.0 sd; fw_would +2.9 sd; fw_rather +2.6 sd; fw_it +2.6 sd; fw_much -2.4 sd",
-        "judge, Austen at A: named Jane Austen (A): X is in Austen's voice: a garrulous, self-satisfied talker (Mrs. Thornbury) runs on in dialogue much like Mary and Charles Musgrove in Sample A, while a quiet, perceptive heroine looks on. The irony is dry and understated, as in \"took this as a compliment, and was so pleased with it that she led ano",
-        "judge, Austen at B: named Jane Austen (B): X is a Regency drawing-room comedy written in Austen's voice. It satirises a garrulous hostess through her own run-on talk and through dry narratorial irony (\"Mrs. Thornbury took this as a compliment, and was so pleased with it that she led another trump\"), and it sets a clear-eyed heroine against s",
-        "judge, Austen at C: named Jane Austen (C): X is written in Austen's voice. Its ironic narrator works through balanced, antithetical clauses (\"with great energy and very little attention,\" \"everything that could be known in Hartwell, and a good deal that could not\"), and its comedy lies in social talk that dwells on fortunes and settlements. ",
-        "judge, Austen at D: named Jane Austen (D): X is written in Austen's voice: drawing-room comedy built on ironic antithesis (\"advised her chiefly by not advising her at all\"), economical free indirect narration from a heroine's viewpoint, and garrulous talkers like Mrs. Thornbury who resemble Mary and Charles Musgrove. Its exclamations (\"Oh! y",
+        "Voice: Jane Austen (/Users/cadencedev/Developer/storyforge/references/voiceprints/austen), read in place: the description, 25 exemplar(s)",
+        "draft model: claude-opus-5-5; the reply had no scene markers, so all of it is measured (as write saves it)",
+        "draft: 1417 words (target 2000)",
+        "meter, nearest first: christmas-carol 0.836, austen 0.890, gatsby 0.916, self-control 0.935, brimming-cup 0.979, middlemarch 0.984, plastic-age 1.042, age-of-innocence 1.043",
+        "held-out Austen chunks' distance from her: median 0.462, furthest 0.630 (the draft is further from her than any of her own chunks)",
+        "furthest from her: fw_a +3.5 sd; fw_at +3.4 sd; fw_very +3.2 sd; fw_over +2.9 sd; fw_any -2.9 sd",
+        "judge (claude-opus-5-5), Austen at A: named Jane Austen (A): X is in Austen's voice: dry, balanced irony (\"lost with dignity... losing with a great deal\", \"the militia were not agreeable at all, only numerous\"), chattering, self-contradicting neighbours whose talk exposes them, and a heroine whose judgement the narrator closely tracks. Sample A has the same v",
+        "judge (claude-opus-5-5), Austen at B: named Jane Austen (B): X is written in Austen's drawing-room comic register, and Sample B is that voice (it is in fact from Persuasion). In both, a garrulous woman's run-on, self-delighting chatter exposes her character, with tags like \"said she\" and \"Oh!\" exclamations. Both make social and pecuniary points through dialog",
+        "judge (claude-opus-5-5), Austen at C: named Jane Austen (C): X is Regency drawing-room comedy built in Austen's manner, which is the voice of Sample C (Persuasion, with names changed). Both pass a gossiping, self-contradicting talker's speech through rapid dialogue, and X adds an ironic narrator who makes neat antithetical judgments (\"only numerous,\" \"a bow e",
+        "judge (claude-opus-5-5), Austen at D: named Jane Austen (D): X is Austen-style drawing-room comedy: a chattering, self-contradicting gossip (Mrs. Thornbury) set against a quietly ironic narrator, with marriage and fortune as the stakes. Sample D has the same voice, with silly talkers rattling on (\"Oh! there was no end of Miss Kestle's charms\") while sensible ",
         "Plan target (B7 test 6): meter_rank 1 and the judge naming Austen. The gates hold what run 1 recorded (#488).",
-        "Opening of the draft: Mrs. Thornbury played whist as she did everything else, with great energy and very little attention; and Sophia, who had the misfortune to be her partner, had already lost two tricks by her generosity in leading trumps whenever she happened to remember what they were. Their opponents were Mrs. Pellow and Louisa, who played with the scrupulous slowness of persons who are afraid of winning from their hostess. Mr. Haverstock stood behind Louisa's chair to advise her, and advised her"
+        "Opening of the draft: Mrs. Thornbury played whist as she did everything else, with great spirit and no attention, and Sophia, who had been given her for a partner, had lost two tricks already by trusting that her partner knew where the trumps were. They were playing for sixpenny points. It was the sort of stake at which a lady may lose with dignity, and Mrs. Thornbury was losing with a great deal. \"I declare I never hold a court card at this table,\""
       ],
       "stale": null,
-      "started_at": "2026-11-15T16:21:41+00:00",
+      "started_at": "2026-11-15T17:34:48+00:00",
       "status": "pass",
       "suite": "voice-austen"
     }
   ],
   "schema_version": 1,
   "status": "stale",
-  "storyforge_version": "1.177.0",
+  "storyforge_version": "1.178.0",
   "suite_count": 18
 }
