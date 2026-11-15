@@ -16,24 +16,29 @@ writer for a whole stretch:
   physical state out, the source passage for an adaptation, the stage as
   the last scene left it). No motifs, no scripted dialogue, no subtext; the
   author's notes only when `drafting.brief_notes` isn't `exclude` (briefs
-  written before #644 hold model-written notes, which Wrath leaves out).
+  written before #644 hold model-written notes: set `exclude` for those).
 - **The writer replies** with the scene, then the stage at its end
   (`STAGE_OPEN`): a list of stage-sheet entries (`stage_sheet.Entry`),
-  kept apart from the prose and saved as the scene's writer sheet.
+  kept apart from the prose and saved as the writer sheet of its draft. A
+  note with any entry that can't be read is not used at all, and said.
 - **After each scene**, in order:
   1. the free tense check (`voice_book.check_tense`): a mismatch goes back
      to the writer once, for the whole scene again;
   2. the voice review (`voice_review`): a reviewer flags lines against
      checks.md, a separate reviser rewrites only those;
   3. the gate (`cmd_write._gate_drafted_scene`), with this session's writer
-     as its fixer (`Session.fixer`): hard findings go back to the writer as
-     short notes and come back as edits, under every rule of
-     `gate.gate_and_fix`;
-  4. the writer's sheet against the extracted one, when the gate kept one
-     (`compare_sheets`); a mismatch is reported;
+     as its fixer (`Session.fixer`): the gate's fix prompt (its problems,
+     the unverified ones marked) goes to the writer as a turn, and its edits
+     come back under every rule of `gate.gate_and_fix`;
+  4. the writer's sheet against the extracted one (`compare_sheets`). The
+     gate in `write` reads blocking whole and keeps no extracted sheet, so
+     today this is said as not compared; it runs once the stage sheet is
+     the gate's method;
   5. the commit, as `write` makes it.
   The conversation then keeps the scene as it was committed (`settle`):
-  the next turn reads the final text, not the draft.
+  the next turn reads the final text, not the draft. A drafted scene
+  between two to draft is put in the conversation in its place
+  (`Session.insert`).
 - A cut-off session resumes by running it again: drafted scenes are skipped
   and become the story so far.
 """
@@ -47,11 +52,10 @@ from dataclasses import dataclass, field
 
 from storyforge import voice_book
 from storyforge.common import log
+from storyforge.schema import VALID_OUTCOMES
 
 #: where a session's logs go, under working/logs/
 LOG_SUBDIR = 'session'
-#: what a session commits besides the scene: its logs (git path form)
-LOG_DIR_FOR_COMMIT = f'working/logs/{LOG_SUBDIR}/'
 #: the writer's answer budget per scene, in tokens (a scene of 5,000 words
 #: is about 7,000)
 SCENE_TOKENS = 16000
@@ -65,10 +69,10 @@ STAGE_CLOSE = '</stage>'
 SCENE_OPEN = '<scene>'
 SCENE_CLOSE = '</scene>'
 #: outcome values that are a craft framework's label, not an ending
-#: (`schema.VALID_OUTCOMES`)
-from storyforge.schema import VALID_OUTCOMES as CRAFT_OUTCOMES  # noqa: E402
-#: the brief fields a session's plan shows, as facts
-FACT_FIELDS = ('key_actions', 'outcome', 'knowledge_out', 'physical_state_out')
+CRAFT_OUTCOMES = VALID_OUTCOMES
+#: the share of the window a session may fill before its next request; the
+#: rest is the answer's room
+WINDOW_SHARE = 0.85
 
 
 class SessionError(RuntimeError):
@@ -168,17 +172,25 @@ def system_blocks(project_dir: str) -> list[dict]:
 FALLBACK_WINDOW = 200_000
 
 
-def story_cap_words(model: str) -> int:
-    """How many words of the story so far a session sends: `STORY_SHARE` of
-    the model's context window (`FALLBACK_WINDOW`, said, when the Models
+def context_window(model: str) -> int:
+    """The model's context window (`FALLBACK_WINDOW`, said, when the Models
     API can't be asked)."""
     from storyforge.api import max_input_tokens
     try:
-        window = max_input_tokens(model)
+        return max_input_tokens(model)
     except RuntimeError as e:
         log(f'NOTE: the context window of {model} is taken as {FALLBACK_WINDOW:,} tokens ({e})')
-        window = FALLBACK_WINDOW
-    return int(window * STORY_SHARE / TOKENS_PER_WORD)
+        return FALLBACK_WINDOW
+
+
+def story_cap_words(model: str, system_tokens: int = 0, reserve_tokens: int = 0) -> int:
+    """How many words of the story so far a session sends: `STORY_SHARE` of
+    the model's context window, less the standing context and
+    `reserve_tokens` (the scenes this session will add), so the conversation
+    still fits at its last scene."""
+    window = context_window(model)
+    room = min(window * STORY_SHARE, window * WINDOW_SHARE - system_tokens - reserve_tokens)
+    return max(0, int(room / TOKENS_PER_WORD))
 
 
 def story_so_far(project_dir: str, first_scene: str, cap_words: int) -> tuple[str, list[str]]:
@@ -192,7 +204,8 @@ def story_so_far(project_dir: str, first_scene: str, cap_words: int) -> tuple[st
     order = ledger.scene_order(project_dir)
     rows = {r['id']: r for r in get_scenes(os.path.join(project_dir, 'reference'))}
     if first_scene not in order:
-        return '', []
+        raise SessionError(f'{first_scene} has no place in the reading order (scenes.csv\'s '
+                           f'seq), so the story before it can\'t be told')
     earlier = [s for s in sorted(order, key=order.get)
                if order[s] < order[first_scene] and _has_prose(project_dir, s)]
     if not earlier:
@@ -215,6 +228,11 @@ def story_so_far(project_dir: str, first_scene: str, cap_words: int) -> tuple[st
         notes.append(f'{len(summarized)} earlier scene(s) sent as summaries only (over '
                      f'{cap_words:,} words): {", ".join(summarized[:5])}'
                      + (' ...' if len(summarized) > 5 else ''))
+        blank = [s for s in summarized if not ((rows.get(s) or {}).get('summary') or '').strip()]
+        if blank:
+            notes.append(f'{len(blank)} of them have no summary in scenes.csv, so the writer '
+                         f'gets only their titles: {", ".join(blank[:5])}'
+                         + (' ...' if len(blank) > 5 else ''))
     for s in whole:
         title = (rows.get(s) or {}).get('title') or s
         parts.append(f'## {title}\n\n{texts[s].strip()}')
@@ -225,9 +243,10 @@ def story_so_far(project_dir: str, first_scene: str, cap_words: int) -> tuple[st
 # The plan for one scene
 # ============================================================================
 
-def _statements(project_dir: str, ids: str, type_: str) -> list[str]:
+def _statements(project_dir: str, ids: str, type_: str,
+                said: list[str] | None = None) -> list[str]:
     """Ledger statements for a `;` list of fact ids (the id itself when the
-    ledger has none)."""
+    ledger has none, appended to `said`)."""
     from storyforge import ledger
     if not ids.strip():
         return []
@@ -237,6 +256,8 @@ def _statements(project_dir: str, ids: str, type_: str) -> list[str]:
     for i in (x.strip() for x in ids.split(';') if x.strip()):
         row = view.get(i) or {}
         text = row.get(key) or i
+        if not row and said is not None:
+            said.append(f'{type_} fact {i} isn\'t in the ledger: the plan gives its id')
         who = row.get('character', '') if type_ == 'physical' else ''
         out.append(f'{who}: {text}' if who else text)
     return out
@@ -269,8 +290,11 @@ def brief_notes_wanted(project_dir: str) -> bool:
 
 
 def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
-               carried: str = '') -> str:
-    """The plan the writer gets for one scene."""
+               carried: str = '', said: list[str] | None = None) -> str:
+    """The plan the writer gets for one scene. What it leaves out that the
+    scene has (a tense that isn't one, a craft-label outcome, a fact id the
+    ledger lacks) is appended to `said`, for the log."""
+    said = said if said is not None else []
     from storyforge.elaborate import AUTHOR_NOTE_COLUMNS, get_scene
     from storyforge.prompts import scene_when
     from storyforge.prompts_source import drafting_section
@@ -287,6 +311,8 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
     add('Point of view', scene.get('pov'))
     tense = (scene.get('tense') or '').strip().lower()
     add('Tense', tense if tense in voice_book.TENSES else '')
+    if tense and tense not in voice_book.TENSES:
+        said.append(f'its tense {scene["tense"]!r} isn\'t present or past: the plan states none')
     add('When', scene_when(scene))
     add('Where', scene.get('location'))
     add('On stage', (scene.get('on_stage') or '').replace(';', ', '))
@@ -302,10 +328,13 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
     # needn't fit a framework (#643), and it says nothing of the ending
     if outcome and outcome.lower() not in CRAFT_OUTCOMES:
         lines += ['', f'## How it ends\n\n{outcome}']
-    know = _statements(project_dir, scene.get('knowledge_out') or '', 'knowledge')
+    elif outcome:
+        said.append(f'its outcome is a craft label ({outcome!r}), not an ending: the plan '
+                    f'says nothing of how it ends')
+    know = _statements(project_dir, scene.get('knowledge_out') or '', 'knowledge', said)
     if know:
         lines += ['', '## Known by the end'] + [f'- {k}' for k in know]
-    state = _statements(project_dir, scene.get('physical_state_out') or '', 'physical')
+    state = _statements(project_dir, scene.get('physical_state_out') or '', 'physical', said)
     if state:
         lines += ['', '## True by the end'] + [f'- {k}' for k in state]
     if notes:
@@ -365,12 +394,16 @@ def parse_reply(text: str, scene_id: str) -> Draft:
         draft.stage_problem = f'the stage note is not a JSON list ({e})'
         return draft
     from storyforge.stage_sheet import Entry
+    stage, problems = [], []
     for item in items:
         try:
-            draft.stage.append(Entry.from_json(item, 'the writer\'s stage note').to_json())
+            stage.append(Entry.from_json(item, 'the writer\'s stage note').to_json())
         except ValueError as e:
-            draft.stage_problem = (draft.stage_problem + '; ' if draft.stage_problem
-                                   else '') + str(e)
+            problems.append(str(e))
+    if problems:   # all or nothing: a half-read stage would be carried as whole
+        draft.stage_problem = '; '.join(problems)
+    else:
+        draft.stage = stage
     return draft
 
 
@@ -381,7 +414,9 @@ def parse_reply(text: str, scene_id: str) -> Draft:
 def save_writer_sheet(project_dir: str, scene_id: str, prose: str, stage: list[dict],
                       model: str) -> str:
     """Save the writer's stage note as the scene's writer sheet
-    (`stage_sheet.sheet_path(..., 'writer')`); its `end` is the note."""
+    (`stage_sheet.sheet_path(..., 'writer')`); its `end` is the note, and its
+    hash is of `prose`, the draft the note describes (so a sheet of a
+    draft the reviser or the gate then changed reads as of other prose)."""
     from storyforge import stage_sheet
     sheet = {'format': stage_sheet.FORMAT, 'scene_id': scene_id, 'source': 'writer',
              'model': model, 'prose_sha256': stage_sheet.prose_hash(prose), 'cast': [],
@@ -407,7 +442,7 @@ def compare_sheets(project_dir: str, scene_id: str, prose: str) -> tuple[list[st
              for src in ('writer', 'extracted')}
     if not os.path.isfile(paths['extracted']):
         return [], ('the writer\'s stage note was not compared: no extracted stage sheet '
-                    '(the gate read the blocking whole; `--stage-sheet` keeps one)')
+                    '(the gate reads blocking whole and keeps none)')
     if not os.path.isfile(paths['writer']):
         return [], 'the writer\'s stage note was not compared: the writer gave none'
     try:
@@ -424,6 +459,8 @@ def compare_sheets(project_dir: str, scene_id: str, prose: str) -> tuple[list[st
                 for src, sh in sheets.items()}
     except ValueError as e:
         return [], f'the writer\'s stage note was not compared: {e}'
+    if not ends['writer']:
+        return [], 'the writer\'s stage note was not compared: it is empty'
     out = []
     for key, w in sorted(ends['writer'].items()):
         x = ends['extracted'].get(key)
@@ -441,7 +478,10 @@ def compare_sheets(project_dir: str, scene_id: str, prose: str) -> tuple[list[st
 
 class Session:
     """One writer's conversation. `messages` holds the story so far, then
-    each settled scene as [plan, the scene as committed]."""
+    each settled scene as [plan, the scene as committed]: turns always
+    alternate user and assistant (`_ask` adds a pair or nothing; `settle`
+    and `insert` add pairs). Every reply is logged to `log_dir` and its
+    spend to the cost ledger (`draft` for writing, `gate-fix` for fixes)."""
 
     def __init__(self, project_dir: str, model: str, system: list[dict], story: str,
                  log_dir: str):
@@ -456,11 +496,11 @@ class Session:
                 {'role': 'assistant', 'content': 'I have the story so far. Send the first plan.'}]
         self._settled = len(self.messages)
         self._turn = 0
-        self.scene_id = ''
 
     def _ask(self, content: str, label: str, tokens: int,
-             output_schema: dict | None = None) -> dict:
-        from storyforge.api import RefusalError, chat, is_truncated
+             output_schema: dict | None = None, operation: str = 'draft',
+             target: str = '') -> dict:
+        from storyforge.api import RefusalError, chat, is_truncated, log_reply
         self._turn += 1
         log_file = os.path.join(self.log_dir, f'{self._turn:03d}-{label}.json')
         self.messages.append({'role': 'user', 'content': content})
@@ -473,6 +513,7 @@ class Session:
         except RuntimeError as e:
             self.messages.pop()
             raise SessionError(f'{label}: the request failed ({e})') from e
+        log_reply(self.project_dir, response, operation, target or label, self.model)
         if is_truncated(response):
             self.messages.pop()
             raise SessionError(f'{label}: the reply hit its token limit ({log_file})')
@@ -483,8 +524,7 @@ class Session:
     def write(self, scene_id: str, plan: str) -> Draft:
         """Write the next scene from its plan."""
         from storyforge.api import extract_text
-        self.scene_id = scene_id
-        response = self._ask(plan, f'write-{scene_id}', SCENE_TOKENS)
+        response = self._ask(plan, f'write-{scene_id}', SCENE_TOKENS, target=scene_id)
         return parse_reply(extract_text(response), scene_id)
 
     def rewrite(self, scene_id: str, note: str) -> Draft:
@@ -493,30 +533,39 @@ class Session:
         content = (f'A note on {scene_id}: {note}\n\nWrite the whole scene again with that '
                    f'fixed and nothing else changed, in the same form '
                    f'({SCENE_OPEN} ... {STAGE_CLOSE}).')
-        response = self._ask(content, f'rewrite-{scene_id}', SCENE_TOKENS)
+        response = self._ask(content, f'rewrite-{scene_id}', SCENE_TOKENS, target=scene_id)
         return parse_reply(extract_text(response), scene_id)
 
-    def tell(self, note: str) -> None:
-        """A note the writer should know but needn't answer (the reviser's
-        edits): kept as a pair, so turns still alternate."""
-        self.messages += [{'role': 'user', 'content': note},
-                          {'role': 'assistant', 'content': 'Noted.'}]
+    def insert(self, title: str, prose: str) -> None:
+        """A scene already in the book, between scenes this session writes:
+        put in the conversation in its place (a settled pair), so the next
+        scene follows it."""
+        self.messages = self.messages[:self._settled] + [
+            {'role': 'user', 'content': f'This scene is already in the book: {title}'},
+            {'role': 'assistant', 'content': f'{SCENE_OPEN}\n{prose.strip()}\n{SCENE_CLOSE}'}]
+        self._settled = len(self.messages)
 
     def fixer(self, scene_id, prose, result, *, log_dir='', model=None, protected=(),
               earlier=(), edits_out=None):
-        """`gate.gate_and_fix`'s fixer: the gate's problems go to this
-        writer, which answers with edits (`gate.FIX_SCHEMA`), applied by
-        `gate.apply_edits`. Same contract as `gate.fix_scene`."""
+        """`gate.gate_and_fix`'s fixer (`gate.Fixer`): the gate's fix prompt
+        goes to this writer, which answers with edits (`gate.FIX_SCHEMA`),
+        applied by `gate.apply_edits`. `model` is ignored (the writer
+        fixes its own scene); the reply is logged in the session's log
+        folder and, when given, copied to the gate's `log_dir`."""
         from storyforge import gate
         from storyforge.api import extract_text
         problems = gate.problems_to_fix(result)
         if not problems:
             return prose
-        prompt = gate.build_fix_prompt(scene_id, prose, problems, protected, earlier)
-        prompt = ('A continuity check read the scene you just wrote. ' + prompt.split('\n', 1)[1]
-                  if '\n' in prompt else prompt)
+        prompt = ('This is about the scene you just wrote. '
+                  + gate.build_fix_prompt(scene_id, prose, problems, protected, earlier))
         try:
-            response = self._ask(prompt, f'fix-{scene_id}', 8000, output_schema=gate.FIX_SCHEMA)
+            response = self._ask(prompt, f'fix-{scene_id}', 8000, output_schema=gate.FIX_SCHEMA,
+                                 operation='gate-fix', target=scene_id)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+                with open(os.path.join(log_dir, f'gate-fix-{scene_id}.json'), 'w') as f:
+                    json.dump(response, f)
             edits = json.loads(extract_text(response))['edits']
         except SessionError as e:
             raise gate.GateError(f'{scene_id}: the writer\'s fix failed: {e}') from e
@@ -543,7 +592,8 @@ class Session:
 # ============================================================================
 
 def forecast(project_dir: str, scene_ids: list[str], model: str, avg_words: int,
-             story_words: int, system_tokens: int, review: bool) -> tuple[float, float, str]:
+             story_words: int, system_tokens: int, review: bool,
+             review_model: str = '') -> tuple[float, float, str]:
     """What a session over `scene_ids` should cost: the writer's turns (the
     standing context and the story so far read from cache, each scene
     written once, about one fix turn in three), the voice review and the
@@ -561,8 +611,9 @@ def forecast(project_dir: str, scene_ids: list[str], model: str, avg_words: int,
         story += scene_tokens + plan
     review_cost = 0.0
     if review:
-        per = (calculate_cost(model, system_tokens + scene_tokens + 1500, 1200)
-               + calculate_cost(model, system_tokens + scene_tokens + 800, 1500))
+        rm = review_model or model
+        per = (calculate_cost(rm, system_tokens + scene_tokens + 1500, 1200)
+               + calculate_cost(rm, system_tokens + scene_tokens + 800, 1500))
         review_cost = per * len(scene_ids)
     gate_cost = gate.WRITE_GATE_COST_PER_SCENE * len(scene_ids)
     basis = (f'writer ~${total:.2f}, voice review ~${review_cost:.2f}, gate '

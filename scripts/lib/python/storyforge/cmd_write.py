@@ -101,7 +101,9 @@ def parse_args(argv):
                              '(#655): one writer, the voice and the story so far in context, '
                              'scene after scene; each scene then gets the tense check, the '
                              'voice review (reference/voice/checks.md) and the gate, whose '
-                             'findings go back to the same writer. Run it again to resume')
+                             'findings go back to the same writer. A scene the gate stops on '
+                             'only for the check\'s findings is committed provisionally, as '
+                             'with --keep-going. Run it again to resume')
     parser.add_argument('--stop-after', type=int, default=None, metavar='N',
                         help='With --session: stop after N scenes, for a read (default: 3 '
                              'when the book has no prose yet, else none; 0: none)')
@@ -210,7 +212,10 @@ def main(argv=None):
     # waits; the others are drafted (#641)
     held: dict[str, list[str]] = {}
     if coaching == 'full' and not args.dry_run:
-        held = _held_up_front(project_dir, pending_ids, keep_going=args.keep_going)
+        # a session commits provisionally as --keep-going does, so a resumed
+        # one must not hold back what depends on those scenes (#685)
+        held = _held_up_front(project_dir, pending_ids,
+                              keep_going=args.keep_going or args.session)
         for sid, lines in held.items():
             _log_held(sid, lines)
         pending_ids = [s for s in pending_ids if s not in held]
@@ -325,7 +330,8 @@ def main(argv=None):
             outcome = _run_session_mode(
                 pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
                 dry_run=args.dry_run, budget=RunBudget(meter),
-                stop_after=_stop_after(project_dir, args.stop_after))
+                stop_after=_stop_after(project_dir, args.stop_after),
+                scene_forecast=scene_forecast)
     elif write_mode == 'batch' and not args.dry_run:
         outcome = _run_batch_mode(
             pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
@@ -364,7 +370,8 @@ def main(argv=None):
     log('============================================')
 
     if not args.dry_run and (drafted_count > 0 or uncommitted):
-        print_summary(project_dir, ('draft', 'gate', 'gate-fix'), session_start=session_start_iso)
+        print_summary(project_dir, ('draft', 'gate', 'gate-fix', 'voice-review'),
+                      session_start=session_start_iso)
     if not args.dry_run and uncommitted:
         # The review phase commits (and is paid for), and the drift check
         # pays too: neither runs on a branch whose commits are failing
@@ -943,7 +950,7 @@ def _log_blockers(blocking: list[str]) -> None:
 
 def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, command: str,
                         log_dir: str, before=None, keep_going: bool = False,
-                        fixer=None) -> tuple[bool, str]:
+                        fixer: "gate.Fixer | None" = None) -> tuple[bool, str]:
     """Gate the scene just written to `scene_file` (fix and re-check, up to
     `gate.FIX_ROUNDS` times; plan §3.2), writing the fixed prose back. Returns
     (passed, why not). A scene
@@ -1787,143 +1794,200 @@ def _session_model(dry_run: bool) -> str:
 
 def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: str):
     """`costs.WriteForecast` for a writing session (`session.forecast`)."""
-    from storyforge import session, voice_book
+    from storyforge import ledger, session, voice_book
+    from storyforge.common import ReferenceDocError
     from storyforge.costs import WriteForecast
     model = _session_model(dry_run=True)
+    order = ledger.scene_order(project_dir)
+    pending_ids = sorted(pending_ids, key=lambda s: order.get(s, float('inf')))
+    avg = _avg_word_count(metadata_csv)
     try:
         system = session.system_blocks(project_dir)
+        system_tokens = sum(len(b['text']) for b in system) // 4
+        reserve = (int(avg * session.TOKENS_PER_WORD) + 700) * len(pending_ids)
         story, _ = session.story_so_far(project_dir, pending_ids[0],
-                                        session.story_cap_words(model))
-    except session.SessionError as e:
+                                        session.story_cap_words(model, system_tokens, reserve))
+        review = bool(voice_book.checks_text(project_dir))
+    except (session.SessionError, ReferenceDocError) as e:
         log(f'ERROR: {e}. Nothing was drafted.')
         sys.exit(1)
-    system_tokens = sum(len(b['text']) for b in system) // 4
     try:
-        review = bool(voice_book.checks_text(project_dir))
-    except Exception:   # said where the review runs
-        review = True
+        review_model = select_model('revision')
+    except RuntimeError:
+        review_model = model
     draft, gate_cost, basis = session.forecast(
-        project_dir, pending_ids, model, _avg_word_count(metadata_csv),
-        len(story.split()), system_tokens, review)
+        project_dir, pending_ids, model, avg, len(story.split()), system_tokens, review,
+        review_model=review_model)
     return WriteForecast(draft, gate_cost, basis)
 
 
 def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_csv, *,
-                      dry_run, budget, stop_after) -> DraftOutcome:
+                      dry_run, budget, stop_after, scene_forecast: float = 0.0) -> DraftOutcome:
     """Draft `pending_ids`, in reading order, in one writing session (#655,
     `storyforge.session`). After each scene: the tense check, the voice
     review, the gate with the session's writer as its fixer, the writer's
-    stage note against the extracted sheet, the commit. The session stops at
-    `stop_after` scenes (0: never), at the cost threshold, at a reply that
-    isn't a scene, and at a scene the gate stops on that can't be committed
-    provisionally (the scenes after it would build on it)."""
+    stage note against the extracted sheet, the commit, and the re-checks
+    the scene owes. A drafted scene between two to draft is put in the
+    conversation in its place. The session stops, saying why, at
+    `stop_after` scenes (0: never), at the cost threshold (the next scene's
+    forecast reserved), and at anything that makes the next scene build on
+    something wrong: a reply that isn't a scene, a scene still in the
+    wrong tense, one that fails verification, or one the gate stops on that
+    can't be committed provisionally (as `--keep-going` would)."""
     from storyforge import gate, ledger, session, stage_sheet, voice_book, voice_review
+    from storyforge.common import ReferenceDocError
     from storyforge.costs import check_threshold
+    from storyforge.elaborate import get_scenes
     from storyforge.git import _git
+    from storyforge.illustrations import keep_markers
+    if not pending_ids:
+        log('Session: nothing to draft.')
+        return DraftOutcome(0, 0, [])
     order = ledger.scene_order(project_dir)
     pending_ids = sorted(pending_ids, key=lambda s: order.get(s, float('inf')))
     model = _session_model(dry_run)
+    rows = {r['id']: r for r in get_scenes(os.path.join(project_dir, 'reference'))}
+    avg_tokens = int(_avg_word_count(metadata_csv) * session.TOKENS_PER_WORD) + 700
     try:
         system = session.system_blocks(project_dir)
         notes_wanted = session.brief_notes_wanted(project_dir)
-    except session.SessionError as e:
+        system_tokens = sum(len(b['text']) for b in system) // 4
+        story, notes = session.story_so_far(
+            project_dir, pending_ids[0],
+            session.story_cap_words(model, system_tokens, avg_tokens * len(pending_ids)))
+        anchors = voice_book.read_folder(project_dir).anchors
+        checks = voice_book.checks_text(project_dir)
+    except (session.SessionError, ReferenceDocError) as e:
         log(f'ERROR: {e}. Nothing was drafted.')
         sys.exit(1)
-    story, notes = session.story_so_far(project_dir, pending_ids[0],
-                                        session.story_cap_words(model))
     for note in notes:
         log(f'Session: {note}')
-    anchors = voice_book.read_folder(project_dir).anchors
     if not notes_wanted:
         log('Session: the briefs\' note columns are left out (drafting.brief_notes: exclude)')
-    try:
-        checks = voice_book.checks_text(project_dir)
-    except Exception as e:
-        log(f'ERROR: {e}: the voice review can\'t read its checks. Nothing was drafted.')
-        sys.exit(1)
     if not checks:
         log(f'NOTE: {voice_book.CHECKS_FILE} has no checks yet, so no scene gets a voice '
             f'review')
     opening, why = stage_sheet.carried_opening(project_dir, pending_ids[0])
     carried = stage_sheet.render(opening) if opening else ''
+    if why:
+        log(f'Session: {why}')
+    # the scenes between the first and the last to draft that this run
+    # won't write: drafted ones go in the conversation; others are gaps
+    span = [s for s in sorted(order, key=order.get)
+            if order[pending_ids[0]] <= order[s] <= order[pending_ids[-1]]]
+    between = {s for s in span if s not in pending_ids}
+    gaps = [s for s in between if not read_scene_prose(os.path.join(scenes_dir, f'{s}.md'))
+            .strip() and (rows.get(s) or {}).get('status', '').lower() not in ('cut', 'merged')]
+    if gaps:
+        log(f'WARNING: the session writes past {len(gaps)} scene(s) with no prose that it '
+            f'won\'t draft (held, or left out by the filter): {", ".join(gaps[:8])}'
+            + (' ...' if len(gaps) > 8 else ''))
     if dry_run:
         system_words = sum(len(b['text'].split()) for b in system)
         log(f'Session (dry run): the writer\'s standing context is {system_words:,} words; '
             f'{len(pending_ids)} scene(s) would be drafted'
             + (f', stopping after {stop_after} for a read' if stop_after else ''))
+        said: list[str] = []
         print(session.scene_plan(project_dir, pending_ids[0], notes=notes_wanted,
-                                 anchors=anchors, carried=carried))
+                                 anchors=anchors, carried=carried, said=said))
+        for note in said:
+            log(f'  NOTE: {pending_ids[0]}: {note}')
         return DraftOutcome(0, 0, [])
     stamp = time.strftime('%Y%m%d-%H%M%S')
     sess = session.Session(project_dir, model, system, story,
                            os.path.join(log_dir, session.LOG_SUBDIR, stamp))
     review_model = select_model('revision')
     before = gate.snapshot(project_dir)
-    drafted, words, failed, provisional, uncommitted = 0, 0, [], [], []
-    for n, sid in enumerate(pending_ids):
+    drafted, words = 0, 0
+    failed, provisional, uncommitted, recheck_open, unreviewed = [], [], [], [], []
+    tense_of = {sid: get_field(metadata_csv, sid, 'tense') for sid in pending_ids}
+
+    def stop_rest(i: int, why: str) -> None:
+        failed.extend(f'{s} (not attempted: {why})' for s in pending_ids[i:])
+
+    for i, sid in enumerate(pending_ids):
+        for s in span[:span.index(sid)]:
+            if s in between:
+                prose_between = read_scene_prose(os.path.join(scenes_dir, f'{s}.md'))
+                if prose_between.strip():
+                    sess.insert((rows.get(s) or {}).get('title') or s, prose_between)
+                    carried = ''
+                between.discard(s)
         if stop_after and drafted >= stop_after:
             log(f'Session: stopped after {drafted} scene(s) for a read. Run it again to go on '
                 f'(drafted scenes become the story so far), or pass --stop-after 0.')
             break
-        if not check_threshold(budget.committed()):
-            log('Session: stopped at the cost threshold; run it again to go on.')
+        if not check_threshold(budget.committed(scene_forecast)):
+            log('ERROR: the session stopped at the cost threshold (the next scene\'s forecast '
+                'reserved); raise STORYFORGE_COST_THRESHOLD or run it again to go on.')
+            stop_rest(i, 'the cost threshold')
             break
-        log(f'--- Scene {sid} ({n + 1}/{len(pending_ids)}) ---')
-        plan = session.scene_plan(project_dir, sid, notes=notes_wanted, anchors=anchors,
-                                  carried=carried)
+        log(f'--- Scene {sid} ({i + 1}/{len(pending_ids)}) ---')
         r = _git(project_dir, 'rev-parse', 'HEAD', check=False)
         head_before = r.stdout.strip() if r.returncode == 0 else 'none'
+        said: list[str] = []
         try:
+            plan = session.scene_plan(project_dir, sid, notes=notes_wanted, anchors=anchors,
+                                      carried=carried, said=said)
+            for note in said:
+                log(f'  NOTE: {note}')
             draft = sess.write(sid, plan)
-            check = voice_book.check_tense(draft.prose, get_field(metadata_csv, sid, 'tense'))
+            check = voice_book.check_tense(draft.prose, tense_of[sid])
             if check.verdict == voice_book.TENSE_MISMATCH:
                 log(f'  Tense: {check.detail}; sent back to the writer')
                 draft = sess.rewrite(sid, check.detail)
-                check = voice_book.check_tense(draft.prose,
-                                               get_field(metadata_csv, sid, 'tense'))
+                check = voice_book.check_tense(draft.prose, tense_of[sid])
                 if check.verdict == voice_book.TENSE_MISMATCH:
-                    log(f'  WARNING: {sid}: still not in its tense after the rewrite: '
-                        f'{check.detail}')
+                    raise session.SessionError(f'{sid} is still not in its tense after the '
+                                               f'rewrite: {check.detail}')
             elif check.detail:
                 log(f'  NOTE: {check.detail}')
-        except session.SessionError as e:
+        except (session.SessionError, ReferenceDocError) as e:
             log(f'ERROR: {e}. The session stops; run it again to resume from {sid}.')
-            failed.append((sid, str(e)))
+            failed.append(f'{sid} ({e})')
+            stop_rest(i + 1, f'the session stopped at {sid}')
             break
         if draft.stage_problem:
             log(f'  WARNING: {sid}: the writer\'s stage note can\'t be used '
-                f'({draft.stage_problem}); the next scene starts with none carried')
+                f'({draft.stage_problem}); none of it is carried to the next scene')
         prose = draft.prose
         if checks:
+            rev, revision, review_note = None, None, ''
             try:
                 rev = voice_review.review(
                     project_dir, sid, prose, model=review_model,
                     log_file=os.path.join(sess.log_dir, f'{sid}-review.json'))
-                revision = (voice_review.revise(
-                    project_dir, sid, prose, rev.flags, model=review_model,
-                    log_file=os.path.join(sess.log_dir, f'{sid}-revise.json'))
-                    if rev.flags else None)
-            except voice_review.VoiceReviewError as e:
-                log(f'  WARNING: the voice review didn\'t finish ({e}); the scene goes on '
-                    f'to the gate as the writer wrote it')
-            else:
-                if revision is not None:
-                    prose = revision.prose
-                rel = voice_review.record(project_dir, sid, rev, revision)
-                applied = len(revision.applied) if revision else 0
-                log(f'  Voice review: {len(rev.flags)} line(s) flagged, {applied} rewritten'
-                    + (f', {len(revision.kept)} kept' if revision and revision.kept else '')
+                if rev.flags:
+                    revision = voice_review.revise(
+                        project_dir, sid, prose, rev.flags, model=review_model,
+                        log_file=os.path.join(sess.log_dir, f'{sid}-revise.json'))
+            except (voice_review.VoiceReviewError, ReferenceDocError) as e:
+                review_note = (f'the voice review didn\'t finish ({e}); the scene went on to '
+                               f'the gate without '
+                               + ('the reviser\'s edits' if rev else 'a review'))
+                log(f'  WARNING: {review_note}')
+                unreviewed.append(f'{sid} ({e})')
+            if revision is not None:
+                prose = revision.prose
+            rel = voice_review.record(project_dir, sid, rev or voice_review.Review(), revision,
+                                      notes=[review_note] if review_note else [])
+            if rev is not None:
+                log(f'  Voice review: {len(rev.flags)} line(s) flagged'
+                    + (f', {revision.summary()}' if revision else '')
                     + (f'; {len(rev.unverified)} flag(s) not in the scene, left out'
-                       if rev.unverified else '')
-                    + (f'; {len(revision.dropped)} edit(s) refused' if revision and
-                       revision.dropped else '') + f' ({rel})')
+                       if rev.unverified else '') + f' ({rel})')
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
+        raw = read_scene_raw(project_dir, sid)
         with open(scene_file, 'w', encoding='utf-8') as f:
-            f.write(prose)
-        passed, why = _gate_drafted_scene(project_dir, sid, scene_file, 'draft', log_dir,
+            # a redraft keeps the scene's illustration markers
+            f.write(keep_markers(project_dir, sid, raw, prose, 'the session', log)
+                    if raw else prose)
+        command = 'redraft' if raw and raw.strip() else 'draft'
+        passed, why = _gate_drafted_scene(project_dir, sid, scene_file, command, log_dir,
                                           before=before, keep_going=True, fixer=sess.fixer)
         final = read_scene_prose(scene_file)
-        session.save_writer_sheet(project_dir, sid, final, draft.stage, model)
+        check = voice_book.check_tense(final, tense_of[sid])
+        session.save_writer_sheet(project_dir, sid, draft.prose, draft.stage, model)
         mismatches, note = session.compare_sheets(project_dir, sid, final)
         for m in mismatches:
             log(f'  WARNING: stage: {m}')
@@ -1936,29 +2000,71 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
                                                  gate_failed=not passed)
             _commit(project_dir, f'Session notes for {sid}',
                     [voice_review.REVIEWS_DIR.replace(os.sep, '/') + '/',
-                     session.LOG_DIR_FOR_COMMIT,
                      stage_sheet.SHEETS_DIR.replace(os.sep, '/') + '/'])
         except CommitError as e:
             log(f'ERROR: {sid}: {e}. The session stops: commit it by hand.')
-            uncommitted.append((sid, str(e)))
+            uncommitted.append(f'{sid} ({e})')
+            stop_rest(i + 1, f'the commit of {sid} failed')
             break
-        if ok:
-            drafted += 1
-            words += count
-        sess.settle(plan, final, draft.stage)
-        carried = session.carried_text(draft.stage)
+        if not ok:
+            failed.append(f'{sid} (failed verification; see the ERROR above)')
+            stop_rest(i + 1, f'{sid} failed verification')
+            break
+        drafted += 1
+        words += count
+        if check.verdict == voice_book.TENSE_MISMATCH:
+            log(f'ERROR: {sid} as committed (after the review and the gate) is not in its '
+                f'tense: {check.detail}. The session stops.')
+            failed.append(f'{sid} (committed, but not in its tense: {check.detail})')
+            stop_rest(i + 1, f'{sid} is not in its tense')
+            break
+        sess.settle(plan, final, draft.stage if final.strip() == draft.prose.strip() else [])
+        # the stage the next scene starts from: the writer's note when it is
+        # of the committed prose and agrees with the extracted sheet
+        if draft.stage and not mismatches and final.strip() == draft.prose.strip():
+            carried = session.carried_text(draft.stage)
+        else:
+            carried = ''
+            if draft.stage:
+                log('  NOTE: the writer\'s stage note isn\'t carried: '
+                    + ('the extracted sheet disagrees with it' if mismatches else
+                       'it is of the draft, which the review or the gate then changed'))
         if is_prov:
-            provisional.append((sid, why))
+            provisional.append(f'{sid} ({why})')
         elif not passed:
             log(f'ERROR: {sid} did not pass the gate ({why}). The session stops: the scenes '
                 f'after it would build on it. Fix it (`storyforge check {sid}`), then run '
                 f'the session again.')
-            failed.append((sid, why))
+            failed.append(f'{sid} (did not pass the gate; listed in {gate_pending_path()})')
+            stop_rest(i + 1, f'{sid} did not pass the gate')
             break
-    if gate.recheck_queue(project_dir):
-        log('NOTE: earlier scenes wait on a re-check after this session: run '
-            '`storyforge check --pending`.')
-    return DraftOutcome(drafted, words, failed, [], uncommitted, provisional)
+        else:
+            later = set(pending_ids[i + 1:])
+            run = budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), later, budget,
+                                   reserved=len(later) * scene_forecast)
+            if run is not None:
+                if run.failed:
+                    recheck_open.append(f'{run.failed} (re-checked after {sid} and did not '
+                                        f'pass: {run.why})')
+                if run.over_budget and run.left:
+                    recheck_open.append(f'{len(run.left)} scene(s) listed for a re-check, not '
+                                        f'run: over the cost threshold')
+                try:
+                    _commit(project_dir, f'Re-check after {sid}: {len(run.passed)} passed'
+                            + (f', {run.failed} did not' if run.failed else ''),
+                            ['reference/', 'working/audit-log.csv',
+                             'working/.audit-snapshot.csv', gate_pending_path(),
+                             gate_prose_path(), gate_source_fix_path(),
+                             gate_advisory_path(), *gate_state_paths()])
+                except CommitError as e:
+                    log(f'ERROR: the re-checks after {sid} ran, but {e}.')
+                    uncommitted.append(f'the re-checks after {sid} ({e})')
+                    stop_rest(i + 1, 'a commit failed')
+                    break
+    if unreviewed:
+        log(f'WARNING: {len(unreviewed)} scene(s) went to the gate without a finished voice '
+            f'review: ' + '; '.join(unreviewed))
+    return DraftOutcome(drafted, words, failed, recheck_open, uncommitted, provisional)
 
 
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,

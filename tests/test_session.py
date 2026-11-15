@@ -71,7 +71,15 @@ def test_a_reply_without_a_scene_stops_the_session():
 ])
 def test_a_stage_note_that_cant_be_used_is_said(stage, problem):
     d = session.parse_reply('<scene>\nShe sat.\n</scene>\n' + stage, SCENE)
-    assert d.prose == 'She sat.\n' and problem in d.stage_problem
+    assert d.prose == 'She sat.\n' and problem in d.stage_problem and d.stage == []
+
+
+def test_a_half_good_stage_note_is_not_used_at_all():
+    good = {'who': 'D', 'field': 'posture', 'item': '', 'value': 'sitting', 'quote': ''}
+    bad = {'who': 'D', 'field': 'wings', 'item': '', 'value': 'up', 'quote': ''}
+    d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
+                            + json.dumps([good, bad]) + '\n</stage>', SCENE)
+    assert d.stage == [] and 'wings' in d.stage_problem
 
 
 # --- the writer's context ---
@@ -317,7 +325,8 @@ def test_a_scene_the_gate_stops_on_stops_the_session(project_dir, loop, requests
     requests.replies = _route
     loop['gate'] = lambda sid: (False, 'a contradiction')
     out = loop['run'](['act1-sc01', 'act1-sc02'])
-    assert out.failed == [('act1-sc01', 'a contradiction')]
+    assert out.failed[0].startswith('act1-sc01 (did not pass the gate')
+    assert out.failed[1] == 'act1-sc02 (not attempted: act1-sc01 did not pass the gate)'
     assert 'The session stops' in capsys.readouterr().out
 
 
@@ -362,3 +371,150 @@ def test_a_craft_label_outcome_is_left_out_of_the_plan(project_dir):
     assert '## How it ends' not in session.scene_plan(project_dir, SCENE, notes=False)
     _brief(project_dir, outcome='She keeps the map and tells no one.')
     assert 'She keeps the map' in session.scene_plan(project_dir, SCENE, notes=False)
+
+
+
+# --- the review's fixes (#685) ---
+
+def test_a_session_error_midway_stops_cleanly(project_dir, loop, requests, capsys):
+    answers = iter([_reply(scene_reply(LONG)), _reply('no scene here')])
+    requests.replies = lambda body: (_route(body) if body.get('output_config')
+                                     else next(answers))
+    out = loop['run'](['act1-sc01', 'act1-sc02', 'act2-sc01'])
+    assert out.drafted == 1
+    assert out.failed[0].startswith('act1-sc02 (') and 'not attempted' in out.failed[1]
+    assert 'resume from act1-sc02' in capsys.readouterr().out
+    assert not os.path.isfile(os.path.join(project_dir, 'scenes', 'act1-sc02.md')) or \
+        'no scene here' not in open(os.path.join(project_dir, 'scenes', 'act1-sc02.md')).read()
+
+
+def test_a_provisional_scene_lets_the_session_go_on(project_dir, loop, requests, monkeypatch):
+    from storyforge import cmd_write
+    requests.replies = _route
+    loop['gate'] = lambda sid: (False, 'a finding') if sid == 'act1-sc01' else (True, '')
+    monkeypatch.setattr(cmd_write, 'is_provisional', lambda pd, sid: sid == 'act1-sc01')
+    out = loop['run'](['act1-sc01', 'act1-sc02'])
+    assert out.drafted == 2 and out.provisional == ['act1-sc01 (a finding)']
+
+
+def test_a_drafted_scene_between_two_to_draft_reaches_the_writer(project_dir, loop, requests):
+    requests.replies = _route
+    with open(os.path.join(project_dir, 'scenes', 'act1-sc02.md'), 'w') as f:
+        f.write('THE MIDDLE SCENE, ALREADY WRITTEN.\n')
+    loop['run'](['act1-sc01', 'act2-sc01'])
+    writes = [r for r in requests if not r.get('output_config')]
+    assert 'THE MIDDLE SCENE' in json.dumps(writes[-1]['messages'])
+    roles = [m['role'] for m in writes[-1]['messages']]
+    assert all(a != b for a, b in zip(roles, roles[1:]))
+
+
+def test_a_scene_that_fails_verification_stops_the_session(project_dir, loop, requests,
+                                                           monkeypatch):
+    from storyforge import cmd_write
+    requests.replies = _route
+    monkeypatch.setattr(cmd_write, '_verify_and_commit_scene', lambda *a, **k: (0, False))
+    out = loop['run'](['act1-sc01', 'act1-sc02'])
+    assert out.drafted == 0 and 'failed verification' in out.failed[0]
+    assert 'not attempted' in out.failed[1]
+
+
+def test_the_cost_threshold_stops_before_the_next_scene(project_dir, loop, requests,
+                                                       monkeypatch, capsys):
+    from storyforge import costs
+    requests.replies = _route
+    answers = iter([True, False])
+    monkeypatch.setattr(costs, 'check_threshold', lambda *a, **k: next(answers))
+    out = loop['run'](['act1-sc01', 'act1-sc02'])
+    assert out.drafted == 1 and out.failed == ['act1-sc02 (not attempted: the cost threshold)']
+    assert 'stopped at the cost threshold' in capsys.readouterr().out
+
+
+def test_a_failed_voice_review_is_recorded_and_said(project_dir, loop, requests, capsys):
+    def route(body):
+        if body.get('output_config'):
+            cut = _reply('{"flags": [')
+            cut['stop_reason'] = 'max_tokens'
+            return cut
+        return _reply(scene_reply(LONG))
+    requests.replies = route
+    out = loop['run'](['act1-sc01'])
+    assert out.drafted == 1
+    with open(os.path.join(project_dir, 'working', 'voice-reviews', 'act1-sc01.md')) as f:
+        assert "didn't finish" in f.read()
+    assert 'without a finished voice review' in capsys.readouterr().out
+
+
+def test_the_stage_is_carried_only_when_it_is_of_the_committed_prose(project_dir, loop,
+                                                                     requests):
+    def route(body):   # no review flag: the committed prose is the draft
+        if body.get('output_config'):
+            return _reply(json.dumps({'flags': []}))
+        return _reply(scene_reply(LONG))
+    requests.replies = route
+    loop['run'](['act1-sc01', 'act1-sc02'])
+    writes = [r for r in requests if not r.get('output_config')]
+    assert '## The stage as the last scene left it' in writes[1]['messages'][-1]['content']
+    requests.clear()
+    requests.replies = _route   # the reviser changes the scene: nothing carried
+    loop['run'](['act2-sc01', 'act2-sc02'])
+    writes = [r for r in requests if not r.get('output_config')]
+    assert '## The stage as the last scene left it' not in writes[1]['messages'][-1]['content']
+
+
+def test_the_spend_reaches_the_cost_ledger(project_dir, loop, requests):
+    from storyforge.costs import ledger_rows
+    requests.replies = _route
+    loop['run'](['act1-sc01'])
+    ops = {r['operation'] for r in ledger_rows(project_dir, ('draft', 'voice-review'))}
+    assert ops == {'draft', 'voice-review'}
+
+
+@pytest.mark.parametrize('argv, why', [
+    (['--session', '--coaching', 'coach'], 'full coaching'),
+    (['--session', '--coaching', 'full', '--batch'], 'full coaching'),
+    (['--session', '--coaching', 'full', '-i'], 'full coaching'),
+    (['--coaching', 'full', '--stop-after', '2'], '--stop-after'),
+    (['--session', '--coaching', 'full', '--stop-after', '-1'], '--stop-after'),
+])
+def test_the_session_flags_are_checked_first(project_dir, monkeypatch, capsys, argv, why):
+    from storyforge import cmd_write
+    monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+    with pytest.raises(SystemExit) as e:
+        cmd_write.main(argv + ['--dry-run'])
+    assert e.value.code == 1 and why in capsys.readouterr().out
+
+
+def test_stop_after_defaults(project_dir, tmp_path):
+    from storyforge import cmd_write
+    assert cmd_write._stop_after(project_dir, None) == 0          # the fixture has prose
+    assert cmd_write._stop_after(project_dir, 5) == 5
+    empty = tmp_path / 'b'
+    (empty / 'scenes').mkdir(parents=True)
+    assert cmd_write._stop_after(str(empty), None) == 3
+
+
+def test_a_dry_run_without_a_key_names_the_model_once(monkeypatch, capsys):
+    from storyforge import cmd_write
+    monkeypatch.setattr(cmd_write, 'select_model',
+                        lambda t: (_ for _ in ()).throw(RuntimeError('ANTHROPIC_API_KEY not set')))
+    monkeypatch.setattr(cmd_write._session_model, 'said', False, raising=False)
+    a, b = cmd_write._session_model(True), cmd_write._session_model(True)
+    assert a == b and capsys.readouterr().out.count('the dry run takes the writer') == 1
+    with pytest.raises(RuntimeError):
+        cmd_write._session_model(False)
+
+
+def test_a_session_dry_run_spends_nothing(project_dir, monkeypatch, capsys):
+    from storyforge import api, cmd_write
+    monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+    monkeypatch.setattr(cmd_write, 'select_model', lambda t: 'claude-opus-5-5')
+    monkeypatch.setattr(api, '_api_request', lambda *a, **k: pytest.fail('spent'))
+    monkeypatch.setattr(api, 'max_input_tokens', lambda m: 200_000)
+    try:
+        cmd_write.main(['--session', '--coaching', 'full', '--dry-run', '--force',
+                        'act1-sc01'])
+    except SystemExit as e:
+        assert not e.code
+    out = capsys.readouterr().out
+    assert 'Cost forecast:' in out and "the writer's standing context is" in out
+    assert '# Next: The Finest Cartographer (act1-sc01)' in out

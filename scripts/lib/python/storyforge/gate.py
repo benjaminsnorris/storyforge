@@ -74,7 +74,7 @@ import unicodedata
 from collections.abc import Callable, Set
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 from storyforge import audit, ledger, persistence
 from storyforge.blocking import BLOCKING_CODE, BlockingError, check_blocking
@@ -2814,6 +2814,19 @@ def apply_edits(prose: str, edits: list[dict]) -> str:
     return prose
 
 
+class Fixer(Protocol):
+    """What `gate_and_fix` calls to fix a scene (`fix_scene`, or a writing
+    session's writer, #655): the fixed prose; the edits applied appended to
+    `edits_out` only once they all applied; `GateError` on any failure.
+    `log_dir` and `model` may be ignored (a session logs to its own folder
+    and fixes with its writer)."""
+
+    def __call__(self, scene_id: str, prose: str, result: 'GateResult', *, log_dir: str,
+                 model: str | None = None, protected: list[str] | tuple = (),
+                 earlier: list['FixRound'] | tuple = (),
+                 edits_out: list[dict] | None = None) -> str: ...
+
+
 def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
               model: str | None = None, protected: list[str] | tuple = (),
               earlier: list[FixRound] | tuple = (),
@@ -3227,7 +3240,7 @@ def run_log_dir(log_dir: str, scene_id: str, *, now=None, pid: int | None = None
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None,
-                 before: Snapshot | None = None, fixer=None) -> GatedScene:
+                 before: Snapshot | None = None, fixer: Fixer | None = None) -> GatedScene:
     """Gate `prose`; while it doesn't pass, fix it and gate the fixed prose,
     at most `FIX_ROUNDS` times (plan §3.2 step 3). Each fix after the first is
     sent the earlier fixes' problems and edits (`rounds`, `build_fix_prompt`).
@@ -3285,10 +3298,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     `.result.passed`: when it passed, the ledger was already committed with
     quotes from that prose.
 
-    `fixer` replaces `fix_scene` (same signature and contract: the fixed
-    prose, the edits appended to `edits_out`, `GateError` on a failure). A
-    writing session passes one that sends the problems to the writer that
-    wrote the scene (#655), so every rule above holds for its fixes too.
+    `fixer` replaces `fix_scene` (`Fixer`'s contract). A writing session
+    passes one that sends the problems to the writer that wrote the scene
+    (#655), so every rule above holds for its fixes too; its fix turns are
+    logged in the session's folder, and copied to this run's log folder.
 
     Raises:
         GateError: from the first gate run, the first fix or its re-gate; it
