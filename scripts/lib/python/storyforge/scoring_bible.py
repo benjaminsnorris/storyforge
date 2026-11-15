@@ -52,6 +52,11 @@ def _load_bibles(project_dir: str) -> dict[str, str]:
             continue
         if content.strip():
             out[label] = content
+    if 'voice/book.md' not in out:
+        from storyforge import voice_book
+        old = voice_book.old_files_note(project_dir)
+        if old:
+            log(f'  NOTE: {old}; the check reads only reference/voice/book.md')
     return out
 
 

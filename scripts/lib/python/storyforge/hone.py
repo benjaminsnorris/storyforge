@@ -1597,7 +1597,7 @@ def build_concretize_prompt(
 ## Current Values (abstract — need rewriting)
 {field_block}
 
-## Voice Guide (POV character)
+## The voice (reference/voice/book.md)
 {voice_guide if voice_guide else '(not available)'}
 
 ## Character
@@ -1818,7 +1818,7 @@ def build_evaluation_fix_prompt(
 ## Current Field Values
 {field_block}
 
-## Voice Guide (POV character)
+## The voice (reference/voice/book.md)
 {voice_guide if voice_guide else '(not available)'}
 
 ## Character
@@ -1969,11 +1969,8 @@ def hone_briefs(
             'fields_rewritten': 0,
         }
 
-    # Load the voice (`voice_book.resolve`) and character bible for prompt building
-    from storyforge import voice_book
-    _voice = voice_book.resolve(project_dir)
-    _voice.raise_if_unreadable(project_dir)
-    voice_guide = _voice.text if _voice.kind == 'ok' else ''
+    # The voice's notes (book.md) and the character bible for prompt building
+    voice_guide = voice_excerpt(project_dir)
 
     char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
 
@@ -2017,7 +2014,7 @@ def hone_briefs(
                 scene_id=sid,
                 fields=abstract_fields,
                 current_values=current_values,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
                 character_entry=char_bible[:2000],
                 labels=labels,
             )
@@ -2077,7 +2074,7 @@ def hone_briefs(
                 fields=eval_fields,
                 current_values=current_values,
                 guidance=guidance,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
                 character_entry=char_bible[:2000],
                 labels=labels,
             )
@@ -2672,7 +2669,7 @@ def build_intent_fix_prompt(
 
 {chr(10).join(field_blocks)}
 
-## Voice Guide (POV character)
+## The voice (reference/voice/book.md)
 {voice_guide if voice_guide else '(not available)'}
 
 ## Output Format
@@ -2805,11 +2802,8 @@ def hone_intent(
             'fields_rewritten': det_fields_rewritten,
         }
 
-    # Load the voice (`voice_book.resolve`)
-    from storyforge import voice_book
-    _voice = voice_book.resolve(project_dir)
-    _voice.raise_if_unreadable(project_dir)
-    voice_guide = _voice.text if _voice.kind == 'ok' else ''
+    # The voice's notes (book.md)
+    voice_guide = voice_excerpt(project_dir)
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
@@ -2851,7 +2845,7 @@ def hone_intent(
                 fields=detected_fields,
                 current_values=current_values,
                 issues=detected_issues,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
             )
 
             eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
@@ -2881,7 +2875,7 @@ def hone_intent(
                 fields=eval_fields,
                 current_values=current_values,
                 guidance=guidance,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
             )
 
             eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
@@ -3249,3 +3243,24 @@ def parse_mice_fill_response(response: str) -> list[str]:
             if scene_id:
                 results.append(scene_id)
     return results
+
+
+#: the most of book.md a hone prompt carries
+VOICE_EXCERPT_CHARS = 6000
+
+
+def voice_excerpt(project_dir: str) -> str:
+    """What the voice does (reference/voice/book.md) for a hone prompt, which
+    rewrites brief cells, not prose: the notes, not the anchors. Cut at
+    `VOICE_EXCERPT_CHARS`, said in the log when it is.
+
+    Raises:
+        common.ReferenceDocError: book.md can't be read.
+    """
+    from storyforge import voice_book
+    notes = voice_book.read_folder(project_dir).notes
+    if len(notes) > VOICE_EXCERPT_CHARS:
+        log(f'NOTE: hone\'s prompts carry the first {VOICE_EXCERPT_CHARS:,} characters of '
+            f'{voice_book.BOOK_FILE} ({len(notes):,} in all)')
+        return notes[:VOICE_EXCERPT_CHARS]
+    return notes

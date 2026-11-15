@@ -239,7 +239,7 @@ class TestPhase5:
             'reference/story-summary.md', 'reference/story-architecture.md',
             'reference/character-bible.md', 'reference/world-bible.md',
             'reference/systems-bible.md', 'reference/voice/book.md',
-            'reference/timeline.md'} | _anchors_written(book)
+            'reference/voice/checks.md', 'reference/timeline.md'} | _anchors_written(book)
         assert _anchors_written(book)
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
@@ -1382,12 +1382,20 @@ class TestVoice:
         assert not os.path.exists(os.path.join(ref, 'voice-profile.csv'))
         assert not os.path.exists(os.path.join(ref, 'voice-guide.md'))
         folder = voice_book.read_folder(book)
-        assert folder.anchors and all(a.kind for a in folder.anchors)
-        # the anchors are the book's own prose, word for word
+        assert folder.anchors and all(a.pov for a in folder.anchors)
+        # the anchors are the book's own prose, word for word, paragraphs kept
         prose = ''.join(open(os.path.join(book, 'scenes', n)).read()
                         for n in os.listdir(os.path.join(book, 'scenes')))
-        assert all(a.text.split('\n')[0][:60] in prose for a in folder.anchors)
+        for a in folder.anchors:
+            assert not a.text.startswith('---')                       # no frontmatter
+            assert all(p in prose for p in a.text.split('\n\n'))
         assert voice_book.resolve(book).kind == 'ok'
+        # what the prose never does is for the reviewer, never in book.md
+        assert '## What the prose never does' not in guide
+        with open(os.path.join(ref, 'voice', 'checks.md')) as f:
+            checks = f.read()
+        assert '# Checks' in checks
+
 
     def test_an_instruction_is_sent_back(self, book):
         from storyforge.extract_describe import ReplyProblems, parse_voice
@@ -1835,6 +1843,25 @@ class TestBiblesGateAndSteps:
         assert '5e (world and systems bibles) skipped: it writes' in out
         assert not any('**overview**' in c['prompt'] for c in mock_api.calls[calls:])
         with open(world, 'rb') as f:
+            assert f.read() == before
+
+    def test_an_edited_anchor_or_book_md_keeps_5f_from_writing(self, book, mock_api,
+                                                               mock_git, mock_costs, capsys):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        out = capsys.readouterr().out
+        assert 'anchor(s) were taken from the prose by position' in out
+        path = os.path.join(book, 'reference', 'voice', 'anchors', 'extracted-1.md')
+        with open(path, 'a') as f:
+            f.write('\nMine.\n')
+        with open(path) as f:
+            before = f.read()
+        calls = len(mock_api.calls)
+        _run(book, force=True)
+        out = capsys.readouterr().out
+        assert '5f (the voice) skipped: it writes' in out
+        assert not any('**lineage**' in c['prompt'] for c in mock_api.calls[calls:])
+        with open(path) as f:
             assert f.read() == before
 
     def test_force_regenerates_an_unedited_voice(self, book, mock_api, mock_git,

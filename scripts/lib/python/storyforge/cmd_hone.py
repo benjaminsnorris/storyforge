@@ -641,24 +641,25 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
         for sid, fields in sorted(craft.items()):
             print(f'    {sid}: {", ".join(fields)}')
 
-    # Part 4: Exemplars
-    print('\n=== Prose Exemplars ===\n')
+    # Part 4: The voice (reference/voice/)
+    print('\n=== The Voice ===\n')
+    from storyforge import voice_book
+    from storyforge.voice_repo import VoiceError
     try:
-        import storyforge.exemplars as ex_mod
-        ex = ex_mod.validate_project_exemplars(project_dir)
-        if not ex['has_any']:
-            print('  No exemplars found. Add reference/prose-exemplars.md or reference/exemplars/{pov}.md')
+        voice = voice_book.resolve(project_dir)
+    except VoiceError as e:
+        print(f'  The voice: storyforge.yaml\'s voice: block can\'t be used ({e})')
+    else:
+        if voice.kind == 'ok':
+            anchors = voice_book.read_folder(project_dir).anchors
+            print(f'  The voice: {voice.path} ({len(anchors)} anchor(s))')
         else:
-            for f in ex['files']:
-                v = f['validation']
-                status = 'PASS' if v['valid'] else 'ISSUES'
-                print(f'  {f["pov"]}: {v["word_count"]} words [{status}]')
-                for issue in v['issues']:
-                    print(f'    - {issue}')
-            if ex['missing_povs']:
-                print(f'  Missing per-POV exemplars: {", ".join(ex["missing_povs"])}')
-    except Exception as e:
-        print(f'  (exemplar validation unavailable: {e})')
+            print(f'  The voice: {voice.detail}. To give drafting one, {voice_book.REMEDY}.')
+        for why in voice.skipped:
+            print(f'  Left out: {why}')
+    old = voice_book.old_files_note(project_dir)
+    if old:
+        print(f'  NOTE: {old}.')
 
     # Part 5: Score Trends (if history available)
     print('\n=== Score Trends ===\n')
