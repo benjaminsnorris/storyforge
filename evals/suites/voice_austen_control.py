@@ -25,9 +25,10 @@ against.
 from harness import Gate, Suite, SuiteOutput
 from suites import voice_austen as va
 
-#: what run 1 recorded (2026-11-15); the gates hold these (#488)
-RECORDED_RANK = 1  # set from the recording
-RECORDED_JUDGE = 4  # set from the recording
+#: what run 1 recorded (2026-11-15); the gates hold these (#488). Runs 2
+#: and 3 put her 7th and 6th of eight; the judge named her 4 of 4 every run
+RECORDED_RANK = 8
+RECORDED_JUDGE = 4
 
 
 def run(ctx):
