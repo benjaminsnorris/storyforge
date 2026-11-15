@@ -1,5 +1,6 @@
-"""Finding a book's voice by blind sample rounds (#654; plan B5, and the
-ready-to-draft plan's section 7, from *Wrath Like Smoke*'s rounds).
+"""Finding a book's voice by blind sample rounds (#654; plan B5, and finding
+7 of the ready-to-draft plan's "What the voice rounds showed", from *Wrath
+Like Smoke*'s rounds).
 
 One scene is written several ways; the author marks sentences in a pull
 request; the next round writes toward what was kept; the winner, ideally
@@ -9,26 +10,29 @@ How the rounds worked on Wrath, and so how this runs:
 - **One sentence per line** (`one_per_line`), so a comment attaches to a
   sentence. Paragraphs are kept with blank lines.
 - **Unlabelled.** Samples are `Sample A`, `Sample B`... in a shuffled
-  order; the key (what each tried) is kept outside the repo
-  (`key_path`, under `~/.storyforge/voice-sample-keys/`), and given to the
-  next round's writer, never to the author until the round is marked.
-- **The rounds are PRs.** `storyforge voice sample` writes
-  `working/voice-samples/round-<n>.md` on a branch, commits it and opens a
-  PR. A later round (`--from-pr N`) reads every page of that PR's comments
-  (`pr_marks`): line comments mapped to the sample and sentence they mark,
-  `suggestion` blocks as the author's own wording, and general reactions.
+  order; the key (what each tried) is kept outside the repo (`key_path`,
+  under `~/.storyforge/voice-sample-keys/`, by the book folder's path), and
+  given to the next round's writer. It isn't shown to the author by any
+  command: they mark blind.
+- **The rounds are PRs**, one per round. A later round (`--from-pr N`)
+  reads the round file as it is at the PR's head, and every page of the
+  PR author's comments (`pr_marks`): line comments checked against the
+  line's text and mapped to the sample and sentence they mark (a comment on
+  a sample's heading is a reaction to the whole sample), `suggestion`
+  blocks as the author's own wording (an empty one cuts the line), and
+  general reactions made since the round was committed.
 - **Write toward the keeps**, not away from the cuts: round 3 obeyed every
   flagged problem and came out flat. The prompt says so.
-- **Takes.** `--take <label>` revises one sample of the marked round
-  toward its marks, in versions that differ in one named thing
-  (`--versions "present tense;past tense"`, or two points of view).
+- **Takes.** `--take <label>` revises one sample of the marked round toward
+  its marks, in versions that differ in one named thing (`--versions
+  "present tense;past tense"`); the versions are headed by those names.
 - **Checked before it's shown.** Each sample gets the blocking read (one
   reading: physical slips) and, when the book has `checks.md`, the voice
-  review; a separate reviser fixes only the flagged lines
-  (`voice_review`). What was found and fixed is in the PR's description.
-- **The winner** (`--promote <round file> --sample X --name N`) is saved
-  as an anchor, with optional `kind:`, `tense:` and `pov:` headers, from
-  the round file as it is now (the author's hand edits included).
+  review; a separate reviser fixes only the flagged lines (`voice_review`).
+  What was found, fixed and left out is in the PR's description.
+- **The winner** (`--promote <round file> --sample X --name N`) is saved as
+  an anchor, with optional `kind:`, `tense:` and `pov:` headers, from the
+  round file as it is now (pull first: the author's edits made on GitHub).
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ import json
 import os
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from storyforge.common import log
 
@@ -89,38 +93,50 @@ def join_lines(text: str) -> str:
                        for p in paras)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Sample:
+    """A sample of a round file: its label, its text (one sentence per line,
+    as in the file), each sentence's 1-based line in that file's text, and
+    the lines of its heading and word count (a comment there is about the
+    whole sample)."""
     label: str
-    text: str                        # one sentence per line, as in the file
-    lines: dict[int, str] = field(default_factory=dict)   # file line -> sentence
+    text: str
+    lines: dict[int, str]
+    head_lines: frozenset[int] = frozenset()
 
 
 def parse_round(text: str) -> dict[str, Sample]:
-    """The samples of a round file, by label, with each sentence's line
-    number (1-based) in the file. A section is `## Sample X` or `## <name>`
-    (a take's version); its word-count line is left out."""
+    """The samples of a round file, by label. A section is `## Sample X` or
+    `## <name>` (a take's version).
+
+    Raises:
+        SampleError: a label given twice.
+    """
     out: dict[str, Sample] = {}
-    current: Sample | None = None
-    body: list[str] = []
+    label, body, lines, heads = None, [], {}, set()
+
+    def close():
+        if label is not None:
+            out[label] = Sample(label, '\n'.join(body).strip(), dict(lines), frozenset(heads))
+
     for n, line in enumerate(text.split('\n'), start=1):
-        m = re.match(r'^##\s+(?:Sample\s+)?(.+?)\s*$', line)
+        m = re.match(r'^##\s+(?:Sample\s+(?=[A-Z]\s*$))?(.+?)\s*$', line)
         if m:
-            if current:
-                current.text = '\n'.join(body).strip()
-            current = Sample(m.group(1).strip(), '')
-            out[current.label] = current
-            body = []
+            close()
+            label = m.group(1).strip()
+            if label in out:
+                raise SampleError(f'the round file has two samples headed {label!r}')
+            body, lines, heads = [], {}, {n}
             continue
-        if current is None:
+        if label is None:
             continue
         if re.match(r'^\*\d[\d,]* words\*$', line.strip()):
+            heads.add(n)
             continue
         body.append(line)
         if line.strip():
-            current.lines[n] = line.strip()
-    if current:
-        current.text = '\n'.join(body).strip()
+            lines[n] = line.strip()
+    close()
     return out
 
 
@@ -138,7 +154,9 @@ def render_round(title: str, intro: str, samples: list[tuple[str, str]]) -> str:
 
 INTRO = """{what}
 
-Each sentence is on its own line, so you can comment on any sentence in the pull request: **keep**, **cut**, or **more like this** (and why, if it comes to you), or suggest your own wording. A general reaction to a whole sample is just as useful. {blind}"""
+Each sentence is on its own line, so you can comment on any sentence in the pull request: **keep**, **cut**, or **more like this** (and why, if it comes to you), or suggest your own wording. A comment on a sample's heading is about the whole sample. Submit your review when you're done: comments in an unsubmitted review can't be read. {blind}"""
+
+BLIND = 'They are shuffled and unlabelled; what each one tried is kept outside the repo.'
 
 
 def next_round_number(project_dir: str) -> int:
@@ -152,99 +170,181 @@ def round_rel(n: int) -> str:
     return os.path.join(SAMPLES_DIR, f'round-{n}.md')
 
 
+def samples_digest(samples: dict[str, Sample]) -> str:
+    """A hash of a round's sample texts, so a key is matched to its round."""
+    joined = '\n'.join(f'{k}\n{join_lines(s.text)}' for k, s in sorted(samples.items()))
+    return hashlib.sha256(joined.encode('utf-8')).hexdigest()
+
+
+# ============================================================================
+# The key
+# ============================================================================
+
+@dataclass(frozen=True)
+class RoundKey:
+    """What a round tried, kept outside the repo: the round, its scene, what
+    it varied and blended (carried by the rounds after it, takes included),
+    what each sample tried, the round or sample it came from, and the hash
+    of its samples' text as written (`samples_digest`)."""
+    round: int
+    scene: str
+    vary: tuple[str, ...] = DEFAULT_VARY
+    influences: str = ''
+    tried: dict[str, str] = field(default_factory=dict)
+    take: str = ''
+    from_round: int | None = None
+    digest: str = ''
+
+    def to_json(self) -> dict:
+        d = asdict(self)
+        d['vary'] = list(self.vary)
+        return d
+
+    @classmethod
+    def from_json(cls, d, where: str) -> 'RoundKey':
+        try:
+            if not isinstance(d, dict) or not isinstance(d.get('tried', {}), dict):
+                raise TypeError('not a key object')
+            return cls(int(d['round']), str(d['scene']), tuple(d.get('vary') or DEFAULT_VARY),
+                       str(d.get('influences') or ''),
+                       {str(k): str(v) for k, v in d.get('tried', {}).items()},
+                       str(d.get('take') or ''), d.get('from_round'), str(d.get('digest') or ''))
+        except (KeyError, TypeError, ValueError) as e:
+            raise SampleError(f'{where} isn\'t a round key ({e})') from e
+
+
 def key_path(project_dir: str, n: int) -> str:
     """Where round `n`'s key lives: outside the repo, so the author marks
-    the samples blind."""
+    the samples blind; by the book folder's path (another clone or
+    worktree of the book has its own)."""
     real = os.path.realpath(project_dir)
     slug = f'{os.path.basename(real)}-{hashlib.sha1(real.encode()).hexdigest()[:8]}'
     return os.path.join(os.path.expanduser(KEYS_ROOT), slug, f'round-{n}.json')
 
 
-def save_key(project_dir: str, n: int, key: dict) -> str:
-    path = key_path(project_dir, n)
+def save_key(project_dir: str, key: RoundKey) -> str:
+    path = key_path(project_dir, key.round)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump(key, f, indent=1, ensure_ascii=False)
+        json.dump(key.to_json(), f, indent=1, ensure_ascii=False)
     return path
 
 
-def load_key(project_dir: str, n: int) -> dict:
-    """Round `n`'s key ({} when it isn't on this machine)."""
+def load_key(project_dir: str, n: int) -> RoundKey | None:
+    """Round `n`'s key, or None when it isn't on this machine.
+
+    Raises:
+        SampleError: the file is there but isn't a key.
+    """
+    path = key_path(project_dir, n)
     try:
-        with open(key_path(project_dir, n), encoding='utf-8') as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        raise SampleError(f'round {n}\'s key can\'t be read ({path}: {e})') from e
+    return RoundKey.from_json(data, path)
 
 
 # ============================================================================
 # The marks on a round
 # ============================================================================
 
+@dataclass(frozen=True)
+class Mark:
+    """One comment on a sample: the sentence(s) it marks, its note, and the
+    author's wording (None: no suggestion; '': cut the line)."""
+    sentence: str
+    note: str = ''
+    wording: str | None = None
+
+
 @dataclass
 class SampleMarks:
-    """The author's marks on one sample: (sentence, note) on lines, the
-    author's own wordings (suggestions), and whether a comment's line had
-    moved since (outdated)."""
-    marks: list[tuple[str, str]] = field(default_factory=list)
-    suggestions: list[tuple[str, str]] = field(default_factory=list)
-    outdated: int = 0
+    """The author's marks on one sample, and reactions to the whole sample."""
+    marks: list[Mark] = field(default_factory=list)
+    whole: list[str] = field(default_factory=list)
 
 
-def marks_for_round(prs, round_text: str, round_path: str) -> tuple[dict[str, SampleMarks],
-                                                                     list[str]]:
-    """The PR's line comments on the round file, by sample, and notes on what
-    couldn't be placed."""
-    samples = parse_round(round_text)
+def marks_for_round(prs, samples: dict[str, Sample], round_path: str
+                    ) -> tuple[dict[str, SampleMarks], list[str]]:
+    """The PR's line comments on the round file (`round_path` from the
+    repo's root), by sample. A comment is placed only when its line still
+    says what GitHub showed (`Comment.line_text`); every comment that can't
+    be placed is counted in the notes."""
     by_line = {n: (s.label, text) for s in samples.values() for n, text in s.lines.items()}
+    heads = {n: s.label for s in samples.values() for n in s.head_lines}
     out: dict[str, SampleMarks] = {label: SampleMarks() for label in samples}
-    notes, unplaced = [], 0
+    notes = []
+    other = moved = nowhere = 0
     path = round_path.replace(os.sep, '/')
     for c in prs.lines:
         if c.path != path:
+            other += 1
+            continue
+        if c.line in heads:
+            out[heads[c.line]].whole.append(c.body or 'see the suggestion')
             continue
         where = by_line.get(c.line)
         if where is None:
-            unplaced += 1
+            nowhere += 1
             continue
         label, sentence = where
-        sm = out[label]
-        if c.body:
-            sm.marks.append((sentence, c.body))
-        if c.suggestion:
-            sm.suggestions.append((sentence, c.suggestion))
-        sm.outdated += c.outdated
-    if unplaced:
-        notes.append(f'{unplaced} comment(s) on {path} are on lines that are no sample\'s '
-                     f'sentence, left out')
-    moved = sum(sm.outdated for sm in out.values())
+        if c.line_text and c.line_text != sentence:
+            moved += 1
+            continue
+        if c.start_line and c.start_line < c.line:
+            span = [by_line[n][1] for n in range(c.start_line, c.line + 1)
+                    if n in by_line and by_line[n][0] == label]
+            sentence = ' '.join(span) or sentence
+        wordings = c.suggestions or (None,)
+        for i, wording in enumerate(wordings):
+            out[label].marks.append(Mark(sentence, c.body if i == 0 else '', wording))
+    if other:
+        notes.append(f'{other} line comment(s) on other files, left out')
+    if nowhere:
+        notes.append(f'{nowhere} comment(s) on {path} on lines that are no sample\'s '
+                     f'sentence or heading, left out')
     if moved:
-        notes.append(f'{moved} comment(s) were on lines since changed; placed by their '
-                     f'original line')
+        notes.append(f'{moved} comment(s) on lines that have changed since they were made, '
+                     f'left out: their sentence can\'t be told for sure')
     return out, notes
 
 
 def describe_marks(samples: dict[str, Sample], marks: dict[str, SampleMarks],
-                   key: dict, general: list[str]) -> str:
+                   key: RoundKey | None, general: list[str]) -> str:
     """The marked round, for the next round's writer: each sample, what it
     tried (the key), and the author's marks on it."""
-    tried = key.get('tried', {})
+    tried = key.tried if key else {}
     parts = ['## The last round, as the author marked it']
     for label, s in samples.items():
-        parts.append(f'### Sample {label}'
-                     + (f' (it tried: {tried[label]})' if label in tried else ''))
+        name = f'Sample {label}' if len(label) == 1 else label
+        parts.append(f'### {name}' + (f' (it tried: {tried[label]})' if label in tried else ''))
         parts.append(join_lines(s.text))
         sm = marks.get(label) or SampleMarks()
+        if sm.whole:
+            parts.append('The author on the whole sample:\n'
+                         + '\n'.join(f'- {w}' for w in sm.whole))
         if sm.marks:
-            parts.append('Marks:\n' + '\n'.join(f'- "{q}": {n}' for q, n in sm.marks))
-        if sm.suggestions:
-            parts.append("The author's own wording:\n"
-                         + '\n'.join(f'- "{q}" → "{w}"' for q, w in sm.suggestions))
-        if not (sm.marks or sm.suggestions):
+            lines = []
+            for m in sm.marks:
+                bits = [m.note] if m.note else []
+                if m.wording == '':
+                    bits.append('cut it')
+                elif m.wording is not None:
+                    bits.append(f'the author\'s wording: "{m.wording}"')
+                lines.append(f'- "{m.sentence}": ' + '; '.join(bits))
+            parts.append('Marks:\n' + '\n'.join(lines))
+        if not (sm.marks or sm.whole):
             parts.append('(not marked)')
     if general:
         parts.append('### The author\'s general reactions\n\n' + '\n\n'.join(general))
     return '\n\n'.join(parts)
+
+
+def count_marks(marks: dict[str, SampleMarks], labels) -> int:
+    return sum(len(marks[k].marks) + len(marks[k].whole) for k in labels if k in marks)
 
 
 # ============================================================================
@@ -261,9 +361,9 @@ ROUND_PROMPT = """You are helping an author find the voice of their novel, {titl
 
 ## This round
 
-Write {n} versions of this scene, each {words} words. The events are the same in each; only the voice changes. Vary {vary} across them{influences}. Make each version a real attempt at a voice an author would want to keep, not a parody of a style.
+Write exactly {n} versions of this scene, each {words} words. The events are the same in each; only the voice changes. Vary {vary} across them{influences}. Make each version a real attempt at a voice an author would want to keep, not a parody of a style.
 {direction}
-For each version, say in one line what it tried (`tried`): the narrator's stance, the distance, the tense, the blend. The author won't see these until the round is marked.
+For each version, say in one line what it tried (`tried`): the narrator's stance, the distance, the tense, the blend. The author won't see these.
 
 Write the scenes as a novel's prose: no title, no notes. Plain, concrete, no stock phrasing."""
 
@@ -283,17 +383,21 @@ TAKE_PROMPT = """You are helping an author find the voice of their novel, {title
 
 {marked}
 
-Write {n} versions of the revised sample, which differ only in this: {versions}. Each version's `tried` is the one it is ({names})."""
+Write exactly {n} versions of the revised sample, which differ only in this: {versions}. Each version's `tried` is exactly one of: {names}."""
 
 
 @dataclass
 class Round:
-    """A round made: the round file's text, the key, and the notes on what
-    the checks found and fixed."""
+    """A round made: its number, the round file's text, its key, and notes
+    on what the checks found, fixed and left out."""
     number: int
     text: str
-    key: dict
+    key: RoundKey
     notes: list[str] = field(default_factory=list)
+
+    @property
+    def rel(self) -> str:
+        return round_rel(self.number)
 
 
 def _voice_text(project_dir: str) -> str:
@@ -308,7 +412,10 @@ def _voice_text(project_dir: str) -> str:
 
 def _scene_context(project_dir: str, scene_id: str) -> str:
     from storyforge import session
-    return session.scene_plan(project_dir, scene_id, notes=True)
+    try:
+        return session.scene_plan(project_dir, scene_id, notes=True)
+    except session.SessionError as e:
+        raise SampleError(str(e)) from e
 
 
 def _ask_variants(prompt: str, model: str, log_file: str, project_dir: str,
@@ -326,12 +433,22 @@ def _ask_variants(prompt: str, model: str, log_file: str, project_dir: str,
     if is_truncated(response):
         raise SampleError(f'the round\'s reply hit its token limit ({log_file})')
     try:
-        variants = json.loads(extract_text(response))['variants']
+        return json.loads(extract_text(response))['variants']
     except (ValueError, KeyError, TypeError) as e:
         raise SampleError(f'the round\'s reply could not be read ({e}; {log_file})') from e
-    variants = [v for v in variants if (v.get('text') or '').strip()]
-    if not variants:
-        raise SampleError(f'the round\'s reply has no sample ({log_file})')
+
+
+def _usable(variants: list[dict], want: int, log_file: str) -> list[dict]:
+    """Exactly `want` variants, each with text and what it tried.
+
+    Raises:
+        SampleError: fewer or more, or one blank.
+    """
+    blank = [i for i, v in enumerate(variants)
+             if not (v.get('text') or '').strip() or not (v.get('tried') or '').strip()]
+    if blank or len(variants) != want:
+        raise SampleError(f'the round\'s reply has {len(variants)} version(s), {len(blank)} of '
+                          f'them blank; {want} were asked for ({log_file}). Run it again')
     return variants
 
 
@@ -339,22 +456,33 @@ def check_samples(project_dir: str, scene_id: str, texts: dict[str, str], *, mod
                   log_dir: str) -> tuple[dict[str, str], list[str]]:
     """Each sample's physical slips (the blocking read, one reading) and,
     with checks.md, the voice review; a reviser fixes only what they flag.
-    Returns the texts after it and notes for the PR. A check that can't run
-    is said, never skipped silently."""
-    from storyforge import blocking, voice_book, voice_review
+    Returns the texts after it and notes for the PR: what was found and
+    fixed, and every flag or check left out. The blocking read's spend is
+    logged (`voice-sample-check`)."""
+    from storyforge import api, blocking, voice_book, voice_review
     from storyforge.common import ReferenceDocError
     has_checks = bool(voice_book.checks_text(project_dir))
     out, notes = {}, []
     if not has_checks:
-        notes.append('No reference/voice/checks.md yet: only physical slips were checked.')
+        notes.append('reference/voice/checks.md has no checks yet (missing, empty or init\'s '
+                     'template): only physical slips were checked.')
     for label, text in texts.items():
         flags: list = []
+        found = []
         try:
-            read = blocking.check_blocking(project_dir, scene_id, prose=text, model=model,
-                                           readings=1,
-                                           log_file=os.path.join(log_dir, f'{label}-blocking.json'))
+            with api.metered() as meter:
+                read = blocking.check_blocking(
+                    project_dir, scene_id, prose=text, model=model, readings=1,
+                    log_file=os.path.join(log_dir, f'{label}-blocking.json'))
+            meter.log(project_dir, 'voice-sample-check', scene_id)
+            quoted = [f for f in read.findings if f.scene_quote]
             flags += [voice_review.Flag(f.scene_quote, 'blocking', f.explanation)
-                      for f in read.findings if f.scene_quote]
+                      for f in quoted]
+            found.append(f'{len(quoted)} physical slip(s)')
+            left = (len(read.findings) - len(quoted)) + len(read.unverified)
+            if left:
+                notes.append(f'Sample {label}: {left} physical finding(s) left out '
+                             f'(unverified, or quoting nothing).')
         except blocking.BlockingError as e:
             notes.append(f'Sample {label}: the physical check didn\'t finish ({e}).')
         if has_checks:
@@ -362,44 +490,52 @@ def check_samples(project_dir: str, scene_id: str, texts: dict[str, str], *, mod
                 rev = voice_review.review(project_dir, scene_id, text, model=model,
                                           log_file=os.path.join(log_dir, f'{label}-review.json'))
                 flags += rev.flags
+                found.append(f'{len(rev.flags)} line(s) against checks.md')
+                left = len(rev.unverified) + rev.over_cap + rev.repeated
+                if left:
+                    notes.append(f'Sample {label}: {left} checks.md flag(s) left out '
+                                 f'(not in the sample, past the cap, or repeated).')
             except (voice_review.VoiceReviewError, ReferenceDocError) as e:
                 notes.append(f'Sample {label}: the voice review didn\'t finish ({e}).')
-        flags = [f for f in flags if voice_review.flag_spans(text, f.quote)]
-        if not flags:
+        placed = [f for f in flags if voice_review.flag_spans(text, f.quote)]
+        if len(placed) < len(flags):
+            notes.append(f'Sample {label}: {len(flags) - len(placed)} flag(s) whose words '
+                         f'aren\'t in the sample, left out.')
+        if not placed:
             out[label] = text
             continue
         try:
-            revision = voice_review.revise(project_dir, scene_id, text, flags, model=model,
+            revision = voice_review.revise(project_dir, scene_id, text, placed, model=model,
                                            log_file=os.path.join(log_dir, f'{label}-revise.json'))
             out[label] = revision.prose
-            notes.append(f'Sample {label}: {len(flags)} line(s) flagged before you saw it '
-                         f'(physical slips, checks.md); {revision.summary()}.')
+            notes.append(f'Sample {label}: flagged before you saw it ({", ".join(found)}); '
+                         f'{revision.summary()}'
+                         + (f'; {"; ".join(revision.dropped)}' if revision.dropped else '')
+                         + '.')
         except (voice_review.VoiceReviewError, ReferenceDocError) as e:
             out[label] = text
-            notes.append(f'Sample {label}: {len(flags)} line(s) flagged, not fixed: the '
+            notes.append(f'Sample {label}: {len(placed)} line(s) flagged, not fixed: the '
                          f'reviser didn\'t finish ({e}).')
     return out, notes
 
 
 def write_round(project_dir: str, scene_id: str, *, variants: int, vary: list[str],
                 influences: str, model: str, log_dir: str, marked: str = '',
-                previous: dict | None = None, words: str = '300 to 500',
+                previous: RoundKey | None = None, words: str = '300 to 500',
                 rng: random.Random | None = None) -> Round:
-    """Round `next_round_number`: `variants` versions of `scene_id`, checked,
-    shuffled and labelled A, B, C... `marked`: the last round as the author
-    marked it (`describe_marks`), for a round after the first.
+    """Round `next_round_number`: exactly `variants` versions of `scene_id`,
+    checked, shuffled and labelled A, B, C... `marked`: the last round as
+    the author marked it (`describe_marks`), for a round after the first.
 
     Raises:
-        SampleError: the scene isn't in the book, or the round can't be written.
+        SampleError: `variants` out of range, the scene isn't in the book, or
+            the round can't be written (a reply with the wrong count).
+        common.ReferenceDocError, voice_repo.VoiceError: the voice can't be read.
     """
-    from storyforge import session
     from storyforge.common import read_yaml_field
     if not 2 <= variants <= len(LABELS):
         raise SampleError(f'--variants takes 2 to {len(LABELS)}, not {variants}')
-    try:
-        plan = _scene_context(project_dir, scene_id)
-    except session.SessionError as e:
-        raise SampleError(str(e)) from e
+    plan = _scene_context(project_dir, scene_id)
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
     n = next_round_number(project_dir)
     infl = f', blending these influences: {influences}' if influences else ''
@@ -407,62 +543,72 @@ def write_round(project_dir: str, scene_id: str, *, variants: int, vary: list[st
                                  n=variants, words=words, vary=', '.join(vary),
                                  influences=infl,
                                  direction=DIRECTION.format(marked=marked) if marked else '')
-    got = _ask_variants(prompt, model, os.path.join(log_dir, f'round-{n}.json'), project_dir,
-                        scene_id)
+    log_file = os.path.join(log_dir, f'round-{n}.json')
+    got = _usable(_ask_variants(prompt, model, log_file, project_dir, scene_id), variants,
+                  log_file)
     rng = rng or random.Random()
     rng.shuffle(got)
-    labelled = {LABELS[i]: v for i, v in enumerate(got[:len(LABELS)])}
+    labelled = {LABELS[i]: v for i, v in enumerate(got)}
     texts, notes = check_samples(project_dir, scene_id,
                                  {k: v['text'] for k, v in labelled.items()}, model=model,
                                  log_dir=os.path.join(log_dir, f'round-{n}-checks'))
-    blind = ('They are shuffled and unlabelled; the key is shown after you mark them.')
-    what = (f'{len(texts)} takes on the same slice of *{scene_id}*. The events are the same '
-            f'in each; only the voice changes: {", ".join(vary)}'
+    what = (f'{len(texts)} versions of *{scene_id}*. The events are the same in each; only '
+            f'the voice changes: {", ".join(vary)}'
             + (f', and how they blend {influences}' if influences else '') + '.')
     text = render_round(f'Voice samples, round {n}: {scene_id}',
-                        INTRO.format(what=what, blind=blind),
-                        list(texts.items()))
-    key = {'round': n, 'scene': scene_id, 'vary': vary, 'influences': influences,
-           'tried': {k: v['tried'] for k, v in labelled.items()},
-           'from': previous or {}}
+                        INTRO.format(what=what, blind=BLIND), list(texts.items()))
+    key = RoundKey(n, scene_id, tuple(vary), influences,
+                   {k: v['tried'] for k, v in labelled.items()}, '',
+                   previous.round if previous else None,
+                   samples_digest(parse_round(text)))
     return Round(n, text, key, notes)
 
 
 def write_take(project_dir: str, scene_id: str, *, sample: str, marked: str,
-               versions: list[str], model: str, log_dir: str) -> Round:
+               versions: list[str], model: str, log_dir: str,
+               previous: RoundKey | None = None) -> Round:
     """A take: one marked sample revised toward its marks, in versions that
-    differ only in `versions` (one line each).
+    differ only in `versions` (each heads its version; matched by what the
+    reply says it tried). The influences and vary list are carried from
+    `previous`.
 
     Raises:
-        SampleError: as `write_round`.
+        SampleError: fewer than two or repeated versions, a reply that
+            doesn't give each version once, or as `write_round`.
     """
-    from storyforge import session
     from storyforge.common import read_yaml_field
     if len(versions) < 2:
         raise SampleError('--versions names at least two, separated by ";"')
-    try:
-        plan = _scene_context(project_dir, scene_id)
-    except session.SessionError as e:
-        raise SampleError(str(e)) from e
+    if len(set(v.lower() for v in versions)) != len(versions):
+        raise SampleError('--versions names one of them twice')
+    plan = _scene_context(project_dir, scene_id)
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
     n = next_round_number(project_dir)
     prompt = TAKE_PROMPT.format(title=title, voice=_voice_text(project_dir), plan=plan,
                                 marked=marked, n=len(versions),
                                 versions=' / '.join(versions),
                                 names='; '.join(versions))
-    got = _ask_variants(prompt, model, os.path.join(log_dir, f'round-{n}.json'), project_dir,
-                        scene_id)
-    named = {}
-    for i, v in enumerate(got[:len(versions)]):
-        named[versions[i]] = v['text']
+    log_file = os.path.join(log_dir, f'round-{n}.json')
+    got = _usable(_ask_variants(prompt, model, log_file, project_dir, scene_id),
+                  len(versions), log_file)
+    by_name = {v.lower(): v for v in versions}
+    named: dict[str, str] = {}
+    for v in got:
+        name = by_name.get(v['tried'].strip().lower())
+        if name is None or name in named:
+            raise SampleError(f'the take\'s reply names a version {v["tried"]!r}, not one of '
+                              f'{"; ".join(versions)} once each ({log_file}). Run it again')
+        named[name] = v['text']
+    named = {v: named[v] for v in versions}
     texts, notes = check_samples(project_dir, scene_id, named, model=model,
                                  log_dir=os.path.join(log_dir, f'round-{n}-checks'))
     what = (f'Sample {sample} of the last round, revised toward your marks, in '
             f'{len(texts)} versions: ' + '; '.join(texts) + '.')
     text = render_round(f'Voice samples, round {n}: {scene_id}, take on sample {sample}',
                         INTRO.format(what=what, blind=''), list(texts.items()))
-    key = {'round': n, 'scene': scene_id, 'take': sample, 'versions': versions,
-           'tried': {k: k for k in texts}}
+    key = RoundKey(n, scene_id, previous.vary if previous else DEFAULT_VARY,
+                   previous.influences if previous else '', {k: k for k in texts}, sample,
+                   previous.round if previous else None, samples_digest(parse_round(text)))
     return Round(n, text, key, notes)
 
 
@@ -473,11 +619,13 @@ def write_take(project_dir: str, scene_id: str, *, sample: str, marked: str,
 def promote(project_dir: str, round_file: str, label: str, name: str, *, kind: str = '',
             tense: str = '', pov: str = '', force: bool = False, dry_run: bool = False) -> str:
     """Save sample `label` of `round_file` (as it is now, hand edits
-    included) as `reference/voice/anchors/<name>.md`. Returns its path.
+    included) as `reference/voice/anchors/<name>.md`; checked as an anchor
+    before anything is written. Returns its path.
 
     Raises:
-        SampleError: no such sample, an anchor of that name (without
-            `force`), a bad name or tense.
+        SampleError: no such sample or round file, an anchor of that name
+            (without `force`), a bad name or tense, or a sample that isn't
+            an anchor (empty).
     """
     from storyforge import voice_book
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', name):
@@ -499,11 +647,13 @@ def promote(project_dir: str, round_file: str, label: str, name: str, *, kind: s
     if os.path.exists(dest) and not force:
         raise SampleError(f'{rel} is there already; pass --force to replace it')
     header = [f'{k}: {v}' for k, v in (('kind', kind), ('tense', tense), ('pov', pov)) if v]
-    body = join_lines(sample.text)
-    if dry_run:
-        return rel
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, 'w', encoding='utf-8') as f:
-        f.write(('\n'.join(header) + '\n\n' if header else '') + body + '\n')
-    voice_book.parse_anchor(rel, open(dest, encoding='utf-8').read())   # it reads back
+    content = ('\n'.join(header) + '\n\n' if header else '') + join_lines(sample.text) + '\n'
+    try:
+        voice_book.parse_anchor(rel, content)
+    except ValueError as e:
+        raise SampleError(f'sample {label} isn\'t an anchor: {e}') from e
+    if not dry_run:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, 'w', encoding='utf-8') as f:
+            f.write(content)
     return rel

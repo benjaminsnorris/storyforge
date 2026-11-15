@@ -130,13 +130,15 @@ def parse_args(argv):
     samp.add_argument('--scene', help='The scene to write several ways')
     samp.add_argument('--variants', type=int, default=5,
                       help='How many versions in a round (default 5)')
-    from storyforge.voice_sample import DEFAULT_VARY
-    samp.add_argument('--vary', default=', '.join(DEFAULT_VARY),
-                      help='What the versions vary, comma-separated (default: narrator '
-                           'stance, distance, tense)')
+    samp.add_argument('--vary', default=None,
+                      help='What the versions vary, comma-separated (default: the last '
+                           'round\'s, else narrator stance, distance, tense)')
+    samp.add_argument('--allow-unmarked', action='store_true',
+                      help='With --from-pr: write the next round even when the PR has no '
+                           'marks of its author\'s')
     samp.add_argument('--influences', default=None,
-                      help='Writers to blend, e.g. "Pressfield, Renault" (a later round '
-                           'takes the last round\'s unless given)')
+                      help='Writers to blend, e.g. "Pressfield, Renault" (a later round, take '
+                           'or not, takes the last round\'s unless given)')
     samp.add_argument('--from-pr', type=int, metavar='N',
                       help='The marked round\'s PR: the next round writes toward its marks')
     samp.add_argument('--take', metavar='LABEL',
@@ -485,11 +487,31 @@ def _accept(voice_dir: str, args) -> int:
     return status
 
 
+def _git_out(project_dir: str, *args: str) -> str:
+    from storyforge.git import _git
+    r = _git(project_dir, *args, check=False)
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
+def _new_round_branch(project_dir: str, n: int) -> str:
+    """A new branch for round `n` (each round its own PR), off main or off
+    the branch the last round is on. '' when it can't be made."""
+    from datetime import datetime
+    from storyforge import git
+    if git._is_main_branch(git.current_branch(project_dir)):
+        return git.create_branch(f'voice-sample-round{n}', project_dir)
+    name = f'storyforge/voice-sample-round{n}-{datetime.now().strftime("%Y%m%d%H%M")}'
+    r = git._git(project_dir, 'checkout', '-b', name, check=False)
+    return name if r.returncode == 0 else ''
+
+
 def _sample(args) -> int:
     """`voice sample`, in a book (#654, `storyforge.voice_sample`)."""
     from storyforge import git, pr_marks, voice_sample as vs
     from storyforge.common import ReferenceDocError, detect_project_root, select_model
+    from storyforge.voice_repo import VoiceError
     project_dir = detect_project_root()
+    prefix = _git_out(project_dir, 'rev-parse', '--show-prefix')   # a book in a subfolder
     try:
         if args.promote:
             if not (args.sample and args.name):
@@ -501,6 +523,9 @@ def _sample(args) -> int:
             if args.dry_run:
                 log(f'Dry run: would save {rel}')
                 return 0
+            if not git.ensure_on_branch('voice-anchor', project_dir):
+                log(f'ERROR: {rel} is written, but no branch could be made to commit it on')
+                return 1
             if not git.commit_and_push(project_dir, f'Voice: anchor {args.name} from '
                                        f'{os.path.basename(args.promote)} sample {args.sample}',
                                        [rel.replace(os.sep, '/')]) \
@@ -512,93 +537,148 @@ def _sample(args) -> int:
         if args.take and not args.from_pr:
             log('ERROR: --take revises a marked sample: give the round\'s PR with --from-pr')
             return 1
-        prev_key: dict = {}
+        latest = vs.next_round_number(project_dir) - 1
+        if latest and _git_out(project_dir, 'status', '--porcelain', '--',
+                               vs.round_rel(latest)):
+            log(f'ERROR: {vs.round_rel(latest)} isn\'t committed as it is: commit or remove it '
+                f'first')
+            return 1
+        prev_key = None
         marked = ''
         scene = args.scene
         notes: list[str] = []
         if args.from_pr:
-            prev = vs.next_round_number(project_dir) - 1
-            if prev < 1:
+            if latest < 1:
                 log('ERROR: --from-pr: there is no earlier round in working/voice-samples/')
                 return 1
-            rel = vs.round_rel(prev)
-            with open(os.path.join(project_dir, rel), encoding='utf-8') as f:
-                round_text = f.read()
-            if rel.replace(os.sep, '/') not in pr_marks.files(args.from_pr, project_dir):
+            rel = vs.round_rel(latest)
+            repo_rel = prefix + rel.replace(os.sep, '/')
+            info = pr_marks.pr_info(args.from_pr, project_dir)
+            if repo_rel not in info['paths']:
                 log(f'ERROR: PR #{args.from_pr} doesn\'t change {rel}, the latest round: give '
                     f'the PR that holds it')
                 return 1
-            prs = pr_marks.fetch(args.from_pr, project_dir)
-            marks, notes = vs.marks_for_round(prs, round_text, rel)
-            prev_key = vs.load_key(project_dir, prev)
-            if not prev_key:
-                notes.append(f'round {prev}\'s key isn\'t on this machine '
-                             f'({vs.key_path(project_dir, prev)}): the writer gets the marks '
-                             f'without what each sample tried')
+            round_text = pr_marks.file_at(project_dir, repo_rel, info['head_sha'])
+            with open(os.path.join(project_dir, rel), encoding='utf-8') as f:
+                if f.read() != round_text:
+                    log(f'ERROR: {rel} here differs from PR #{args.from_pr}\'s (edits or '
+                        f'suggestions committed on GitHub): pull the branch first, so marks '
+                        f'are read against the same text')
+                    return 1
             samples = vs.parse_round(round_text)
+            if not samples:
+                log(f'ERROR: {rel} has no sample headings (`## Sample X`)')
+                return 1
+            since = _git_out(project_dir, 'log', '-1', '--format=%cI', '--', rel)
+            prs = pr_marks.fetch(args.from_pr, project_dir, since=since)
+            marks, notes = vs.marks_for_round(prs, samples, repo_rel)
+            notes += prs.notes
+            prev_key = vs.load_key(project_dir, latest)
+            if prev_key is None:
+                notes.append(f'round {latest}\'s key isn\'t on this machine '
+                             f'({vs.key_path(project_dir, latest)}): the writer gets the '
+                             f'marks without what each sample tried, and the influences '
+                             f'and vary list aren\'t carried')
+            elif prev_key.digest and prev_key.digest != vs.samples_digest(samples):
+                notes.append(f'round {latest}\'s key is of other samples (the round was '
+                             f'edited, or remade): not used')
+                prev_key = None
             if args.take:
                 if args.take not in samples:
-                    log(f'ERROR: round {prev} has no sample {args.take!r}')
+                    log(f'ERROR: round {latest} has no sample {args.take!r} (it has '
+                        f'{", ".join(samples)})')
                     return 1
                 samples = {args.take: samples[args.take]}
+            counted = vs.count_marks(marks, samples)
+            if not counted and not prs.general and not args.allow_unmarked:
+                log(f'ERROR: PR #{args.from_pr} has no marks of its author\'s on round '
+                    f'{latest}' + (f' on sample {args.take}' if args.take else '')
+                    + ' (comments in an unsubmitted review can\'t be read: submit it). '
+                    'Pass --allow-unmarked to write the round anyway')
+                return 1
             marked = vs.describe_marks(samples, marks, prev_key, prs.general)
-            scene = scene or prev_key.get('scene')
-            counted = sum(len(m.marks) + len(m.suggestions) for m in marks.values())
-            log(f'Round {prev}: {counted} mark(s) on {len(samples)} sample(s), '
+            if prev_key and args.scene and args.scene != prev_key.scene:
+                notes.append(f'--scene {args.scene} is not the scene round {latest} marked '
+                             f'({prev_key.scene})')
+            scene = scene or (prev_key.scene if prev_key else '')
+            log(f'Round {latest}: {counted} mark(s) on {len(samples)} sample(s), '
                 f'{len(prs.general)} general reaction(s), from PR #{args.from_pr}')
         if not scene:
-            log('ERROR: name the scene (--scene); a later round takes it from the last '
-                'round\'s key, which isn\'t on this machine')
+            log('ERROR: name the scene (--scene)'
+                + (': the last round\'s key, which would name it, isn\'t usable here'
+                   if args.from_pr else ''))
             return 1
         for note in notes:
             log(f'NOTE: {note}')
-        n = vs.next_round_number(project_dir)
+        n = latest + 1
         influences = args.influences if args.influences is not None else \
-            prev_key.get('influences', '')
+            (prev_key.influences if prev_key else '')
+        vary = ([v.strip() for v in args.vary.split(',') if v.strip()] if args.vary else
+                list(prev_key.vary if prev_key else vs.DEFAULT_VARY))
+        versions = [v.strip() for v in (args.versions or '').split(';') if v.strip()]
+        if args.take and len(versions) < 2:
+            log('ERROR: --take needs --versions, at least two, separated by ";"')
+            return 1
         log(f'Round {n}: {scene}, '
             + (f'a take on sample {args.take}' if args.take else f'{args.variants} versions'))
         if args.dry_run:
-            log('Dry run: one call writes the round (~$1), then each sample gets the '
-                'physical check and the voice review (~$0.30 each); nothing written.')
+            log('Dry run: nothing written or spent. A real run makes one call for the round '
+                '(a rough guess: about $1), then the physical check of each sample, the '
+                'voice review when checks.md has checks, and a reviser call for each sample '
+                'with flags (together a rough guess: about $0.30 to $0.60 a sample).')
             return 0
         if not os.environ.get('ANTHROPIC_API_KEY'):
             log('ERROR: ANTHROPIC_API_KEY not set; nothing was written.')
             return 1
-        git.create_branch(f'voice-sample-round{n}', project_dir)
+        if not _new_round_branch(project_dir, n):
+            log(f'ERROR: no branch could be made for round {n}; nothing was written.')
+            return 1
         model = select_model('creative')
         log_dir = os.path.join(project_dir, 'working', 'logs', 'voice-sample')
         if args.take:
-            versions = [v.strip() for v in (args.versions or '').split(';') if v.strip()]
             rnd = vs.write_take(project_dir, scene, sample=args.take, marked=marked,
-                                versions=versions, model=model, log_dir=log_dir)
+                                versions=versions, model=model, log_dir=log_dir,
+                                previous=prev_key)
         else:
-            rnd = vs.write_round(project_dir, scene, variants=args.variants,
-                                 vary=[v.strip() for v in args.vary.split(',') if v.strip()],
+            rnd = vs.write_round(project_dir, scene, variants=args.variants, vary=vary,
                                  influences=influences, model=model, log_dir=log_dir,
                                  marked=marked, previous=prev_key)
-    except (vs.SampleError, pr_marks.PrMarksError, ReferenceDocError, OSError) as e:
+        os.makedirs(os.path.join(project_dir, vs.SAMPLES_DIR), exist_ok=True)
+        with open(os.path.join(project_dir, rnd.rel), 'w', encoding='utf-8') as f:
+            f.write(rnd.text)
+    except (vs.SampleError, pr_marks.PrMarksError, ReferenceDocError, VoiceError, OSError,
+            RuntimeError) as e:
         log(f'ERROR: {e}')
         return 1
-    rel = vs.round_rel(rnd.number)
-    with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
-        f.write(rnd.text)
-    key = vs.save_key(project_dir, rnd.number, rnd.key)
-    log(f'Round {rnd.number}: {rel}; the key (outside the repo): {key}')
+    log(f'Round {rnd.number}: {rnd.rel}')
     for note in rnd.notes:
         log(f'  {note}')
     if not git.commit_and_push(project_dir, f'Voice: round {rnd.number} samples of {scene}',
-                               [rel.replace(os.sep, '/')]):
-        log(f'ERROR: {rel} is written but not committed ({git.last_commit_error})')
+                               [rnd.rel.replace(os.sep, '/')]):
+        log(f'ERROR: {rnd.rel} is written but not committed ({git.last_commit_error}); its '
+            f'key isn\'t saved')
+        return 1
+    try:
+        key = vs.save_key(project_dir, rnd.key)
+        log(f'  The key (outside the repo): {key}')
+    except OSError as e:
+        log(f'ERROR: the round is committed, but its key couldn\'t be saved ({e}): the next '
+            f'round won\'t know what each sample tried')
         return 1
     if args.no_pr:
         return 0
-    body = (f'Voice samples, round {rnd.number}: `{rel}`.\n\n'
+    body = (f'Voice samples, round {rnd.number}: `{rnd.rel}`.\n\n'
             f'Mark sentences in **Files changed**: keep, cut, more like this, or your own '
-            f'wording as a suggestion. When you\'re done, the next round is `storyforge '
-            f'voice sample --from-pr <this PR>`, a take on one sample `--from-pr <this PR> '
-            f'--take <label> --versions "a;b"`, and a winner `--promote {rel} --sample '
+            f'wording as a suggestion; a comment on a sample\'s heading is about the whole '
+            f'sample. Submit the review when you\'re done. Then: the next round, `storyforge '
+            f'voice sample --from-pr <this PR>`; a take on one sample, `--from-pr <this PR> '
+            f'--take <label> --versions "a;b"`; a winner, `--promote {rnd.rel} --sample '
             f'<label> --name <name>`.\n'
             + ('\n## Checked before you see it\n\n' + '\n'.join(f'- {x}' for x in rnd.notes)
                if rnd.notes else ''))
-    git.create_draft_pr(f'Voice: round {rnd.number} samples of {scene}', body, project_dir)
+    if not git.create_draft_pr(f'Voice: round {rnd.number} samples of {scene}', body,
+                               project_dir):
+        log(f'ERROR: round {rnd.number} is committed, but no PR was opened (is the branch '
+            f'pushed, and gh set up?). Open one by hand, or run with --no-pr next time')
+        return 1
     return 0
