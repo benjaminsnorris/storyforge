@@ -1126,6 +1126,16 @@ def model_catalog() -> list[dict]:
         return _catalog
 
 
+def reset_model_catalog() -> None:
+    """Forget the fetched catalog, so the next ``model_catalog`` fetches it
+    again. The eval harness calls it before each suite run: every recording
+    directory then holds its own catalog request and replays alone (#689
+    review CR-1: runs 2 and 3 of a ``--runs 3`` recording had none)."""
+    global _catalog
+    with _catalog_lock:
+        _catalog = None
+
+
 # Which capability tier each task type dispatches to.
 _TASK_TIER = {
     'drafting': 'opus',

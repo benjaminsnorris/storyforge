@@ -717,3 +717,27 @@ def test_an_unreadable_ledger_with_over_budget_runs_and_says_so(tmp_path, live, 
 def test_each_test_has_its_own_eval_spend_ledger(tmp_path):
     """T3: no test's spend counts against another's budget."""
     assert os.environ[eval_spend.LEDGER_ENV] == str(tmp_path / 'eval-spend.jsonl')
+
+
+def test_each_suite_run_fetches_its_own_model_catalog(tmp_path):
+    """Every run of a suite starts without the process's model catalog, so
+    each recording directory (run 1, run2/, run3/) holds its own catalog
+    request and replays alone (#689 review CR-1: runs 2 and 3 of a
+    `--runs 3` recording replayed stale on `GET models`)."""
+    from storyforge import common
+    seen = []
+
+    def run(ctx):
+        seen.append(common._catalog)
+        common._catalog = [{'id': 'claude-opus-5-5'}]  # as a fetch would leave it
+        return harness.SuiteOutput(gates=[harness.Gate('ok', 1, '==', 1)])
+
+    suite = harness.Suite('catalog', 'reads the catalog', run)
+    saved = common._catalog
+    try:
+        common._catalog = [{'id': 'left-over'}]
+        for label in ('', 'run2', 'run3'):
+            harness.run_suite(suite, 'replay', str(tmp_path), run=label)
+    finally:
+        common._catalog = saved
+    assert seen == [None, None, None]
