@@ -160,6 +160,13 @@ The Verne pair is two voices because what the fingerprint reads in a
 translation is the translator's English. A real author's corpus can mix
 voices the same way: ghostwritten posts, quoted material, a decade of drift.
 
+**Test 6, writing in the voice** (#654), is a frozen eval suite, not a unit
+test: `voice-austen` (`evals/README.md`, "Writing in the voice"). `write`
+drafts an original scene with this voiceprint; the meter puts the draft
+nearest Austen among the eight authors and an Opus judge names her from four
+samples, in each of three recorded runs (her distance 0.77 to 0.82, the next
+author 0.02 to 0.07 further; her held-out chunks' median is 0.46).
+
 ## The author voice repo (B0, B1, #652)
 
 A voiceprint belongs to an author, not a book: it lives in the author's own

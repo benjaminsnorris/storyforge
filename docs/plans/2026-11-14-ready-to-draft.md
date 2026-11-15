@@ -215,11 +215,12 @@ blind read of the old draft against the session pilot).
   anchor, saves it, hand edits included, and commits it off `main`
   (`references/voice-folder.md`, "Finding anchors"). `status` now recommends `write --session` for a prose book
   (`write --keep-going` for a graphic novel); E5 re-recorded.
+- **#654's test 6** (2026-11-15): the frozen `voice-austen` suite. A scene
+  `write` drafts with the Austen reference voice is nearest her on the
+  meter, and an Opus judge names her from four in every ordering, in all
+  three recorded runs, though the margins are thin and the drafts sit well
+  outside her own range (`evals/README.md`, "Writing in the voice").
 - **Not built yet:**
-  - #654's test 6: a scene written with the Austen exemplars scores closer
-    to her on the meter than to the other authors, and a judge picks Austen
-    from four. A frozen eval suite; it needs a paid recording and Ben's
-    approval.
   - `revise --marks` reads only a file; reading a drafted scene's marks
     from a PR has no issue yet.
   - Sessions at coach or strict coaching (flags to the author, nothing

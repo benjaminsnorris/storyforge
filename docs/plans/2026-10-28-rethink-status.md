@@ -36,12 +36,13 @@ Status section says what's built and how Ben starts the redraft).
   review, reviser) before the author sees it, the key kept outside the
   repo; `--from-pr N` writes the next round toward the PR's marks;
   `--take X --versions "a;b"` revises one sample; `--promote` saves the
-  winner as an anchor. Not built: the issue's test 6 (the Austen exemplars
-  on the meter and a judge), a frozen eval suite that needs a paid
-  recording and Ben's approval.
+  winner as an anchor. The issue's test 6 is the frozen `voice-austen`
+  suite (2026-11-15, three runs, $1.18): `write` with the Austen voice is
+  nearest her on the meter and the judge names her from four, every run;
+  thin margins (`evals/README.md`, "Writing in the voice").
 
 **Next:** Ben fills Wrath's `reference/voice/` and runs the Act 1 pilot.
-#654's test 6 when Ben approves the recording. Reading a drafted scene's
+Reading a drafted scene's
 marks from a PR has no issue yet. Then #656 and #659, then #657 and #658.
 
 ## Latest: the gate-and-voiceprint plan, phases 1–5 merged (2026-11-09, v1.173.0)

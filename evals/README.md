@@ -337,6 +337,56 @@ layer caught (qs-017, qs-021), so the two together caught 14. Its
 E5 and recheck-set error on this base); the next full `--baseline` rewrites
 it the same.
 
+## Writing in the voice (#654)
+
+`voice-austen` is the Austen reference voiceprint's test 6 (plan B7): can
+`write`, given her voice, write a scene that sounds like her? The fixture
+book (`evals/fixtures/voice-austen/`) is an original one-scene comedy of
+manners (a card party in a country town about 1810, about 2,000 words, none
+of her characters or events) whose `voice:` block names
+`references/voiceprints/austen`, so the drafting prompt carries her
+description and exemplars (all from *Pride and Prejudice*). The scene is
+drafted as `write` drafts it (shared context plus `cmd_write._build_prompt`,
+no gate), then:
+
+- **the meter** (free) compares the draft with her fingerprint and with the
+  seven other authors' of the reference tests: `meter_rank` (1: she is
+  nearest), `meter_distance_austen`, `meter_margin` (nearest other minus
+  hers), and `austen_held_out_median` (her own held-out chunks' distance,
+  for scale);
+- **the judge** (Opus) reads the draft beside four unlabelled samples of
+  about 500 words, Austen (*Persuasion*, held out), Brunton (*Self-Control*),
+  Eliot (*Middlemarch*) and Dickens (*A Christmas Carol*), and names whose
+  voice it is, four times with her sample in each place: `judge_austen`.
+
+It is **frozen**; the gates hold run 1's values (rank 1, judge 4 of 4).
+**Recorded 2026-11-15** as three runs, $1.18 (Ben's approval over the
+monthly budget):
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| words | 1946 | 1945 | 1783 |
+| meter: Austen's place among eight | 1 | 1 | 1 |
+| her distance | 0.768 | 0.773 | 0.824 |
+| the nearest other author, and the margin | Dickens, 0.069 | Fisher, 0.035 | Dickens, 0.018 |
+| judge named her | 4 of 4 | 4 of 4 | 4 of 4 |
+
+Her held-out chunks sit at a median 0.462 from her fingerprint, so the
+drafts are near her but well outside her own range, and the margins over the
+next author are thin. The measures furthest from her are function words
+(`at`, `it`, `very`, `would` more often than she uses them; `much` and
+`such` less). The judge's reasons quote the narrator's ironic antitheses
+and free indirect style, but also the Regency drawing room, which no other
+sample has: the setting helps it. What the suite doesn't show is that the
+exemplars made the difference; a book with no voice would be the control,
+and `write` refuses to draft one.
+
+To re-record (only when a decision depends on it):
+`python3 evals/run.py --mode record --suite voice-austen --runs 3`, then set
+`RECORDED_RANK` and `RECORDED_JUDGE` in the suite from run 1.
+`evals/consistency.py` doesn't read it (E6's suites only): the table above
+is the spread.
+
 ## Recorded API calls
 
 Every Anthropic call goes through `api._api_request`, which consults
