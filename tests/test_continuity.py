@@ -1378,7 +1378,9 @@ def test_write_commits_the_gate_s_saved_state():
     from storyforge import cmd_write
     assert cmd_write.gate_state_paths() == ['working/typed-state/', 'working/stage-sheets/']
     src = inspect.getsource(cmd_write)
-    assert src.count('*gate_state_paths()') == 3
+    # the scene's commit, the gate-only commit, and the re-check commits
+    # of direct mode and of a session (#685)
+    assert src.count('*gate_state_paths()') == 4
 
 
 def test_covered_fact_ids_for_the_question_layer():

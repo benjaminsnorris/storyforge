@@ -1,7 +1,37 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-10 (the blog voice set aside, voice samples started, #680); before that 2026-11-09 (the blocking-set baseline, the gate set #677, Ben's voice repo); before that 2026-11-08, at v1.162.0 (the gate's blocking read, #626); before that v1.161.0 (sync hook for subfolder projects #612, E8's mislabelled cases #614, register check #615; PR #625); before that v1.157.0 (reading level and key decisions in revision prompts, #616); before that 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalness` forecast before they spend, #510; one cost budget per run and `check --pending --keep-going`, #503; see Latest; carried states and the gate's spend at v1.130.2, #491; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling became 3 (#488); 4 at #513, and 1 since #614's audit (v1.161.0)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-14 (the voice folder, #682, and long writing sessions, #655); before that 2026-11-10 (the blog voice set aside, voice samples started, #680); before that 2026-11-09 (the blocking-set baseline, the gate set #677, Ben's voice repo); before that 2026-11-08, at v1.162.0 (the gate's blocking read, #626); before that v1.161.0 (sync hook for subfolder projects #612, E8's mislabelled cases #614, register check #615; PR #625); before that v1.157.0 (reading level and key decisions in revision prompts, #616); before that 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalness` forecast before they spend, #510; one cost budget per run and `check --pending --keep-going`, #503; see Latest; carried states and the gate's spend at v1.130.2, #491; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling became 3 (#488); 4 at #513, and 1 since #614's audit (v1.161.0)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
+
+## Latest: the voice folder and long writing sessions (2026-11-14)
+
+The voice rounds in iliad-adult found Wrath's voice by hand: an anchor Ben
+finished, notes that quote it, a list of checks, and tense by POV. The
+plan for what that means is `docs/plans/2026-11-14-ready-to-draft.md` (its
+Status section says what's built and how Ben starts the redraft).
+
+- **#682, the voice folder** (v1.175.0): `reference/voice/` (`book.md`,
+  `anchors/`, `checks.md`) is a prose book's voice, read through
+  `voice_book.resolve`; the old voice files are no longer read; `scenes.csv`
+  has `tense`. `checks.md` never reaches a writing prompt.
+- **#655, long writing sessions** (PR #685):
+  `storyforge write --session` drafts a stretch with one writer in one
+  conversation (`session`, `api.chat`). Each scene gets the free tense
+  check, the voice review (`voice_review`: a reviewer flags lines against
+  `checks.md`, a separate reviser rewrites only those), the gate with
+  the same writer as its fixer, and the re-checks; it commits as
+  `--keep-going` does. A book with no prose stops after 3 scenes. The
+  writer's stage note isn't compared yet (write's gate keeps no extracted
+  sheet; each scene gets a NOTE). `storyforge revise --marks FILE` sends
+  the author's marks to the same reviser, their keeps as examples it never
+  edits; a revision the gate rejects is rolled back. `drafting.brief_notes: exclude` leaves the old briefs' notes out.
+  The skills now offer these; `--polish --loop` and `--naturalness` are no
+  longer the default.
+
+**Next:** #654 (`voice sample`, whose rounds read marks from a PR's
+comments; reading a drafted scene's marks from a PR has no issue yet).
+Ben fills Wrath's `reference/voice/` and runs the Act 1 pilot. Then #656
+and #659, then #657 and #658.
 
 ## Latest: the gate-and-voiceprint plan, phases 1–5 merged (2026-11-09, v1.173.0)
 

@@ -18,6 +18,7 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `source` | Optional. The Storyforge project(s) this one adapts: a retelling, an expansion, a rewrite of an earlier draft |
 | `series` | Optional. A canon shared with the other books of a series, read in place from outside the project |
 | `voice` | Optional. The author voice repo the book is drafted in, read in place from outside the project (#652) |
+| `drafting` | Optional. How `storyforge write` builds its prompts: `prior_prose`, `brief_notes` |
 
 ---
 
@@ -334,6 +335,25 @@ voice:
 **Read-only.** Storyforge never writes to the voice repo from a book.
 
 **Errors.** `write` checks the block before anything is spent (`require_voice`), and `score --voice` when it reads it; `status` and `validate` report a block that can't be used (a voice blocker; `validate` exits 1). These are errors: `voice:` given twice, indented under another block, or a one-line value; a key other than `author` and `narrator`, or one given twice; no `author`; a value that isn't a path (`~`, `null`, a flow list or map); an author repo that isn't there, has no `voice.yaml` (or one that can't be used), or is inside a book; no `description.md`, an empty one, or no exemplars; a narrator outside the repo's `fiction/`, missing, empty or unreadable. A file in `reference/voice/` that can't be read stops `write` too, with or without the block.
+
+---
+
+## `drafting`
+
+Optional. How `storyforge write` builds a scene's prompt.
+
+```yaml
+drafting:
+  prior_prose: full      # full | window | none
+  brief_notes: exclude   # include | exclude
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `prior_prose` | `full` | The earlier prose a scene is drafted with. `full`: the manuscript so far (past 100,000 words it falls back to `window`, with a WARNING). `window`: the scene before, and the latest scene of each MICE thread the scene carries. `none`. `--prior-prose` overrides it. A writing session (`write --session`) ignores it: it always has the story so far word for word. Revise's redraft-from-brief reads it too. |
+| `brief_notes` | `include` | Whether a writing session's scene plan shows the brief's author-note columns (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs, motif_details), as notes, not requirements. `exclude` leaves them out: use it for briefs written before #644, whose notes a model wrote. Read only by `write --session`. |
+
+Any other value stops the run with an error (`write`, and `revise` for `prior_prose`).
 
 ---
 

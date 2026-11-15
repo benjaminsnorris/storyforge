@@ -410,6 +410,43 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
     return response
 
 
+def chat(messages: list[dict], model: str, max_tokens: int = 4096, label: str = '',
+         timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+         output_schema: dict | None = None, log_file: str = '') -> dict:
+    """One request in a conversation the caller keeps (#655's writing
+    session): ``messages`` as the Messages API takes them, alternating user
+    and assistant. The request is auto-cached (as ``converse``'s), so each
+    turn reads the conversation so far from cache. ``max_tokens`` is the
+    answer's budget (``THINKING_ALLOWANCE`` is added). ``log_file``, if
+    given, gets the reply. Check ``is_truncated`` on the reply.
+
+    Raises:
+        RefusalError: the model refused (the log is written first).
+        RuntimeError: the request failed (HTTP, network, retries spent).
+    """
+    body = {
+        'model': model,
+        'max_tokens': request_max_tokens(model, max_tokens),
+        'messages': messages,
+        'cache_control': {'type': 'ephemeral'},
+    }
+    if system:
+        body['system'] = system
+    if output_schema:
+        body['output_config'] = _output_config(output_schema)
+    heartbeat = _Heartbeat(label or model)
+    heartbeat.start()
+    try:
+        response = _api_request('messages', body, method='POST', timeout=timeout)
+    finally:
+        heartbeat.stop()
+    _meter(response, model)
+    if log_file:
+        _write_log(log_file, response)
+    _check_refusal(response)
+    return response
+
+
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
            timeout: int = API_TIMEOUT, system: list[dict] | None = None,
            output_schema: dict | None = None, fallback: bool = False) -> dict:
@@ -691,6 +728,27 @@ def extract_text_from_file(log_file: str) -> str:
             return extract_text(json.load(f))
     except (json.JSONDecodeError, FileNotFoundError):
         return ''
+
+
+def log_reply(project_dir: str, response: dict, operation: str, target: str,
+              model: str) -> float:
+    """One cost-ledger row for a reply (priced as the model that wrote it,
+    a refusal fallback's when one did). Returns the cost. A row that can't
+    be written is a WARNING: the spend still happened."""
+    from storyforge.common import log
+    from storyforge.costs import log_operation
+    try:
+        model = fallback_model(response) or model
+        usage = extract_usage(response)
+        cost = calculate_cost_from_usage(usage, model)
+        log_operation(project_dir, operation, model, usage['input_tokens'],
+                      usage['output_tokens'], cost, target=target,
+                      cache_read=usage.get('cache_read', 0),
+                      cache_create=usage.get('cache_create', 0))
+        return cost
+    except Exception as e:   # the ledger only; never the run
+        log(f'WARNING: could not log the cost of {operation} {target}: {e}')
+        return 0.0
 
 
 def extract_usage(response: dict) -> dict:

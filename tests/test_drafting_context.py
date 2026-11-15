@@ -548,7 +548,8 @@ def test_rules_block_callers_carry_key_decisions():
                        'briefs_section', 'drafting_section'}
     builders = {n for n, t in sources.items() if n != 'prompts_source.py'
                 and any(re.search(rf'\b{fn}\(', t) for fn in calling)}
-    assert builders == {'prompts_elaborate.py', 'prompts.py'}
+    assert builders == {'prompts_elaborate.py', 'prompts.py', 'session.py'}
     assert "('key-decisions.md', 'Key Decisions', False)" in sources['prompts_elaborate.py']
     assert "reference_doc(project_dir, 'key-decisions.md')" in sources['prompts.py']
+    assert "reference_doc(project_dir, 'key-decisions.md')" in sources['session.py']
 

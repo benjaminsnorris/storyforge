@@ -193,7 +193,7 @@ def test_keep_section_is_empty_for_a_graphic_novel(project_dir, monkeypatch):
 WRITES = {   # builds a prompt whose model writes or rewrites the fields
     'prompts_elaborate.py', 'extract.py', 'enrich.py', 'hone.py', 'cmd_revise.py',
 }
-READS_INTO_PROSE = {'prompts.py', 'revision.py'}
+READS_INTO_PROSE = {'prompts.py', 'revision.py', 'session.py'}
 GRAPHIC_NOVEL = {   # key_dialogue is matched verbatim in the panel script
     'cmd_extract_gn.py', 'prompts_gn.py', 'prompts_elaborate_gn.py',
     'prompts_page_prompt.py', 'script_format.py',

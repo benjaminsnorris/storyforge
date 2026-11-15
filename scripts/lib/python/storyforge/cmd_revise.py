@@ -78,6 +78,14 @@ def parse_args(argv):
                         help='Auto-generate plan from structural proposals (CSV-only)')
     parser.add_argument('--naturalness', action='store_true',
                         help='Auto-generate 3-pass plan targeting AI prose patterns')
+    parser.add_argument('--marks', metavar='FILE', default=None,
+                        help='Revise by reaction (#655): the author\'s marks on drafted '
+                             'scenes (`## <scene id>`, `> the scene\'s words`, a note; a quote '
+                             'with no note, or "keep", is a line that works). On a revise '
+                             'branch, the voice reviser rewrites only the lines asking for a '
+                             'change, toward the voice and the keeps; each scene is gated and '
+                             'committed, or rolled back when the gate rejects it. See '
+                             'storyforge.marks')
     parser.add_argument('--polish', action='store_true',
                         help='Auto-generate craft-only polish plan')
     parser.add_argument('--scores', action='store_true',
@@ -3403,6 +3411,142 @@ def main(argv=None):
         return _main(argv)
 
 
+def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool) -> int:
+    """`revise --marks`: each marked scene's lines asking for a change
+    rewritten toward the voice by the voice reviser, the author's keeps
+    shown as examples and protected (`voice_review.revise`); the record in
+    working/voice-reviews/; the scene gated (against the book as it was
+    before this run) and committed on a revise branch, its illustration
+    markers kept; the re-checks it owes run. A revision the gate stops on
+    that can't be committed provisionally is rolled back (the old prose
+    restored, the record committed). What can't be done is said. Returns 1
+    when the file can't be used, a scene isn't drafted, a reviser call
+    fails, a revision is rolled back or committed provisionally, a re-check
+    doesn't finish, or a commit fails; else 0."""
+    from storyforge import api, cmd_write, gate, marks as marks_mod, voice_book, voice_review
+    from storyforge.common import ReferenceDocError
+    from storyforge.costs import RunBudget
+    from storyforge.git import CommitError, commit_or_raise
+    from storyforge.illustrations import keep_markers, read_scene_prose, read_scene_raw
+    try:
+        with open(marks_file, encoding='utf-8-sig') as f:
+            scenes = marks_mod.parse_marks(f.read())
+    except (OSError, UnicodeDecodeError, marks_mod.MarksError) as e:
+        log(f'ERROR: {marks_file}: {e}')
+        return 1
+    if not scenes:
+        log(f'ERROR: {marks_file} marks no scene (`## <scene id>`, then `> words`)')
+        return 1
+    try:
+        voice = voice_book.resolve(project_dir)
+        voice.raise_if_unreadable(project_dir)
+    except ReferenceDocError as e:
+        log(f'ERROR: {e}')
+        return 1
+    if voice.kind != 'ok':
+        log(f'ERROR: {voice.detail}: the reviser writes toward the voice. First '
+            f'{voice_book.REMEDY}.')
+        return 1
+    if not dry_run:
+        if not os.environ.get('ANTHROPIC_API_KEY'):
+            log('ERROR: ANTHROPIC_API_KEY not set; nothing was revised.')
+            return 1
+        create_branch('revise', project_dir)
+    model = select_model('revision') if not dry_run else ''
+    before = gate.snapshot(project_dir) if not dry_run else None
+    budget = RunBudget()
+    code, done = 0, []
+    gate_files = [cmd_write.gate_pending_path(), cmd_write.gate_prose_path(),
+                  cmd_write.gate_source_fix_path(), cmd_write.gate_advisory_path(),
+                  *cmd_write.gate_state_paths(), 'reference/', 'working/audit-log.csv',
+                  'working/.audit-snapshot.csv']
+    review_dir = voice_review.REVIEWS_DIR.replace(os.sep, '/') + '/'
+    for n, sm in enumerate(scenes):
+        sid = sm.scene_id
+        raw = read_scene_raw(project_dir, sid)
+        prose = read_scene_prose(os.path.join(project_dir, 'scenes', f'{sid}.md')) if raw else ''
+        if not prose.strip():
+            log(f'ERROR: {sid} has no prose; its marks are left out')
+            code = 1
+            continue
+        flags = voice_review.flags_from_marks(sm.changes)
+        keeps = [m.quote for m in sm.keeps if voice_review.flag_spans(prose, m.quote)]
+        missing = ([f.quote for f in flags if not voice_review.flag_spans(prose, f.quote)]
+                   + [m.quote for m in sm.keeps if m.quote not in keeps])
+        for q in missing:
+            log(f'  WARNING: {sid}: marked words not in the scene, left out: "{q[:80]}"')
+        flags = [f for f in flags if f.quote not in missing]
+        log(f'{sid}: {len(flags)} line(s) to revise, {len(keeps)} kept as examples')
+        if dry_run or not flags:
+            continue
+        notes = [f'From the author\'s marks ({marks_file}).']
+        notes += [f'Marked words not in the scene, left out: "{q[:80]}"' for q in missing]
+        try:
+            with api.metered() as meter:
+                revision = voice_review.revise(
+                    project_dir, sid, prose, flags, model=model, keeps=keeps,
+                    log_file=os.path.join(log_dir, 'marks', f'{sid}.json'))
+            budget.charge(meter.cost())
+        except (voice_review.VoiceReviewError, ReferenceDocError) as e:
+            log(f'ERROR: {e}')
+            code = 1
+            continue
+        rel = voice_review.record(project_dir, sid, voice_review.Review(flags=flags), revision,
+                                  notes=notes)
+        log(f'  {revision.summary()} ({rel})')
+        paths = [review_dir]
+        message = f'Revise {sid} from the author\'s marks'
+        passed_gate = False
+        if revision.prose != prose:
+            path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(keep_markers(project_dir, sid, raw, revision.prose, 'the voice reviser',
+                                     log))
+            passed, why = cmd_write._gate_drafted_scene(project_dir, sid, path, 'revise',
+                                                        log_dir, before=before,
+                                                        keep_going=True)
+            if not passed and not cmd_write.is_provisional(project_dir, sid):
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(raw)   # the gate rejected it: the scene as it was
+                log(f'ERROR: {sid}: the revision did not pass the gate ({why}); it is rolled '
+                    f'back, the record kept ({rel})')
+                message = f'Record a rolled-back revision of {sid} (did not pass the gate)'
+                code = 1
+            else:
+                passed_gate = passed
+                if not passed:
+                    log(f'ERROR: {sid} is committed provisionally: the gate still stops on '
+                        f'{why}')
+                    message += ' (committed provisionally; listed in working/gate-pending.csv)'
+                    code = 1
+                paths += [f'scenes/{sid}.md']
+            paths += gate_files
+        else:
+            message = f'Record the marks on {sid} (nothing rewritten)'
+        try:
+            commit_or_raise(project_dir, message, paths)
+        except CommitError as e:
+            left = [s.scene_id for s in scenes[n + 1:]]
+            log(f'ERROR: {sid}: {e}; commit it by hand'
+                + (f'. Not revised: {", ".join(left)}' if left else ''))
+            return 1
+        done.append(sid)
+        if passed_gate:   # its changed facts: the later scenes that depend on them
+            run = _recheck_after(project_dir, log_dir,
+                                 {s.scene_id for s in scenes[n + 1:]}, budget)
+            if run is not None:
+                if run.failed or (run.over_budget and run.left):
+                    log(f'ERROR: the re-checks after {sid} did not finish; `storyforge check '
+                        f'--pending`')
+                    code = 1
+                try:
+                    commit_or_raise(project_dir, f'Re-check after {sid}', gate_files)
+                except CommitError as e:
+                    log(f'ERROR: the re-checks after {sid} ran, but {e}')
+                    return 1
+    return code
+
+
 def _note_reference_docs(project_dir: str) -> None:
     """Tell the author what the revision prompts leave out (#596, SF-3/SF-4):
     with no voice (`voice_book.resolve`) they take it from the existing
@@ -3458,6 +3602,8 @@ def _main(argv=None):
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
+    if args.marks:
+        sys.exit(_revise_marks(project_dir, args.marks, log_dir, args.dry_run))
     set_log_file(os.path.join(log_dir, 'revision-log.txt'))
     _note_reference_docs(project_dir)
 
