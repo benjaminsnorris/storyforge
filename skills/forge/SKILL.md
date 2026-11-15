@@ -68,8 +68,13 @@ Before doing anything else, orient yourself:
      author voice repo (the `voice` blocker says which;
      `references/voice-folder.md`). `storyforge write` refuses to draft until
      it's there. Route to the `elaborate` skill's Voice Stage, where the
-     author finds anchors through sample rounds; `storyforge elaborate --stage
-     voice` only sets up the folder's files. Draft after.
+     author finds anchors through sample rounds (`storyforge voice sample
+     --scene <id>`: blind rounds, each its own branch and PR the author
+     marks, `--from-pr N` for the next, `--promote` to save the winner as
+     an anchor; at coach or strict coaching Claude writes no samples and
+     doesn't run it: the author writes the samples, and running the command
+     is their choice); `storyforge elaborate
+     --stage voice` only sets up the folder's files. Draft after.
 3. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
 4. **Scan for key artifacts** — check for the existence of:
    - `reference/character-bible.md`
@@ -141,7 +146,7 @@ The author has a specific request. Parse what they want and route to the right s
 Invoke the `elaborate` skill. This handles all creative development work — from spine through briefs, including character deepening, world building, finding the voice, and scene-level design.
 
 **"Start drafting" / "Write scenes":**
-Check that `reference/scenes.csv` exists with scenes, and that `storyforge status --json` has no `voice` blocker (`reference/voice/` that exists can still hold only init's templates; `write` refuses to draft without `book.md` and an anchor, or an author voice repo). If there is one, route to the Voice Stage first (Step 1). If ready, draft in a **writing session** (#655): one writer drafts the stretch scene after scene in one conversation, with the voice (`reference/voice/book.md` and the anchors) and the story so far word for word in its context. Provide the commands in this order:
+Check that `reference/scenes.csv` exists with scenes, and that `storyforge status --json` has no `voice` blocker (`reference/voice/` that exists can still hold only init's templates; `write` refuses to draft without `book.md` and an anchor, or an author voice repo). If there is one, route to the Voice Stage first (Step 1), where `storyforge voice sample` finds the anchors. If ready, draft in a **writing session** (#655): one writer drafts the stretch scene after scene in one conversation, with the voice (`reference/voice/book.md` and the anchors) and the story so far word for word in its context. Provide the commands in this order:
 ```bash
 ./storyforge write --session --act 1 --dry-run   # the forecast and the first scene's plan; nothing spent
 ./storyforge write --session --act 1             # the real run

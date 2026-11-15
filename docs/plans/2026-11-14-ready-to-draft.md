@@ -111,13 +111,14 @@ As the issue says, with these changes from the rounds:
 - `--dry-run` forecasts the cost. Default: stop after the first 3 scenes for
   a read before going on.
 
-### 4. `voice sample` (#654), shaped by section 7 above
+### 4. `voice sample` (#654), shaped by finding 7 above
 
 It runs a round as a PR in the book. Variants are one sentence per line and
 unlabelled, and the key goes outside the repo. Round 2 onwards reads the
 author's marks from the PR's comments, every page. A "take" mode revises a
 sample toward its keeps, with two versions that differ in one named thing.
-Before publishing, the samples are checked against `checks.md`. A winning
+Before publishing, the samples are checked for physical slips and against
+`checks.md`. A winning
 passage is saved to `reference/voice/anchors/`.
 
 ### 5. After the pilot
@@ -190,10 +191,37 @@ blind read of the old draft against the session pilot).
   - The skills offer the session for drafting and `--marks` for revision;
     `revise --polish --loop` and `--naturalness` still run but aren't
     offered as defaults.
+- **Section 4, `voice sample` (#654): built.** In a book (a subfolder of
+  its repo too), `storyforge voice sample --scene <id>` writes a round
+  (exactly `--variants` versions, 2 to 8, shuffled, unlabelled, one
+  sentence per line) to `working/voice-samples/round-<n>.md`, on its own
+  branch and PR (off `main`, or off the last round's branch; either failing
+  is exit 1). The key, a `RoundKey` (scene, vary, influences, what each
+  sample tried, a digest of the samples), goes under
+  `~/.storyforge/voice-sample-keys/`, per book folder, once the round is
+  committed; no command shows it to the author. Each sample gets the
+  blocking read and, with `checks.md`, the voice review before the author
+  sees it, a reviser fixing only the flagged lines; the PR body says what
+  was found, fixed and left out. `--from-pr N` reads the round at the PR's
+  head (refusing a local copy that differs) and every page of the PR
+  author's comments (`pr_marks`): a comment counts only where its line
+  still says what GitHub showed, one on a sample's heading is about the
+  whole sample, an empty suggestion cuts; others' and bots' comments, and
+  general ones from before the round, are left out and counted. It writes
+  the next round toward the keeps, carrying scene, vary and influences; a
+  PR with no marks is refused without `--allow-unmarked`. `--take X
+  --versions "a;b"` revises one sample in versions headed by their names;
+  `--promote <round file> --sample X --name N` checks the sample as an
+  anchor, saves it, hand edits included, and commits it off `main`
+  (`references/voice-folder.md`, "Finding anchors"). `status` now recommends `write --session` for a prose book
+  (`write --keep-going` for a graphic novel); E5 re-recorded.
 - **Not built yet:**
-  - `voice sample` (section 4), whose rounds read the author's marks from
-    a PR's comments: #654, next. `revise --marks` reads only a file;
-    reading a drafted scene's marks from a PR has no issue yet.
+  - #654's test 6: a scene written with the Austen exemplars scores closer
+    to her on the meter than to the other authors, and a judge picks Austen
+    from four. A frozen eval suite; it needs a paid recording and Ben's
+    approval.
+  - `revise --marks` reads only a file; reading a drafted scene's marks
+    from a PR has no issue yet.
   - Sessions at coach or strict coaching (flags to the author, nothing
     rewritten): `--session` takes full coaching only.
   - `score --voice` drift and the question layer inside a session; the
