@@ -23,7 +23,7 @@ Before doing anything else, orient yourself:
 2. **Read key reference documents** (all that exist):
    - `reference/story-architecture.md` — themes, structure, central conflict
    - `reference/character-bible.md` — protagonist and cast
-   - `reference/voice-guide.md` — tone, mood, register
+   - `reference/voice/book.md` and `reference/voice/anchors/` — tone, mood, register (a graphic novel's is `reference/voice-guide.md`)
    - `reference/world-bible.md` — setting, atmosphere
    - `reference/key-decisions.md` — settled creative decisions
    - `reference/scenes.csv` — scene count, structure

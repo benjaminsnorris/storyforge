@@ -23,7 +23,7 @@ Before doing anything else, orient yourself:
 2. **Read key reference documents** (if they exist):
    - `reference/story-architecture.md` — themes, central conflict, structure
    - `reference/character-bible.md` — protagonist names, epithets, roles
-   - `reference/voice-guide.md` — tone, mood, register
+   - `reference/voice/book.md` and `reference/voice/anchors/` — tone, mood, register (a graphic novel's is `reference/voice-guide.md`)
    - `reference/world-bible.md` — setting, atmosphere
 3. **Read the key decisions file** — check for any existing title decision. If a title decision is already recorded, acknowledge it and ask whether the author wants to revisit it or move on.
 4. **Scan for content** — check if scenes exist in `scenes/`, if evaluations exist in `working/evaluations/`. More content means more material to draw from.

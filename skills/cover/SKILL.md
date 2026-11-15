@@ -27,7 +27,7 @@ Before doing anything else, orient yourself:
    - `reference/story-architecture.md` — themes, central conflict, premise, structure
    - `reference/character-bible.md` — protagonist details, imagery, defining traits
    - `reference/world-bible.md` — setting, atmosphere, visual world, sensory details
-   - `reference/voice-guide.md` — tone, mood, register
+   - `reference/voice/book.md` and `reference/voice/anchors/` — tone, mood, register (a graphic novel's is `reference/voice-guide.md`)
 4. **Read the key decisions file** — check for any existing cover-related decisions.
 5. **Check for existing covers** in `manuscript/assets/` — `cover.png`, `cover.svg`, `cover-illustration.png`.
 

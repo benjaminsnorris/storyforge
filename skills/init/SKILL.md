@@ -162,6 +162,8 @@ Read the reference document templates from the Storyforge plugin's `templates/re
 
 Use the **Glob tool** to discover available templates, then use the **Read tool** and **Write tool** to copy each one into `{project-dir}/reference/`.
 
+The templates include the voice folder, `templates/reference/voice/` (`book.md`, `checks.md`, `anchors/.gitkeep`). Copy it with its layout, to `{project-dir}/reference/voice/`. It is where a prose book's voice lives (`references/voice-folder.md`); the author fills it later, in the `elaborate` skill's Voice Stage. There is no voice guide template.
+
 If no templates are found in the plugin directory, note this to the author and let them know they can add reference documents manually later.
 
 ### Graphic-novel projects: also copy the canon tree
@@ -214,7 +216,7 @@ This project uses the Storyforge plugin for Claude Code. Key commands:
 ## Where to Find Things
 - `storyforge.yaml` — project configuration (title, genre, phase, coaching level)
 - `working/pipeline.csv` — pipeline history (evaluation/revision/scoring cycles)
-- `reference/` — scene metadata, character bible, voice guide, world bible
+- `reference/` — scene metadata, character bible, world bible, and the voice (`reference/voice/`: `book.md`, `anchors/`, `checks.md`; `references/voice-folder.md`)
 - `scenes/` — scene prose files
 - `working/scores/latest/` — most recent scoring results
 - `working/evaluations/` — evaluation reports

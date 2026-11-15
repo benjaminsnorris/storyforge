@@ -7,7 +7,7 @@
 - [ ] Read `exemplars.py` — reusable utilities (`split_sentences`, `compute_rhythm_signature`)
 - [ ] Read `structural.py` — CSV metadata readers, pacing shape scorer
 - [ ] Read `references/ai-tell-words.csv` — AI-tell vocabulary items
-- [ ] Read `references/voice-profile.csv` — character voice constraints
+- [ ] Read `references/voice-folder.md` — how a book's voice is kept (`reference/voice/`), and why `checks.md` is review-only
 - [ ] Read existing tests: `test_repetition.py`, `test_structural.py`, `test_targeted_scoring.py`
 
 ### 2. Follow the `prose_repetition` Pattern

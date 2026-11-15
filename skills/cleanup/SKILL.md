@@ -129,6 +129,7 @@ These can't be automated:
 | `orphan_meta` | "Scene {id} has metadata but no file. Should I remove the metadata rows, or create the scene file?" |
 | `bad_chapter_ref` | "Chapter map references scene {id} which doesn't exist. Should I remove it from the chapter map?" |
 | `extra_column` | "CSV has unexpected column {col}. Is this intentional?" |
+| `old_voice_file` | "{file} is no longer read: the voice is `reference/voice/` (`references/voice-folder.md`). Do you want to move any of it into `reference/voice/book.md` or an anchor first?" Move only what the author picks, word for word, then delete the file only with their yes. Never delete it unasked (prose books only) |
 
 Wait for the author's answer, then act and update status.
 

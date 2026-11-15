@@ -34,7 +34,7 @@ Store this resolved plugin path for use throughout the session.
    - `reference/motif-taxonomy.csv` — the concrete recurring vehicles
    - `reference/themes.csv` — what the story argues
    - `reference/chapter-map.csv` — distribution
-6. **Visual context** — `reference/character-bible.md`, `reference/world-bible.md`, `reference/voice-guide.md`.
+6. **Visual context** — `reference/character-bible.md`, `reference/world-bible.md`, `reference/voice/book.md` and its anchors.
 7. **Existing art** — `manuscript/assets/` for the cover and `cover-prompt.md` (the best available statement of the book's visual register), and `manuscript/assets/illustrations/` for anything already ingested.
 
 ## Step 2: Determine Mode

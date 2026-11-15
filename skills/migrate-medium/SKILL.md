@@ -17,7 +17,7 @@ You are helping an author convert their Storyforge project between novel and gra
 
 **What it preserves:**
 - `reference/scene-intent.csv` (medium-agnostic)
-- `reference/voice-profile.csv` (voice carries between mediums)
+- The voice files, untouched: `reference/voice/` (a prose book's voice) and `reference/voice-guide.md` / `voice-profile.csv` (a graphic novel's). Each medium reads only its own, so after a migration the other medium's voice has to be set up (see below)
 - `reference/story-architecture.md`, `character-bible.md`, `world-bible.md` content
 - All registry CSVs (`characters.csv`, `locations.csv`, etc.)
 
@@ -82,7 +82,7 @@ Before running anything, explain clearly what will happen:
 >
 > **What stays the same:**
 > - `reference/scene-intent.csv` (narrative intent is medium-agnostic)
-> - `reference/voice-profile.csv` (voice carries across mediums)
+> - `reference/voice/` (the prose voice; a graphic novel doesn't read it) and any `reference/voice-profile.csv`
 > - `reference/story-architecture.md` (story structure is unchanged)
 > - All registry CSVs (characters, locations, values, etc.)
 > - Brief text columns in `scene-briefs.csv` (goal, conflict, outcome, etc.) — the GN-specific columns are already empty; they get filled via `./storyforge elaborate --stage briefs`
@@ -92,7 +92,8 @@ Before running anything, explain clearly what will happen:
 > 2. Add `### Visual` subsections to `reference/world-bible.md` per location
 > 3. Set `target_pages` for each scene in `reference/scenes.csv`
 > 4. Run `./storyforge elaborate --stage briefs` to fill GN-specific brief columns
-> 5. Run `./storyforge write` to draft panel scripts scene by scene
+> 5. Run `./storyforge elaborate --stage voice` for the graphic novel's `voice-guide.md` and `voice-profile.csv` if it has none
+> 6. Run `./storyforge write` to draft panel scripts scene by scene
 
 **Graphic Novel → Novel:**
 
@@ -103,14 +104,16 @@ Before running anything, explain clearly what will happen:
 > - `scenes/`: all `.md` files moved to `working/migration/{timestamp}-graphic-novel-to-novel/scenes/`
 >
 > **What stays the same:**
-> - `reference/scene-intent.csv`, `reference/voice-profile.csv`, `reference/story-architecture.md`
+> - `reference/scene-intent.csv`, `reference/story-architecture.md`
+> - `reference/voice-guide.md` and `reference/voice-profile.csv`, which a prose book no longer reads (`status` and `cleanup` say so; move what you want into `reference/voice/`)
 > - `reference/character-bible.md` and `reference/world-bible.md` — `### Visual` subsections are kept (they may still be useful as art reference for cover design or press kit)
 > - All registry CSVs
 >
 > **After migration, you'll need to:**
 > 1. Set `target_words` per scene in `reference/scenes.csv`
 >    (or run `./storyforge elaborate --stage map` to repopulate word targets)
-> 2. Run `./storyforge write` to draft prose scenes
+> 2. Set up the prose voice, `reference/voice/` (`book.md` and at least one anchor; `references/voice-folder.md`): run `./storyforge elaborate --stage voice` for the files, then the `elaborate` skill's Voice Stage
+> 3. Run `./storyforge write` to draft prose scenes
 
 ---
 

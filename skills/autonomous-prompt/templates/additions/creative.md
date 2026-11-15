@@ -4,7 +4,7 @@
 - [ ] Read `storyforge.yaml` for project settings and coaching level
 - [ ] Read relevant CSV files (`scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`)
 - [ ] Understand which scenes/chapters are affected
-- [ ] Check `reference/voice-profile.csv` for voice constraints
+- [ ] Read the voice: `reference/voice/book.md` and `reference/voice/anchors/` (`references/voice-folder.md`). Never put `reference/voice/checks.md` into a writing prompt; it is for reviewing finished prose. A graphic novel's voice is still `reference/voice-guide.md` and `voice-profile.csv`
 
 ### 2. Respect Coaching Level
 - [ ] Check `project.coaching_level` in storyforge.yaml
