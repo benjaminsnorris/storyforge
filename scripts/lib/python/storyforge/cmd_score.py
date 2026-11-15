@@ -91,8 +91,8 @@ def parse_args(argv):
                              'book\'s with no filter): a source translation\'s archaic '
                              'words, grammar and idiom carried into the prose, and runs '
                              'of dialogue copied from the source scene a scene adapts '
-                             '(#615). Skips what the voice guide\'s "Register exemptions" '
-                             'allow. No API calls, no cycle, nothing written. Prose '
+                             '(#615). Skips what reference/voice/book.md\'s "Register '
+                             'exemptions" allow. No API calls, no cycle, nothing written. Prose '
                              'projects only.')
     parser.add_argument('--voice', action='store_true',
                         help='Print the voice meter: how far the prose in scope (the '

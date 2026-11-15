@@ -264,6 +264,8 @@ def main(argv=None):
                 text = f.read()
             with open(os.path.join(project, 'reference', name), 'w', encoding='utf-8') as f:
                 f.write(text.replace(PROJECT_TITLE, details['title']))
+    from storyforge import voice_book
+    voice_book.scaffold(project)   # reference/voice/: book.md, checks.md, anchors/
     kind = _kind(args, meta)
     with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
         f.write(_storyforge_yaml(plugin, details, target))

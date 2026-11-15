@@ -790,7 +790,7 @@ class TestMainUpdatesStoryforgeYaml:
         after = self._yaml(project_dir)
 
         for artifact in ('world_bible', 'character_bible', 'systems_bible',
-                         'story_architecture', 'voice_guide', 'timeline',
+                         'story_architecture', 'timeline',
                          'scene_index', 'key_decisions'):
             assert f'  {artifact}:' in after, artifact
         assert 'updated: "2026-02-15"' in after

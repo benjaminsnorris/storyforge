@@ -518,7 +518,7 @@ def build_revision_prompt(
         coaching_level: One of "full", "coach", "strict".
         api_mode: If True, inline file content for API use.
         system_context: When True, shared reference material (craft engine,
-            scoring rubrics, voice guide, CSV files) is provided via the API
+            scoring rubrics, the voice, CSV files) is provided via the API
             system parameter for prompt caching. The prompt skips inlining
             those materials. Per-pass content (config, scene prose, briefs,
             exemplars) is still included.
@@ -621,17 +621,19 @@ def build_revision_prompt(
     if calendar_section:
         calendar_section = '\n' + calendar_section
 
-    # The voice guide drafting follows (#596, SF-3): with none, the prompt
-    # says so and the voice comes from the book's scenes; the caller tells
-    # the author (cmd_revise)
-    from storyforge.common import reference_text, resolve_voice_guide
-    voice = resolve_voice_guide(project_dir)
+    # The voice drafting follows (`voice_book.resolve`), inlined: with none,
+    # the prompt says so and the voice comes from the book's scenes; the
+    # caller tells the author (cmd_revise). The system context carries it
+    from storyforge import voice_book
+    from storyforge.common import reference_text
+    voice = voice_book.resolve(project_dir)
     voice.raise_if_unreadable(project_dir)
     no_voice_section = '' if voice.kind == 'ok' else (
-        '\n## No Voice Guide\n\n'
-        'This book has no voice guide yet. Wherever these instructions mention the '
-        "voice guide, take the voice from the book's existing scenes instead: their "
+        '\n## No Voice Yet\n\n'
+        'This book has no voice yet (reference/voice/). Wherever these instructions '
+        "mention the voice, take it from the book's existing scenes instead: their "
         'register, rhythm, diction and each POV character\'s way of thinking and speaking.\n')
+    voice_section = ('\n' + voice.text + '\n') if voice.kind == 'ok' and not system_context else ''
 
     # The author's key decisions, as drafting has them (#596): one that
     # governs the prose (reading level, POV, how an event is told) binds a
@@ -661,7 +663,7 @@ def build_revision_prompt(
             'The following scenes do not yet exist. **Create** them as new files '
             '(do not look for existing content to revise):\n\n'
             f'{new_list}\n\n'
-            'Write each scene following the voice guide, scene intent, and any '
+            'Write each scene in the voice, scene intent, and any '
             'guidance in the pass configuration. Each scene should be pure prose '
             'markdown with no YAML frontmatter.\n'
         )
@@ -669,9 +671,9 @@ def build_revision_prompt(
     # Inline reference files for API mode (skip when system_context provides them)
     inline_references = ''
     if api_mode and not system_context:
-        # the voice guide, when there is one, and scenes.csv; a doc missing or
-        # still its template is left out (F-130, #596)
-        ref_files = ([voice.path] if voice.kind == 'ok' else []) + ['reference/scenes.csv']
+        # scenes.csv (the voice is its own section); a doc missing or still
+        # its template is left out (F-130, #596)
+        ref_files = ['reference/scenes.csv']
         ref_parts = []
         for ref in ref_files:
             ref_content = reference_text(os.path.join(project_dir, ref), strip=False)
@@ -750,6 +752,7 @@ def build_revision_prompt(
         f'## Purpose\n\n{purpose}\n',
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         no_voice_section,
+        voice_section,
         decisions_section,
         register_section,
         config_section,
@@ -766,7 +769,7 @@ def build_revision_prompt(
     if api_mode:
         if system_context:
             ref_note = ('Reference materials (craft engine, scoring rubrics, '
-                        'voice guide, registries) are provided in the system context.')
+                        'the voice, registries) are provided in the system context.')
         else:
             ref_note = inline_references
         parts.append(
@@ -781,7 +784,7 @@ def build_revision_prompt(
                       'Apply the revision purpose stated above to the scene files provided.')
         parts.append(_api_output_format_block())
     else:
-        parts.append(_claudep_read_instructions(voice.path if voice.kind == 'ok' else ''))
+        parts.append(_claudep_read_instructions())
 
     # Coaching-level-specific instructions
     parts.append(_coaching_instructions(
@@ -812,20 +815,15 @@ def _api_output_format_block() -> str:
     )
 
 
-def _claudep_read_instructions(voice_path: str = 'reference/voice-guide.md') -> str:
-    """The `claude -p` read list; `voice_path` '' when the book has no voice
-    guide (the prompt's No Voice Guide section says where the voice comes from)."""
-    voice_line = (
-        f'- `{voice_path}` — the established voice rules, prose style, and '
-        'per-character dialogue fingerprints. Every edit you make must be consistent with this guide.\n'
-        if voice_path else '')
+def _claudep_read_instructions() -> str:
+    """The `claude -p` read list. The voice isn't on it: the prompt carries
+    it (its checks.md must never reach a writing prompt)."""
     return (
         '\n## Instructions\n\n'
         'You are performing a revision pass on a novel manuscript. Follow these rules precisely:\n\n'
         '### 1. Read Reference Context First\n\n'
         'Before making any changes, read these reference files to understand the project\'s '
-        'voice and continuity state:\n\n'
-        + voice_line +
+        'continuity state (the voice is in this prompt, above):\n\n'
         '- `reference/scenes.csv` — the master scene list for structural context.\n'
         '- `reference/scene-intent.csv` — narrative dynamics, MICE threads, and character presence.\n'
         '- `reference/commitments.csv` — the commitments ledger: canonical knowledge facts '
@@ -946,10 +944,10 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             'and protection lists precisely. These represent the author\'s intent — '
             'execute on them, do not second-guess them.\n\n'
             '### Preserve Voice and Discriminate Cuts\n\n'
-            'Every edit must be consistent with the voice guide provided in the reference context '
-            'above. The voice guide defines each POV character\'s sentence patterns, metaphor '
+            'Every edit must be consistent with the voice provided in the reference context '
+            'above. The voice shows each POV character\'s sentence patterns, metaphor '
             'domains, and emotional registers. Before cutting or rewriting any passage, identify '
-            'which character\'s voice is active and what the voice guide says about that voice.\n\n'
+            'which character\'s voice is active and what the voice shows of that voice.\n\n'
             '**What "kill darlings" means — and what it does not:**\n\n'
             'CUT these (they serve the writer, not the story):\n'
             '- Restated metaphors: a second sentence that says the same thing in different imagery\n'
@@ -961,17 +959,17 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             '- Passages where cutting loses no meaning — the surrounding prose already conveys it\n\n'
             'DO NOT CUT these (they serve the story):\n'
             '- The sentence that delivers the scene\'s value shift or thematic thesis\n'
-            '- Character-specific diction that the voice guide identifies as that character\'s '
+            '- Character-specific diction that the voice shows as that character\'s '
             'pattern (e.g., engineering metaphors for an engineer, food metaphors for a cook, '
             'polysyndetic chains in a voice that builds through accumulation)\n'
             '- Physical sensation markers that externalize internal state — these are showing, '
             'not telling\n'
             '- Closing images that are the scene\'s earned payoff (a concrete image is not a '
             '"summary closer" — only cut closers that restate the scene\'s meaning abstractly)\n'
-            '- Lyrical extensions at emotional peaks when the voice guide says this voice earns '
+            '- Lyrical extensions at emotional peaks when the voice shows this voice earns '
             'lyricism through contrast with its default spare register\n\n'
             '**Test before cutting:** If a sentence is doing voice work (matching a pattern the '
-            'voice guide explicitly calls for) AND advancing the scene\'s emotional or thematic '
+            'voice explicitly shows) AND advancing the scene\'s emotional or thematic '
             'arc, it is not a darling. Improve it if the phrasing is weak, but do not delete it.\n\n'
             '### Prose Naturalness\n\n'
             'Em dashes are rare — use at most one per scene. Default to commas, parentheses, or '
@@ -1016,10 +1014,10 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             'execute on them, do not second-guess them.\n\n'
             'Work through each file methodically. Make edits directly to the scene files.\n\n'
             '### 4. Preserve Voice and Discriminate Cuts\n\n'
-            'Every edit must be consistent with the voice guide. The voice guide defines each '
+            'Every edit must be consistent with the voice. The voice shows each '
             'POV character\'s sentence patterns, metaphor domains, and emotional registers. '
             'Before cutting or rewriting any passage, identify which character\'s voice is active '
-            'and what the voice guide says about that voice.\n\n'
+            'and what the voice shows of that voice.\n\n'
             '**What "kill darlings" means — and what it does not:**\n\n'
             'CUT these (they serve the writer, not the story):\n'
             '- Restated metaphors: a second sentence that says the same thing in different imagery\n'
@@ -1031,17 +1029,17 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             '- Passages where cutting loses no meaning — the surrounding prose already conveys it\n\n'
             'DO NOT CUT these (they serve the story):\n'
             '- The sentence that delivers the scene\'s value shift or thematic thesis\n'
-            '- Character-specific diction that the voice guide identifies as that character\'s '
+            '- Character-specific diction that the voice shows as that character\'s '
             'pattern (e.g., engineering metaphors for an engineer, food metaphors for a cook, '
             'polysyndetic chains in a voice that builds through accumulation)\n'
             '- Physical sensation markers that externalize internal state — these are showing, '
             'not telling\n'
             '- Closing images that are the scene\'s earned payoff (a concrete image is not a '
             '"summary closer" — only cut closers that restate the scene\'s meaning abstractly)\n'
-            '- Lyrical extensions at emotional peaks when the voice guide says this voice earns '
+            '- Lyrical extensions at emotional peaks when the voice shows this voice earns '
             'lyricism through contrast with its default spare register\n\n'
             '**Test before cutting:** If a sentence is doing voice work (matching a pattern the '
-            'voice guide explicitly calls for) AND advancing the scene\'s emotional or thematic '
+            'voice explicitly shows) AND advancing the scene\'s emotional or thematic '
             'arc, it is not a darling. Improve it if the phrasing is weak, but do not delete it.\n\n'
             '### 5. Prose Naturalness\n\n'
             'Em dashes are rare — use at most one per scene. Default to commas, parentheses, or '

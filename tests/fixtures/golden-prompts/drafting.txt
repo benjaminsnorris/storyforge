@@ -43,8 +43,6 @@ Technical and procedural detail — how instruments work, how schemes are execut
 
 This POV character withholds. Their interiority is sparse, physical, professional. Emotions are shown through action and observation, rarely named. Do not editorialize their feelings. Let the reader infer from what the character does and what they notice.
 
-
-
 ## Scene Brief: act1-sc02
 
 **seq:** 2
@@ -158,7 +156,7 @@ Its other fields (a value shift, an emotional arc, goal, conflict, crisis, decis
 - Vary sentence and paragraph length — follow thought patterns, not templates
 - Contractions in interiority and dialogue
 - Enter late, leave early
-- Match the voice guide exactly
+- Write toward the voice's passages
 
 **Scene ending:** no set shape. Stop when what happens is done: on an action, a line, an image, or running on toward what comes next. Do NOT close on a reflection, a thematic echo, or a landscape-as-metaphor sentence.
 

@@ -30,7 +30,7 @@ Before doing anything else, orient yourself:
      floor check (`storyforge score --level N`) — the section itself is
      developed via the `elaborate` skill, not by this command.
    - `blockers` — coverage/consistency mismatches, any phase/yaml
-     disagreement, a `voice` blocker (no voice guide to draft from) and a
+     disagreement, a `voice` blocker (no voice to draft from) and a
      `gate` blocker per scene waiting on the gate; surface these before
      advancing.
    - `advisory` — broken promises the gate reported but didn't stop on
@@ -49,7 +49,7 @@ Before doing anything else, orient yourself:
      point, the action/sequel balance). They never keep a rung thin; mention them as
      observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
-     (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
+     (L0–L6; the voice is not a ladder rung, it shows as the `voice`
      stage and blocker).
 
    Two stages route the same in every phase, elaboration or not:
@@ -62,12 +62,14 @@ Before doing anything else, orient yourself:
      scene left to draft depends on one of them, `check` is next again
      (`write` would draft nothing). Surface the `gate` blockers either way.
    - **`next.stage` is `voice`** (or `then.stage` is, behind a `check`): the
-     structure is built, but the voice guide is missing, init's template,
-     empty, can't be read, or is only `reference/persistent-prompt.md`, which
-     the brief-based prompt doesn't read (the `voice` blocker says which).
-     `storyforge write` refuses to draft until it is filled. Route to the
-     `elaborate` skill's Voice Stage, or give the author
-     `storyforge elaborate --stage voice` to write it unattended; draft after.
+     structure is built, but the voice isn't: `reference/voice/book.md` is
+     missing, init's template or empty, there's no anchor passage in
+     `reference/voice/anchors/`, or a file can't be read, and the book has no
+     author voice repo (the `voice` blocker says which;
+     `references/voice-folder.md`). `storyforge write` refuses to draft until
+     it's there. Route to the `elaborate` skill's Voice Stage, where the
+     author finds anchors through sample rounds; `storyforge elaborate --stage
+     voice` only sets up the folder's files. Draft after.
 3. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
 4. **Scan for key artifacts** — check for the existence of:
    - `reference/character-bible.md`
@@ -75,7 +77,7 @@ Before doing anything else, orient yourself:
    - `reference/story-summary.md` (logline / synopsis / act-shape / theme — canonical prose tier)
    - `reference/spine.csv`, `reference/architecture.csv` (structural-anchor tier — each has a `summary` column)
    - `reference/outline.md` (read-only expanding outline rendered from the three summary columns)
-   - `reference/voice-guide.md`
+   - `reference/voice/` (`book.md`, `anchors/`, `checks.md`: the voice; `references/voice-folder.md`). In a prose book, an old `reference/voice-guide.md`, `voice-profile.csv`, `persistent-prompt.md`, `prose-exemplars.md` or `exemplars/` is no longer read: mention it once and offer to move what the author wants into the folder
    - `reference/timeline.md`
    - `reference/scenes.csv`
    - `working/evaluations/*/findings.csv` (preferred) or `working/evaluations/findings.yaml` (legacy)
@@ -83,7 +85,7 @@ Before doing anything else, orient yourself:
    - `working/scores/structural-latest.csv` (structural scoring results; its `computed_at` column says when. It is stale once the scene CSVs change after that: re-run `./storyforge validate --structural`, free, before quoting it)
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
    - `working/scoring-verdicts.csv` (LLM boundary-diff verdicts, if any boundaries have been run)
-   - `reference/voice-profile.csv` (voice profile with per-character banned words)
+   - `reference/voice-guide.md` and `reference/voice-profile.csv` (graphic novels only: the script's voice)
    - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
    - `working/annotations.csv` (reader annotations from Bookshelf, if present)
    - The `scenes/` directory (any `.md` files = drafted scenes)
@@ -118,8 +120,8 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
 - Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
 - Character, world, voice and scene design and revision planning have no separate skills: that work is in the elaborate pipeline (and revision planning in the `revise` skill)
 - Skills that still apply normally: `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
-- If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data, validation passes and `status` has no `voice` blocker, then provide the write command (which will automatically detect briefs and use the brief-aware prompt builder)
-- If the author asks to evaluate or polish after drafting, those scripts work normally
+- If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data, validation passes and `status` has no `voice` blocker, then provide the writing-session commands ("Start drafting" below)
+- If the author asks to evaluate or revise after drafting, those scripts work normally; revision of drafted prose starts from the author's marks (`storyforge revise --marks`, see "Revise" below)
 
 **If the project is NOT in an elaboration phase** (legacy phases: `development`, `scene-design`, `drafting`, `evaluation`, `revision`, `review`, `complete`, `production`), proceed with the existing routing below.
 
@@ -136,14 +138,19 @@ The author has a specific request. Parse what they want and route to the right s
 **CRITICAL: Never run pipeline scripts directly.** The `./storyforge write`, `./storyforge evaluate`, `./storyforge revise` commands launch long-running Claude sub-sessions. Running them from inside an existing Claude session almost always fails. Instead, **prompt the author to run the command themselves** in their terminal. Present the command, explain the options, and let the author execute it.
 
 **Creative development** (character, world, voice, story architecture, scene design):
-Invoke the `elaborate` skill. This handles all creative development work — from spine through briefs, including character deepening, world building, voice guide creation, and scene-level design.
+Invoke the `elaborate` skill. This handles all creative development work — from spine through briefs, including character deepening, world building, finding the voice, and scene-level design.
 
 **"Start drafting" / "Write scenes":**
-Check that `reference/scenes.csv` exists with scenes, and that `storyforge status --json` has no `voice` blocker (a `reference/voice-guide.md` that exists can still be init's template; `write` refuses to draft without a filled one). If there is one, route to the Voice Stage first (Step 1). If ready, provide the command:
+Check that `reference/scenes.csv` exists with scenes, and that `storyforge status --json` has no `voice` blocker (`reference/voice/` that exists can still hold only init's templates; `write` refuses to draft without `book.md` and an anchor, or an author voice repo). If there is one, route to the Voice Stage first (Step 1). If ready, draft in a **writing session** (#655): one writer drafts the stretch scene after scene in one conversation, with the voice (`reference/voice/book.md` and the anchors) and the story so far word for word in its context. Provide the commands in this order:
 ```bash
-./storyforge write --keep-going [options]
+./storyforge write --session --act 1 --dry-run   # the forecast and the first scene's plan; nothing spent
+./storyforge write --session --act 1             # the real run
 ```
-A full draft runs unattended, so pass `--keep-going` (Ben, 2026-11-04): a scene the gate can't pass after its fixes is committed provisionally for the author, so the scenes that depend on it are drafted too (see "Draft overnight" below). Without it a failing scene still stops only itself: the later scenes that depend on it wait, and the rest are drafted.
+After each scene the session runs the tense check (`scenes.csv`'s `tense`; a scene in the wrong tense goes back to the writer once), the voice review (a reviewer flags lines against `reference/voice/checks.md`; a separate reviser that never sees checks.md rewrites only those lines; the record is in `working/voice-reviews/<scene>.md`), and the gate, whose problems go back to the same writer. Then it commits the scene and runs the re-checks it owes. When the book has no prose yet it stops after 3 scenes (`--stop-after N` changes that; `0` never stops), so the author reads the first pages before the rest are written: the first pages are where a voice goes wrong. Running the same command again goes on from where it stopped; the drafted scenes become the story so far. The session works as `--keep-going` does: a scene the gate stops on only for the check's findings is committed provisionally and the session goes on; one it can't commit stops the session. It also stops at a scene still in the wrong tense after its rewrite, one that fails verification, a failed commit, and the cost threshold (the next scene's forecast reserved); it names the scenes it didn't attempt. Session logs in `working/logs/session/` aren't committed; the voice reviews are.
+
+Before the first session, tell the author to check: a `tense` in `scenes.csv` for each scene when tense follows POV, a `checks.md` with checks (with none, no scene gets a voice review), and `drafting.brief_notes: exclude` in `storyforge.yaml` when the briefs' note columns were written by a model (briefs from before #644).
+
+`--session` takes full coaching and neither `--batch` nor `--interactive`. `storyforge status` still names `storyforge write --keep-going` as next: that scene-by-scene draft still works (see "Draft overnight" below), but recommend the session.
 If prerequisites are missing, route to `elaborate` to build them.
 
 **"Evaluate" / "Run evaluation":**
@@ -154,9 +161,17 @@ Check that scene files exist in `scenes/`. If ready, provide the command:
 
 **"Revise" / "Fix issues" / "Plan revision" / "Polish":**
 Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
-For polish-only: `./storyforge revise --polish`
 
-**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — in the briefs." `--polish --loop` names those scenes in a NOTE but no longer rewrites their goal, conflict, crisis or decision (the author's notes, plan decision 9): suggest a change to the brief's events (`storyforge hone`) or a note the author writes. Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
+For the prose itself, revise by reaction (#655): the author reads the drafted scenes and marks lines in a marks file (`## <scene id>`, then `> the scene's words`, then a note such as `cut: reads like AI`; a quote with no note, or a note such as `keep` or `more like this`, is a keep: an example for the reviser that is never edited; a blank line ends a quote), and runs:
+```bash
+./storyforge revise --marks working/marks.md --dry-run   # each scene's lines to revise and keeps; flags words not in the scene; spends nothing
+./storyforge revise --marks working/marks.md
+```
+Each scene's lines asking for a change are rewritten toward the voice (and the keeps) by the voice reviser, then gated and committed on a revise branch. A revision the gate rejects, if it can't be committed provisionally, is rolled back to the old prose. The record is in `working/voice-reviews/<scene>.md`. The marks come from the file only; reading a drafted scene's marks from a PR's comments has no issue yet.
+
+`./storyforge revise --polish` (and `--polish --loop`, `--naturalness`) still run, but they are no longer offered as the default (#655): revision of the prose is by reaction, the author's marks. Run them when the author asks for them.
+
+**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass; the author's marks (`revise --marks`) are the way to revise the prose. Also explain: "These scenes have been polished multiple times without improvement. The problem is upstream — in the briefs." `--polish --loop` names those scenes in a NOTE but no longer rewrites their goal, conflict, crisis or decision (the author's notes, plan decision 9): suggest a change to the brief's events (`storyforge hone`) or a note the author writes. Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
 
 **"Score" / "Score my scenes":**
 Invoke the `score` skill.
@@ -209,7 +224,7 @@ Use `--dry-run` to preview without invoking the LLM.
 ```bash
 ./storyforge score --bible-consistency
 ```
-LLM check of every drafted scene against `character-bible.md`, `world-bible.md`, `voice-guide.md`. Bibles are cached (~$20-25/run). Findings get stable `finding_id`s so overrides via `working/scoring-overrides.csv` persist.
+LLM check of every drafted scene against `character-bible.md`, `world-bible.md`, `voice/book.md`. Bibles are cached (~$20-25/run). Findings get stable `finding_id`s so overrides via `working/scoring-overrides.csv` persist.
 
 **"Clean up" / "Health check" / "Check my project" / "Fix CSV issues" / "Project cleanup":**
 Invoke the `cleanup` skill. This runs the project health report (CSV schema validation, scene artifact detection, structural checks), then works through action items — fixing what it can directly and delegating to other skills/scripts as needed.
@@ -292,7 +307,7 @@ Check prerequisites before proceeding:
   - At least some scene files (`.md`) in `scenes/` for the referenced scenes
 - *Soft prerequisites* (recommend but allow override):
   - All referenced scenes should have status `drafted` or `revised`
-  - A voice guide should exist (for consistency)
+  - The voice (`reference/voice/`) should be in place (for consistency)
 
 If the chapter map exists, provide the assembly command:
 
@@ -328,7 +343,7 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure." → Provide `./storyforge validate --structural`. Review scores and proposals with the author. They're advisory (#643) and never hold drafting: a below-target dimension is something the author may act on, not work to clear first.
 
-**2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --keep-going` command.
+**2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --session --act 1 --dry-run`, then the same without `--dry-run` (see "Start drafting").
 
 **3. Drafted, not evaluated:** If scenes exist but no evaluation → "Run evaluation" → provide `./storyforge evaluate` command.
 
@@ -336,11 +351,11 @@ Determine the single highest-value next action based on project state. Work thro
 
 **5. Revision complete:** If revision cycle done → "Review and decide next step" → invoke `revise` in review mode.
 
-**6. Ready to polish:** If evaluation shows only craft issues → "Polish the prose" → provide `./storyforge revise --polish` command.
+**6. Ready to polish:** If evaluation shows only craft issues → "Mark the lines that don't sound right" → the author's marks file and `./storyforge revise --marks FILE` (see "Revise"). Not `--polish`, unless the author asks for it.
 
 **7. Ready to publish:** If manuscript is polished → "Publish" → invoke `publish`.
 
-**8. Artifact gaps:** Missing character bible, world bible, voice guide → "Deepen your foundations" → invoke `elaborate` with specific direction.
+**8. Artifact gaps:** Missing character bible, world bible, or voice (`reference/voice/`) → "Deepen your foundations" → invoke `elaborate` with specific direction.
 
 On approval, execute immediately by invoking the appropriate skill.
 
@@ -373,7 +388,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; a voice guide with the author's text (no `voice` blocker in `storyforge status`; `write` refuses a missing, template or empty one). With a `voice:` block in `storyforge.yaml`, a usable author voice repo: `write` also stops on a block it can't use (the repo missing or inside the book, no `description.md` or exemplars yet, a narrator not under its `fiction/`) |
+| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; the voice: `reference/voice/book.md` with the author's text and at least one anchor, or an author voice repo (no `voice` blocker in `storyforge status`; `write` refuses to draft without it). With a `voice:` block in `storyforge.yaml`, a usable author voice repo: `write` also stops on a block it can't use (the repo missing or inside the book, no `description.md` or exemplars yet, a narrator not under its `fiction/`) |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | Revision planning (`revise` skill) | Evaluation results in `working/evaluations/`, or scores |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |
@@ -487,7 +502,7 @@ This is especially important during long autonomous sessions where a skill is ex
 
 - Built a character? Commit and push. Then build the next character.
 - Designed an act's worth of scenes? Commit and push. Then design the next act.
-- Produced a voice guide section? Commit and push. Then produce the next section.
+- Saved an anchor or a `book.md` section? Commit and push. Then do the next.
 - Updated a reference document? Commit and push.
 
 Every commit includes updated `storyforge.yaml` so the project state is always current.

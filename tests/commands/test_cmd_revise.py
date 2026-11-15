@@ -260,7 +260,7 @@ class TestPlanGeneration:
         os.makedirs(plans_dir, exist_ok=True)
         plan_file = os.path.join(plans_dir, 'revision-plan.csv')
 
-        rows = _generate_polish_plan(plan_file, project_dir)
+        rows = _generate_polish_plan(plan_file)
         assert len(rows) == 1
         assert rows[0]['name'] == 'prose-polish'
         assert rows[0]['fix_location'] == 'craft'

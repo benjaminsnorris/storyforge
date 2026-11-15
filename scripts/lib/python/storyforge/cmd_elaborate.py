@@ -1823,7 +1823,7 @@ _ARTIFACT_FOR_FILE = {
     'story-architecture.md': 'story_architecture',
     'character-bible.md': 'character_bible',
     'world-bible.md': 'world_bible',
-    'voice-guide.md': 'voice_guide',
+    'voice-guide.md': 'voice_guide',   # a graphic novel's voice stage
     'scenes.csv': 'scene_index',
 }
 
@@ -1898,6 +1898,45 @@ def _keep_must(existing: dict, row: dict, sid: str) -> dict:
     return values
 
 
+def _run_voice_stage(project_dir: str, dry_run: bool) -> int:
+    """The voice stage of a prose book (ready-to-draft plan, 2026-11-14): no
+    model writes the voice. It is passages the author chose or finished by
+    hand, in reference/voice/ (`voice_book`). The stage sets up the folder's
+    missing files from the templates (never over one that's there), commits
+    them, and says what the voice still needs. Free; returns the exit code."""
+    from storyforge import git, voice_book
+    from storyforge.common import ReferenceDocError
+    try:
+        made = voice_book.scaffold(project_dir, dry_run=dry_run)
+    except ReferenceDocError as e:
+        log(f'ERROR: {e}: the voice folder can\'t be set up. Move it aside and run the stage '
+            f'again.')
+        return 1
+    verb = 'Would set up' if dry_run else 'Set up'
+    for rel in made:
+        log(f'{verb} {rel}')
+    if made and not dry_run:
+        if not git.commit_and_push(project_dir, 'Voice: set up reference/voice/', made) \
+                and git.last_commit_error != git.NOTHING_TO_COMMIT:
+            log(f'ERROR: the voice folder was set up but not committed '
+                f'({git.last_commit_error}); commit {", ".join(made)} by hand.')
+            return 1
+    old = voice_book.old_files_note(project_dir)
+    if old:
+        log(f'NOTE: {old}.')
+    voice = voice_book.resolve(project_dir)
+    if voice.skipped:
+        log(voice_book.skipped_warning(voice))
+    if voice.kind == 'unreadable':
+        log(f'ERROR: {voice.detail}')
+        return 1
+    if voice.kind == 'ok':
+        log(f'The voice is ready: {voice.path}')
+        return 0
+    log(f'The voice isn\'t ready: {voice.detail}. Next: {voice_book.REMEDY}.')
+    return 0
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -1939,6 +1978,9 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             force=getattr(args, 'force', False),
         )
         sys.exit(rc)
+
+    if stage == 'voice' and medium != 'graphic-novel':
+        sys.exit(_run_voice_stage(project_dir, dry_run))
 
     plugin_dir = get_plugin_dir()
     log_dir = os.path.join(project_dir, 'working', 'logs')
@@ -1995,8 +2037,8 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         prompt = build_architecture_prompt(project_dir, plugin_dir, registries_text=registries,
                                            system_context=has_system)
     elif stage == 'voice':
-        # The voice guide and profile (#551, Gawain G-017): written by hand
-        # or in the skill before; it advances no phase
+        # A graphic novel's voice guide and profile (#551, Gawain G-017; a
+        # prose book's voice stage is `_run_voice_stage`); no phase advance
         prompt = build_voice_prompt(project_dir, plugin_dir, system_context=has_system)
     elif stage == 'map':
         if medium == 'graphic-novel':

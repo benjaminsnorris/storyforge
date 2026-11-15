@@ -18,6 +18,7 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `source` | Optional. The Storyforge project(s) this one adapts: a retelling, an expansion, a rewrite of an earlier draft |
 | `series` | Optional. A canon shared with the other books of a series, read in place from outside the project |
 | `voice` | Optional. The author voice repo the book is drafted in, read in place from outside the project (#652) |
+| `drafting` | Optional. How `storyforge write` builds its prompts: `prior_prose`, `brief_notes` |
 
 ---
 
@@ -31,7 +32,7 @@ Core metadata identifying the novel and its goals.
 | `genre` | string | required | The primary genre classification. Used to load genre-specific evaluation heuristics and voice expectations. | — | `"science fiction"` |
 | `subgenre` | string | optional | A more specific genre qualifier. Refines evaluation guidance when present. | `null` | `"hard sci-fi"` |
 | `target_words` | number | required | The target word count for the completed manuscript. Used to calibrate pacing feedback and act-length estimates. | — | `90000` |
-| `reading_level` | string | optional | The target reading level as a Flesch-Kincaid grade, one grade or a range (`6`, `6th`, `5-7`; empty or `null` for none). Prose projects only. `storyforge score` reports each scene and the book as below, within or above it (`readability.csv`, `score --readability`). Not a prompt instruction: put the rule the prose follows in the key decisions or voice guide. | `null` | `"5-7"` |
+| `reading_level` | string | optional | The target reading level as a Flesch-Kincaid grade, one grade or a range (`6`, `6th`, `5-7`; empty or `null` for none). Prose projects only. `storyforge score` reports each scene and the book as below, within or above it (`readability.csv`, `score --readability`). Not a prompt instruction: put the rule the prose follows in the key decisions or `reference/voice/book.md`. | `null` | `"5-7"` |
 | `logline` | string | required | A one- or two-sentence pitch that captures the protagonist, conflict, and stakes. Referenced during story architecture and continuity checks to keep the narrative on course. | — | `"A disgraced xenolinguist must decode an alien signal before first contact becomes humanity's last."` |
 | `coaching_level` | enum | optional | Controls how much Claude takes the creative lead. Affects all skills and scripts. Override per-command with `--coaching LEVEL` or globally with `STORYFORGE_COACHING` env var. | `"full"` | `"coach"` |
 | `series_name` | string | optional | The name of the series this book belongs to. Used in epub metadata (`belongs-to-collection`). | `null` | `"The Mapmaker Trilogy"` |
@@ -75,12 +76,13 @@ Every artifact entry shares the same three-field structure:
 | `character_bible` | Profiles for every named character including appearance, psychology, voice patterns, relationships, and arc trajectories. | `reference/character-bible.md` |
 | `systems_bible` | Documentation of invented systems — magic, technology, politics, economics — with internal rules and constraints. | `reference/systems-bible.md` |
 | `story_architecture` | The structural blueprint: act breaks, major turning points, subplot threading, and thematic throughlines. | `reference/story-architecture.md` |
-| `voice_guide` | Prose style reference capturing POV strategy, sentence rhythm, diction registers, and per-character dialogue fingerprints. | `reference/voice-guide.md` |
 | `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `reference/timeline.md` |
 | `scene_index` | The master list of every scene with metadata (POV, location, status, word count, and any scene extensions). Stored as pipe-delimited CSV files: `reference/scenes.csv` (structural identity), `reference/scene-intent.csv` (narrative dynamics), and `reference/scene-briefs.csv` (drafting contracts). | `reference/scenes.csv` |
 | `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
 | `chapter_map` | Maps scenes to chapters for manuscript assembly as a pipe-delimited CSV. Includes chapter numbers, titles, heading format, and semicolon-separated scene IDs. Production settings (author, copyright, scene break style, genre preset), cover generation settings, and web book settings are stored in `storyforge.yaml` under the `production` key. Created by the `produce` skill or manually. | `reference/chapter-map.csv` |
 | `manuscript` | The assembled manuscript output directory. Contains individual chapter files, front/back matter, assets (CSS, cover), and generated output (epub, PDF, HTML, web). Created by `./storyforge assemble`. Output formats: `epub` (default), `pdf`, `html` (single-file), `web` (multi-page hostable site), `markdown`, `all`. | `manuscript/` |
+
+The voice has no artifact entry. A prose book's voice is always the folder `reference/voice/` (`references/voice-folder.md`). An older project's `voice_guide` entry is left alone but nothing reads it.
 
 ---
 
@@ -339,11 +341,30 @@ voice:
 | `author` | required | The author voice repo: a path relative to the project (or absolute, or `~/...`). It must have `voice.yaml`, a `description.md` and an exemplar bank (`voice propose`, then `voice accept`), and not be inside a book. |
 | `narrator` | optional | The fiction anchor for this book's narrator: a folder of `.md` files, or one file, under the repo's `fiction/`. |
 
-**What reads it.** At full coaching, `write`'s drafting prompt carries the author's voice (`voice_repo.author_voice_section`): the description, the exemplars by job, the fiction anchor, and the book's own `reference/voice/book.md` when it has one. A book without the block gets exactly the prompt it got before. `score --voice` with neither `--fingerprint` nor `--voice-repo` measures against the repo's fingerprint. The voice guide is still required beside it. The corpus never goes in a prompt.
+**What reads it.** The book's voice (`voice_book.resolve`; `references/voice-folder.md`) puts the author's voice first (`voice_repo.author_voice_section`: the description, the exemplars by job, the fiction anchor), then the book's own `reference/voice/` folder (`book.md` and the anchors, never `checks.md`). Every prompt that carries the voice gets both: drafting, revision and the shared system context (evaluation, scoring, the elaboration stages). Hone carries `book.md` only. With the block, the repo alone is enough to draft: `book.md` and the anchors are optional, though the book's POV rules, people and tense still belong in `book.md`. Without the block, the voice needs `book.md` and at least one anchor. `score --voice` with neither `--fingerprint` nor `--voice-repo` measures against the repo's fingerprint. The corpus never goes in a prompt.
 
 **Read-only.** Storyforge never writes to the voice repo from a book.
 
-**Errors.** `write` checks the block before anything is spent (`require_voice`), and `score --voice` when it reads it; `validate` doesn't check it yet. These are errors: `voice:` given twice, indented under another block, or a one-line value; a key other than `author` and `narrator`, or one given twice; no `author`; a value that isn't a path (`~`, `null`, a flow list or map); an author repo that isn't there, has no `voice.yaml` (or one that can't be used), or is inside a book; no `description.md`, an empty one, or no exemplars; a narrator outside the repo's `fiction/`, missing, empty or unreadable; a `reference/voice/book.md` that can't be read.
+**Errors.** `write` checks the block before anything is spent (`require_voice`), and `score --voice` when it reads it; `status` and `validate` report a block that can't be used (a voice blocker; `validate` exits 1). These are errors: `voice:` given twice, indented under another block, or a one-line value; a key other than `author` and `narrator`, or one given twice; no `author`; a value that isn't a path (`~`, `null`, a flow list or map); an author repo that isn't there, has no `voice.yaml` (or one that can't be used), or is inside a book; no `description.md`, an empty one, or no exemplars; a narrator outside the repo's `fiction/`, missing, empty or unreadable. A file in `reference/voice/` that can't be read stops `write` too, with or without the block.
+
+---
+
+## `drafting`
+
+Optional. How `storyforge write` builds a scene's prompt.
+
+```yaml
+drafting:
+  prior_prose: full      # full | window | none
+  brief_notes: exclude   # include | exclude
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `prior_prose` | `full` | The earlier prose a scene is drafted with. `full`: the manuscript so far (past 100,000 words it falls back to `window`, with a WARNING). `window`: the scene before, and the latest scene of each MICE thread the scene carries. `none`. `--prior-prose` overrides it. A writing session (`write --session`) ignores it: it always has the story so far word for word. Revise's redraft-from-brief reads it too. |
+| `brief_notes` | `include` | Whether a writing session's scene plan shows the brief's author-note columns (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs, motif_details), as notes, not requirements. `exclude` leaves them out: use it for briefs written before #644, whose notes a model wrote. Read only by `write --session`. |
+
+Any other value stops the run with an error (`write`, and `revise` for `prior_prose`).
 
 ---
 
@@ -375,10 +396,6 @@ artifacts:
     exists: true
     path: reference/story-architecture.md
     updated: 2026-02-25
-  voice_guide:
-    exists: true
-    path: reference/voice-guide.md
-    updated: 2026-02-22
   timeline:
     exists: false
     path: reference/timeline.md

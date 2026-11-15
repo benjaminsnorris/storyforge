@@ -2,7 +2,7 @@
 
 Phases 0-4 build the scene layer. Phase 5 writes what sits above it
 (spine, architecture, themes and motifs, story summary and architecture,
-the character, world and systems bibles, the voice guide and profile) from
+the character, world and systems bibles, the voice (reference/voice/)) from
 what those phases found, describing the book as written, and (5g, with
 no model) `timeline.md` and the chapter map. Plan: docs/plans/2026-10-30-extract-upper-layers.md.
 
@@ -41,8 +41,7 @@ from datetime import datetime, timezone
 from typing import Callable, Literal, Sequence, TypedDict, get_args
 
 from .common import is_unfilled_template, log
-#: elaborate's voice-profile.csv columns, which `validate_voice_profile` checks
-from .schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS, stated_time
+from .schema import CHAPTER_MAP_COLUMNS, stated_time
 
 PROVENANCE_FILE = os.path.join('working', 'extraction-provenance.csv')
 
@@ -200,7 +199,8 @@ def file_state(project_dir: str, rel_path: str, provenance: Provenance) -> FileS
             # templates carry older headers
             if all(_COLUMN_NAME.match(f) for f in fields) and _KEY_COLUMNS & set(fields):
                 return 'header_only'
-    if is_unfilled_template(path):
+    from storyforge.voice_book import is_template
+    if is_unfilled_template(path) or is_template(project_dir, rel_path):
         return 'template'
     if provenance is None:
         return 'unverified'
@@ -1275,7 +1275,7 @@ def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[
 
 
 # ============================================================================
-# Steps 5d-5f: the character bible, the world bible, the voice guide
+# Steps 5d-5f: the character bible, the world bible, the voice
 # ============================================================================
 
 #: What a description field says when the book doesn't show the thing.
@@ -2304,7 +2304,7 @@ _POV_VOICE_LABELS = {'interiority': 'Interiority style', 'sentence_patterns': 'S
                      'metaphor_domain': 'Metaphor domain', 'notices': 'What they notice',
                      'emotional_register': 'Emotional register', 'speech': 'Speech patterns'}
 _POV_VOICE_FIELDS = tuple(_POV_VOICE_LABELS)
-#: The fewest items the voice guide's lists may have (the prompt asks for
+#: The fewest items the voice description's lists may have (the prompt asks for
 #: more); an empty list would render as if the book had none.
 _VOICE_LIST_MINIMUMS = {'lineage': 1, 'habits': 1, 'never_does': 1, 'pacing': 1}
 
@@ -2428,26 +2428,57 @@ def parse_voice(response: str, ev: VoiceEvidence) -> dict:
 
 
 
-def voice_profile_rows(reply: dict) -> list[dict[str, str]]:
-    """`voice-profile.csv` in elaborate's shape: a `_project` row with the
-    register, then one row per profile in the reply (every POV character,
-    and any other character it profiled). `banned_words` stays empty: a
-    word the book never uses isn't banned."""
-    rows = [{'character': '_project', 'register': reply['register']}]
-    rows += [{'character': p['id'], 'preferred_words': ';'.join(p['preferred_words']),
-              'metaphor_families': ';'.join(p['metaphor_families']),
-              'rhythm_preference': p['rhythm'], 'dialogue_style': p['dialogue_style']}
-             for p in reply['profiles']]
-    return rows
+#: the most words an extracted anchor keeps (whole paragraphs)
+ANCHOR_MAX_WORDS = 1500
 
 
-def render_voice_guide(reply: dict, ev: VoiceEvidence, header: str) -> str:
-    """`voice-guide.md`, described. The template's prescriptive sections
-    become descriptions ("Influence Blend" is "Lineage", "Style Rules" is
-    "What the prose does" and "What the prose never does", "Pacing Rules"
-    is "Pacing"), its "Prose Naturalness" rules for a drafter are left out,
-    and a "Measured" section gives code's numbers."""
-    out = [header, f'# {ev.title or "Untitled"} -- Voice Guide', '', '---', '', '## Lineage', '',
+def anchor_passage(text: str, max_words: int = ANCHOR_MAX_WORDS) -> str:
+    """The opening of a scene's prose as an anchor: whole paragraphs, line
+    breaks kept, up to `max_words` (a first paragraph longer than that is cut
+    at a word and marked `[…]`)."""
+    text = text.strip()
+    if text.startswith('---\n') and '\n---' in text[4:]:   # an older scene's frontmatter
+        text = text[4:].split('\n---', 1)[1].lstrip('-').strip()
+    paras = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+    kept, words = [], 0
+    for para in paras:
+        n = len(para.split())
+        if kept and words + n > max_words:
+            break
+        if not kept and n > max_words:
+            return ' '.join(para.split()[:max_words]) + ' […]'
+        kept.append(para)
+        words += n
+    return '\n\n'.join(kept)
+
+
+def render_anchor(text: str, pov: str = '') -> str:
+    """An anchor from a scene's own prose (`anchor_passage`), with the
+    scene's POV as its `pov:` header when it has one
+    (`voice_book.parse_anchor`)."""
+    passage = anchor_passage(text)
+    return (f'pov: {pov}\n\n{passage}\n' if pov.strip() else f'{passage}\n')
+
+
+def render_checks(reply: dict, header: str) -> str:
+    """reference/voice/checks.md, from what the prose never does: for a
+    reviewer reading a draft, never for the writer (`voice_book`)."""
+    return '\n'.join([header, '# Checks', '',
+                      'Described from the book\'s own prose: what it never does. A reviewer '
+                      'reads a draft against these; the writer never sees them. Add the '
+                      'problems you mark in drafts, each with an example.', '',
+                      _bullets(reply['never_does'])]) + '\n'
+
+
+def render_book_md(reply: dict, ev: VoiceEvidence, header: str) -> str:
+    """reference/voice/book.md, described from the prose: Lineage, Measured
+    (code's numbers), POV Voices, Sensory Palette, Dialogue, Emotional
+    Register, What the prose does, Pacing, Recurring Language, People and
+    Register. What the prose never does goes to checks.md (`render_checks`),
+    never into what the writer reads."""
+    out = [header, f'# {ev.title or "Untitled"} -- The Voice', '',
+           'Described from the book\'s own prose. The anchors in anchors/ are passages '
+           'from it; replace them with the ones you would write toward.', '', '---', '', '## Lineage', '',
            '| Influence | What the voice shares with it |', '|---|---|']
     out += [f'| {_cell_md(x["influence"])} | {_cell_md(x["what"])} |' for x in reply['lineage']] \
         or ['| (none named) | |']
@@ -2471,8 +2502,7 @@ def render_voice_guide(reply: dict, ev: VoiceEvidence, header: str) -> str:
             f'{_shown(reply["emotion"]["restraint"])}', '', '**Key emotional moments:**',
             _bullets(reply['emotion']['key_moments']), '',
             f'**Physical expression:** {_shown(reply["emotion"]["physical"])}', '', '---', '',
-            '## What the prose does', '', _bullets(reply['habits']), '',
-            '## What the prose never does', '', _bullets(reply['never_does']), '', '---', '',
+            '## What the prose does', '', _bullets(reply['habits']), '', '---', '',
             '## Pacing', '']
     out += [f'- **{p["scene_type"]}:** {p["description"]}' for p in reply['pacing']] \
         or ['- (none described)']
@@ -2480,6 +2510,15 @@ def render_voice_guide(reply: dict, ev: VoiceEvidence, header: str) -> str:
             '| Word/Phrase | Usage | Significance |', '|---|---|---|']
     out += [f'| {_cell_md(r["phrase"])} | {_cell_md(r["usage"])} | {_cell_md(r["significance"])} |'
             for r in reply['recurring']] or ['| (none) | | |']
+    out += ['', '---', '', '## People', '']
+    for p in reply['profiles']:
+        out += [f'### {ev.names.get(p["id"], p["id"])}', '']
+        out += [f'- **Words they use:** {", ".join(p["preferred_words"])}'] if p['preferred_words'] else []
+        out += [f'- **Their comparisons come from:** {", ".join(p["metaphor_families"])}'] \
+            if p['metaphor_families'] else []
+        out += [f'- **Rhythm:** {p["rhythm"]}'] if p['rhythm'] else []
+        out += [f'- **How they speak:** {p["dialogue_style"]}', ''] if p['dialogue_style'] else ['']
+    out += ['## Register', '', reply['register']]
     return '\n'.join(out) + '\n'
 
 
@@ -3103,15 +3142,32 @@ def run_world(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutc
     return 'written' if _write_all(run, files, '5e', '5e') else 'partial'
 
 
+#: How many of 5f's samples become anchors: the author's own passages,
+#: which the drafter writes toward (`voice_book`)
+ANCHOR_SAMPLES = 3
+
+
+def anchor_rel(n: int) -> str:
+    """The path of 5f's `n`th anchor (1-based)."""
+    return f'reference/voice/anchors/extracted-{n}.md'
+
+
 def run_voice(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
-    """Step 5f: voice-guide.md and voice-profile.csv, from sampled prose and
-    the measures code takes of it. Skipped, and said, when no scene has
-    prose: a voice can't be described from summaries."""
-    rels = ['reference/voice-guide.md', 'reference/voice-profile.csv']
-    if not _gate(run, rels, '5f (voice guide and profile)'):
-        return 'skipped'
+    """Step 5f: the voice (reference/voice/), from sampled prose and the
+    measures code takes of it: book.md describes it, checks.md lists what
+    the prose never does, and the scenes of the first `ANCHOR_SAMPLES`
+    samples (by position: opening, middle, close) give anchors, the
+    author's own passages (`anchor_passage`). The run report says the
+    anchors were picked by position, for the author to replace. Skipped,
+    and said, when no scene has prose: a voice can't be described from
+    summaries."""
     title, title_notes = _book_title(run.project_dir)
     ev, notes = voice_evidence(run.project_dir, scenes, title)
+    count = min(ANCHOR_SAMPLES, len(ev.samples)) if ev else ANCHOR_SAMPLES
+    rels = (['reference/voice/book.md', 'reference/voice/checks.md']
+            + [anchor_rel(n) for n in range(1, count + 1)])
+    if not _gate(run, rels, '5f (the voice)'):
+        return 'skipped'
     run.reports.extend(f'5f: {n}' for n in title_notes + (notes if ev else []))
     if ev is None:
         run.reports.append('5f skipped: no scene has prose to describe a voice from ('
@@ -3120,8 +3176,14 @@ def run_voice(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutc
     reply = _ask(run, 'voice', lambda problems: build_voice_prompt(profile, ev, problems),
                  lambda text: parse_voice(text, ev), VOICE_SCHEMA, VOICE_MAX_TOKENS)
     header = provenance_header(run.version, '5f', ['profile', *ev.sources])
-    files = [(rels[0], render_voice_guide(reply, ev, header)),
-             (rels[1], _csv_text(voice_profile_rows(reply), VOICE_PROFILE_COLUMNS))]
+    texts, _ = _prose(run.project_dir, scenes)
+    pov = {s['id']: (s.get('pov') or '').strip() for s in scenes}
+    files = [(rels[0], render_book_md(reply, ev, header)), (rels[1], render_checks(reply, header))]
+    files += [(rel, render_anchor(texts.get(sid) or text, pov.get(sid, '')))
+              for rel, (_, sid, text) in zip(rels[2:], ev.samples)]
+    run.reports.append(f'5f: {len(files) - 2} anchor(s) were taken from the prose by position '
+                       f'({", ".join(label for label, _, _ in ev.samples[:len(files) - 2])}), '
+                       f'not chosen: replace them with passages you would write toward')
     return 'written' if _write_all(run, files, '5f', '5f') else 'partial'
 
 
@@ -3177,6 +3239,6 @@ WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
                  'reference/motif-taxonomy.csv', 'reference/story-summary.md',
                  'reference/story-architecture.md', 'reference/character-bible.md',
                  'reference/world-bible.md', 'reference/systems-bible.md',
-                 'reference/voice-guide.md', 'reference/voice-profile.csv',
+                 'reference/voice/',
                  'reference/timeline.md', 'reference/chapter-map.csv',
                  'storyforge.yaml', 'working/']

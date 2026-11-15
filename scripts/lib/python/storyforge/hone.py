@@ -1577,7 +1577,7 @@ def build_concretize_prompt(
         scene_id: The scene being concretized.
         fields: List of field names to rewrite.
         current_values: Dict of field_name -> current value.
-        voice_guide: Excerpt from the voice guide (POV character's sensory palette).
+        voice_guide: Excerpt from the voice (reference/voice/).
         character_entry: Character bible entry for the POV character.
 
     Returns:
@@ -1597,7 +1597,7 @@ def build_concretize_prompt(
 ## Current Values (abstract — need rewriting)
 {field_block}
 
-## Voice Guide (POV character)
+## The voice (reference/voice/book.md)
 {voice_guide if voice_guide else '(not available)'}
 
 ## Character
@@ -1610,7 +1610,7 @@ def build_concretize_prompt(
 3. Replace "tension deepening" with what the character SEES or FEELS (someone's jaw tightening, the room going quiet, a hand moving to a weapon).
 4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
 5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
-6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
+6. Use the character's sensory palette, as the voice shows it. If they think in food metaphors, their observations should reflect that.
 {_labels_block(labels)}{_must_block(current_values, fields)}
 ## Output Format
 
@@ -1795,7 +1795,7 @@ def build_evaluation_fix_prompt(
         fields: List of field names to rewrite.
         current_values: Dict of field_name -> current value.
         guidance: Evaluation guidance text describing what to fix.
-        voice_guide: Excerpt from the voice guide (truncated externally to 3000 chars).
+        voice_guide: Excerpt from the voice (truncated externally to 3000 chars).
         character_entry: Character bible entry (truncated externally to 2000 chars).
 
     Returns:
@@ -1818,7 +1818,7 @@ def build_evaluation_fix_prompt(
 ## Current Field Values
 {field_block}
 
-## Voice Guide (POV character)
+## The voice (reference/voice/book.md)
 {voice_guide if voice_guide else '(not available)'}
 
 ## Character
@@ -1969,8 +1969,8 @@ def hone_briefs(
             'fields_rewritten': 0,
         }
 
-    # Load voice guide and character bible for prompt building
-    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
+    # The voice's notes (book.md) and the character bible for prompt building
+    voice_guide = voice_excerpt(project_dir)
 
     char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
 
@@ -2014,7 +2014,7 @@ def hone_briefs(
                 scene_id=sid,
                 fields=abstract_fields,
                 current_values=current_values,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
                 character_entry=char_bible[:2000],
                 labels=labels,
             )
@@ -2074,7 +2074,7 @@ def hone_briefs(
                 fields=eval_fields,
                 current_values=current_values,
                 guidance=guidance,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
                 character_entry=char_bible[:2000],
                 labels=labels,
             )
@@ -2615,7 +2615,7 @@ def build_intent_fix_prompt(
         fields: List of field names to rewrite.
         current_values: Dict of field_name -> current value.
         issues: List of issue dicts for this scene.
-        voice_guide: Optional voice guide excerpt.
+        voice_guide: Optional excerpt from the voice.
 
     Returns:
         Prompt string for Claude.
@@ -2669,7 +2669,7 @@ def build_intent_fix_prompt(
 
 {chr(10).join(field_blocks)}
 
-## Voice Guide (POV character)
+## The voice (reference/voice/book.md)
 {voice_guide if voice_guide else '(not available)'}
 
 ## Output Format
@@ -2802,8 +2802,8 @@ def hone_intent(
             'fields_rewritten': det_fields_rewritten,
         }
 
-    # Load voice guide
-    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
+    # The voice's notes (book.md)
+    voice_guide = voice_excerpt(project_dir)
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
@@ -2845,7 +2845,7 @@ def hone_intent(
                 fields=detected_fields,
                 current_values=current_values,
                 issues=detected_issues,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
             )
 
             eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
@@ -2875,7 +2875,7 @@ def hone_intent(
                 fields=eval_fields,
                 current_values=current_values,
                 guidance=guidance,
-                voice_guide=voice_guide[:3000],
+                voice_guide=voice_guide,
             )
 
             eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
@@ -3243,3 +3243,24 @@ def parse_mice_fill_response(response: str) -> list[str]:
             if scene_id:
                 results.append(scene_id)
     return results
+
+
+#: the most of book.md a hone prompt carries
+VOICE_EXCERPT_CHARS = 6000
+
+
+def voice_excerpt(project_dir: str) -> str:
+    """What the voice does (reference/voice/book.md) for a hone prompt, which
+    rewrites brief cells, not prose: the notes, not the anchors. Cut at
+    `VOICE_EXCERPT_CHARS`, said in the log when it is.
+
+    Raises:
+        common.ReferenceDocError: book.md can't be read.
+    """
+    from storyforge import voice_book
+    notes = voice_book.read_folder(project_dir).notes
+    if len(notes) > VOICE_EXCERPT_CHARS:
+        log(f'NOTE: hone\'s prompts carry the first {VOICE_EXCERPT_CHARS:,} characters of '
+            f'{voice_book.BOOK_FILE} ({len(notes):,} in all)')
+        return notes[:VOICE_EXCERPT_CHARS]
+    return notes

@@ -2,8 +2,8 @@
 grammar, idiom and words (#615).
 
 A novel retold from an old translation (Weston's *Gawain*, Butler's or
-Lang's Homer) re-voices the source's speeches. A voice guide's banned list
-catches archaic *words*; this also catches the translator's *grammar and
+Lang's Homer) re-voices the source's speeches. Archaic *words* are the
+easy part; this also catches the translator's *grammar and
 idiom* left in modern speech: "bade Gawain take the other", "I'll not",
 "fail of my errand", "while my lord is from home", "But that you're Gawain,
 I very much doubt".
@@ -21,10 +21,10 @@ sentence as written.
 - **Source echo** (`echo`), quoted dialogue only: a run of `ECHO_RUN` or
   more words shared with the source scene the scene adapts (from
   `reference/source-map.csv`), `ECHO_CONTENT` or more of them not common
-  function words. A re-voiced line should say the thing in the voice
-  guide's words, not the translator's.
+  function words. A re-voiced line should say the thing in the book's own
+  words, not the translator's.
 
-Exemptions live in the voice guide, under a heading holding "register
+Exemptions live in reference/voice/book.md, under a heading holding "register
 exemptions" (any level, any case), until the next heading of the same or a
 higher level. Each bullet is one exemption:
 
@@ -208,7 +208,7 @@ class Exemptions:
 
 
 def read_exemptions(text: str) -> Exemptions:
-    """The exemptions under the voice guide's "register exemptions" heading.
+    """The exemptions under book.md's "register exemptions" heading.
     Empty without one. A bullet that can't be used is in `problems`."""
     phrases: list[str] = []
     scenes: set[str] = set()
@@ -254,17 +254,31 @@ def read_exemptions(text: str) -> Exemptions:
 
 
 def load_exemptions(project_dir: str) -> Exemptions:
-    """`read_exemptions` of reference/voice-guide.md; empty without one. A
-    guide that can't be read is a problem, not an exception."""
-    path = os.path.join(project_dir, 'reference', 'voice-guide.md')
+    """`read_exemptions` of reference/voice/book.md (its `## Register
+    exemptions` section); empty without one. A book.md that can't be read is
+    a problem, not an exception; so is an old voice-guide.md that still holds
+    exemptions, which are no longer read."""
+    from storyforge import voice_book
+    from storyforge.common import ReferenceDocError
+    old = []
+    guide = os.path.join(project_dir, 'reference', 'voice-guide.md')
+    if os.path.isfile(guide):
+        try:
+            with open(guide, encoding='utf-8-sig') as f:
+                lines = f.read().splitlines()
+            if any(_EXEMPT_HEADING_RE.match(ln) for ln in lines):
+                old.append('reference/voice-guide.md has register exemptions, which are no '
+                               f'longer read: move them to {voice_book.BOOK_FILE}\'s '
+                               f'`## Register exemptions`')
+        except (OSError, UnicodeDecodeError):
+            pass   # cleanup and the other commands name the old file
     try:
-        with open(path, encoding='utf-8-sig') as f:
-            return read_exemptions(f.read())
-    except FileNotFoundError:
-        return Exemptions()
-    except (OSError, UnicodeDecodeError) as e:
-        return Exemptions(problems=(f"reference/voice-guide.md can't be read, so no "
-                                    f"register exemptions apply ({e.__class__.__name__}: {e})",))
+        text = voice_book._read(project_dir, voice_book.BOOK_FILE)
+    except ReferenceDocError as e:
+        return Exemptions(problems=(f"{voice_book.BOOK_FILE} can't be read, so no register "
+                                    f"exemptions apply ({e})", *old))
+    ex = read_exemptions(text) if text else Exemptions()
+    return Exemptions(ex.phrases, ex.scenes, ex.problems + tuple(old)) if old else ex
 
 
 def _tokens(text: str) -> list[tuple[str, int, int]]:
@@ -549,7 +563,7 @@ def revision_section(project_dir: str, scene_ids: list[str],
         lines += ['', 'The register check flagged these in this pass\'s scenes. Check '
                       'each; change it only if it is archaic or copied from the '
                       'translation (a source echo is the translation\'s own words) and '
-                      'the voice guide doesn\'t exempt it:', '']
+                      'the voice (book.md) doesn\'t exempt it:', '']
         for f in checked.findings[:REVISION_MAX_FINDINGS]:
             lines.append(f'- {f.scene_id}: "{f.sentence}" ({f.kind}: {f.evidence}; {f.what})')
         more = len(checked.findings) - REVISION_MAX_FINDINGS

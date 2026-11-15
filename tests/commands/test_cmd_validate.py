@@ -345,23 +345,21 @@ class TestMainJson:
         assert 'schema' in data
 
     def test_json_stdout_is_pure_json_with_status_lines(self, project_dir, monkeypatch, capsys):
-        # A valid voice profile (extract phase 5 writes one) and canon findings
-        # log status lines; with --json they must not reach stdout, which
-        # callers parse whole (`validate --json > report.json`).
+        # The voice line and canon findings log status lines; with --json
+        # they must not reach stdout, which callers parse whole
+        # (`validate --json > report.json`).
         monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setattr('storyforge.elaborate.validate_structure',
                             lambda ref_dir: _passing_structural())
         monkeypatch.setattr('storyforge.schema.validate_schema',
                             lambda ref_dir, project_dir=None: _passing_schema())
-        monkeypatch.setattr('storyforge.schema.validate_voice_profile',
-                            lambda pd: _no_errors_voice_profile())
         with pytest.raises(SystemExit):
             main(['--json'])
         captured = capsys.readouterr()
         data = json.loads(captured.out)
         assert 'structural' in data
-        assert 'Voice profile: valid (3 characters)' in captured.err
+        assert 'Voice: reference/voice' in captured.err
 
     def test_json_contains_structural_result(self, project_dir, monkeypatch, capsys):
         monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
@@ -568,36 +566,40 @@ class TestMainKnowledgeGranularity:
 
 
 class TestMainVoiceProfile:
-    """Test main() voice profile validation output."""
+    """The voice validate reports: a prose book's reference/voice/ (and the
+    old files it no longer reads); a graphic novel's voice profile."""
 
-    def test_voice_profile_errors_logged(self, project_dir, monkeypatch, capsys):
+    def _run(self, project_dir, monkeypatch, capsys):
         monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setattr('storyforge.elaborate.validate_structure',
                             lambda ref_dir: _passing_structural())
         monkeypatch.setattr('storyforge.schema.validate_schema',
                             lambda ref_dir, project_dir=None: _passing_schema())
+        with pytest.raises(SystemExit):
+            main([])
+        return capsys.readouterr().out
+
+    def test_a_prose_book_reports_its_voice_and_old_files(self, project_dir, monkeypatch,
+                                                          capsys):
+        output = self._run(project_dir, monkeypatch, capsys)
+        assert 'Voice: reference/voice' in output and 'Voice profile' not in output
+        with open(os.path.join(project_dir, 'reference', 'voice-profile.csv'), 'w') as f:
+            f.write('character\n')
+        output = self._run(project_dir, monkeypatch, capsys)
+        assert 'NOTE: reference/voice-profile.csv is no longer read' in output
+
+    def test_a_graphic_novel_reports_its_voice_profile(self, project_dir, monkeypatch,
+                                                       capsys):
+        monkeypatch.setattr('storyforge.common.get_medium', lambda pd: 'graphic-novel')
         monkeypatch.setattr('storyforge.schema.validate_voice_profile',
                             lambda pd: _errors_voice_profile())
-        with pytest.raises(SystemExit):
-            main([])
-        # Voice profile errors are logged via log(), check stdout
-        output = capsys.readouterr().out
-        assert 'Voice profile' in output or '1 issues' in output
-
-    def test_voice_profile_valid_logged(self, project_dir, monkeypatch, capsys):
-        monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
-                            lambda: project_dir)
-        monkeypatch.setattr('storyforge.elaborate.validate_structure',
-                            lambda ref_dir: _passing_structural())
-        monkeypatch.setattr('storyforge.schema.validate_schema',
-                            lambda ref_dir, project_dir=None: _passing_schema())
+        output = self._run(project_dir, monkeypatch, capsys)
+        assert 'Voice profile: 1 issues' in output
         monkeypatch.setattr('storyforge.schema.validate_voice_profile',
                             lambda pd: _no_errors_voice_profile())
-        with pytest.raises(SystemExit):
-            main([])
-        output = capsys.readouterr().out
-        assert 'Voice profile' in output or '3 characters' in output
+        output = self._run(project_dir, monkeypatch, capsys)
+        assert 'Voice profile: valid (3 characters)' in output
 
 
 # ============================================================================

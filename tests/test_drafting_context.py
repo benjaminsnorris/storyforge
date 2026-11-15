@@ -13,12 +13,13 @@ import pytest
 
 from storyforge.common import (
     PROJECT_TITLE, ReferenceDocError, get_plugin_dir, is_unfilled_template,
-    resolve_voice_guide,
 )
+from storyforge.voice_book import resolve as resolve_voice
 
 TEMPLATES = os.path.join(get_plugin_dir(), 'templates', 'reference')
 KD_MARK = 'KD-001: Magic System'          # the fixture's key decisions
-VG_MARK = 'Narrative Voice'               # the fixture's voice guide
+VG_MARK = 'Measures before it feels'      # the fixture's reference/voice/book.md
+ANCHOR_MARK = 'The village was not there'  # its anchor
 
 
 def _template(project_dir, name, title=None):
@@ -63,10 +64,10 @@ def test_briefs_prompt_carries_key_decisions(project_dir, system_context):
     prompt = _briefs_prompt(project_dir, system_context=system_context)
     assert '## Key Decisions' in prompt
     assert KD_MARK in prompt
-    # before the voice guide, after the brief
+    # before the voice, after the brief
     assert prompt.index('## Scene Brief') < prompt.index('## Key Decisions')
     if not system_context:
-        assert prompt.index('## Key Decisions') < prompt.index('## Voice Guide')
+        assert prompt.index('## Key Decisions') < prompt.index('## The Voice')
 
 
 @pytest.mark.parametrize('system_context', [False, True])
@@ -112,18 +113,44 @@ def test_write_dry_run_prints_key_decisions(project_dir, capsys, monkeypatch):
     assert '## Key Decisions' in text and KD_MARK in text
 
 
-# --- part 3: no template voice guide (or bible) in the scene prompt ---
 
-def test_briefs_prompt_leaves_out_template_voice_guide(project_dir):
-    _template(project_dir, 'voice-guide.md')
+# --- the voice (reference/voice/) in the scene prompts ---
+
+VOICE_TEMPLATES = os.path.join(get_plugin_dir(), 'templates')
+
+
+def _book(project_dir):
+    return os.path.join(project_dir, 'reference', 'voice', 'book.md')
+
+
+def _anchors(project_dir):
+    return os.path.join(project_dir, 'reference', 'voice', 'anchors')
+
+
+def _template_book(project_dir):
+    """Reset reference/voice/book.md to init's template."""
+    with open(os.path.join(VOICE_TEMPLATES, 'reference', 'voice', 'book.md'),
+              encoding='utf-8') as f:
+        _write_file(_book(project_dir), f.read())
+
+
+def _no_anchors(project_dir):
+    import shutil
+    shutil.rmtree(_anchors(project_dir))
+
+
+def test_briefs_prompt_leaves_out_a_template_voice(project_dir):
+    _template_book(project_dir)
     prompt = _briefs_prompt(project_dir)
-    assert '## Voice Guide' not in prompt
-    assert '[Title] -- Voice Guide' not in prompt
+    assert '## The Voice' not in prompt
+    assert 'What the voice does, said by quoting the anchors' not in prompt
 
 
-def test_briefs_prompt_keeps_a_filled_voice_guide(project_dir):
+def test_briefs_prompt_carries_the_voice_never_its_checks(project_dir):
     prompt = _briefs_prompt(project_dir)
-    assert '## Voice Guide' in prompt and VG_MARK in prompt
+    assert '## The Voice' in prompt and VG_MARK in prompt and ANCHOR_MARK in prompt
+    assert 'kind: quiet, realization; POV: Dorren Hayle' in prompt
+    assert 'Her heart pounded in her chest' not in prompt  # checks.md
 
 
 def test_briefs_prompt_leaves_out_template_character_bible(project_dir):
@@ -131,53 +158,64 @@ def test_briefs_prompt_leaves_out_template_character_bible(project_dir):
     assert '## Character Bible' not in _briefs_prompt(project_dir)
 
 
-def test_legacy_prompt_inlines_no_template(project_dir):
+def test_legacy_prompt_inlines_the_voice_and_lists_no_voice_file(project_dir):
     from storyforge.prompts import build_scene_prompt
-    _template(project_dir, 'voice-guide.md')
     prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
-    assert '=== FILE: reference/voice-guide.md ===' not in prompt
+    assert VG_MARK in prompt and ANCHOR_MARK in prompt
+    assert 'reference/voice/' not in prompt.split('## The Voice')[0]
     assert '=== FILE: reference/key-decisions.md ===' in prompt
-    assert 'Pay special attention to the voice guide' not in prompt
     listed = build_scene_prompt('act1-sc01', project_dir, api_mode=False)
-    assert 'reference/voice-guide.md' not in listed
+    assert 'reference/voice/checks.md' not in listed
+    assert 'Her heart pounded in her chest' not in listed + prompt
 
 
-def test_revision_prompt_inlines_no_template_voice_guide(project_dir):
+def test_legacy_prompt_lists_no_old_voice_file(project_dir):
+    from storyforge.prompts import list_reference_files
+    _write_file(os.path.join(project_dir, 'reference', 'voice-guide.md'), 'Old guide.\n')
+    _write_file(os.path.join(project_dir, 'reference', 'exemplars', 'dorren.md'), 'Old.\n')
+    listed = list_reference_files(project_dir)
+    assert not [f for f in listed if 'voice' in f or 'exemplars' in f]
+
+
+def test_revision_prompt_carries_the_voice_never_its_checks(project_dir):
     from storyforge.revision import build_revision_prompt
-    _template(project_dir, 'voice-guide.md')
     prompt = build_revision_prompt('prose', 'Tighten', 'act1-sc01', project_dir, api_mode=True)
-    assert '=== FILE: reference/voice-guide.md ===' not in prompt
+    assert VG_MARK in prompt and 'Her heart pounded in her chest' not in prompt
+    _template_book(project_dir)
+    prompt = build_revision_prompt('prose', 'Tighten', 'act1-sc01', project_dir, api_mode=True)
+    assert VG_MARK not in prompt
 
 
 def test_reference_text_reads_no_template(project_dir):
     # TD-4: the prompt readers (hone, script-package, revision, evaluate,
     # the recommend step) all read through it
     from storyforge.common import reference_text
-    path = os.path.join(project_dir, 'reference', 'voice-guide.md')
-    assert VG_MARK in reference_text(path)
-    _template(project_dir, 'voice-guide.md')
+    path = os.path.join(project_dir, 'reference', 'key-decisions.md')
+    assert KD_MARK in reference_text(path)
+    _template(project_dir, 'key-decisions.md', title='X')
     assert reference_text(path) == ''
     assert reference_text(os.path.join(project_dir, 'reference', 'missing.md')) == ''
 
 
-def test_evaluate_skips_template_voice_guide_and_says_so(project_dir, capsys):
-    from storyforge.cmd_evaluate import _build_assessment_prompt, _resolve_voice_guide
-    _template(project_dir, 'voice-guide.md')
+def test_evaluate_without_a_voice_says_so(project_dir, capsys):
+    from storyforge.cmd_evaluate import _build_assessment_prompt, _resolve_voice
+    _template_book(project_dir)
     _template(project_dir, 'key-decisions.md', title='X')
-    assert _resolve_voice_guide(project_dir) == (None, '')
+    assert _resolve_voice(project_dir) == (None, '')
     out = capsys.readouterr()
-    assert "voice-guide.md is still init's template" in out.out + out.err
+    assert "reference/voice/book.md is still init's template" in out.out + out.err
     prompt, count = _build_assessment_prompt(project_dir, 'eval', 'ts', 'all', 'T', 'g',
                                              False, True)
     assert prompt is None and count == 0
 
 
-def test_script_package_reads_no_template(project_dir):
-    from storyforge.cmd_script_package import _read_optional
-    path = os.path.join(project_dir, 'reference', 'voice-guide.md')
-    assert VG_MARK in _read_optional(path)
-    _template(project_dir, 'voice-guide.md')
-    assert _read_optional(path) == ''
+def test_evaluate_assessment_carries_the_voice(project_dir):
+    from storyforge.cmd_evaluate import _build_assessment_prompt, _resolve_voice
+    path, text = _resolve_voice(project_dir)
+    assert path == 'reference/voice' and VG_MARK in text
+    prompt, _count = _build_assessment_prompt(project_dir, 'eval', 'ts', 'all', 'T', 'g',
+                                              False, True)
+    assert '## Voice Alignment' in prompt and VG_MARK in prompt
 
 
 def test_recommend_step_leaves_out_template_key_decisions(project_dir, monkeypatch):
@@ -210,11 +248,8 @@ def test_gn_drafting_prompt_carries_key_decisions(project_dir_gn):
     assert _build_visual_refs(project_dir_gn)[0] == ''
 
 
-# --- one voice guide resolver (CR-1/TD-1/TD-2) ---
 
-def _vg(project_dir):
-    return os.path.join(project_dir, 'reference', 'voice-guide.md')
-
+# --- one voice resolver (`voice_book.resolve`) ---
 
 def _write_file(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -223,103 +258,93 @@ def _write_file(path, data):
         f.write(data)
 
 
-def _yaml_voice_path(project_dir, rel):
-    path = os.path.join(project_dir, 'storyforge.yaml')
-    with open(path, encoding='utf-8') as f:
-        text = f.read()
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(text + f'\nreference:\n  voice_guide: {rel}\n')
-
-
 def test_resolver_kinds(project_dir):
-    assert resolve_voice_guide(project_dir).kind == 'ok'
-    _template(project_dir, 'voice-guide.md')
-    v = resolve_voice_guide(project_dir)
-    assert (v.kind, v.detail) == ('template', "reference/voice-guide.md is still init's template")
-    _write_file(_vg(project_dir), '  \n')
-    assert resolve_voice_guide(project_dir).kind == 'empty'
-    _write_file(_vg(project_dir), b'\xff\xfe bad bytes')
-    v = resolve_voice_guide(project_dir)
-    assert v.kind == 'unreadable' and "can't read reference/voice-guide.md" in v.detail
-    os.remove(_vg(project_dir))
-    assert resolve_voice_guide(project_dir).kind == 'missing'
+    v = resolve_voice(project_dir)
+    assert (v.kind, v.path) == ('ok', 'reference/voice') and VG_MARK in v.text
+    _template_book(project_dir)
+    v = resolve_voice(project_dir)
+    assert (v.kind, v.detail) == ('template', "reference/voice/book.md is still init's template")
+    _write_file(_book(project_dir), '  \n')
+    assert resolve_voice(project_dir).kind == 'empty'
+    _write_file(_book(project_dir), b'\xff\xfe bad bytes')
+    v = resolve_voice(project_dir)
+    assert v.kind == 'unreadable' and "can't read reference/voice/book.md" in v.detail
+    os.remove(_book(project_dir))
+    _no_anchors(project_dir)
+    assert resolve_voice(project_dir).kind == 'missing'
 
 
-def test_resolver_honours_the_yaml_path_and_passes_a_template(project_dir):
-    # status, write and the prompt follow the same file (CR-1)
-    _template(project_dir, 'voice-guide.md')
-    _write_file(os.path.join(project_dir, 'docs', 'voice.md'), '# Voice\n\nTerse.\n')
-    _yaml_voice_path(project_dir, 'docs/voice.md')
-    v = resolve_voice_guide(project_dir)
-    assert (v.kind, v.path, v.text) == ('ok', 'docs/voice.md', '# Voice\n\nTerse.')
-    assert '## Voice Guide\n\n# Voice\n\nTerse.' in _briefs_prompt(project_dir)
+def test_resolver_needs_an_anchor_beside_book_md(project_dir):
+    _no_anchors(project_dir)
+    v = resolve_voice(project_dir)
+    assert (v.kind, v.detail) == ('empty', 'reference/voice/anchors/ holds no anchor passage')
 
 
-def test_persistent_prompt_counts_only_for_the_prompt_that_reads_it(project_dir):
-    os.remove(_vg(project_dir))
-    _write_file(os.path.join(project_dir, 'reference', 'persistent-prompt.md'), 'Old voice.\n')
-    assert resolve_voice_guide(project_dir).kind == 'unread'
-    v = resolve_voice_guide(project_dir, briefs=False)
-    assert (v.kind, v.path) == ('ok', 'reference/persistent-prompt.md')
+def test_old_voice_files_are_not_read(project_dir):
+    import shutil
+    shutil.rmtree(os.path.join(project_dir, 'reference', 'voice'))
+    _write_file(os.path.join(project_dir, 'reference', 'voice-guide.md'), '# Voice\n\nOld.\n')
+    _write_file(os.path.join(project_dir, 'reference', 'persistent-prompt.md'), 'Old.\n')
+    assert resolve_voice(project_dir).kind == 'missing'
+    assert '# Voice\n\nOld.' not in _briefs_prompt(project_dir)
 
 
-def test_evaluate_moves_past_a_template_to_the_next_candidate(project_dir, capsys):
-    # T-3: a template is passed over and said; the later file is used
-    from storyforge.cmd_evaluate import _resolve_voice_guide
-    _template(project_dir, 'voice-guide.md')
-    _write_file(os.path.join(project_dir, 'reference', 'persistent-prompt.md'), 'Old voice.\n')
-    path, text = _resolve_voice_guide(project_dir)
-    assert path.endswith('reference/persistent-prompt.md') and text == 'Old voice.'
-    out = capsys.readouterr()
-    assert "reference/voice-guide.md is still init's template; left out" in out.out + out.err
-
-
-# --- T-1 / SF-1: an unreadable voice guide or key decisions fails loudly ---
+# --- T-1 / SF-1: an unreadable voice or key decisions fails loudly ---
 
 BAD = b'\xff\xfe not utf-8'
 
 
-@pytest.mark.parametrize('name', ['voice-guide.md', 'key-decisions.md'])
+def _bad(project_dir, name):
+    rel = 'voice/book.md' if name == 'book.md' else name
+    _write_file(os.path.join(project_dir, 'reference', rel), BAD)
+
+
+@pytest.mark.parametrize('name', ['book.md', 'key-decisions.md'])
 @pytest.mark.parametrize('system_context', [False, True])
 def test_unreadable_doc_raises_from_the_briefs_prompt(project_dir, name, system_context):
-    _write_file(os.path.join(project_dir, 'reference', name), BAD)
-    if name == 'voice-guide.md' and system_context:
-        # the system context carries the voice guide; write stops before this
+    _bad(project_dir, name)
+    if name == 'book.md' and system_context:
+        # the system context carries the voice; write stops before this
         _briefs_prompt(project_dir, system_context=True)
         return
     with pytest.raises(ReferenceDocError, match=name):
         _briefs_prompt(project_dir, system_context=system_context)
 
 
-@pytest.mark.parametrize('name', ['voice-guide.md', 'key-decisions.md'])
-@pytest.mark.parametrize('system_context', [False, True])
-def test_unreadable_doc_raises_from_the_legacy_prompt(project_dir, name, system_context):
+@pytest.mark.parametrize('name', ['book.md', 'key-decisions.md'])
+def test_unreadable_doc_raises_from_the_legacy_prompt(project_dir, name):
     from storyforge.prompts import build_scene_prompt
-    _write_file(os.path.join(project_dir, 'reference', name), BAD)
+    _bad(project_dir, name)
     with pytest.raises(ReferenceDocError, match=name):
-        build_scene_prompt('act1-sc01', project_dir, api_mode=True,
-                           system_context=system_context)
+        build_scene_prompt('act1-sc01', project_dir, api_mode=True)
 
 
-@pytest.mark.parametrize('name', ['voice-guide.md', 'key-decisions.md'])
+def test_unreadable_anchor_raises(project_dir):
+    _write_file(os.path.join(_anchors(project_dir), 'bad.md'), BAD)
+    with pytest.raises(ReferenceDocError, match='bad.md'):
+        _briefs_prompt(project_dir)
+
+
+@pytest.mark.parametrize('name', ['book.md', 'key-decisions.md'])
 @pytest.mark.parametrize('dry_run', [False, True])
 @pytest.mark.parametrize('coaching', ['full', 'coach'])
 def test_write_stops_on_an_unreadable_doc(project_dir, capsys, name, dry_run, coaching):
     code, text = _check(project_dir, capsys, coaching=coaching, dry_run=dry_run,
-                        setup=lambda: _write_file(os.path.join(project_dir, 'reference', name), BAD))
+                        setup=lambda: _bad(project_dir, name))
     assert code == 1
-    assert f"ERROR: can't read reference/{name}" in text
+    assert "ERROR: can't read reference/" in text and name in text
 
 
 def test_dispatcher_turns_an_unreadable_doc_into_exit_1(project_dir, monkeypatch, capsys):
     from storyforge import __main__ as dispatch
     from storyforge.cmd_script_package import _read_optional
-    _write_file(_vg(project_dir), BAD)
+    path = os.path.join(project_dir, 'reference', 'key-decisions.md')
+    _write_file(path, BAD)
 
     class Module:
         @staticmethod
         def main(argv):
-            _read_optional(_vg(project_dir))
+            _read_optional(path)
     monkeypatch.setattr(dispatch.sys, 'argv', ['storyforge', 'script-package'])
     with pytest.raises(SystemExit) as e:
         dispatch._dispatch(Module)
@@ -327,19 +352,16 @@ def test_dispatcher_turns_an_unreadable_doc_into_exit_1(project_dir, monkeypatch
     assert "ERROR: can't read" in capsys.readouterr().err
 
 
-def test_script_package_and_evaluate_fail_on_unreadable(project_dir, capsys):
-    from storyforge.cmd_evaluate import _resolve_voice_guide
-    from storyforge.cmd_script_package import _read_optional
-    _write_file(_vg(project_dir), BAD)
-    with pytest.raises(ReferenceDocError, match='voice-guide.md'):
-        _read_optional(_vg(project_dir))
+def test_evaluate_fails_on_an_unreadable_voice(project_dir, capsys):
+    from storyforge.cmd_evaluate import _resolve_voice
+    _bad(project_dir, 'book.md')
     with pytest.raises(SystemExit):
-        _resolve_voice_guide(project_dir)
+        _resolve_voice(project_dir)
     out = capsys.readouterr()
-    assert "ERROR: can't read reference/voice-guide.md" in out.out + out.err
+    assert "ERROR: can't read reference/voice/book.md" in out.out + out.err
 
 
-# --- T-2 / SF-2: write's voice guide verdicts ---
+# --- T-2 / SF-2: write's voice verdicts ---
 
 def _check(project_dir, capsys, briefs=True, coaching='full', dry_run=False, setup=None):
     from storyforge.cmd_write import _check_reference_docs
@@ -347,32 +369,36 @@ def _check(project_dir, capsys, briefs=True, coaching='full', dry_run=False, set
         setup()
     code = None
     try:
-        _check_reference_docs(project_dir, briefs, coaching, dry_run)
+        _check_reference_docs(project_dir, coaching, dry_run)
     except SystemExit as e:
         code = e.code
     out = capsys.readouterr()
     return code, out.out + out.err
 
 
-def test_write_with_a_voice_guide_goes_on(project_dir, capsys):
+def test_write_with_a_voice_goes_on(project_dir, capsys):
     code, text = _check(project_dir, capsys)
-    assert code is None and 'WARNING' not in text
-    assert 'Voice guide: reference/voice-guide.md' in text
+    assert code is None and 'WARNING' not in text and 'NOTE: reference/' not in text
+    assert 'Voice: reference/voice' in text
 
 
-def _only_persistent_prompt(pd):
-    os.remove(_vg(pd))
-    _write_file(os.path.join(pd, 'reference', 'persistent-prompt.md'), 'Old.\n')
+def test_write_notes_old_voice_files(project_dir, capsys):
+    _write_file(os.path.join(project_dir, 'reference', 'voice-guide.md'), 'Old.\n')
+    _write_file(os.path.join(project_dir, 'reference', 'voice-profile.csv'), 'character\n')
+    code, text = _check(project_dir, capsys)
+    assert code is None
+    assert ('NOTE: reference/voice-guide.md, reference/voice-profile.csv are no longer read'
+            in text)
+    assert os.path.isfile(os.path.join(project_dir, 'reference', 'voice-guide.md'))
 
 
 @pytest.mark.parametrize('setup, detail', [
-    (lambda pd: _template(pd, 'voice-guide.md'), "reference/voice-guide.md is still init's template"),
-    (lambda pd: _write_file(_vg(pd), '\n'), 'reference/voice-guide.md is empty'),
-    (lambda pd: os.remove(_vg(pd)), 'reference/voice-guide.md is missing'),
-    (_only_persistent_prompt,
-     'only reference/persistent-prompt.md, which the brief-based drafting prompt does not read'),
+    (_template_book, "reference/voice/book.md is still init's template"),
+    (lambda pd: _write_file(_book(pd), '\n'), 'reference/voice/book.md is missing or empty'),
+    (_no_anchors, 'reference/voice/anchors/ holds no anchor passage'),
+    (lambda pd: (os.remove(_book(pd)), _no_anchors(pd)), 'reference/voice/ has no voice yet'),
 ])
-def test_write_refuses_to_draft_without_a_voice_guide(project_dir, capsys, setup, detail):
+def test_write_refuses_to_draft_without_a_voice(project_dir, capsys, setup, detail):
     setup(project_dir)
     code, text = _check(project_dir, capsys)
     assert code == 1
@@ -385,30 +411,13 @@ def test_write_refuses_to_draft_without_a_voice_guide(project_dir, capsys, setup
     assert code is None and 'coach coaching writes no prose' in text
 
 
-def test_write_without_briefs_reads_persistent_prompt(project_dir, capsys):
-    _only_persistent_prompt(project_dir)
-    code, text = _check(project_dir, capsys, briefs=False)
-    assert code is None and 'Voice guide: reference/persistent-prompt.md' in text
-
-
-def test_write_says_a_passed_over_template(project_dir, capsys):
-    # the fixture's artifacts.voice_guide.path (reference/voice-guide.md) is
-    # the template, so the older reference.voice_guide key's file is used
-    _template(project_dir, 'voice-guide.md')
-    _write_file(os.path.join(project_dir, 'docs', 'voice.md'), 'Terse.\n')
-    _yaml_voice_path(project_dir, 'docs/voice.md')
-    code, text = _check(project_dir, capsys)
-    assert code is None
-    assert "WARNING: reference/voice-guide.md is still init's template; passed over" in text
-    assert 'Voice guide: docs/voice.md' in text
-
-
 def test_read_artifact_field(project_dir, tmp_path):
     from storyforge.common import read_artifact_field
-    assert read_artifact_field(project_dir, 'voice_guide', 'path') == 'reference/voice-guide.md'
-    assert read_artifact_field(project_dir, 'voice_guide', 'nope') == ''
+    assert read_artifact_field(project_dir, 'character_bible', 'path') == \
+        'reference/character-bible.md'
+    assert read_artifact_field(project_dir, 'character_bible', 'nope') == ''
     assert read_artifact_field(project_dir, 'no_such_artifact', 'path') == ''
-    assert read_artifact_field(str(tmp_path), 'voice_guide', 'path') == ''
+    assert read_artifact_field(str(tmp_path), 'character_bible', 'path') == ''
 
 
 # --- SF-4: key decisions left out are said ---
@@ -445,43 +454,41 @@ def test_rules_are_given_in_full_when_key_decisions_are_left_out(project_dir, mo
     assert 'RULE-TEXT' in block and 'in Key Decisions' not in block
 
 
-# --- SF-3: revise without a voice guide says so, in the prompt and to the author ---
+# --- SF-3: revise without a voice says so, in the prompt and to the author ---
 
 @pytest.mark.parametrize('api_mode', [True, False])
-def test_revision_prompt_without_a_voice_guide_says_where_voice_comes_from(project_dir, api_mode):
+def test_revision_prompt_without_a_voice_says_where_voice_comes_from(project_dir, api_mode):
     from storyforge.revision import build_revision_prompt
     prompt = build_revision_prompt('prose', 'Tighten', 'act1-sc01', project_dir, api_mode=api_mode)
-    assert '## No Voice Guide' not in prompt
-    _template(project_dir, 'voice-guide.md')
+    assert '## No Voice Yet' not in prompt
+    _template_book(project_dir)
     prompt = build_revision_prompt('prose', 'Tighten', 'act1-sc01', project_dir, api_mode=api_mode)
-    assert '## No Voice Guide' in prompt
-    assert "take the voice from the book's existing scenes" in prompt
-    assert '`reference/voice-guide.md`' not in prompt
+    assert '## No Voice Yet' in prompt
+    assert "take it from the book's existing scenes" in prompt
+    assert 'reference/voice/book.md`' not in prompt
 
 
-def test_revise_warns_without_a_voice_guide(project_dir, capsys):
+def test_revise_warns_without_a_voice(project_dir, capsys):
     from storyforge.cmd_revise import _note_reference_docs
     _note_reference_docs(project_dir)
     out = capsys.readouterr()
     assert 'WARNING' not in out.out + out.err
-    _template(project_dir, 'voice-guide.md')
+    _template_book(project_dir)
     _note_reference_docs(project_dir)
     out = capsys.readouterr()
-    assert ("WARNING: reference/voice-guide.md is still init's template: the revision "
-            'prompts have no voice guide') in out.out + out.err
+    assert ("WARNING: reference/voice/book.md is still init's template: the revision "
+            'prompts have no voice') in out.out + out.err
 
 
-def test_shared_context_follows_the_resolved_voice_guide(project_dir):
+def test_shared_context_carries_the_voice_never_its_checks(project_dir):
     from storyforge.common import _shared_context_cache, build_shared_context
-    _template(project_dir, 'voice-guide.md')
-    _write_file(os.path.join(project_dir, 'docs', 'voice.md'), '# Voice\n\nTerse.\n')
-    _yaml_voice_path(project_dir, 'docs/voice.md')
     _shared_context_cache.clear()
     try:
         text = '\n'.join(b['text'] for b in build_shared_context(project_dir))
     finally:
         _shared_context_cache.clear()
-    assert '=== Voice Guide ===\n\n# Voice\n\nTerse.' in text
+    assert '=== The Voice ===' in text and VG_MARK in text and ANCHOR_MARK in text
+    assert 'Her heart pounded in her chest' not in text
 
 
 # --- T-4 / T-5: is_unfilled_template edge cases ---
@@ -541,7 +548,8 @@ def test_rules_block_callers_carry_key_decisions():
                        'briefs_section', 'drafting_section'}
     builders = {n for n, t in sources.items() if n != 'prompts_source.py'
                 and any(re.search(rf'\b{fn}\(', t) for fn in calling)}
-    assert builders == {'prompts_elaborate.py', 'prompts.py'}
+    assert builders == {'prompts_elaborate.py', 'prompts.py', 'session.py'}
     assert "('key-decisions.md', 'Key Decisions', False)" in sources['prompts_elaborate.py']
     assert "reference_doc(project_dir, 'key-decisions.md')" in sources['prompts.py']
+    assert "reference_doc(project_dir, 'key-decisions.md')" in sources['session.py']
 

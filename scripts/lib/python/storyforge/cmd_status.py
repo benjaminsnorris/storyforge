@@ -52,6 +52,8 @@ def render_human(verdict: dict) -> str:
             lines.append(f"  [{b['source']}] {b['detail']}")
     else:
         lines.append('BLOCKERS: none')
+    for note in verdict.get('notes') or []:
+        lines.append(f'NOTE: {note}')
     every = verdict.get('advisory') or []
     craft = [a for a in every if a['source'] == CRAFT_ADVISORY_SOURCE]
     advisory = [a for a in every if a['source'] != CRAFT_ADVISORY_SOURCE]

@@ -1984,7 +1984,7 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
     what phases 0-4 found: 5a (structure), 5b (themes and motifs), 5c
     (story summary and story architecture), 5d (character bible), 5e
-    (world and systems bibles), 5f (voice guide and profile) and 5g
+    (world and systems bibles), 5f (the voice: book.md and anchors) and 5g
     (timeline and chapter map, no model); `extract_describe` holds them and
     the write gate. Returns whether any
     step wrote.
@@ -2054,7 +2054,7 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
                            ('story summary and architecture', describe.run_pitch),
                            ('character bible', describe.run_characters),
                            ('world and systems bibles', describe.run_world),
-                           ('voice guide', describe.run_voice),
+                           ('voice', describe.run_voice),
                            ('timeline and chapter map', describe.run_timeline)):
             stopped = [n for n, outcome in outcomes.items() if outcome == 'partial']
             if stopped:
