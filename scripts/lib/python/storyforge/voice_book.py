@@ -60,8 +60,8 @@ TENSES = ('present', 'past')
 
 #: what makes the voice, named wherever its absence is reported
 REMEDY = (f'put at least one passage you chose or finished by hand in {ANCHORS_DIR}/ '
-          f'and say what it does in {BOOK_FILE} (references/voice-folder.md; the '
-          f'elaborate skill\'s voice stage runs sample rounds to find one)')
+          f'and say what it does in {BOOK_FILE} (references/voice-folder.md; '
+          f'`storyforge voice sample --scene <id>` runs blind sample rounds to find one)')
 
 #: the pipeline's voice files, no longer written or read: (path, what it was)
 OLD_FILES = (

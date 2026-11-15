@@ -124,6 +124,40 @@ def parse_args(argv):
                           'column once accepted')
     acc.add_argument('--force', action='store_true',
                      help='With --auto-pick, replace picks already in the shortlist')
+    samp = sub.add_parser('sample', help='In a book: a round of blind voice samples of one '
+                                          'scene, as a PR to mark; a take on a marked sample; '
+                                          'or a winner saved as an anchor (#654)')
+    samp.add_argument('--scene', help='The scene to write several ways')
+    samp.add_argument('--variants', type=int, default=5,
+                      help='How many versions in a round (default 5)')
+    from storyforge.voice_sample import DEFAULT_VARY
+    samp.add_argument('--vary', default=', '.join(DEFAULT_VARY),
+                      help='What the versions vary, comma-separated (default: narrator '
+                           'stance, distance, tense)')
+    samp.add_argument('--influences', default=None,
+                      help='Writers to blend, e.g. "Pressfield, Renault" (a later round '
+                           'takes the last round\'s unless given)')
+    samp.add_argument('--from-pr', type=int, metavar='N',
+                      help='The marked round\'s PR: the next round writes toward its marks')
+    samp.add_argument('--take', metavar='LABEL',
+                      help='With --from-pr: revise this sample toward its marks')
+    samp.add_argument('--versions', metavar='"A;B"',
+                      help='With --take: the versions, which differ only in this '
+                           '(e.g. "present tense;past tense")')
+    samp.add_argument('--promote', metavar='ROUND_FILE',
+                      help='Save a sample of this round file as an anchor (with --sample, '
+                           '--name)')
+    samp.add_argument('--sample', metavar='LABEL', help='With --promote: which sample')
+    samp.add_argument('--name', help='With --promote: the anchor\'s file name')
+    samp.add_argument('--kind', default='', help='With --promote: the anchor\'s kind:')
+    samp.add_argument('--tense', default='', help='With --promote: the anchor\'s tense:')
+    samp.add_argument('--pov', default='', help='With --promote: the anchor\'s pov:')
+    samp.add_argument('--force', action='store_true',
+                      help='With --promote: replace an anchor of that name')
+    samp.add_argument('--no-pr', action='store_true',
+                      help='Write and commit the round, open no PR')
+    samp.add_argument('--dry-run', action='store_true',
+                      help='Say what the round would do and cost; spend nothing')
     return parser.parse_args(argv)
 
 
@@ -132,6 +166,8 @@ def main(argv=None):
     install_signal_handlers()
     from storyforge import voice_repo as vr
     from storyforge import voiceprint_proposals as vpp
+    if args.action == 'sample':
+        return _sample(args)
     voice_dir = os.path.abspath(args.dir)
     try:
         if args.action == 'init':
@@ -447,3 +483,122 @@ def _accept(voice_dir: str, args) -> int:
             log(f'ERROR: {e}')
             status = 1
     return status
+
+
+def _sample(args) -> int:
+    """`voice sample`, in a book (#654, `storyforge.voice_sample`)."""
+    from storyforge import git, pr_marks, voice_sample as vs
+    from storyforge.common import ReferenceDocError, detect_project_root, select_model
+    project_dir = detect_project_root()
+    try:
+        if args.promote:
+            if not (args.sample and args.name):
+                log('ERROR: --promote takes --sample and --name')
+                return 1
+            rel = vs.promote(project_dir, args.promote, args.sample, args.name,
+                             kind=args.kind, tense=args.tense, pov=args.pov, force=args.force,
+                             dry_run=args.dry_run)
+            if args.dry_run:
+                log(f'Dry run: would save {rel}')
+                return 0
+            if not git.commit_and_push(project_dir, f'Voice: anchor {args.name} from '
+                                       f'{os.path.basename(args.promote)} sample {args.sample}',
+                                       [rel.replace(os.sep, '/')]) \
+                    and git.last_commit_error != git.NOTHING_TO_COMMIT:
+                log(f'ERROR: {rel} is written but not committed ({git.last_commit_error})')
+                return 1
+            log(f'Saved {rel}. Say what it does in reference/voice/book.md, quoting it.')
+            return 0
+        if args.take and not args.from_pr:
+            log('ERROR: --take revises a marked sample: give the round\'s PR with --from-pr')
+            return 1
+        prev_key: dict = {}
+        marked = ''
+        scene = args.scene
+        notes: list[str] = []
+        if args.from_pr:
+            prev = vs.next_round_number(project_dir) - 1
+            if prev < 1:
+                log('ERROR: --from-pr: there is no earlier round in working/voice-samples/')
+                return 1
+            rel = vs.round_rel(prev)
+            with open(os.path.join(project_dir, rel), encoding='utf-8') as f:
+                round_text = f.read()
+            if rel.replace(os.sep, '/') not in pr_marks.files(args.from_pr, project_dir):
+                log(f'ERROR: PR #{args.from_pr} doesn\'t change {rel}, the latest round: give '
+                    f'the PR that holds it')
+                return 1
+            prs = pr_marks.fetch(args.from_pr, project_dir)
+            marks, notes = vs.marks_for_round(prs, round_text, rel)
+            prev_key = vs.load_key(project_dir, prev)
+            if not prev_key:
+                notes.append(f'round {prev}\'s key isn\'t on this machine '
+                             f'({vs.key_path(project_dir, prev)}): the writer gets the marks '
+                             f'without what each sample tried')
+            samples = vs.parse_round(round_text)
+            if args.take:
+                if args.take not in samples:
+                    log(f'ERROR: round {prev} has no sample {args.take!r}')
+                    return 1
+                samples = {args.take: samples[args.take]}
+            marked = vs.describe_marks(samples, marks, prev_key, prs.general)
+            scene = scene or prev_key.get('scene')
+            counted = sum(len(m.marks) + len(m.suggestions) for m in marks.values())
+            log(f'Round {prev}: {counted} mark(s) on {len(samples)} sample(s), '
+                f'{len(prs.general)} general reaction(s), from PR #{args.from_pr}')
+        if not scene:
+            log('ERROR: name the scene (--scene); a later round takes it from the last '
+                'round\'s key, which isn\'t on this machine')
+            return 1
+        for note in notes:
+            log(f'NOTE: {note}')
+        n = vs.next_round_number(project_dir)
+        influences = args.influences if args.influences is not None else \
+            prev_key.get('influences', '')
+        log(f'Round {n}: {scene}, '
+            + (f'a take on sample {args.take}' if args.take else f'{args.variants} versions'))
+        if args.dry_run:
+            log('Dry run: one call writes the round (~$1), then each sample gets the '
+                'physical check and the voice review (~$0.30 each); nothing written.')
+            return 0
+        if not os.environ.get('ANTHROPIC_API_KEY'):
+            log('ERROR: ANTHROPIC_API_KEY not set; nothing was written.')
+            return 1
+        git.create_branch(f'voice-sample-round{n}', project_dir)
+        model = select_model('creative')
+        log_dir = os.path.join(project_dir, 'working', 'logs', 'voice-sample')
+        if args.take:
+            versions = [v.strip() for v in (args.versions or '').split(';') if v.strip()]
+            rnd = vs.write_take(project_dir, scene, sample=args.take, marked=marked,
+                                versions=versions, model=model, log_dir=log_dir)
+        else:
+            rnd = vs.write_round(project_dir, scene, variants=args.variants,
+                                 vary=[v.strip() for v in args.vary.split(',') if v.strip()],
+                                 influences=influences, model=model, log_dir=log_dir,
+                                 marked=marked, previous=prev_key)
+    except (vs.SampleError, pr_marks.PrMarksError, ReferenceDocError, OSError) as e:
+        log(f'ERROR: {e}')
+        return 1
+    rel = vs.round_rel(rnd.number)
+    with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
+        f.write(rnd.text)
+    key = vs.save_key(project_dir, rnd.number, rnd.key)
+    log(f'Round {rnd.number}: {rel}; the key (outside the repo): {key}')
+    for note in rnd.notes:
+        log(f'  {note}')
+    if not git.commit_and_push(project_dir, f'Voice: round {rnd.number} samples of {scene}',
+                               [rel.replace(os.sep, '/')]):
+        log(f'ERROR: {rel} is written but not committed ({git.last_commit_error})')
+        return 1
+    if args.no_pr:
+        return 0
+    body = (f'Voice samples, round {rnd.number}: `{rel}`.\n\n'
+            f'Mark sentences in **Files changed**: keep, cut, more like this, or your own '
+            f'wording as a suggestion. When you\'re done, the next round is `storyforge '
+            f'voice sample --from-pr <this PR>`, a take on one sample `--from-pr <this PR> '
+            f'--take <label> --versions "a;b"`, and a winner `--promote {rel} --sample '
+            f'<label> --name <name>`.\n'
+            + ('\n## Checked before you see it\n\n' + '\n'.join(f'- {x}' for x in rnd.notes)
+               if rnd.notes else ''))
+    git.create_draft_pr(f'Voice: round {rnd.number} samples of {scene}', body, project_dir)
+    return 0
