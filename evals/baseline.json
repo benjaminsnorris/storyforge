@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 3108,
-    "input_tokens": 13041233,
-    "output_tokens": 4452168,
-    "replayed_calls": 3108,
+    "calls": 3112,
+    "input_tokens": 13060458,
+    "output_tokens": 4445011,
+    "replayed_calls": 3112,
     "unpriced_calls": 0,
-    "usd_if_live": 35.1429,
+    "usd_if_live": 35.0101,
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "0009da6a00f9ad041d1757e46e2c6febd270d988",
+  "git_sha": "1d2388c4fd97aeb88f03af03d5c16d88494d6754",
   "mode": "replay",
   "results": [
     {
@@ -24,7 +24,7 @@
         "usd_spent": 0.0
       },
       "description": "Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; private set",
-      "duration_s": 0.44,
+      "duration_s": 0.36,
       "error": null,
       "frozen": true,
       "gates": [
@@ -185,7 +185,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:32:35+00:00",
+      "started_at": "2026-11-15T16:20:11+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
@@ -201,7 +201,7 @@
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 2.25,
+      "duration_s": 1.99,
       "error": null,
       "frozen": true,
       "gates": [
@@ -370,7 +370,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:32:35+00:00",
+      "started_at": "2026-11-15T16:20:11+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
@@ -446,7 +446,7 @@
       "mode": "replay",
       "notes": [],
       "stale": null,
-      "started_at": "2026-11-10T02:32:37+00:00",
+      "started_at": "2026-11-15T16:20:13+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -504,7 +504,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 1.26,
+      "duration_s": 1.1,
       "error": null,
       "frozen": false,
       "gates": [
@@ -579,7 +579,7 @@
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:32:37+00:00",
+      "started_at": "2026-11-15T16:20:13+00:00",
       "status": "pass",
       "suite": "e2-carol"
     },
@@ -643,7 +643,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 3.09,
+      "duration_s": 1.99,
       "error": null,
       "frozen": false,
       "gates": [
@@ -717,7 +717,7 @@
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:32:39+00:00",
+      "started_at": "2026-11-15T16:20:14+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -765,7 +765,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 52.24,
+      "duration_s": 25.34,
       "error": null,
       "frozen": false,
       "gates": [
@@ -833,7 +833,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:32:42+00:00",
+      "started_at": "2026-11-15T16:20:16+00:00",
       "status": "pass",
       "suite": "e2-corpus-drift"
     },
@@ -883,7 +883,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 48.9,
+      "duration_s": 38.04,
       "error": null,
       "frozen": false,
       "gates": [
@@ -951,7 +951,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:33:34+00:00",
+      "started_at": "2026-11-15T16:20:42+00:00",
       "status": "pass",
       "suite": "e2-corpus-validate"
     },
@@ -992,7 +992,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 19.52,
+      "duration_s": 10.76,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1077,7 +1077,7 @@
         "The commitments pass is judged after the persistence check, as phase 4 records it: persistence_dropped counts the facts it dropped over every scene judged."
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:34:23+00:00",
+      "started_at": "2026-11-15T16:21:20+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -1194,7 +1194,7 @@
     {
       "by_code": {
         "PHY": {
-          "mismatches": 11
+          "mismatches": 15
         },
         "REL": {
           "mismatches": 1
@@ -1205,15 +1205,15 @@
       },
       "cost": {
         "calls": 60,
-        "input_tokens": 554724,
-        "output_tokens": 109066,
+        "input_tokens": 553749,
+        "output_tokens": 104714,
         "replayed_calls": 60,
         "unpriced_calls": 0,
-        "usd_if_live": 4.6719,
+        "usd_if_live": 4.503,
         "usd_spent": 0.0
       },
       "description": "Rewrite from plan + ledger; facts the rewrite changes",
-      "duration_s": 1.59,
+      "duration_s": 0.98,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1225,14 +1225,14 @@
           "threshold": 10
         },
         {
-          "actual": 1.3,
+          "actual": 1.7,
           "name": "mismatches_per_scene",
           "op": "<=",
           "passed": true,
           "threshold": 2.3
         },
         {
-          "actual": 3.3,
+          "actual": 3.8,
           "name": "ledger_only.mismatches_per_scene",
           "op": "<=",
           "passed": true,
@@ -1240,31 +1240,32 @@
         }
       ],
       "metrics": {
-        "ledger_only.KNO": 1,
-        "ledger_only.PHY": 28,
+        "ledger_only.KNO": 2,
+        "ledger_only.PHY": 30,
         "ledger_only.REL": 1,
         "ledger_only.TIM": 3,
-        "ledger_only.mismatches": 33,
-        "ledger_only.mismatches_per_scene": 3.3,
-        "mismatches": 13,
-        "mismatches_per_scene": 1.3,
+        "ledger_only.TRT": 2,
+        "ledger_only.mismatches": 38,
+        "ledger_only.mismatches_per_scene": 3.8,
+        "mismatches": 17,
+        "mismatches_per_scene": 1.7,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 1 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: In the original the door makes a particular creak when he enters, but in the redraft it swings open without a sound.\n    ledger only, PHY: The way she is given water differs: in the original he tilts the hood fabric away from her mouth so the bottle reaches her lips, while in th",
-        "harmons-hands: 1 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: In the original he cuts and re-ties the right wrist as well, but in the redraft he checks it and leaves it untouched because it is fine.\n    ledger only, PHY: The tool used to cut the zip tie, and where he carries it, differ: a small folding knife from his back pocket in the original, snips from hi\n    ledger only, PHY: The woman's breathing is fast and elevated, and she has been crying, in the original; in the redraft it is even and calm, with her panic sub",
-        "waking-maren: 1 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: At the end of the scene the original has Maren switch off the kitchen light and stand in the dark, while the redraft has her still standing \n    ledger only, PHY: When she wakes at 2:47, Maren is already sitting up in the original, but in the redraft she is lying on her back.\n    ledger only, PHY: At 3:02 the original has Maren with the kitchen light turned off, standing in the dark; the redraft has the fluorescent light still on and h",
-        "waking-hank: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: The amount the water temperature dropped as the hot tank cooled differs: half a degree at a time in the original, a full degree at a time in\n    ledger only, PHY: Where Rook waits while he is at the sink differs: in the hallway in the original, lying across the bedroom doorway in the redraft.\n    ledger only, PHY: In the original Rook stays in the kitchen doorway and does not approach; in the redraft she crosses the kitchen and leans against his shin.\n    ledger only, PHY: The pencil was lying beside the pad in the original but across it in the redraft.",
-        "the-school: 1 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: In the original the custodian is present and lets Hank in through the side entrance; in the redraft the custodian has left the door propped \n    ledger only, PHY: The old scar at the base of Hank's thumb is on his left hand in the original, but on his right thumb in the redraft.\n    ledger only, PHY: In the original, Hank writes the 'stress field' sentence, crosses it out and rewrites it on the clipboard inside the gym, stopping mid-sente",
-        "advocate: 4 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    TIM: When Maren's ring-finger tremor began: in the original it starts during the interview, at 12:15 in Sofia's account; in the redraft it has be\n    PHY: In Maren's captivity flashback the original has her barefoot on concrete; the redraft has her wearing thin-soled shoes on gravel.\n    PHY: During her grounding, the original has the backs of her calves touching the chair; the redraft has the backs of her thighs.\n    PHY: In the bathroom the original has Maren gripping the sink with both hands; in the redraft she holds it with her right hand only, her left han\n    ledger only, PHY: In the original Maren makes the call to the DA's office from the hallway, away from Sofia; in the redraft she makes it from the interview ro\n    ledger only, PHY: In the original Delgado comes on the line and confirms receipt of the motion; in the redraft the clerk confirms receipt.\n    ledger only, PHY: In the original Maren sees Sofia off at the lobby, where Sofia leaves through the glass doors; in the redraft she sees her off at the elevat\n    ledger only, PHY: In the original Maren gets down on the bathroom floor with her knuckles on the floor tile; in the redraft she stays standing with her fists ",
-        "maren-runs: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    PHY: After the flinch, the original has her stride count reset to zero and restart from one, while the redraft has her resume the count at 232 an\n    ledger only, PHY: The foot that caught on nothing at mid-span differs.\n    ledger only, PHY: Her settled running breath pattern differs: three strides in and out versus two in and two out.\n    ledger only, PHY: After the episode, the original has her stride count reset to zero, while the redraft has her resume the count at 232.\n    ledger only, PHY: During the flinch her splayed hands are at her sides in the original but raised in front of her face in the redraft.\n    ledger only, PHY: The sleeping man under a tarp is on the bridge by the east rail with a shopping cart in the original, but asleep in a doorway off the bridge\n    ledger only, PHY: The river's color differs: gray versus brown.",
-        "engineer: 1 mismatch(es) in the rewrite, 8 from the plan and ledger alone\n    PHY: After Hank says he's fine, Rook stays where she is in the original, but in the redraft she closes the distance and leans her shoulder into h\n    ledger only, PHY: The depth Danny calls out for the mortar joint differs.\n    ledger only, PHY: Danny's position while probing the mortar differs: up a ladder against the west wall in the original, on his knees in the redraft.\n    ledger only, PHY: The tool Danny probes the mortar with differs: a flathead screwdriver in the original, a pick in the redraft.\n    ledger only, PHY: Hank's handwriting is steady in the original but shaky in the redraft.\n    ledger only, PHY: The door frame's material differs: wood in the original, steel in the redraft.\n    ledger only, PHY: Rook stays where she is after Hank's episode in the original, but moves in close and presses against his knee in the redraft.\n    ledger only, PHY: The tool used to remove the stucco differs: a masonry hammer in the original, a flat bar in the redraft.\n    ledger only, KNO: The person who says \"Hell\" on seeing the missing anchors differs: Danny in the original, Hank in the redraft.",
-        "name-surfaces: 1 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: When Hank writes CLAIRE, the original has the same steady block letters, but in the redraft his hand shakes.\n    ledger only, TIM: In the original, the Claire fragment surfaces at 2:47 a.m. while he is watching the microwave clock; in the redraft it surfaces after 2:50.",
-        "voicemail: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    REL: When Marie is pictured at Claire's apartment, the original calls Claire her sister, while the redraft calls Claire her daughter.\n    ledger only, TIM: The message in which Marie reports the coworker Jennifer seeing Claire leave the lot at 11:15 is the fifth, six days after the first call, i\n    ledger only, TIM: Marie's visit to the apartment and finding the car is reported in the fourth message in the original but in the fifth (six days out) in the \n    ledger only, REL: In the original, Claire's apartment is described as Marie's sister's kitchen; in the redraft it is her daughter's kitchen.\n    ledger only, PHY: The unfiled case intake form is a physical item next to the laptop in the original, but a blank form minimized on the laptop screen in the r"
+        "claires-cold: 2 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: In the original the door makes a particular creak when he enters; in the redraft the door never squeaks.\n    PHY: In the original the captor speaks to her during the visit; the redraft describes him as a man who doesn't speak.\n    ledger only, PHY: In the original the captor lifts the hood fabric away from her mouth so she drinks directly from the bottle; in the redraft the water soaks ",
+        "harmons-hands: 2 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: The hand he uses for the fingertip capillary test is the right hand in the original but the left hand in the redraft.\n    PHY: The space heater is aimed at her torso in the original but moved toward her shins in the redraft.\n    ledger only, PHY: In the original the woman is seated in a chair with each wrist zip-tied to an armrest; in the redraft she kneels on the slab with her hands \n    ledger only, PHY: The sleeping bag is draped across her lap and tucked under her thighs in the original, but over her shoulders and tucked under her arms in t\n    ledger only, PHY: The capillary-refill check is done on her right hand in the original, but on her left hand in the redraft.\n    ledger only, PHY: The original says the hands he is wearing stayed steady all night, while in the redraft those fingers tremble.",
+        "waking-maren: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: The original has her drinking the wine on an empty stomach, while the redraft says she had it with crackers.\n    ledger only, TIM: At 2:47 she was sitting up in bed reading the bedroom alarm clock, not already standing at the kitchen counter reading the microwave clock.\n    ledger only, PHY: In the original she turns on the buzzing fluorescent overhead kitchen light, whereas in the redraft she leaves the kitchen light off and see\n    ledger only, PHY: At 3:02 she is standing in the dark kitchen in the original, but in the redraft she has walked back to the bedroom doorway.",
+        "waking-hank: 2 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: Before he writes, the pencil is described as lying beside the legal pad in the original, but as lying across it in the redraft.\n    PHY: When Rook approaches, the original has her stop in the kitchen doorway, but the redraft has her come into the kitchen and stop a few feet fr\n    ledger only, PHY: When he comes to the counter, the original has the legal pad lying facedown, but the redraft has it faceup.\n    ledger only, PHY: In the original he is barefoot in boxers, but in the redraft he is wearing boots.\n    ledger only, TIM: In the original the stove clock reads 2:47 after he has finished writing, but in the redraft it reads 2:47 before he writes and 3:09 when he\n    ledger only, PHY: In the original the notes fit on a single page, but in the redraft they run onto more than one page.\n    ledger only, PHY: In the original Rook comes and stands in the kitchen doorway after the writing, but in the redraft she is still lying in the hallway when he",
+        "the-school: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: How Hank gets into the building differs: in the original the custodian lets him in, while in the redraft he opens the side door himself with\n    ledger only, PHY: Where Hank begins the survey and which direction he works along the wall.\n    ledger only, PHY: The gymnasium floor is rubber in the original but hardwood and varnished in the redraft.\n    ledger only, TIM: In the original Hank crosses out the troubling sentence while still in the gym and only rereads it in the truck; in the redraft he first cro",
+        "advocate: 3 mismatch(es) in the rewrite, 7 from the plan and ledger alone\n    PHY: In Maren's flashback, the concrete is under her bare feet in the original but under her bare knees in the redraft.\n    PHY: The contact points Maren counts to ground herself differ: toes, heels and calves against the chair in the original, versus six points on her\n    PHY: When the tremor starts, Maren's ring finger twitches against the table surface in the original but against the folder under the table in the\n    ledger only, PHY: In the original, Maren's tremor begins partway through the interview; in the redraft, her left hand has been shaking since before the interv\n    ledger only, PHY: In the original, the tremor during the interview is in a single finger (the left ring finger); in the redraft, all four fingers of the left \n    ledger only, KNO: In the original, Sofia does not notice Maren's physical reaction; in the redraft, Sofia is watching her as it happens.\n    ledger only, PHY: In the original, Sofia herself moved her chair closer to the door; in the redraft, Maren chose Sofia's seat position for its view of the doo\n    ledger only, PHY: In the original, the intake folder is under the table with Maren's thumb pressed against its spine; in the redraft, the folder lies on the t\n    ledger only, PHY: During the phone call, Maren's left hand presses flat against the wall in the original, but against a window ledge in the redraft.\n    ledger only, PHY: In the bathroom, Maren sinks to the floor with her knuckles on the floor tile in the original; in the redraft, she stays standing with her f",
+        "maren-runs: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    PHY: During the flinch, the original has her hands splayed open at her sides; the redraft has them thrown up, palms out, shoving at something an \n    ledger only, PHY: The river's colour differs: gray in the original, brown in the redraft.\n    ledger only, PHY: Her running breath pattern differs: three strides in and three out in the original, two in and two out in the redraft.\n    ledger only, PHY: During the flinch her hands splay open at her sides in the original but come up and spread in front of her face in the redraft.\n    ledger only, PHY: After stopping, her stride count restarts from one in the original but from four in the redraft.\n    ledger only, PHY: She resumes running faster than before in the original, but starts at a near-walk in the redraft.\n    ledger only, PHY: At the end of the bridge she presses her hands on the steel railing in the original, but puts a palm on the granite end post in the redraft.",
+        "engineer: 1 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: In the original he scrubbed the hand under very hot water; in the redraft he ran it under the tap only until the water went lukewarm, sugges\n    ledger only, PHY: The burned or scalded hand is the right hand in the original but the left hand in the redraft, where the right hand is the steady one restin\n    ledger only, TRT: Danny says \"Hell\" on seeing the missing anchors in the original; in the redraft Hank says it and Danny says nothing.\n    ledger only, PHY: Danny removes the stucco with a masonry hammer in the original but with a flat bar in the redraft.\n    ledger only, PHY: Hank scores the sill concrete with his thumbnail in the original but with the tip of a screwdriver in the redraft.\n    ledger only, PHY: Danny's mortar probe reaches only a quarter to three-eighths inch in the original, but the screwdriver sinks two inches in the redraft.",
+        "name-surfaces: 3 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: Hank writes CLAIRE with a pen in the original but with a pencil in the redraft.\n    PHY: In the original Hank's hand stays steady while he writes the name; in the redraft his hand is trembling and he struggles to hold the pencil \n    TIM: In the original the notes run past midnight, with an interior entry stamped 12:15; the redraft says both pages were filled before midnight.\n    ledger only, PHY: In the original Hank writes with a pen and the ink is still wet on the page; in the redraft he writes with a pencil.",
+        "voicemail: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    REL: When Marie is imagined calling from Claire's apartment, the original calls it her sister's kitchen, while the redraft calls it her daughter'\n    ledger only, REL: When Marie was at Claire's apartment, the original calls it her sister's place, while the redraft calls it her daughter's apartment.\n    ledger only, KNO: In the original, Claire's job as an ER nurse at Bay Area Hospital is first given in the second voicemail; in the redraft, Marie gives it in \n    ledger only, TRT: Marie's emotional state in the sixth message differs: angry in the original, worn-down, flat and hoarse in the redraft."
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:34:43+00:00",
+      "started_at": "2026-11-15T16:21:31+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -1292,7 +1293,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.28,
+      "duration_s": 0.17,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1344,7 +1345,7 @@
         "christmas-carol/run1: 25 flag(s)"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:34:44+00:00",
+      "started_at": "2026-11-15T16:21:32+00:00",
       "status": "pass",
       "suite": "e7-classics"
     },
@@ -1501,7 +1502,7 @@
         "usd_spent": 0.0
       },
       "description": "Extract phase 5 leaves a complete, floor-passing project",
-      "duration_s": 0.5,
+      "duration_s": 0.6,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1594,9 +1595,59 @@
         "status next: evaluate"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:34:46+00:00",
+      "started_at": "2026-11-15T16:21:33+00:00",
       "status": "pass",
       "suite": "e9-reference"
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "replayed_calls": 0,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0,
+        "usd_spent": 0.0
+      },
+      "description": "The gate (open checker) alone on E8's recorded, judged replays; private set",
+      "duration_s": 0.0,
+      "error": null,
+      "frozen": true,
+      "gates": [],
+      "metrics": {},
+      "mode": "replay",
+      "notes": [],
+      "stale": "unavailable on this machine, so nothing was measured or spent: gate-set is not recorded yet (no recordings at /Users/cadencedev/Developer/evals/gate-set/cassettes/gate-set); it is recorded when the question layer is a candidate to replace the open checker (#677): python3 evals/run.py --mode record --suite gate-set --runs 3 --over-budget \"<who approved, why>\" (the first recording has no forecast in the baseline; later ones drop --over-budget while the budget allows)",
+      "started_at": "2026-11-15T16:21:33+00:00",
+      "status": "stale",
+      "suite": "gate-set",
+      "unavailable": true
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "replayed_calls": 0,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0,
+        "usd_spent": 0.0
+      },
+      "description": "The gate with the question layer (#649) alone on E8's recorded, judged replays; private set",
+      "duration_s": 0.0,
+      "error": null,
+      "frozen": true,
+      "gates": [],
+      "metrics": {},
+      "mode": "replay",
+      "notes": [],
+      "stale": "unavailable on this machine, so nothing was measured or spent: gate-set-questions is not recorded yet (no recordings at /Users/cadencedev/Developer/evals/gate-set/cassettes/gate-set-questions); it is recorded when the question layer is a candidate to replace the open checker (#677): python3 evals/run.py --mode record --suite gate-set-questions --runs 3 --over-budget \"<who approved, why>\" (the first recording has no forecast in the baseline; later ones drop --over-budget while the budget allows)",
+      "started_at": "2026-11-15T16:21:33+00:00",
+      "status": "stale",
+      "suite": "gate-set-questions",
+      "unavailable": true
     },
     {
       "by_code": {
@@ -1627,7 +1678,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
-      "duration_s": 0.35,
+      "duration_s": 0.36,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1706,7 +1757,7 @@
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:34:46+00:00",
+      "started_at": "2026-11-15T16:21:33+00:00",
       "status": "pass",
       "suite": "question-set"
     },
@@ -1753,7 +1804,7 @@
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 8.42,
+      "duration_s": 7.83,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1845,13 +1896,71 @@
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
       "stale": null,
-      "started_at": "2026-11-10T02:34:46+00:00",
+      "started_at": "2026-11-15T16:21:34+00:00",
       "status": "pass",
       "suite": "recheck-set"
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 5,
+        "input_tokens": 36037,
+        "output_tokens": 6221,
+        "replayed_calls": 5,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.6454,
+        "usd_spent": 0.0
+      },
+      "description": "B7 test 6: a scene written with the Austen exemplars, on the meter and before a four-way judge",
+      "duration_s": 1.41,
+      "error": null,
+      "frozen": true,
+      "gates": [
+        {
+          "actual": 1,
+          "name": "meter_rank",
+          "op": "<=",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 4,
+          "name": "judge_austen",
+          "op": ">=",
+          "passed": true,
+          "threshold": 4
+        }
+      ],
+      "metrics": {
+        "austen_held_out_median": 0.4622,
+        "judge_asked": 4,
+        "judge_austen": 4,
+        "meter_distance_austen": 0.7684,
+        "meter_margin": 0.0694,
+        "meter_rank": 1,
+        "words": 1946
+      },
+      "mode": "replay",
+      "notes": [
+        "draft: 1946 words (target 2000)",
+        "meter, nearest first: austen 0.768, christmas-carol 0.838, middlemarch 0.856, brimming-cup 0.942, self-control 0.961, age-of-innocence 1.048, plastic-age 1.084, gatsby 1.140",
+        "held-out Austen chunks' median distance from her: 0.462",
+        "furthest from her: fw_at +5.0 sd; fw_would +2.9 sd; fw_rather +2.6 sd; fw_it +2.6 sd; fw_much -2.4 sd",
+        "judge, Austen at A: named Jane Austen (A): X is in Austen's voice: a garrulous, self-satisfied talker (Mrs. Thornbury) runs on in dialogue much like Mary and Charles Musgrove in Sample A, while a quiet, perceptive heroine looks on. The irony is dry and understated, as in \"took this as a compliment, and was so pleased with it that she led ano",
+        "judge, Austen at B: named Jane Austen (B): X is a Regency drawing-room comedy written in Austen's voice. It satirises a garrulous hostess through her own run-on talk and through dry narratorial irony (\"Mrs. Thornbury took this as a compliment, and was so pleased with it that she led another trump\"), and it sets a clear-eyed heroine against s",
+        "judge, Austen at C: named Jane Austen (C): X is written in Austen's voice. Its ironic narrator works through balanced, antithetical clauses (\"with great energy and very little attention,\" \"everything that could be known in Hartwell, and a good deal that could not\"), and its comedy lies in social talk that dwells on fortunes and settlements. ",
+        "judge, Austen at D: named Jane Austen (D): X is written in Austen's voice: drawing-room comedy built on ironic antithesis (\"advised her chiefly by not advising her at all\"), economical free indirect narration from a heroine's viewpoint, and garrulous talkers like Mrs. Thornbury who resemble Mary and Charles Musgrove. Its exclamations (\"Oh! y",
+        "Plan target (B7 test 6): meter_rank 1 and the judge naming Austen. The gates hold what run 1 recorded (#488).",
+        "Opening of the draft: Mrs. Thornbury played whist as she did everything else, with great energy and very little attention; and Sophia, who had the misfortune to be her partner, had already lost two tricks by her generosity in leading trumps whenever she happened to remember what they were. Their opponents were Mrs. Pellow and Louisa, who played with the scrupulous slowness of persons who are afraid of winning from their hostess. Mr. Haverstock stood behind Louisa's chair to advise her, and advised her"
+      ],
+      "stale": null,
+      "started_at": "2026-11-15T16:21:41+00:00",
+      "status": "pass",
+      "suite": "voice-austen"
     }
   ],
   "schema_version": 1,
-  "status": "pass",
-  "storyforge_version": "1.173.0",
-  "suite_count": 15
+  "status": "stale",
+  "storyforge_version": "1.177.0",
+  "suite_count": 18
 }
