@@ -1112,17 +1112,27 @@ def check_file_exists(filepath: str, label: str | None = None,
 MODEL_TIERS: Final = ('opus', 'sonnet', 'haiku')
 
 _catalog: list[dict] | None = None
+#: the catalog this process fetched and the eval cassette it was fetched
+#: under (STORYFORGE_CASSETTE, '' for none)
+_fetched: tuple[str, list[dict]] | None = None
 _catalog_lock = threading.Lock()
 
 
 def model_catalog() -> list[dict]:
     """Every model the API offers (``id``, ``created_at``, ``max_tokens``),
-    fetched once per process."""
-    global _catalog
+    fetched once per process, and again when the eval cassette changes:
+    each recording directory (a suite's, run2/, run3/) then holds its own
+    catalog request and replays alone (#689 review CR-1: runs 2 and 3 of a
+    ``--runs 3`` recording had none). A catalog set in its place (the
+    tests' stub) is never replaced."""
+    global _catalog, _fetched
+    cassette = os.environ.get('STORYFORGE_CASSETTE', '')
     with _catalog_lock:
-        if _catalog is None:
+        if _catalog is None or (_fetched is not None and _fetched[1] is _catalog
+                                and _fetched[0] != cassette):
             from storyforge.api import list_models
             _catalog = list_models()
+            _fetched = (cassette, _catalog)
         return _catalog
 
 

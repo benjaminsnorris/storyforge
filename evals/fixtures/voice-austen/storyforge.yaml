@@ -1,0 +1,13 @@
+project:
+  title: "The Lodge at Hartwell"
+  genre: "literary fiction"
+  subgenre: "comedy of manners"
+  target_words: 2000
+  logline: "A younger sister must decide whether to expose her family's poverty to save her sister from a suitor who believes them rich."
+
+phase: drafting
+
+# The suite points this at references/voiceprints/austen (an absolute path,
+# written into its working copy): the book is drafted in Austen's voice.
+voice:
+  author: AUTHOR_REPO
