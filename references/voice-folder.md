@@ -88,8 +88,34 @@ top-level `.md` file, or a header it can't read) is a WARNING in `write`,
 
 Problems to look for in a finished scene, each with an example taken from
 your own marks on a draft. It is for a reviewer reading a finished draft:
-you, or Claude in the `elaborate` skill's sample rounds. The long writing
-sessions (#655) will run it on each finished scene.
+you, or Claude in the `elaborate` skill's sample rounds, or the voice
+review in a writing session (`storyforge write --session`), which runs it on
+each finished scene before the gate. With no checks in the file, no scene
+gets a voice review, and the session says so.
+
+The voice review is two agents. A reviewer reads the scene, the voice and
+`checks.md`, and flags lines: the words, the check, why. A separate reviser,
+in a fresh context, gets `book.md`, the anchors and the flagged lines, never
+`checks.md`, and rewrites only those lines toward the anchors, or keeps one
+and says why. Code keeps each edit inside the sentence its flag quotes; a
+flag whose words aren't in the scene, or an edit outside its sentence, is
+dropped and said. What happened is in `working/voice-reviews/<scene>.md`.
+
+`storyforge revise --marks FILE` sends your own marks on drafted scenes to
+the same reviser. A marks file:
+
+```
+## act1-sc03
+> He had come all the way down from the house to say it.
+cut: reads like AI
+
+> Andromache did not smile.
+more like this
+```
+
+Each `## <scene id>` starts a scene; each `>` line quotes the scene's words;
+the lines after it are your note. A quote with no note means keep. Each
+scene is then gated and committed.
 
 `checks.md` never goes into a writing prompt. Writing from a list of things
 to avoid makes flat prose: the writer steers away from the list instead of
@@ -101,8 +127,14 @@ you don't want here.
 `scenes.csv` has an optional `tense` column: `present` or `past`. Blank
 means not said, and the writer follows the anchors. When it's set, the
 drafting prompt states it. Use it when tense follows POV. Speech is as people
-speak and doesn't count. A free check of the narration against it is coming
-with the gate.
+speak and doesn't count.
+
+A writing session checks each scene's narration against it, for free. A
+scene in the wrong tense goes back to the writer once, for the whole scene
+again; still wrong after that is a WARNING. A scene with too few common verb
+forms to judge (under 12) is not checked, and the session says so. A value
+other than `present` or `past` is a WARNING in `write`, and that scene's
+prompt states no tense. The gate doesn't check tense.
 
 ## The old voice files
 

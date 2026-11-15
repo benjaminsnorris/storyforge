@@ -151,3 +151,53 @@ blind read of the old draft against the session pilot).
    rewrites, aiming for quality writing at full coaching.
 3. **Order:** build #654 and #655 in Storyforge first. Ben then uses them on
    Wrath. The Wrath items above are his, done afterwards.
+
+## Status (2026-11-14)
+
+- **Section 1, the voice folder, and section 2's tense column: done** (PR
+  #682). `reference/voice/` is the voice (`references/voice-folder.md`),
+  the old voice files are no longer read, and `scenes.csv` has `tense`.
+- **Section 3, long writing sessions (#655): built** in the PR after #682.
+  - `storyforge write --session`: one writer drafts the scenes in one
+    conversation, with `book.md`, the anchors, the key decisions, the canon,
+    the cast and the story so far word for word. Each scene's plan is lean,
+    and the brief's note columns are left out with
+    `drafting.brief_notes: exclude` (decision 1).
+  - After each scene: the free tense check (a mismatch goes back to the
+    writer once), the voice review (a reviewer flags lines against
+    `checks.md`; a separate reviser, never shown `checks.md`, rewrites only
+    those lines; decision 2), the gate with the same writer fixing its
+    findings, the writer's stage note against the extracted one, and the
+    commit.
+  - `--dry-run` gives the forecast and the first scene's plan. A book with
+    no prose stops after 3 scenes for a read (`--stop-after N`). Running it
+    again resumes.
+  - `storyforge revise --marks FILE`: the author's marks on drafted scenes
+    go to the same reviser, then the gate and a commit.
+  - The skills offer the session for drafting and `--marks` for revision;
+    `revise --polish --loop` and `--naturalness` still run but aren't
+    offered as defaults.
+- **Not built yet:**
+  - Reading marks from a PR's comments, and `voice sample` (section 4):
+    #654, next.
+  - Sessions at coach or strict coaching (flags to the author, nothing
+    rewritten): `--session` takes full coaching only.
+  - `score --voice` drift and the question layer inside a session; the
+    gate's default reading checks each scene.
+
+### How Ben starts Wrath's redraft
+
+1. Fill `reference/voice/` in iliad-adult: `book.md` from
+   `reference/voice-notes.md` Parts 1–3 and 5; the anchors from
+   `working/voice-samples/` (the anchor Ben finished, and the Chryses, Zeus
+   and, once marked, Sarpedon takes), with `kind:`, `tense:` and `pov:`
+   lines; and `checks.md` from Part 4, each check with its example. Ben's
+   text moves word for word.
+2. Set `tense` in `scenes.csv` by POV: gods `past`, mortals `present`.
+3. Set `drafting.brief_notes: exclude` in `storyforge.yaml` (the old briefs'
+   notes were written by a model).
+4. `./storyforge write --session --act 1 --dry-run`: check the forecast and
+   the first scene's plan.
+5. `./storyforge write --session --act 1`: it stops after 3 scenes. Read
+   them, mark lines (`revise --marks`), move repeated cuts into
+   `checks.md`, then run the same command again to go on.

@@ -119,7 +119,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 | Architecture done (architecture.csv has rows; value_shift is optional, #643) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
 | Briefs done, `storyforge status` has a `voice` blocker (next.stage `voice`, or then.stage `voice` behind a gate `check`: `reference/voice/book.md` missing, init's template or empty, no anchor, or a file unreadable, with no author voice repo) | Run the Voice Stage |
-| Briefs done, validation passes | Announce ready for drafting, redirect to forge |
+| Briefs done, validation passes | Announce ready for drafting, redirect to forge (drafting is a writing session: `storyforge write --session --act 1 --dry-run`, then the real run, which stops after 3 scenes for the author's read) |
 | Drafted with blocking validation failures (`passed` False; advisory findings alone never count, #643) | Run gap-fill |
 | Everything passes | Redirect to forge |
 
@@ -350,7 +350,7 @@ The voice is found, not written. It lives in `reference/voice/` (`references/voi
 
 - `anchors/*.md` — passages the author chose or finished by hand. They are the voice spec.
 - `book.md` — what the voice does, said by quoting the anchors; the people; decided rules (person, distance, tense by POV); for a retelling, `## Register exemptions`.
-- `checks.md` — problems to look for in a finished scene, taken from the author's own marks. Review only: never put it, or a list like it, into a writing prompt. In *Wrath Like Smoke*'s rounds a sample written from a list of things to avoid avoided all of them and read flat.
+- `checks.md` — problems to look for in a finished scene, taken from the author's own marks. Review only: never put it, or a list like it, into a writing prompt. A writing session (`storyforge write --session`) runs it on each finished scene: a reviewer flags lines against it, and a separate reviser that never sees it rewrites those lines toward the anchors. With no checks in it, no scene gets that review. In *Wrath Like Smoke*'s rounds a sample written from a list of things to avoid avoided all of them and read flat.
 
 Voice work usually happens once the map's POVs and scene types are known. Drafting needs it: until `book.md` has the author's text and there is at least one anchor (or the book's `voice:` block names an author voice repo), `storyforge status` has a `voice` blocker and names `voice` as the stage before drafting, and `storyforge write` refuses to draft at full coaching. `./storyforge elaborate --stage voice` calls no model for a prose book: it sets up the folder's missing files from the templates (never over one that's there), commits, and says what's still missing. It advances no phase.
 

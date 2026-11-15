@@ -1,6 +1,6 @@
 ---
 name: revise
-description: Plan and execute revision — analyze evaluation findings or scoring data, create upstream + craft passes, execute them, and review results. Automatically detects stale evaluations and shifts to score-driven mode. Use when the author has evaluation results and wants to revise, after scoring reveals issues, or when the author asks to polish prose.
+description: Plan and execute revision — analyze evaluation findings or scoring data, create upstream + craft passes, execute them, and review results. Automatically detects stale evaluations and shifts to score-driven mode. Use when the author has evaluation results and wants to revise, after scoring reveals issues, when the author has marked lines in drafted scenes, or when the author asks to polish prose.
 ---
 
 # Storyforge Revise
@@ -50,6 +50,29 @@ Replace `PROJECT_DIR` with the actual project directory path.
 
 Based on the author's request and project state:
 
+### "This line sounds wrong" / "Sounds like a machine" / "Clean up the prose" / "I marked up the draft" / "Revision by reaction"
+→ Revision by reaction (#655), the default way to revise drafted prose. The author reads the scenes and marks lines in a marks file (any path; `working/marks.md` is a good place):
+
+```
+## act1-sc03
+> He had come all the way down from the house to say it.
+cut: reads like AI
+
+> Andromache did not smile.
+more like this
+```
+
+Each `## <scene id>` starts a scene. Each `>` line quotes the scene's words, copied exactly (several `>` lines join into one quote). The lines after it are the note: keep, cut, more like this, or anything the author wants to say. A quote with no note means keep: it tells the reviser what works. Then:
+
+```bash
+./storyforge revise --marks working/marks.md --dry-run   # counts each scene's marks; names marked words not in the scene
+./storyforge revise --marks working/marks.md
+```
+
+Each scene's marks go to the voice reviser: it gets `reference/voice/book.md`, the anchors and the marks (never `checks.md`), and rewrites only the marked sentences toward the anchors, or keeps one and says why. Code drops any edit outside the sentence its mark quotes. Marked words that aren't in the scene are a WARNING and left out. Then the scene is gated and committed ("Revise <id> from the author's marks"). The record of what was rewritten, kept and refused is in `working/voice-reviews/<scene>.md`; go through it with the author. The book needs its voice (`reference/voice/`, or an author voice repo); without it the command stops.
+
+The checks the author keeps repeating in marks belong in `reference/voice/checks.md` (`references/voice-folder.md`), so the voice review in the next writing session (`storyforge write --session`) catches them before the author has to.
+
 ### "Revise" / "Fix the issues" / "Plan revision"
 → Full revision cycle: analyze findings, plan passes, execute, review. **If evaluation is stale**, recommend score-driven mode instead (see below).
 
@@ -61,17 +84,21 @@ Based on the author's request and project state:
 When the staleness check fires, present these options instead of the standard revision options:
 
 1. **Score-driven revision** (`storyforge revise --scores`) — Upstream brief fixes + targeted craft polish based on current diagnosis. **Recommended.**
-2. **Polish loop** (`storyforge revise --polish --loop`) — Craft-only convergence from current scores.
+2. **Revision by reaction** (`storyforge revise --marks FILE`) — The author marks the lines that don't work; for the prose itself.
 3. **Re-evaluate first** — Run `storyforge evaluate` before planning revision.
 4. **Use evaluation anyway** — Treat stale evaluation findings as still actionable (author override).
 
-### "Polish" / "Clean up the prose" / "Polish pass"
+### Polish and naturalness passes: on request only
+
+`--polish`, `--polish --loop` and `--naturalness` still run, but they are no longer offered as the default (#655): revision of the prose is by reaction (the author's marks, above). Use them only when the author asks for one by name or asks for an unattended polish; otherwise offer `revise --marks`.
+
+### "Polish" / "Polish pass"
 → Craft-only revision: skip planning, target scenes with low craft scores. Equivalent to `./storyforge revise --polish`.
 
 ### "Polish until it's good" / "Keep polishing" / "Autonomous polish"
 → Convergence loop: scores scenes, identifies weak principles, generates targeted polish plan, executes, re-scores, repeats until scores stabilize or no high/medium priority issues remain. Equivalent to `./storyforge revise --polish --loop`. Use `--max-loops N` to cap iterations (default 5).
 
-### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts" / "Sounds like a machine"
+### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts"
 → Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts. The `--naturalness` and `--polish` passes dynamically load vocabulary from `references/ai-tell-words.csv` (the universal AI-tell word list). A project's own `voice-profile.csv` banned words are no longer merged in: a prose book's voice is `reference/voice/`, and words the author marks as wrong belong in its `checks.md`, which a reviewer reads and no writing prompt does.
 
 ### Upstream Fix Routing (automatic in --polish --loop)
@@ -203,9 +230,8 @@ Offer two options:
 > cd [project_dir] && [plugin_path]/storyforge revise [flags]
 > ```
 > For score-driven (upstream + craft from diagnosis): `./storyforge revise --scores`
-> For craft-only: `./storyforge revise --polish`
-> For autonomous polish loop (score→polish→re-score until stable): `./storyforge revise --polish --loop`
-> For AI pattern removal: `./storyforge revise --naturalness`
+> For the author's marks on drafted scenes: `./storyforge revise --marks FILE`
+> On request only: craft-only `./storyforge revise --polish`, the polish loop `./storyforge revise --polish --loop`, AI pattern removal `./storyforge revise --naturalness`
 > For structural-only (CSV fixes, no prose): `./storyforge revise --structural`
 
 ### Structural Mode
