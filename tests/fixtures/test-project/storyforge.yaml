@@ -26,10 +26,6 @@ artifacts:
     path: reference/story-architecture.md
     updated:
 
-  voice_guide:
-    exists: true
-    path: reference/voice-guide.md
-    updated: "2026-02-18"
 
   timeline:
     exists: false

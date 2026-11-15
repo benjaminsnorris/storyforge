@@ -237,11 +237,13 @@ voice:
                                  # .md files or one file under fiction/ (#654)
 ```
 
-Its drafting prompt (full coaching) then carries the author's voice:
-`description.md`, the exemplars by job, the fiction anchor's files, and the
-book's own `reference/voice/book.md` (the narrator's stance and period
-register particular to this book) when it has one. A book without the block
-gets exactly the prompt it got before. `score --voice` with neither
+Every prompt that carries the voice (`voice_book.resolve`; drafting and
+revision at every coaching level, and the shared system context) then
+carries the author's voice first: `description.md`, the exemplars by job and
+the fiction anchor's files. The book's own `reference/voice/` folder
+(`book.md` and its anchors: the narrator's stance and period register
+particular to this book) follows. With the block, the repo alone is enough
+to draft. `score --voice` with neither
 `--fingerprint` nor `--voice-repo` measures against the block's repo. A block
 that can't be used (the repo isn't there, isn't a voice repo or is inside a
 book, it has no description or exemplars yet, the narrator isn't under

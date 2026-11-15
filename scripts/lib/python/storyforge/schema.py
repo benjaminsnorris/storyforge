@@ -11,6 +11,7 @@ from .elaborate import _read_csv, _FILE_MAP
 from . import mice
 from .enrich import load_alias_map
 from .narrator import NARRATOR_POV
+from .voice_book import TENSES
 
 
 # ============================================================================
@@ -286,6 +287,15 @@ COLUMN_SCHEMA = {
                        'pov is its teller, who is in the telling scene\'s cast. timeline_day is '
                        'when the told events happened, and time_mode is unchanged: like a '
                        'flashback, a told scene is a device, never an error.',
+    },
+
+    'tense': {
+        'type': 'enum', 'values': list(TENSES),
+        'file': 'scenes.csv', 'stage': 'map',
+        'description': 'The tense the scene\'s narration is told in: present or past (speech '
+                       'is as people speak). Empty: not said, and the writer follows the voice\'s '
+                       'anchors. The voice may vary it by POV (one book tells its mortals in '
+                       'present and its gods in past); the drafting prompt states it.',
     },
 
     # architecture.csv — structural anchor tier

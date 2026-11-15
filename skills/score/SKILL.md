@@ -37,7 +37,7 @@ Read the following files to understand the full context:
   - `source-fidelity.csv` / `source-fidelity-rationale.csv` -- adaptations only: each scene's prose (or brief) against the source scenes it adapts. Departures are tagged `deliberate` (the map row or a version rule), `moved` (to or from the neighbouring book scene; a WARNING lists a move to a neighbour that the neighbour's result doesn't confirm), `staging` (connective invention that changes no event, fact or outcome, so never on outcome or knowledge_out; allowed in `free` mode, and in `faithful` mode by a version rule or the scene's own note) or `drift`. Staging on goal, key actions or key dialogue is listed in the log: worth a look, since that is where it could hide a changed event. Only drift lowers the scores and goes to revise; the CSV counts each tag. When the author asks how far the book departs, report drift, not the total
   - `incomplete.txt` -- present only in a cycle with unscored parts (such a cycle never becomes `latest`). `./storyforge score --complete-cycle` re-scores just those parts into it (see "Filling in an incomplete cycle")
   - `readability.csv` -- reading level per scene (Flesch-Kincaid grade, words a sentence, narration grade) and an `ALL` row pooling the scenes scored; with `project.reading_level` set, each is below, within or above it. Not a principle. Prose only. `./storyforge score --readability` prints it free, with no cycle
-  - `./storyforge score --register` (free, no cycle, nothing written): for a retelling, the source translation's archaic words, grammar and idiom left in the prose, and dialogue that copies the source scene's wording. The voice guide's `## Register exemptions` (quoted phrases, `scene: <id>`) are skipped. Revision prompts of an adaptation carry these findings.
+  - `./storyforge score --register` (free, no cycle, nothing written): for a retelling, the source translation's archaic words, grammar and idiom left in the prose, and dialogue that copies the source scene's wording. The `## Register exemptions` in `reference/voice/book.md` (quoted phrases, `scene: <id>`) are skipped. Revision prompts of an adaptation carry these findings.
   - `./storyforge score --voice` (against the book's `voice:` block's repo, or `--voice-repo PATH` / `--fingerprint PATH`; free, no cycle, nothing written): the voice meter. See "Voice drift" below.
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
@@ -384,7 +384,7 @@ leaves out a turn passes.
 
 - `--bible-consistency` — for every drafted scene, check the prose against
   `reference/character-bible.md`, `reference/world-bible.md`, and
-  `reference/voice-guide.md`. The bibles are sent as cached system blocks, so
+  `reference/voice/book.md`. The bibles are sent as cached system blocks, so
   the per-scene incremental cost is small (~$20-25 total for a full run).
 
 Findings include a stable `finding_id` (sha1 of scope + bible + claim) so
@@ -439,7 +439,7 @@ Reference these scoring concepts as needed:
 
 - **Effective weight** = author_weight if set, otherwise the default weight. This determines how much a principle matters in diagnosis priority.
 - **Diagnosis priority** = based on average score, regression from previous cycle, and effective weight. High priority means the principle needs attention.
-- **Proposals** = suggested changes (weight adjustments, voice guide additions, scene-level overrides) based on diagnosis.
+- **Proposals** = suggested changes (weight adjustments, and global or scene-level directives in `working/overrides.csv`) based on diagnosis. Changing the voice itself (`reference/voice/`) is the author's, by hand.
 - **Tuning ledger** = history of all weight changes and their effects, used to detect validated patterns.
 - **Exemplars** = passages scoring 5 (masterful) that demonstrate craft excellence, useful as reference during revision.
 - **Author deltas** = systematic differences between system and author scores, revealing calibration gaps.

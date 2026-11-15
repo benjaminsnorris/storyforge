@@ -169,9 +169,11 @@ Present results:
 - Recommend `storyforge elaborate --stage gap-fill` to fill them
 - Each gap has `advisory`: True for a craft-framework field (any of `elaborate.CRAFT_FRAMEWORK_COLUMNS`). Report those apart, as optional notes the author may want, never as missing data
 
-### Voice Profile Validation
+### Voice Profile Validation (graphic novels only)
 
-If `reference/voice-profile.csv` exists, validate it:
+A prose book's voice is `reference/voice/` (`references/voice-folder.md`), which hone doesn't validate; its prompts read `book.md` and the anchors. In a prose book an old `reference/voice-profile.csv` is no longer read: say so and point to `storyforge cleanup` (`old_voice_file`), don't validate it.
+
+In a graphic novel, if `reference/voice-profile.csv` exists, validate it:
 - Check for a missing `_project` row (the project-level voice profile entry)
 - Check that character IDs in the file match entries in `reference/characters.csv`
 - Check for empty `banned_words` when a voice guide (`reference/voice-guide.md`) exists — suggest populating it from the voice guide's avoidance lists

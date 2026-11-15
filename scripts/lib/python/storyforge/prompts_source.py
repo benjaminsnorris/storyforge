@@ -45,8 +45,8 @@ REVOICE_RULE = (
     '("Then came hooves on the flags") and no inversions ("But that you\'re Gawain, I '
     'doubt"). Where the source says a thing twice in a doublet, say it once. Keep a '
     'period noun only where the scene makes its meaning plain; otherwise use the plain '
-    'word. Older diction is allowed only where the voice guide\'s "Register exemptions" '
-    'list allows it (an oath, quoted liturgy, a cry, a frame narrator\'s turn).')
+    'word. Older diction is allowed only where the voice\'s "Register exemptions" '
+    '(reference/voice/book.md) allow it (an oath, quoted liturgy, a cry, a frame narrator\'s turn).')
 
 
 def _cfg(project_dir: str) -> source.SourceConfig | None:

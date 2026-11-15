@@ -110,7 +110,7 @@ class TestValidate:
         """SF-4: one unreadable scene or reference file crashed validate."""
         _set_brief(project_dir, DRAFTED, goal='find Olinsky')
         unreadable = [os.path.join(project_dir, 'scenes', 'act2-sc01.md'),
-                      _ref(project_dir, 'voice-guide.md')]
+                      _ref(project_dir, 'character-bible.md')]
         for path in unreadable:
             os.chmod(path, 0)
         try:
@@ -123,7 +123,7 @@ class TestValidate:
         notes = ' '.join(c['message'] for c in checks
                          if c['check'] == 'brief-stray-names-unchecked')
         assert 'scenes/act2-sc01.md could not be read' in notes
-        assert 'reference/voice-guide.md could not be read' in notes
+        assert 'reference/character-bible.md could not be read' in notes
 
     def test_a_file_that_is_not_utf8_is_read_and_noted(self, project_dir):
         with open(os.path.join(project_dir, 'scenes', 'act2-sc01.md'), 'ab') as f:

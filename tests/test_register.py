@@ -181,10 +181,27 @@ def test_an_exempt_scene_has_no_findings():
     assert register.echo_findings('frame-teller', '"a b c d e"', {'x': 'a b c d e'}, ex) == []
 
 
-def test_load_exemptions_reads_the_projects_voice_guide(tmp_path):
+def test_load_exemptions_reads_the_books_voice(tmp_path):
     assert register.load_exemptions(str(tmp_path)) == Exemptions()
-    _write(tmp_path, {'reference/voice-guide.md': GUIDE})
+    _write(tmp_path, {'reference/voice/book.md': GUIDE})
     assert 'god keep you' in register.load_exemptions(str(tmp_path)).phrases
+
+
+def test_an_old_voice_guide_is_not_read_for_exemptions(tmp_path):
+    _write(tmp_path, {'reference/voice-guide.md': GUIDE})
+    ex = register.load_exemptions(str(tmp_path))
+    assert ex.phrases == () and ex.scenes == frozenset()
+    assert ex.problems == ('reference/voice-guide.md has register exemptions, which are no '
+                           'longer read: move them to reference/voice/book.md\'s '
+                           '`## Register exemptions`',)
+
+
+def test_an_unreadable_anchor_never_costs_book_mds_exemptions(tmp_path):
+    _write(tmp_path, {'reference/voice/book.md': GUIDE})
+    os.makedirs(tmp_path / 'reference' / 'voice' / 'anchors')
+    (tmp_path / 'reference' / 'voice' / 'anchors' / 'x.md').write_bytes(b'\xff\xfe')
+    ex = register.load_exemptions(str(tmp_path))
+    assert 'god keep you' in ex.phrases and ex.problems == ()
 
 
 # --- source echo ---
@@ -439,7 +456,7 @@ def test_the_voice_stage_asks_for_exemptions_the_check_reads(adapted):
     ex = register.read_exemptions(guide)
     assert ex.phrases == ('by my faith',) and ex.scenes == {'frame-teller'}
     assert ex.problems == ()
-    with open(os.path.join(PLUGIN, 'templates', 'reference', 'voice-guide.md'),
+    with open(os.path.join(PLUGIN, 'templates', 'reference', 'voice', 'book.md'),
               encoding='utf-8') as f:
         assert register.read_exemptions(f.read()) == Exemptions()
 
@@ -488,7 +505,7 @@ def test_an_exemption_that_cant_be_used_is_a_problem(bullet, why):
 
 def test_exemption_problems_and_unknown_scenes_are_warnings(adapted):
     """R-4: in report_lines and the revision build."""
-    _write(adapted, {'reference/voice-guide.md': (
+    _write(adapted, {'reference/voice/book.md': (
         '## Register exemptions\n\n- by my faith\n- scene: no-such-scene\n'
         '- scene: athena-at-the-door\n')})
     checked = register.check_scenes(['athena-at-the-door'], adapted)
@@ -503,14 +520,12 @@ def test_exemption_problems_and_unknown_scenes_are_warnings(adapted):
     assert seen == warnings
 
 
-def test_a_voice_guide_that_cant_be_read_is_a_problem_not_a_traceback(tmp_path):
-    """R-12: IsADirectoryError, PermissionError, UnicodeDecodeError escaped."""
-    os.makedirs(tmp_path / 'reference' / 'voice-guide.md')
+def test_a_book_md_that_cant_be_read_is_a_problem_not_a_traceback(tmp_path):
+    """R-12: PermissionError, UnicodeDecodeError escaped."""
+    os.makedirs(tmp_path / 'reference' / 'voice')
+    (tmp_path / 'reference' / 'voice' / 'book.md').write_bytes(b'\xff\xfe\x00')
     ex = register.load_exemptions(str(tmp_path))
-    assert ex.phrases == () and "can't be read" in ex.problems[0]
-    os.rmdir(tmp_path / 'reference' / 'voice-guide.md')
-    (tmp_path / 'reference' / 'voice-guide.md').write_bytes(b'\xff\xfe\x00')
-    assert "can't be read" in register.load_exemptions(str(tmp_path)).problems[0]
+    assert ex.phrases == () and "reference/voice/book.md can't be read" in ex.problems[0]
 
 
 def test_revision_section_logs_what_it_couldnt_check(adapted):
@@ -532,7 +547,7 @@ def test_revision_section_warns_to_the_log_by_default(adapted, capsys):
 
 def test_the_revision_prompt_sends_register_warnings_to_stderr(adapted, capsys):
     from storyforge.revision import build_revision_prompt
-    _write(adapted, {'reference/voice-guide.md': '## Register exemptions\n\n- oops\n'})
+    _write(adapted, {'reference/voice/book.md': '## Register exemptions\n\n- oops\n'})
     build_revision_prompt('polish', 'Polish', 'athena-at-the-door', adapted, api_mode=True)
     err = capsys.readouterr().err
     assert 'register exemptions' in err and 'no double-quoted phrase' in err

@@ -72,7 +72,7 @@ When the staleness check fires, present these options instead of the standard re
 → Convergence loop: scores scenes, identifies weak principles, generates targeted polish plan, executes, re-scores, repeats until scores stabilize or no high/medium priority issues remain. Equivalent to `./storyforge revise --polish --loop`. Use `--max-loops N` to cap iterations (default 5).
 
 ### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts" / "Sounds like a machine"
-→ Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts. The `--naturalness` and `--polish` passes dynamically load vocabulary from `references/ai-tell-words.csv` (the universal AI-tell word list). When a project has `reference/voice-profile.csv`, its `banned_words` field is merged with the universal list, creating a project-specific vocabulary constraint for revision prompts.
+→ Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts. The `--naturalness` and `--polish` passes dynamically load vocabulary from `references/ai-tell-words.csv` (the universal AI-tell word list). A project's own `voice-profile.csv` banned words are no longer merged in: a prose book's voice is `reference/voice/`, and words the author marks as wrong belong in its `checks.md`, which a reviewer reads and no writing prompt does.
 
 ### Upstream Fix Routing (automatic in --polish --loop)
 
@@ -148,7 +148,7 @@ The plan is a pipe-delimited CSV at `working/plans/revision-plan.csv`:
 pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location|owed
 1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief|
 2|mice-thread-fix|Fix MICE thread operations|full||Each thread opens once and closes once, where it resolves|all-strengths|F007|pending|sonnet|intent|
-3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft|
+3|prose-tightening|Voice consistency and AI pattern cleanup|full||Write toward the voice's anchors|scene-30b|F012;F015|pending|opus|craft|
 ```
 
 Leave `owed` blank when writing a plan. `revise` fills it when a prose pass's reply held scenes it couldn't write (cut off, ending mid-sentence): the pass stops uncompleted, and re-running `storyforge revise` revises only the owed scenes.

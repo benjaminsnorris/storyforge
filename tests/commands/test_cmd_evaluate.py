@@ -16,7 +16,7 @@ from storyforge.cmd_evaluate import (
     CORE_EVALUATORS,
     _resolve_filter,
     _load_custom_evaluators,
-    _resolve_voice_guide,
+    _resolve_voice,
     _build_eval_prompt,
     _build_manuscript_text,
     _estimate_avg_words,
@@ -226,20 +226,20 @@ custom_evaluators:
 
 
 # ============================================================================
-# _resolve_voice_guide
+# _resolve_voice
 # ============================================================================
 
-class TestResolveVoiceGuide:
-    """Tests for voice guide resolution."""
+class TestResolveVoice:
+    """The evaluation's voice: reference/voice/ (`voice_book.resolve`)."""
 
-    def test_finds_voice_guide(self, project_dir):
-        path, content = _resolve_voice_guide(project_dir)
-        assert path is not None
-        assert 'Voice Guide' in content
+    def test_finds_the_voice(self, project_dir):
+        path, content = _resolve_voice(project_dir)
+        assert path == 'reference/voice'
+        assert 'Measures before it feels' in content
 
-    def test_no_voice_guide(self, tmp_path):
+    def test_no_voice(self, tmp_path):
         (tmp_path / 'storyforge.yaml').write_text('project:\n  title: Test\n')
-        path, content = _resolve_voice_guide(str(tmp_path))
+        path, content = _resolve_voice(str(tmp_path))
         assert path is None
         assert content == ''
 

@@ -29,8 +29,7 @@ from datetime import datetime
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, get_plugin_dir, install_signal_handlers,
-    get_coaching_level, build_shared_context, reference_text, resolve_voice_guide,
-    VOICE_GUIDE_REMEDY,
+    get_coaching_level, build_shared_context, reference_text,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.illustrations import read_scene_prose
@@ -177,27 +176,30 @@ def _load_custom_evaluators(project_dir):
 
 
 # ============================================================================
-# Voice guide resolution
+# The voice
 # ============================================================================
 
-def _resolve_voice_guide(project_dir):
-    """Find and read voice guide content. Returns (path, content) or (None, '').
-
-    `common.resolve_voice_guide` (#596, CR-1), with the older
-    persistent-prompt.md: a candidate still init's template or empty is
-    passed over and said (the evaluators would read a template's guidance as
-    the book's voice); one that can't be read stops the evaluation (ERROR,
-    exit 1), naming it."""
-    voice = resolve_voice_guide(project_dir, briefs=False)
-    passed = voice.skipped + ((voice.detail,) if voice.kind in ('template', 'empty') else ())
-    for detail in passed:
-        log(f'WARNING: {detail}; left out of the evaluation. Fill it: {VOICE_GUIDE_REMEDY}.')
+def _resolve_voice(project_dir):
+    """The book's voice (`voice_book.resolve`) as (path, text), or (None, '')
+    without one. A template or empty book.md, or no anchor, is said (the
+    evaluators would have no voice to judge against); a file that can't be
+    read stops the evaluation (ERROR, exit 1), naming it."""
+    from storyforge import voice_book
+    voice = voice_book.resolve(project_dir)
+    if voice.kind in ('missing', 'template', 'empty'):
+        log(f'WARNING: {voice.detail}; the evaluation has no voice to judge against. To give '
+            f'it one, {voice_book.REMEDY}.')
+    if voice.skipped:
+        log(voice_book.skipped_warning(voice))
     if voice.kind == 'unreadable':
         log(f'ERROR: {voice.detail}')
         sys.exit(1)
+    old = voice_book.old_files_note(project_dir)
+    if old:
+        log(f'NOTE: {old}.')
     if voice.kind != 'ok':
         return None, ''
-    return os.path.join(project_dir, voice.path), voice.text
+    return voice.path, voice.text
 
 
 # ============================================================================
@@ -618,11 +620,23 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
     """
     # a doc missing or still its template states no intention of the
     # author's (F-130, #596); one that can't be read raises ReferenceDocError
-    voice = resolve_voice_guide(project_dir, briefs=False)
+    from storyforge import voice_book
+    voice = voice_book.resolve(project_dir)
+    voice.raise_if_unreadable(project_dir)
     candidates = ['reference/key-decisions.md',
-                  *([voice.path] if voice.kind == 'ok' else []),
                   'reference/story-architecture.md', 'references/story-architecture.md']
     ref_text = {}
+    if voice.kind == 'ok':
+        if api_mode:
+            ref_text[voice.path] = voice.text
+        else:
+            # the claude CLI reads files: the voice as resolved (the author
+            # repo's, book.md, the anchors; never checks.md), one file
+            voice_file = os.path.join(eval_dir, 'voice.md')
+            os.makedirs(eval_dir, exist_ok=True)
+            with open(voice_file, 'w', encoding='utf-8') as f:
+                f.write(voice.text + '\n')
+            ref_text[os.path.relpath(voice_file, project_dir)] = voice.text
     for ref in candidates:
         text = reference_text(os.path.join(project_dir, ref), strip=False)
         if text:
@@ -635,8 +649,8 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
     # Build sections based on which files exist
     sections = []
     for ref in ref_files:
-        if voice.kind == 'ok' and ref == voice.path:
-            sections.append('## Voice Guide Alignment\nDid the prose deliver the voice described in the voice guide?')
+        if voice.kind == 'ok' and ref_text.get(ref) == voice.text:
+            sections.append('## Voice Alignment\nDid the prose deliver the voice its passages and notes show?')
         elif 'story-architecture' in ref:
             sections.append('## Story Architecture Alignment\nDid the structural intentions land?')
         elif 'key-decisions' in ref:
@@ -978,12 +992,10 @@ def main(argv=None):
     if project_subgenre:
         genre_display = f'{project_genre} ({project_subgenre})'
 
-    # Voice guide
-    vg_path, voice_guide_content = _resolve_voice_guide(project_dir)
+    # The voice
+    vg_path, voice_guide_content = _resolve_voice(project_dir)
     if vg_path:
-        log(f'Voice guide: {vg_path}')
-    else:
-        log('WARNING: No voice guide found.')
+        log(f'Voice: {vg_path}')
 
     # Build file list
     scene_files, scope_description, input_type = _build_file_list(

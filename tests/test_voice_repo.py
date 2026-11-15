@@ -263,7 +263,6 @@ def test_block_loads_description_exemplars_and_anchor(project_dir, voice):
     assert [e.id for e in v.exemplars.exemplars] == ['walk-1-2', 'rain-3-3']
     assert v.anchor == (('fiction/close-third/opening.md',
                          '# Opening\n\nShe kept the light for eleven years.'),)
-    assert v.book_notes == ''
 
 
 def test_author_voice_section_carries_the_voice(project_dir, voice):
@@ -272,14 +271,18 @@ def test_author_voice_section_carries_the_voice(project_dir, voice):
     _write(os.path.join(project_dir, 'reference', 'voice', 'book.md'),
            '# This book\n\nBronze-age vocabulary only.\n')
     text = vr.author_voice_section(project_dir)
-    assert text.startswith("## The Author's Voice")
-    assert '#### What the voice does' in text            # demoted under the section
-    assert '#### Passage 1 (description): The heron, seen plainly.' in text
+    assert text.startswith("### The author's voice")
+    assert '##### What the voice does' in text           # demoted under the section
+    assert '##### Passage 1 (description): The heron, seen plainly.' in text
     assert 'The heron stood in the shallows.' in text
-    assert '#### Passage 2 (quiet)\n\nIt rained' in text
+    assert '##### Passage 2 (quiet)\n\nIt rained' in text
     assert 'fiction anchor: fiction/close-third' in text and 'eleven years' in text
-    assert 'reference/voice/book.md' in text and 'Bronze-age vocabulary' in text
+    assert 'Bronze-age vocabulary' not in text            # the book's own: voice_book
     assert vr.require_voice(project_dir)[0].startswith('Voice: Test Author')
+    # the one voice section has the author's, then the book's folder
+    from storyforge import voice_book
+    whole = voice_book.resolve(project_dir).text
+    assert whole.index('The heron stood') < whole.index('Bronze-age vocabulary')
 
 
 def test_the_voice_repo_is_never_written(project_dir, voice):
@@ -410,28 +413,35 @@ def test_briefs_prompt_carries_the_voice_and_nothing_else_changes(project_dir, v
     _yaml(project_dir, f'voice:\n  author: {voice}\n  narrator: fiction/close-third\n')
     section = vr.author_voice_section(project_dir)
     voiced = _briefs_prompt(project_dir, system_context=system_context)
+    if system_context:
+        # the system context carries the voice, the author's with it
+        assert voiced == plain
+        return
     assert section in voiced
-    assert voiced.replace(section, '', 1) == plain
-    # before the brief, the passages the writer holds to
-    assert voiced.index('The heron stood') < voiced.index('## Scene Brief: act1-sc01')
+    assert voiced.replace('\n\n' + section, '', 1) == plain
+    # inside the voice section, before the book's own anchors
+    assert (voiced.index('## The Voice') < voiced.index('The heron stood')
+            < voiced.index('The village was not there'))
 
 
-def test_book_exemplars_follow_the_authors_voice(project_dir, voice):
+def test_old_prose_exemplars_are_not_read(project_dir, voice):
     _write(os.path.join(project_dir, 'reference', 'prose-exemplars.md'),
            'The book\'s own exemplar passage.\n')
     _yaml(project_dir, f'voice:\n  author: {voice}\n')
     voiced = _briefs_prompt(project_dir)
-    assert voiced.index('The heron stood') < voiced.index("The book's own exemplar passage")
+    assert 'The heron stood' in voiced
+    assert "The book's own exemplar passage" not in voiced
 
 
-def test_coach_and_strict_prompts_leave_the_voice_out(project_dir, voice):
+def test_coach_and_strict_prompts_carry_the_voice_too(project_dir, voice):
+    # a guide or a constraint list for the author is written toward the voice
     from storyforge.prompts import build_scene_prompt
     _yaml(project_dir, f'voice:\n  author: {voice}\n')
     for level in ('coach', 'strict'):
-        assert "Author's Voice" not in _briefs_prompt(project_dir, coaching_level=level)
+        assert 'The heron stood' in _briefs_prompt(project_dir, coaching_level=level)
         # T8: the older builder too
-        assert "Author's Voice" not in build_scene_prompt('act1-sc01', project_dir, level,
-                                                          api_mode=True)
+        assert 'The heron stood' in build_scene_prompt('act1-sc01', project_dir, level,
+                                                       api_mode=True)
 
 
 def test_older_drafting_prompt_carries_the_voice(project_dir, voice):

@@ -1,8 +1,8 @@
 """F-130: reference docs still identical to their template never reach a prompt.
 
 Extraction doesn't write the prose reference docs, so on an extracted book
-character-bible.md, world-bible.md, voice-guide.md and story-architecture.md
-stay the template init copied in. The scorer used to send that template text
+character-bible.md, world-bible.md, systems-bible.md, story-architecture.md
+and reference/voice/book.md stay the template init copied in. The scorer used to send that template text
 as if it were the book's own bible.
 """
 
@@ -16,8 +16,19 @@ from storyforge.common import (
 from storyforge.cmd_score import _read_reference
 from storyforge.scoring_bible import _load_bibles
 
-DOCS = ('character-bible.md', 'world-bible.md', 'voice-guide.md',
+DOCS = ('character-bible.md', 'world-bible.md', 'systems-bible.md',
         'story-architecture.md')
+
+
+def _voice(project, filled=True):
+    """reference/voice/: init's templates, or a book.md and an anchor."""
+    from storyforge import voice_book
+    voice_book.scaffold(project)
+    if filled:
+        with open(os.path.join(project, 'reference', 'voice', 'book.md'), 'w') as f:
+            f.write('# The voice\n\nThe real voice for this book.\n')
+        with open(os.path.join(project, 'reference', 'voice', 'anchors', 'a.md'), 'w') as f:
+            f.write('She measured twice.\n')
 
 
 def _project(tmp_path, filled=()):
@@ -41,10 +52,27 @@ def test_template_copy_is_unfilled(tmp_path):
 
 def test_whitespace_difference_still_unfilled(tmp_path):
     project = _project(tmp_path)
-    path = os.path.join(project, 'reference', 'voice-guide.md')
+    path = os.path.join(project, 'reference', 'systems-bible.md')
     with open(path, 'a') as f:
         f.write('\n\n')
     assert is_unfilled_template(path)
+
+
+def test_the_voice_folder_templates_are_unfilled(tmp_path):
+    project = _project(tmp_path)
+    _voice(project, filled=False)
+    for name in ('book.md', 'checks.md'):
+        assert is_unfilled_template(os.path.join(project, 'reference', 'voice', name))
+    _voice(project)
+    assert not is_unfilled_template(os.path.join(project, 'reference', 'voice', 'book.md'))
+
+
+def test_bible_check_skips_a_template_book_md(tmp_path, capsys):
+    project = _project(tmp_path)
+    _voice(project, filled=False)
+    assert 'voice/book.md' not in _load_bibles(project)
+    _voice(project)
+    assert 'voice/book.md' in _load_bibles(project)
 
 
 def test_edited_or_unknown_file_is_not_unfilled(tmp_path):
@@ -68,19 +96,21 @@ def test_bible_check_skips_template(tmp_path):
 
 
 def test_shared_context_skips_template(tmp_path):
-    project = _project(tmp_path, filled=('voice-guide.md',))
+    project = _project(tmp_path)
+    _voice(project)
     _shared_context_cache.clear()
     try:
         text = '\n'.join(b['text'] for b in build_shared_context(project))
     finally:
         _shared_context_cache.clear()
-    assert '=== Voice Guide ===' in text
+    assert '=== The Voice ===' in text
     assert '=== Character Bible ===' not in text
     assert '=== World Bible ===' not in text
 
 
 def test_unreadable_file_is_not_unfilled_and_doesnt_crash(tmp_path):
-    project = _project(tmp_path, filled=('voice-guide.md',))
+    project = _project(tmp_path)
+    _voice(project)
     path = tmp_path / 'reference' / 'character-bible.md'
     path.write_bytes(b'Caf\xe9 society')  # cp1252, not UTF-8
     assert not is_unfilled_template(str(path))
@@ -89,7 +119,7 @@ def test_unreadable_file_is_not_unfilled_and_doesnt_crash(tmp_path):
         text = '\n'.join(b['text'] for b in build_shared_context(project))
     finally:
         _shared_context_cache.clear()
-    assert '=== Voice Guide ===' in text
+    assert '=== The Voice ===' in text
 
 
 def test_read_reference_falls_through_to_next_candidate(tmp_path):
@@ -104,7 +134,7 @@ def test_read_reference_falls_through_to_next_candidate(tmp_path):
 def test_bom_saved_template_still_unfilled(tmp_path):
     """A BOM made a template copy read as the author's own text (#442)."""
     project = _project(tmp_path)
-    path = os.path.join(project, 'reference', 'voice-guide.md')
+    path = os.path.join(project, 'reference', 'systems-bible.md')
     with open(path, 'rb') as f:
         data = f.read()
     with open(path, 'wb') as f:
@@ -114,7 +144,7 @@ def test_bom_saved_template_still_unfilled(tmp_path):
 
 def test_crlf_saved_template_still_unfilled(tmp_path):
     project = _project(tmp_path)
-    path = os.path.join(project, 'reference', 'voice-guide.md')
+    path = os.path.join(project, 'reference', 'systems-bible.md')
     with open(path, 'rb') as f:
         data = f.read()
     with open(path, 'wb') as f:

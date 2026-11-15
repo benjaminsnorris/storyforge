@@ -166,14 +166,20 @@ def book(project_dir):
     ids = [r['id'] for r in _read_csv(os.path.join(ref, 'scenes.csv'))]
     for sid in ids[:2]:
         update_scene(sid, ref, {'motifs': 'the brass compass'})
-    # The bibles and voice guide as init leaves them: templates, no profile
+    # The character bible and the voice as init leaves them: templates
     import shutil
+    from storyforge import voice_book
     from storyforge.common import get_plugin_dir
-    for name in ('character-bible.md', 'voice-guide.md'):
-        shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'reference', name),
-                    os.path.join(ref, name))
-    os.remove(os.path.join(ref, 'voice-profile.csv'))
+    shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'reference', 'character-bible.md'),
+                os.path.join(ref, 'character-bible.md'))
+    shutil.rmtree(os.path.join(ref, 'voice'))
+    voice_book.scaffold(project_dir)
     return project_dir
+
+
+def _anchors_written(project_dir):
+    """The anchors 5f wrote, from the provenance record."""
+    return {p for p in read_provenance(project_dir) if p.startswith('reference/voice/anchors/')}
 
 
 def _scene_ids(project_dir):
@@ -232,8 +238,9 @@ class TestPhase5:
             'reference/themes.csv', 'reference/motif-taxonomy.csv',
             'reference/story-summary.md', 'reference/story-architecture.md',
             'reference/character-bible.md', 'reference/world-bible.md',
-            'reference/systems-bible.md', 'reference/voice-guide.md',
-            'reference/voice-profile.csv', 'reference/timeline.md'}
+            'reference/systems-bible.md', 'reference/voice/book.md',
+            'reference/voice/checks.md', 'reference/timeline.md'} | _anchors_written(book)
+        assert _anchors_written(book)
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
@@ -1355,15 +1362,13 @@ class TestWorld:
 class TestVoice:
     """Step 5f."""
 
-    def test_the_guide_and_profile_are_described_and_loadable(self, book, mock_api, mock_git,
+    def test_the_voice_is_described_with_anchors_and_resolves(self, book, mock_api, mock_git,
                                                               mock_costs):
-        import re
-        from storyforge.extract_describe import VOICE_PROFILE_COLUMNS
-        from storyforge.prompts import load_voice_profile
+        from storyforge import voice_book
         mock_api.set_response_fn(_answer(book))
         _run(book)
         ref = os.path.join(book, 'reference')
-        with open(os.path.join(ref, 'voice-guide.md')) as f:
+        with open(os.path.join(ref, 'voice', 'book.md')) as f:
             guide = f.read()
         assert '- Nothing was measured: too little prose' in guide   # the fixture is short
         for gone in ('Influence Blend', 'Style Rules', 'Prose Naturalness', '### Do Not'):
@@ -1372,11 +1377,25 @@ class TestVoice:
         from storyforge.extract_describe import _IMPERATIVE
         bullets = [line[2:] for line in guide.splitlines() if line.startswith('- ')]
         assert not [b for b in bullets if _IMPERATIVE.match(b)]
-        with open(os.path.join(ref, 'voice-profile.csv')) as f:
-            assert f.readline().strip().split('|') == VOICE_PROFILE_COLUMNS
-        project, chars = load_voice_profile(book)
-        assert project == {'register': 'Formal, close third.'}     # no banned_words
-        assert chars['dorren-hayle']['preferred_words'] == 'meridian;ink'
+        assert '## Register\n\nFormal, close third.' in guide
+        assert '- **Words they use:** meridian, ink' in guide
+        assert not os.path.exists(os.path.join(ref, 'voice-profile.csv'))
+        assert not os.path.exists(os.path.join(ref, 'voice-guide.md'))
+        folder = voice_book.read_folder(book)
+        assert folder.anchors and all(a.pov for a in folder.anchors)
+        # the anchors are the book's own prose, word for word, paragraphs kept
+        prose = ''.join(open(os.path.join(book, 'scenes', n)).read()
+                        for n in os.listdir(os.path.join(book, 'scenes')))
+        for a in folder.anchors:
+            assert not a.text.startswith('---')                       # no frontmatter
+            assert all(p in prose for p in a.text.split('\n\n'))
+        assert voice_book.resolve(book).kind == 'ok'
+        # what the prose never does is for the reviewer, never in book.md
+        assert '## What the prose never does' not in guide
+        with open(os.path.join(ref, 'voice', 'checks.md')) as f:
+            checks = f.read()
+        assert '# Checks' in checks
+
 
     def test_an_instruction_is_sent_back(self, book):
         from storyforge.extract_describe import ReplyProblems, parse_voice
@@ -1417,7 +1436,9 @@ class TestVoice:
         out = capsys.readouterr().out
         assert '5f skipped: no scene has prose to describe a voice from' in out
         assert not any('**lineage**' in c['prompt'] for c in mock_api.calls)
-        assert not os.path.exists(os.path.join(book, 'reference', 'voice-profile.csv'))
+        assert not _anchors_written(book)
+        assert not os.path.exists(os.path.join(book, 'reference', 'voice', 'anchors',
+                                               'extracted-1.md'))
 
 
 def test_dialogue_spans_keep_lines_apart():
@@ -1748,14 +1769,8 @@ class TestBiblesReviewFixes:
         assert len(ids) == len(set(ids)) == 1
         shutil.rmtree(os.path.join(book, 'scenes'))
 
-    def test_the_voice_profile_validates(self, book, mock_api, mock_git, mock_costs):
-        """TD / T-17: the written profile passes schema's own check, and a
-        `|` in model text keeps the columns aligned."""
-        from storyforge.extract_describe import VOICE_PROFILE_COLUMNS
-        from storyforge.prompts import load_voice_profile
-        from storyforge.schema import VOICE_PROFILE_COLUMNS as SCHEMA_COLUMNS
-        from storyforge.schema import validate_voice_profile
-        assert VOICE_PROFILE_COLUMNS is SCHEMA_COLUMNS
+    def test_a_pipe_in_model_text_stays_in_book_md(self, book, mock_api, mock_git, mock_costs):
+        """TD / T-17, now that the profile is book.md's People section."""
         answer = _answer(book)
 
         def reply(p):
@@ -1766,10 +1781,8 @@ class TestBiblesReviewFixes:
             return answer(p)
         mock_api.set_response_fn(reply)
         _run(book)
-        assert validate_voice_profile(book)['errors'] == []
-        _, chars = load_voice_profile(book)
-        first = next(iter(chars.values()))
-        assert first['dialogue_style'] == 'Clipped.'
+        with open(os.path.join(book, 'reference', 'voice', 'book.md')) as f:
+            assert '- **Rhythm:** Long | winding' in f.read()
 
     def test_a_graphic_novel_project_skips_phase_5(self, book, mock_api, mock_git, mock_costs,
                                                    capsys):
@@ -1792,7 +1805,7 @@ class TestBiblesGateAndSteps:
     @pytest.mark.parametrize('marker,rel,step', [
         ('## Its characters, as the scenes show them', 'character-bible.md', '5d'),
         ('**overview**', 'systems-bible.md', '5e'),
-        ('**lineage**', 'voice-profile.csv', '5f'),
+        ('**lineage**', 'voice/book.md', '5f'),
     ])
     def test_a_file_changed_during_the_call_stops_the_step_and_those_after(
             self, book, mock_api, mock_git, mock_costs, capsys, marker, rel, step):
@@ -1810,7 +1823,7 @@ class TestBiblesGateAndSteps:
         assert f'{step} stopped part-way' in out
         with open(path) as f:
             assert 'Mine' in f.read()
-        later = {'5d': ['world and systems bibles', 'voice guide'], '5e': ['voice guide'],
+        later = {'5d': ['world and systems bibles', 'voice'], '5e': ['voice'],
                  '5f': []}[step]
         for name in later:
             assert f'{name} skipped: ' in out
@@ -1832,16 +1845,35 @@ class TestBiblesGateAndSteps:
         with open(world, 'rb') as f:
             assert f.read() == before
 
-    def test_force_regenerates_an_unedited_voice_profile(self, book, mock_api, mock_git,
-                                                         mock_costs):
-        from storyforge.prompts import load_voice_profile
+    def test_an_edited_anchor_or_book_md_keeps_5f_from_writing(self, book, mock_api,
+                                                               mock_git, mock_costs, capsys):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        out = capsys.readouterr().out
+        assert 'anchor(s) were taken from the prose by position' in out
+        path = os.path.join(book, 'reference', 'voice', 'anchors', 'extracted-1.md')
+        with open(path, 'a') as f:
+            f.write('\nMine.\n')
+        with open(path) as f:
+            before = f.read()
+        calls = len(mock_api.calls)
+        _run(book, force=True)
+        out = capsys.readouterr().out
+        assert '5f (the voice) skipped: it writes' in out
+        assert not any('**lineage**' in c['prompt'] for c in mock_api.calls[calls:])
+        with open(path) as f:
+            assert f.read() == before
+
+    def test_force_regenerates_an_unedited_voice(self, book, mock_api, mock_git,
+                                                 mock_costs):
         mock_api.set_response_fn(_answer(book))
         _run(book)
         answer = _answer(book)
         mock_api.set_response_fn(lambda p: _voice_reply(book, register='Plain.')
                                  if '**lineage**' in p else answer(p))
         _run(book, force=True)
-        assert load_voice_profile(book)[0] == {'register': 'Plain.'}
+        with open(os.path.join(book, 'reference', 'voice', 'book.md')) as f:
+            assert '## Register\n\nPlain.' in f.read()
 
     def test_required_places_are_those_set_twice(self, book):
         """T-8: the fixture's places are each in one scene, so only the
@@ -1895,7 +1927,7 @@ class TestBiblesGateAndSteps:
         for name, heading in (('character-bible.md', 'Character Bible'),
                               ('world-bible.md', 'World Bible'),
                               ('systems-bible.md', 'Systems Bible'),
-                              ('voice-guide.md', 'Voice Guide')):
+                              ('voice/book.md', 'The Voice')):
             with open(os.path.join(ref, name)) as f:
                 doc = f.read()
             assert f'# Untitled -- {heading}' in doc and 'PROJECT_TITLE' not in doc
@@ -2144,14 +2176,16 @@ class TestTimelineAndChapterMap:
 
 
 def test_the_chapter_map_columns_are_one_declaration():
-    """Review: three hand copies of the header (and of voice-profile's)."""
-    from storyforge.cmd_cleanup import EXPECTED_CSV_SCHEMAS
+    """Review: three hand copies of the header (and of a graphic novel's
+    voice-profile's)."""
+    from storyforge.cmd_cleanup import EXPECTED_CSV_SCHEMAS, GN_CSV_SCHEMA_OVERRIDES
     from storyforge.common import get_plugin_dir
-    from storyforge.schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
+    from storyforge.schema import CHAPTER_MAP_COLUMNS
     with open(os.path.join(get_plugin_dir(), 'templates', 'production', 'chapter-map.csv')) as f:
         assert f.readline().strip().split('|') == CHAPTER_MAP_COLUMNS
     assert EXPECTED_CSV_SCHEMAS['reference/chapter-map.csv'] == CHAPTER_MAP_COLUMNS
-    assert EXPECTED_CSV_SCHEMAS['reference/voice-profile.csv'] == VOICE_PROFILE_COLUMNS
+    assert 'reference/voice-profile.csv' not in EXPECTED_CSV_SCHEMAS     # prose: not read
+    assert 'reference/voice-profile.csv' in GN_CSV_SCHEMA_OVERRIDES
 
 
 def test_e9_snapshot_skips_only_the_projects_own_working(tmp_path):

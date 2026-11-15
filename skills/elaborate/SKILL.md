@@ -98,7 +98,7 @@ Based on the author's request, determine the mode:
 
 - **"Start a new novel"** / **"Let's begin"** → Start at Stage 0, the pitch/prose tier. Ask for the seed (logline, genre, characters, themes, constraints) and develop it through `reference/story-summary.md`: logline → synopsis → act-shape, gating each with `storyforge score --level 0|1|2` and pressure-testing the whole pitch with `storyforge score --story-power`. Only build the spine once `storyforge status` shows the prose tier rungs `solid`.
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
-- **"Develop the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). Typically happens after architecture and before briefs.
+- **"Develop the voice"** / **"Find the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). Typically happens once the map's POVs are set, before drafting.
 - **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the character bible entries. The spine creates seed entries; this mode enriches them with wound/lie/need structure, voice fingerprints, and relationship dynamics.
 - **"Build the world"** / **"World building"** → World bible development. During elaboration, world building supports the architecture and scene map stages.
 - **"Story architecture"** / **"Theme"** / **"Structure"** → Story architecture refinement. The spine creates the initial architecture; this mode deepens thematic throughlines, conflict structure, and arc planning.
@@ -118,7 +118,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 | Spine done (5-10 rows, function only) | Run architecture |
 | Architecture done (architecture.csv has rows; value_shift is optional, #643) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
-| Briefs done, `storyforge status` has a `voice` blocker (next.stage `voice`, or then.stage `voice` behind a gate `check`: the voice guide is missing, init's template, empty, unreadable, or only persistent-prompt.md) | Run the Voice Stage |
+| Briefs done, `storyforge status` has a `voice` blocker (next.stage `voice`, or then.stage `voice` behind a gate `check`: `reference/voice/book.md` missing, init's template or empty, no anchor, or a file unreadable, with no author voice repo) | Run the Voice Stage |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
 | Drafted with blocking validation failures (`passed` False; advisory findings alone never count, #643) | Run gap-fill |
 | Everything passes | Redirect to forge |
@@ -346,32 +346,45 @@ Reference images upload alongside the prompt, labeled by role: **Image 1** chara
 
 ### Voice Stage (Interactive)
 
-Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Drafting needs it: while the voice guide is missing, still init's template, empty, unreadable, or only `reference/persistent-prompt.md` (which the brief-based prompt doesn't read), `storyforge status` has a `voice` blocker and names `voice` as the stage before drafting, and `storyforge write` refuses to draft. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
+The voice is found, not written. It lives in `reference/voice/` (`references/voice-folder.md`):
 
-A book with a `voice:` block in `storyforge.yaml` (an author voice repo, `references/storyforge-yaml-schema.md`) is drafted in the author's own voice too. The voice guide is still required beside it: it holds the book's POV rules and characters, which the author's voice doesn't.
+- `anchors/*.md` — passages the author chose or finished by hand. They are the voice spec.
+- `book.md` — what the voice does, said by quoting the anchors; the people; decided rules (person, distance, tense by POV); for a retelling, `## Register exemptions`.
+- `checks.md` — problems to look for in a finished scene, taken from the author's own marks. Review only: never put it, or a list like it, into a writing prompt. In *Wrath Like Smoke*'s rounds a sample written from a list of things to avoid avoided all of them and read flat.
 
-Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, voice guide, scene index).
+Voice work usually happens once the map's POVs and scene types are known. Drafting needs it: until `book.md` has the author's text and there is at least one anchor (or the book's `voice:` block names an author voice repo), `storyforge status` has a `voice` blocker and names `voice` as the stage before drafting, and `storyforge write` refuses to draft at full coaching. `./storyforge elaborate --stage voice` calls no model for a prose book: it sets up the folder's missing files from the templates (never over one that's there), commits, and says what's still missing. It advances no phase.
 
-1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)
-2. If the voice guide doesn't exist, or is still init's template (it starts `# [Title] -- Voice Guide`; `storyforge status` shows a `voice` blocker): explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation, replacing the template; its bracketed placeholders are not the author's choices.
-3. If the voice guide has the author's text: refine it. Test against sample scenes. Develop POV-specific rules. Identify areas where voice drifts.
-   - **The narrator.** When scenes have `pov` `narrator` (the book's narrator tells them, through no character's eyes), or key-decisions.md says `narrator_pov: limited N`, the voice guide defines the narrator like a POV character: who they are (an omniscient voice, a bard, a later teller, a character looking back) and their stance (how far into minds they see, whether they judge, foreshadow or address the reader, how close they stand to the action), with a `narrator` row in `voice-profile.csv`. An adaptation's narrator is the novel's, not the translator's.
-4. For each POV character, define: their unique speech patterns, what metaphors they reach for, what they notice first, what they never say, their sentence rhythm.
-5. Commit: `git add -A -- . && git commit -m "Elaborate: voice guide" && git push`
+A book with a `voice:` block in `storyforge.yaml` (an author voice repo, `references/storyforge-yaml-schema.md`) is ready with the repo alone; the writing prompt carries the repo's voice first, then this folder. The book's POV rules, people and tense still belong in `book.md`.
 
-Voice work in coach mode: ask questions about what the author hears in their head — tone, rhythm, register. Don't propose voice; help the author discover it.
+If the book still has `reference/voice-guide.md`, `voice-profile.csv`, `persistent-prompt.md`, `prose-exemplars.md` or `exemplars/`, nothing reads them any more (`status` prints a NOTE; `cleanup` reports `old_voice_file`). Offer to move what the author wants to keep into `book.md` or an anchor, word for word. Never delete them without the author's say.
 
-Voice work in strict mode: collect the author's voice preferences, format into the voice guide structure, provide the template.
+Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, scene index).
+
+**Running sample rounds by hand.** `storyforge voice sample` (#654) will run these as PRs. Until it exists, run them in the session:
+
+1. Read what the book has: the character bible, story architecture, key decisions, any existing `reference/voice/` files, and anything the author points to as a model (their own earlier prose, a writer they admire).
+2. Pick one scene that matters and that the author will know well, and write it several ways (three to five variants) that differ in real choices: distance, tense, whose POV, rhythm, how much is said.
+3. Before showing them, check every sample yourself: physical slips (a character holding two things, in two places, seeing what they can't see) and any pattern you promised the author was gone. Fix them first.
+4. Put the samples on a branch, unlabelled (call them A, B, C; keep which-is-which out of the repo), one sentence per line so the author can mark single sentences in a PR. Open the PR and ask the author to mark keeps, cuts, "more like this" and notes.
+5. Read every page of the PR's comments. Write the next take toward the keeps, not away from the cuts. After the second round, two versions that differ in one named thing (tense, or whose POV) teach more than five blends.
+6. When a sample is close, the author finishes it by hand. Save it as `reference/voice/anchors/<name>.md`, with `kind:`, `tense:` and `pov:` header lines when they help. Add anchors for other kinds of scene the book needs (a battle reads differently from a farewell).
+7. Write `book.md` from the anchors: each thing the voice does, with the quoted line that does it. Put the people (each POV character, and the narrator when scenes have `pov` `narrator` or key-decisions.md says `narrator_pov: limited N`: who they are and how close they stand; an adaptation's narrator is the novel's, not the translator's) and the decided rules under their headings. Turn the author's cut marks into `checks.md`, each check with the example it came from.
+8. If tense follows POV, fill `scenes.csv`'s `tense` column (`present` or `past`).
+9. Commit: `git add -A -- . && git commit -m "Voice: <what changed>" && git push`
+
+Voice work in coach mode: Claude writes no samples. Ask what the author hears: tone, rhythm, distance, which passages by others feel close. Help the author pick or write their own anchor, then help them describe it in `book.md` by pointing at its lines, and turn their marks into `checks.md`.
+
+Voice work in strict mode: no prose and no creative proposals from Claude. Set up the folder (`elaborate --stage voice`), explain the anchor header format and the `book.md` sections, file the author's own passages and words into the right places, and fill the `tense` column from their decisions.
 
 ### Graphic-novel mode
 
-Voice in graphic-novel mode still describes per-character speech register, but the `_project` row of `voice-profile.csv` carries two extra fields:
+Graphic novels don't use `reference/voice/`. Their voice stage is unchanged: `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv`, and the script reads them. Interactively, build the voice guide (per-character speech register, caption voice) with the author, then the profile below. The `_project` row of `voice-profile.csv` carries two graphic-novel fields:
 - `caption_voice` — narration style: `journal-voiceover`, `omniscient`, `first-person`, `none`
 - `lettering_style` — visual treatment hint: `loose-natural`, `typeset`, `hand-lettered-feel`
 
-### Voice Profile (Second Artifact)
+#### Voice Profile (graphic novels only)
 
-After writing the voice guide, also produce `reference/voice-profile.csv` — a structured companion with machine-parseable voice constraints. This file is used by drafting and revision prompts to enforce vocabulary and style rules.
+`reference/voice-profile.csv` is a structured companion to a graphic novel's voice guide, with machine-parseable voice constraints the script prompts read. A prose book doesn't have one.
 
 Format (pipe-delimited CSV):
 
@@ -379,14 +392,15 @@ Format (pipe-delimited CSV):
 |--------|-------------|
 | `character` | Character ID from characters.csv, or `_project` for project-level fields |
 | `preferred_words` | Semicolon-delimited words central to this voice (character rows only) |
-| `banned_words` | Words that break this book's voice (project row only; merged with universal AI-tell list at draft time) |
+| `banned_words` | Words that break this book's voice (project row only) |
 | `metaphor_families` | Domains to source metaphors from (character rows only) |
 | `rhythm_preference` | Sentence rhythm description (character rows only) |
 | `register` | Prose register, e.g. "literary;restrained;precise" (project row only) |
 | `dialogue_style` | How this character speaks (character rows only) |
+| `caption_voice`, `lettering_style` | See above (project row only) |
 
 Rules:
-- The `_project` row holds book-wide constraints: `banned_words` and `register`. Leave character-specific fields empty.
+- The `_project` row holds book-wide constraints: `banned_words`, `register`, `caption_voice`, `lettering_style`. Leave character-specific fields empty.
 - Each POV character gets one row with: `preferred_words` (10-20 words), `metaphor_families`, `rhythm_preference`, `dialogue_style`. Leave project-level fields empty.
 - Character IDs must match the `id` column in `reference/characters.csv`.
 

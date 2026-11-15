@@ -45,6 +45,11 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to fill it:** The telling scene's id. The told scene's `pov` is its teller, who is in the telling scene's cast; its `timeline_day` is when the told events happened, and `time_mode` is unchanged. A scene going on with the tale has the same `told_by` (all of Odysseus's tale is told in one scene at Alcinous's court); a tale inside a tale names the told scene it is told in. Extraction's phase 1 fills it.
 **How to check:** `./storyforge validate` lists a told scene set before the present as a told tale (a device, like a flashback, never an error), blocks a `told_by` naming an unknown scene, itself or a cycle, and warns when the teller isn't in the telling scene's cast. `./storyforge timeline --check` reads the step into a tale as a step back, and reports a told scene set after the scene that tells it (a told future is a `vision`).
 
+### tense — How the Narration Is Told
+**Why it matters:** Some books change tense with the POV: one tells its mortals in present and its gods in past. Without a column the writer has to guess per scene, and a scene that drifts into the other tense reads like a mistake.
+**How to fill it:** `present` or `past`, for the narration only (speech is as people speak). Leave it empty when the book doesn't vary tense: the writer follows the voice's anchors (`reference/voice/`, `references/voice-folder.md`). When tense follows POV, write the rule under `## Decided` in `reference/voice/book.md` and fill the column from it.
+**How to check:** The drafting prompt states the tense when the column has one. Read a drafted scene's narration against it.
+
 ### type — Narrative Purpose
 **Why it matters:** A balanced manuscript has a mix of types. Five consecutive plot scenes with no character development creates pace without depth. Five character scenes with no plot creates depth without momentum.
 **How to check:** Look at the Scene Type Sequence chart. Flag stretches of 4+ same type.
