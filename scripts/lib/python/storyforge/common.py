@@ -170,9 +170,10 @@ class DocState(NamedTuple):
     branch on, `detail` to show, `text` when `kind` is 'ok'."""
     kind: DocKind
     path: str      # relative to the project ('' when there is no file)
-    detail: str    # e.g. "reference/voice-guide.md is still init's template"
+    detail: str    # e.g. "reference/key-decisions.md is still init's template"
     text: str = ''
-    #: details of earlier candidates passed over (a voice guide only)
+    #: `voice_book.resolve`: the anchor files left out of the voice, each with
+    #: why (empty for any other doc)
     skipped: tuple[str, ...] = ()
 
     def raise_if_unreadable(self, project_dir: str) -> None:
@@ -1313,6 +1314,10 @@ def build_shared_context(project_dir: str, model: str = '',
 
     Returns:
         List of content blocks for the API 'system' parameter.
+
+    Raises:
+        ReferenceDocError: a file of the voice (reference/voice/) can't be read.
+        voice_repo.VoiceError: the book's `voice:` block can't be used.
     """
     cache_key = f'{project_dir}:{model}:{craft_rules}'
     if cache_key in _shared_context_cache:
@@ -1339,9 +1344,16 @@ def build_shared_context(project_dir: str, model: str = '',
 
     # --- Tier 2: Project-level (session-stable) ---
     ref_dir = os.path.join(project_dir, 'reference')
+    graphic = get_medium(project_dir) == 'graphic-novel'
+    # a graphic novel's script keeps its voice guide and profile; a prose
+    # book's voice is reference/voice/ (below)
+    gn_voice = ([(os.path.join(ref_dir, 'voice-guide.md'), 'Voice Guide'),
+                 (os.path.join(ref_dir, 'voice-profile.csv'), 'Voice Profile')]
+                if graphic else [])
     tier2_sources = [
         (os.path.join(ref_dir, 'character-bible.md'), 'Character Bible'),
         (os.path.join(ref_dir, 'world-bible.md'), 'World Bible'),
+        *gn_voice,
         (os.path.join(ref_dir, 'characters.csv'), 'Character Registry'),
         (os.path.join(ref_dir, 'locations.csv'), 'Location Registry'),
         (os.path.join(ref_dir, 'mice-threads.csv'), 'MICE Thread Registry'),
@@ -1360,7 +1372,7 @@ def build_shared_context(project_dir: str, model: str = '',
     # The voice (`voice_book.resolve`: book.md, the anchors, an author repo;
     # never checks.md); an unreadable one raises, naming the file
     from storyforge import voice_book
-    voice = voice_book.resolve(project_dir)
+    voice = voice_book.resolve(project_dir) if not graphic else DocState('missing', '', '')
     voice.raise_if_unreadable(project_dir)
     if voice.kind == 'ok':
         tier2_blocks.append({'type': 'text', 'text': f'=== The Voice ===\n\n{voice.text}'})

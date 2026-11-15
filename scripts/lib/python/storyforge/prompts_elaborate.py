@@ -127,7 +127,13 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
     bibles, the series canon) are left out and the rest are kept. A doc still holding its
     template text is skipped (F-130)."""
     sections = []
-    for name, label, in_shared in _REFERENCE_DOCS:
+    from .common import get_medium
+    docs = _REFERENCE_DOCS
+    if get_medium(project_dir) == 'graphic-novel':
+        # a graphic novel keeps its voice guide (prose: reference/voice/)
+        docs = [(('voice-guide.md', 'Voice Guide', True) if n == 'voice/book.md' else (n, l, i))
+                for n, l, i in docs]
+    for name, label, in_shared in docs:
         if shared and in_shared:
             continue
         content = reference_doc(project_dir, name)

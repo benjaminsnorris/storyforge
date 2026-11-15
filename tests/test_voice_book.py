@@ -69,7 +69,8 @@ def test_the_writing_section_never_carries_checks(project_dir):
 
 
 def test_render_puts_the_authors_voice_first():
-    folder = vb.BookVoiceFolder('Notes.', (vb.Anchor('x.md', 'Passage.'),))
+    folder = vb.BookVoiceFolder(notes='Notes.', notes_state='ok',
+                                anchors=(vb.Anchor('x.md', 'Passage.'),))
     text = vb.render(folder, 'AUTHOR')
     assert text.index('AUTHOR') < text.index('Notes.') < text.index('Passage.')
 
@@ -84,13 +85,6 @@ def test_an_unreadable_checks_md_raises(project_dir):
     _write(os.path.join(project_dir, vb.CHECKS_FILE), b'\xff\xfe')
     with pytest.raises(ReferenceDocError, match='checks.md'):
         vb.checks_text(project_dir)
-
-
-def test_register_section(project_dir):
-    _write(os.path.join(project_dir, vb.BOOK_FILE),
-           '# V\n\n## Register exemptions\n\n- "by my faith"\n\n## People\n\nX.\n')
-    assert vb.register_section(project_dir, 'Register exemptions') == '- "by my faith"'
-    assert vb.register_section(project_dir, 'Missing') == ''
 
 
 # --- the old files ---
@@ -160,17 +154,203 @@ def test_tense_is_read_from_narration_not_speech():
     assert curly.past == 0 and curly.present == 1
 
 
-@pytest.mark.parametrize('prose, declared, problem', [
-    (PRESENT, 'present', False), (PAST, 'past', False),
-    (PRESENT, 'past', True), (PAST, 'present', True),
-    (PAST, '', False), (PAST, 'future', False),
-    ('He walked. She saw.', 'present', False),            # too short to judge
+@pytest.mark.parametrize('prose, declared, verdict', [
+    (PRESENT, 'present', vb.TENSE_OK), (PAST, 'past', vb.TENSE_OK),
+    (PRESENT, 'past', vb.TENSE_MISMATCH), (PAST, 'present', vb.TENSE_MISMATCH),
+    (PAST, '', vb.TENSE_NOT_SAID), (PAST, 'future', vb.TENSE_NOT_SAID),
+    ('He walked. She saw.', 'present', vb.TENSE_UNJUDGED),
 ])
-def test_tense_problem(prose, declared, problem):
-    assert bool(vb.tense_problem(prose, declared)) is problem
+def test_check_tense(prose, declared, verdict):
+    check = vb.check_tense(prose, declared)
+    assert check.verdict == verdict
+    # what isn't checked is said, never silent
+    if verdict in (vb.TENSE_UNJUDGED, vb.TENSE_MISMATCH) or declared == 'future':
+        assert check.detail
 
 
 def test_present_narration_may_still_say_had_and_was():
     # what came before is told in the past inside a present-tense scene
     prose = PRESENT + ' He had been here before. It was spring then. He was young.'
-    assert vb.tense_problem(prose, 'present') == ''
+    assert vb.check_tense(prose, 'present').verdict == vb.TENSE_OK
+
+
+def test_single_curly_speech_with_a_contraction_is_speech():
+    r = vb.read_tense(PRESENT + ' ‘I don’t know what I was, or what I saw, or felt,’ he says.')
+    assert r.past == 0
+
+
+def test_share_takes_only_a_tense():
+    with pytest.raises(ValueError):
+        vb.TenseReading(1, 1).share('Present')
+
+
+# --- the review's fixes (#682) ---
+
+def test_anchor_constructor_holds_the_rules():
+    with pytest.raises(ValueError, match='empty'):
+        vb.Anchor('a.md', '  ')
+    with pytest.raises(ValueError, match="'future'"):
+        vb.Anchor('a.md', 'Text.', tense='future')
+
+
+def test_a_header_with_an_unknown_key_is_refused_not_read_as_prose():
+    with pytest.raises(ValueError, match='`source:`'):
+        vb.parse_anchor('a.md', 'kind: battle\nsource: Iliad 16\n\nHe fell.')
+
+
+def test_crlf_header_and_bom_template_are_read(project_dir):
+    a = vb.parse_anchor('a.md', 'kind: Battle\r\ntense: past\r\n\r\nHe ran.\r\n')
+    assert (a.kind, a.tense, a.text) == (('battle',), 'past', 'He ran.')
+    with open(os.path.join(vb.get_plugin_dir(), 'templates', vb.BOOK_FILE), 'rb') as f:
+        data = f.read()
+    _write(os.path.join(project_dir, vb.BOOK_FILE), b'\xef\xbb\xbf' + data.replace(b'\n', b'\r\n'))
+    assert vb.is_template(project_dir, vb.BOOK_FILE)
+    assert vb.resolve(project_dir).kind == 'template'
+
+
+def test_a_skipped_anchor_is_carried_on_an_ok_verdict(project_dir):
+    _write(os.path.join(project_dir, vb.ANCHORS_DIR, 'bad.md'), 'tense: future\n\nText.')
+    _write(os.path.join(project_dir, vb.ANCHORS_DIR, 'nested', 'deep.md'), 'Text.')
+    _write(os.path.join(project_dir, vb.ANCHORS_DIR, 'note.txt'), 'Text.')
+    v = vb.resolve(project_dir)
+    assert v.kind == 'ok' and len(v.skipped) == 3
+    warning = vb.skipped_warning(v)
+    assert warning.startswith('WARNING: 3 anchor file(s)')
+    assert 'bad.md' in warning and 'nested' in warning and 'note.txt' in warning
+
+
+def test_write_warns_about_a_skipped_anchor(project_dir, capsys):
+    from storyforge.cmd_write import _check_reference_docs
+    _write(os.path.join(project_dir, vb.ANCHORS_DIR, 'bad.md'), 'kind: x\nkind: y\n\nText.')
+    _check_reference_docs(project_dir, 'full', False)
+    out = capsys.readouterr()
+    assert 'WARNING: 1 anchor file(s)' in out.out + out.err and 'given twice' in out.out + out.err
+
+
+def test_a_directory_for_book_md_or_a_file_for_anchors_is_unreadable(project_dir):
+    os.remove(os.path.join(project_dir, vb.BOOK_FILE))
+    os.makedirs(os.path.join(project_dir, vb.BOOK_FILE))
+    v = vb.resolve(project_dir)
+    assert v.kind == 'unreadable' and 'not a regular file' in v.detail
+    os.rmdir(os.path.join(project_dir, vb.BOOK_FILE))
+    shutil.rmtree(os.path.join(project_dir, vb.ANCHORS_DIR))
+    _write(os.path.join(project_dir, vb.ANCHORS_DIR), 'oops')
+    v = vb.resolve(project_dir)
+    assert v.kind == 'unreadable' and 'not a folder' in v.detail
+    with pytest.raises(ReferenceDocError, match='not a folder'):
+        vb.scaffold(project_dir)
+
+
+def test_an_unreadable_checks_md_never_stops_writing(project_dir):
+    _write(os.path.join(project_dir, vb.CHECKS_FILE), b'\xff\xfe')
+    assert vb.resolve(project_dir).kind == 'ok'
+    with pytest.raises(ReferenceDocError):
+        vb.checks_text(project_dir)
+
+
+def test_the_author_repo_alone_is_a_voice(project_dir, tmp_path, monkeypatch):
+    from storyforge import voice_repo
+    shutil.rmtree(os.path.join(project_dir, vb.VOICE_DIR))
+    monkeypatch.setattr(voice_repo, 'voice_ref', lambda pd: object())
+    monkeypatch.setattr(voice_repo, 'author_voice_section', lambda pd: 'THE AUTHOR')
+    v = vb.resolve(project_dir)
+    assert v.kind == 'ok' and 'THE AUTHOR' in v.text
+    _write(os.path.join(project_dir, vb.BOOK_FILE), b'\xff\xfe')
+    assert vb.resolve(project_dir).kind == 'unreadable'
+
+
+SENTINEL = 'CHECKS_SENTINEL_7f3a'
+
+
+@pytest.fixture
+def sentinel(project_dir):
+    _write(os.path.join(project_dir, vb.CHECKS_FILE), f'# Checks\n\n1. {SENTINEL}\n')
+    return project_dir
+
+
+@pytest.mark.parametrize('coaching', ['full', 'coach', 'strict'])
+@pytest.mark.parametrize('system_context', [False, True])
+def test_checks_md_never_reaches_a_drafting_prompt(sentinel, coaching, system_context):
+    from storyforge.prompts import build_scene_prompt, build_scene_prompt_from_briefs
+    for api_mode in (True, False):
+        assert SENTINEL not in build_scene_prompt('act1-sc01', sentinel, coaching,
+                                                  api_mode=api_mode,
+                                                  system_context=system_context)
+    assert SENTINEL not in build_scene_prompt_from_briefs(
+        'act1-sc01', sentinel, vb.get_plugin_dir(), coaching, system_context=system_context)
+
+
+@pytest.mark.parametrize('api_mode', [True, False])
+@pytest.mark.parametrize('system_context', [False, True])
+def test_checks_md_never_reaches_a_revision_prompt_or_the_shared_context(
+        sentinel, api_mode, system_context):
+    from storyforge.common import _shared_context_cache, build_shared_context
+    from storyforge.prompts_elaborate import _existing_refs
+    from storyforge.revision import build_revision_prompt
+    assert SENTINEL not in build_revision_prompt('prose', 'Tighten', 'act1-sc01', sentinel,
+                                                 api_mode=api_mode,
+                                                 system_context=system_context)
+    _shared_context_cache.clear()
+    try:
+        assert SENTINEL not in ''.join(b['text'] for b in build_shared_context(sentinel))
+    finally:
+        _shared_context_cache.clear()
+    assert SENTINEL not in _existing_refs(sentinel) + _existing_refs(sentinel, shared=True)
+
+
+def test_hone_carries_book_md_only(project_dir, capsys):
+    from storyforge.hone import VOICE_EXCERPT_CHARS, voice_excerpt
+    text = voice_excerpt(project_dir)
+    assert 'Measures before it feels' in text and 'The village was not there' not in text
+    _write(os.path.join(project_dir, vb.BOOK_FILE), 'x ' * VOICE_EXCERPT_CHARS)
+    assert len(voice_excerpt(project_dir)) == VOICE_EXCERPT_CHARS
+    assert 'hone\'s prompts carry the first' in capsys.readouterr().out
+
+
+def test_the_voice_stage_dry_run_writes_nothing(project_dir, monkeypatch, capsys):
+    from storyforge import git
+    from storyforge.cmd_elaborate import _run_voice_stage
+    commits = []
+    monkeypatch.setattr(git, 'commit_and_push', lambda *a, **k: commits.append(a) or True)
+    shutil.rmtree(os.path.join(project_dir, vb.VOICE_DIR))
+    assert _run_voice_stage(project_dir, dry_run=True) == 0
+    assert not os.path.exists(os.path.join(project_dir, vb.VOICE_DIR))
+    assert commits == []
+    assert 'Would set up reference/voice/book.md' in capsys.readouterr().out
+
+
+def test_the_voice_stage_fails_when_its_commit_fails(project_dir, monkeypatch, capsys):
+    from storyforge import cmd_elaborate, git
+    shutil.rmtree(os.path.join(project_dir, vb.VOICE_DIR))
+    monkeypatch.setattr(git, 'commit_and_push', lambda *a, **k: False)
+    monkeypatch.setattr(git, 'last_commit_error', 'index.lock exists')
+    assert cmd_elaborate._run_voice_stage(project_dir, dry_run=False) == 1
+    assert 'not committed (index.lock exists)' in capsys.readouterr().out
+
+
+def test_graphic_novel_elaboration_keeps_its_voice_guide(project_dir, monkeypatch):
+    from storyforge import common
+    from storyforge.prompts_elaborate import _existing_refs
+    _write(os.path.join(project_dir, 'reference', 'voice-guide.md'), '# GN VOICE MARK\n')
+    monkeypatch.setattr(common, 'get_medium', lambda pd: 'graphic-novel')
+    common._shared_context_cache.clear()
+    try:
+        text = ''.join(b['text'] for b in common.build_shared_context(project_dir))
+    finally:
+        common._shared_context_cache.clear()
+    assert '=== Voice Guide ===' in text and 'GN VOICE MARK' in text
+    assert '=== The Voice ===' not in text
+    assert 'GN VOICE MARK' in _existing_refs(project_dir)
+
+
+# --- extract 5f's anchors ---
+
+def test_an_extracted_anchor_keeps_paragraphs_and_stops_at_a_paragraph():
+    from storyforge.extract_describe import anchor_passage, render_anchor
+    text = '\n\n'.join(f'Para {i} ' + 'word ' * 400 for i in range(6))
+    out = anchor_passage(text, max_words=1000)
+    assert out.count('\n\n') == 1 and out.startswith('Para 0') and 'Para 2' not in out
+    assert anchor_passage('one ' * 50, max_words=10).endswith('[…]')
+    assert anchor_passage('---\nid: x\n---\n\nThe prose.') == 'The prose.'
+    a = vb.parse_anchor('a.md', render_anchor('He ran.\n\nHe fell.', 'Hector'))
+    assert (a.pov, a.text) == ('Hector', 'He ran.\n\nHe fell.')
