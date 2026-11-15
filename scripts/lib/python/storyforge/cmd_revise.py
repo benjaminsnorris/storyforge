@@ -1097,19 +1097,14 @@ def _generate_polish_plan(plan_file, project_dir='', *, write=True):
     """Generate a single-pass craft-only polish plan (`write=False`: the
     rows only, for `_save_plan` once the run's forecast is approved)."""
     # Load AI-tell vocabulary for inclusion in guidance
-    from storyforge.prompts import load_ai_tell_words, load_voice_profile, merge_banned_words
+    from storyforge.prompts import banned_words, load_ai_tell_words
     plugin_dir = get_plugin_dir()
     ai_words = load_ai_tell_words(plugin_dir)
-
-    if project_dir:
-        profile, _ = load_voice_profile(project_dir)
-        banned = merge_banned_words(profile, ai_words)
-    else:
-        banned = [w['word'] for w in ai_words if w.get('severity') == 'high']
+    banned = banned_words(ai_words)
 
     banned_str = ', '.join(banned) if banned else ''
 
-    guidance = ('Follow the voice guide strictly. Focus on: em dash overuse, '
+    guidance = ('Keep to the voice. Focus on: em dash overuse, '
                 'antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. '
                 'Enter late, leave early.')
     if banned_str:
@@ -1134,19 +1129,12 @@ def _generate_polish_plan(plan_file, project_dir='', *, write=True):
 
 
 def _build_naturalness_pass3_guidance(project_dir: str = '') -> str:
-    """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv
-    and project voice profile."""
-    from storyforge.prompts import load_ai_tell_words, load_voice_profile, merge_banned_words
+    """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv."""
+    from storyforge.prompts import banned_words, load_ai_tell_words
 
     plugin_dir = get_plugin_dir()
     ai_words = load_ai_tell_words(plugin_dir)
-
-    # Merge with project-level banned words if available
-    if project_dir:
-        project_profile, _ = load_voice_profile(project_dir)
-        all_banned = merge_banned_words(project_profile, ai_words)
-    else:
-        all_banned = [w['word'] for w in ai_words if w.get('severity') == 'high']
+    all_banned = banned_words(ai_words)
 
     vocab_words = [w['word'] for w in ai_words if w['category'] == 'vocabulary']
     hedging_words = [w['word'] for w in ai_words if w['category'] == 'hedging']
@@ -1443,7 +1431,7 @@ def _generate_scores_plan(plan_file: str, diag_rows: list,
         guidance = (
             'Score-driven craft polish. Target principles:\n'
             + '\n'.join(f'  - {p}' for p in craft_principles)
-            + '\nFollow the voice guide strictly. Preserve plot, character, and continuity.'
+            + '\nKeep to the voice. Preserve plot, character, and continuity.'
         )
         if findings_guidance:
             guidance += '\n\n' + findings_guidance
@@ -1734,7 +1722,7 @@ def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict],
     guidance = (
         'Diagnosis-driven polish. Priority principles to improve:\n'
         + '\n'.join(f'  - {g}' for g in guidance_parts)
-        + '\nFollow the voice guide strictly. Preserve all plot, character, and continuity.'
+        + '\nKeep to the voice. Preserve all plot, character, and continuity.'
     )
 
     worst_scenes = set()
@@ -3417,12 +3405,13 @@ def main(argv=None):
 
 def _note_reference_docs(project_dir: str) -> None:
     """Tell the author what the revision prompts leave out (#596, SF-3/SF-4):
-    with no voice guide they take the voice from the existing scenes (a
-    WARNING); key decisions missing, empty or a template are a NOTE (the
+    with no voice (`voice_book.resolve`) they take it from the existing
+    scenes (a WARNING); key decisions missing, empty or a template are a NOTE (the
     prose passes and redrafts carry them when there are some). One that
     exists but can't be read stops the session (ERROR, exit 1)."""
-    from storyforge.common import VOICE_GUIDE_REMEDY, doc_state, resolve_voice_guide
-    voice = resolve_voice_guide(project_dir)
+    from storyforge import voice_book
+    from storyforge.common import doc_state
+    voice = voice_book.resolve(project_dir)
     decisions = doc_state(project_dir, 'reference/key-decisions.md')
     for state in (voice, decisions):
         if state.kind == 'unreadable':
@@ -3430,8 +3419,11 @@ def _note_reference_docs(project_dir: str) -> None:
                 'and run again; nothing was revised.')
             sys.exit(1)
     if voice.kind != 'ok':
-        log(f'WARNING: {voice.detail}: the revision prompts have no voice guide and take '
-            f"the voice from the book's existing scenes. Fill it: {VOICE_GUIDE_REMEDY}.")
+        log(f'WARNING: {voice.detail}: the revision prompts have no voice and take it '
+            f"from the book's existing scenes. To give them one: {voice_book.REMEDY}.")
+    old = voice_book.old_files_note(project_dir)
+    if old:
+        log(f'NOTE: {old}.')
     if decisions.kind != 'ok':
         log(f'NOTE: {decisions.detail}, so the prose passes and redrafts carry no '
             'key decisions.')

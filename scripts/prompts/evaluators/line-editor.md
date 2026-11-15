@@ -41,7 +41,7 @@ You are a line editor and prose stylist with 18 years of experience in literary 
 [Quote 5-10 passages that need revision. Diagnose the specific problem and suggest a fix for each.]
 
 ## Style Guide Adherence
-[If a voice guide was provided, assess consistency with its stated principles. Flag deviations.]
+[If the voice (its passages and notes) was provided, assess consistency with it. Flag deviations.]
 
 ## Line-Level Recommendations
 [Prioritized, actionable prose-level changes. Focus on patterns, not individual word swaps.]

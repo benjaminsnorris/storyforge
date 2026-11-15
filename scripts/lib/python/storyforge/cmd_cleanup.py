@@ -38,7 +38,7 @@ from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge import ledger
 from storyforge.elaborate import _FILE_MAP, _MOTIF_COLS, _THEMES_COLS
 from storyforge.audit import COLUMNS as AUDIT_COLUMNS
-from storyforge.schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
+from storyforge.schema import CHAPTER_MAP_COLUMNS
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
 from storyforge import world_table
@@ -109,7 +109,9 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # them gets a LEGACY_REGISTRY finding from report_csv_schema)
     f'reference/{ledger.LEDGER_FILE}': list(ledger.COLUMNS),
     'reference/chapter-map.csv': list(CHAPTER_MAP_COLUMNS),
-    'reference/voice-profile.csv': list(VOICE_PROFILE_COLUMNS),
+    # voice-profile.csv is no longer read in a prose book (the voice is
+    # reference/voice/: an OLD_VOICE_FILE finding); a graphic novel's
+    # script still has one (GN_CSV_SCHEMA_OVERRIDES)
     # Working CSVs
     'working/craft-weights.csv': [
         'section', 'principle', 'weight', 'author_weight', 'notes',
@@ -172,7 +174,7 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     # Added to the schema after projects existed; elaborate and extract add
     # them on their next write of the file
     'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene',
-                             'told_by'},
+                             'told_by', 'tense'},
     'reference/scene-intent.csv': {'theme_threads'},
     'reference/scene-briefs.csv': {'motif_details'},
 }
@@ -1602,6 +1604,9 @@ def report_csv_schema(project_dir: str) -> list[str]:
 
     issues += [f'LEGACY_REGISTRY:reference/{f}' for f in
                ledger.legacy_files(os.path.join(project_dir, 'reference'))]
+    if not is_gn:
+        from storyforge.voice_book import old_voice_files
+        issues += [f'OLD_VOICE_FILE:{rel}' for rel, _ in old_voice_files(project_dir)]
     return issues
 
 
@@ -1929,6 +1934,18 @@ def _classify_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) 
                        f'already exists, stops and says what to check'),
             'command': 'storyforge migrate',
             'severity': 'error',
+        }
+
+    if issue.startswith('OLD_VOICE_FILE:'):
+        # The author's text: reported, never deleted
+        path = issue.split(':', 1)[1]
+        return {
+            'type': 'old_voice_file', 'file': path,
+            'detail': f'{path} is no longer read: the voice is reference/voice/',
+            'action': ('Move what you want to keep into reference/voice/book.md (what the '
+                       'voice does) or an anchor passage in reference/voice/anchors/, then '
+                       'delete the file'),
+            'severity': 'warning',
         }
 
     if issue.startswith('UNREADABLE_CSV:'):

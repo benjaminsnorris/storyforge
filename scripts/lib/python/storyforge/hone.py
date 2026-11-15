@@ -1577,7 +1577,7 @@ def build_concretize_prompt(
         scene_id: The scene being concretized.
         fields: List of field names to rewrite.
         current_values: Dict of field_name -> current value.
-        voice_guide: Excerpt from the voice guide (POV character's sensory palette).
+        voice_guide: Excerpt from the voice (reference/voice/).
         character_entry: Character bible entry for the POV character.
 
     Returns:
@@ -1610,7 +1610,7 @@ def build_concretize_prompt(
 3. Replace "tension deepening" with what the character SEES or FEELS (someone's jaw tightening, the room going quiet, a hand moving to a weapon).
 4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
 5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
-6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
+6. Use the character's sensory palette, as the voice shows it. If they think in food metaphors, their observations should reflect that.
 {_labels_block(labels)}{_must_block(current_values, fields)}
 ## Output Format
 
@@ -1795,7 +1795,7 @@ def build_evaluation_fix_prompt(
         fields: List of field names to rewrite.
         current_values: Dict of field_name -> current value.
         guidance: Evaluation guidance text describing what to fix.
-        voice_guide: Excerpt from the voice guide (truncated externally to 3000 chars).
+        voice_guide: Excerpt from the voice (truncated externally to 3000 chars).
         character_entry: Character bible entry (truncated externally to 2000 chars).
 
     Returns:
@@ -1969,8 +1969,11 @@ def hone_briefs(
             'fields_rewritten': 0,
         }
 
-    # Load voice guide and character bible for prompt building
-    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
+    # Load the voice (`voice_book.resolve`) and character bible for prompt building
+    from storyforge import voice_book
+    _voice = voice_book.resolve(project_dir)
+    _voice.raise_if_unreadable(project_dir)
+    voice_guide = _voice.text if _voice.kind == 'ok' else ''
 
     char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
 
@@ -2615,7 +2618,7 @@ def build_intent_fix_prompt(
         fields: List of field names to rewrite.
         current_values: Dict of field_name -> current value.
         issues: List of issue dicts for this scene.
-        voice_guide: Optional voice guide excerpt.
+        voice_guide: Optional excerpt from the voice.
 
     Returns:
         Prompt string for Claude.
@@ -2802,8 +2805,11 @@ def hone_intent(
             'fields_rewritten': det_fields_rewritten,
         }
 
-    # Load voice guide
-    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
+    # Load the voice (`voice_book.resolve`)
+    from storyforge import voice_book
+    _voice = voice_book.resolve(project_dir)
+    _voice.raise_if_unreadable(project_dir)
+    voice_guide = _voice.text if _voice.kind == 'ok' else ''
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 

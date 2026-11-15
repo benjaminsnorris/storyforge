@@ -60,7 +60,7 @@ def _seed_project(project_dir, drafts: dict[str, str] | None = None,
         bibles = {
             'character-bible.md': 'The cartographer is left-handed and quiet.',
             'world-bible.md': 'Writing is forbidden outside the capital.',
-            'voice-guide.md': 'Short sentences; first-person POV.',
+            'voice/book.md': 'Short sentences; first-person POV.',
         }
     if drafts is None:
         drafts = {
@@ -69,6 +69,7 @@ def _seed_project(project_dir, drafts: dict[str, str] | None = None,
     ref = os.path.join(project_dir, 'reference')
     os.makedirs(ref, exist_ok=True)
     for fname, content in bibles.items():
+        os.makedirs(os.path.dirname(os.path.join(ref, fname)), exist_ok=True)
         with open(os.path.join(ref, fname), 'w', encoding='utf-8') as f:
             f.write(content)
     scenes_dir = os.path.join(project_dir, 'scenes')

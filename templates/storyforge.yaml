@@ -65,11 +65,6 @@ artifacts:
     path: reference/story-architecture.md
     updated:
 
-  voice_guide:
-    exists: false
-    path: reference/voice-guide.md
-    updated:
-
   timeline:
     exists: false
     path: reference/timeline.md

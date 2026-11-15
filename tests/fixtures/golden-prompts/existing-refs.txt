@@ -24,29 +24,35 @@
 **Wound:** Grew up in a border village that was redistricted out of existence on paper. Her family lost their land rights.
 **Lie:** If she works within the system, she can fix it from the inside.
 
-### Voice Guide
+### The Voice (reference/voice/book.md)
 
-# Voice Guide — The Cartographer's Silence
+# The voice: The Cartographer's Silence
 
-## Narrative Voice
+Third person, close to the POV character. Precise and observational, with an
+undercurrent of institutional dread.
 
-Third-person limited. Precise, observational prose with an undercurrent of institutional dread. The narrator notices details the way a cartographer would — measurements, spatial relationships, the gap between what is recorded and what is real.
+## What it does
 
-## Prose Style
+**Measures before it feels.** "She checked the scale bar twice. The village
+was not there." The realization arrives in a short sentence after a long,
+careful one.
 
-- Short declarative sentences for moments of realization
-- Longer, winding sentences for description and world-building
-- Metaphors drawn from cartography, measurement, and institutional language
-- Minimal adverbs; let verbs carry the weight
-- Dialogue is sparse and functional — characters speak to convey information, not to fill silence
+**Lets verbs carry the weight.** "She pressed the calipers flat" rather than
+"she carefully measured". Few adverbs.
 
-## POV Voices
+**Comparisons come from the work.** Cartography, measurement and the
+office's own forms: "a silence with the exact dimensions of a missing name".
 
-### Dorren Hayle
-Precise, controlled, emotionally restrained. She processes the world through systems and categories. When overwhelmed, her language becomes more clinical, not less.
+## People
 
-### Tessa Merrin
-Sensory, curious, slightly irreverent. She notices textures, smells, sounds. Her internal voice has an edge of dark humor.
+- **Dorren Hayle** processes the world through systems and categories. When
+  overwhelmed, her language turns more clinical, not less.
+- **Tessa Merrin** notices textures, smells and sounds, with an edge of dark
+  humor.
+
+## Decided
+
+- Dialogue is sparse and functional.
 
 ### Key Decisions
 

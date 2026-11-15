@@ -16,8 +16,8 @@ from storyforge.scoring_levels import (
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import (
-    MEDIUM_GRAPHIC_NOVEL, VOICE_GUIDE_REMEDY, VOICE_STAGE, VOICE_STAGE_COMMAND,
-    parse_story_summary, read_yaml_field, resolve_voice_guide,
+    MEDIUM_GRAPHIC_NOVEL, VOICE_STAGE, VOICE_STAGE_COMMAND,
+    parse_story_summary, read_yaml_field,
 )
 from storyforge.elaborate import _read_csv
 
@@ -40,12 +40,12 @@ ELABORATE_STAGE = {
 }
 
 # The voice rung (#596): between briefs and drafting, a prose book needs a
-# voice guide with the author's text in it (`common.resolve_voice_guide`: not
-# missing, init's template, empty, unreadable, or only persistent-prompt.md).
+# voice (`voice_book.resolve`: reference/voice/book.md and an anchor, or an
+# author voice repo).
 # Not a floor-checked ladder level. Before drafting, `build_status` makes it
 # the phase and `next` (or `then`, while scenes wait on the gate) and a
 # `voice` blocker; once every scene is drafted, the blocker alone. A graphic
-# novel's script is written from voice-profile.csv, so it has no voice rung.
+# novel's script has its own voice files, so it has no voice rung.
 
 #: what status recommends for drafting (Storyforge's unattended drafting
 #: passes --keep-going, Ben 2026-11-04)
@@ -251,10 +251,11 @@ def _recommend(stage: Stage) -> tuple[dict, dict | None]:
                     'command': WRITE_COMMAND, 'reason': ''}
         return nxt, then
     if stage == VOICE_STAGE:
-        return ({'stage': VOICE_STAGE, 'action': 'Develop the voice guide',
+        return ({'stage': VOICE_STAGE, 'action': 'Find the voice',
                  'command': VOICE_STAGE_COMMAND,
-                 'reason': ('Briefs are complete; drafting needs a voice guide with '
-                            "the author's text (see the voice blocker)")},
+                 'reason': ('Briefs are complete; drafting needs the voice: '
+                            'reference/voice/book.md and an anchor passage (see the voice '
+                            'blocker)')},
                 {'stage': 'draft', 'action': 'Draft scenes',
                  'command': WRITE_COMMAND, 'reason': ''})
     if stage == 'draft':
@@ -352,18 +353,19 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     if phase is None:
         phase, _drafted, _total = draft_stage(project_dir)
 
-    # #596: briefs to drafting with no voice guide. Before drafting the
-    # voice stage is the phase (next, or then while scenes wait on the gate);
-    # once every scene is drafted only the blocker is reported, since
-    # evaluation and revision read the voice guide too.
+    # #596: briefs to drafting with no voice. Before drafting the voice
+    # stage is the phase (next, or then while scenes wait on the gate); once
+    # every scene is drafted only the blocker is reported, since evaluation
+    # and revision read the voice too.
     voice_blocker = None
     if phase in ('draft', 'evaluate') and medium != MEDIUM_GRAPHIC_NOVEL:
-        voice = resolve_voice_guide(project_dir)
+        from storyforge import voice_book
+        voice = voice_book.resolve(project_dir)
         if voice.kind != 'ok':
             voice_blocker = {
                 'source': VOICE_STAGE, 'level': -1,  # sentinel: not a ladder rung
-                'detail': (f'{voice.detail}: drafting has no voice guide to follow, '
-                           f'and write refuses to draft. Fill it: {VOICE_GUIDE_REMEDY}'),
+                'detail': (f'{voice.detail}: drafting has no voice to follow, and write '
+                           f'refuses to draft. To give it one, {voice_book.REMEDY}'),
             }
             if phase == 'draft':
                 phase = VOICE_STAGE
@@ -393,6 +395,13 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     blockers = collect_blockers(project_dir)
     if voice_blocker:
         blockers.insert(0, voice_blocker)
+    if medium != MEDIUM_GRAPHIC_NOVEL:
+        # the pipeline's voice files, ignored since reference/voice/: said,
+        # never deleted (the author's text)
+        from storyforge import voice_book
+        old = voice_book.old_files_note(project_dir)
+        if old:
+            blockers.append({'source': 'old-voice-files', 'level': -1, 'detail': old})
     if declared and not matches:
         names = ', '.join(r['name'] for r in unmet)
         blockers.insert(0, {

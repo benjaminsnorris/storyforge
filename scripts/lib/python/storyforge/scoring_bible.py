@@ -27,7 +27,7 @@ from storyforge.scoring_state import is_override_accepted
 BIBLES = (
     ('reference/character-bible.md', 'character-bible.md'),
     ('reference/world-bible.md', 'world-bible.md'),
-    ('reference/voice-guide.md', 'voice-guide.md'),
+    ('reference/voice/book.md', 'voice/book.md'),
 )
 
 
@@ -101,7 +101,7 @@ def score_bible_consistency(project_dir: str,
     if not bibles:
         log('No bibles found; nothing to check (expected at least one of: '
             'reference/character-bible.md, reference/world-bible.md, '
-            'reference/voice-guide.md)')
+            'reference/voice/book.md)')
         return []
 
     scenes = _drafted_scenes(project_dir)

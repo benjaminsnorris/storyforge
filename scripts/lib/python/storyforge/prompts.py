@@ -11,10 +11,8 @@ import re
 import sys
 from collections.abc import Collection, Mapping
 
-from .common import (
-    is_unfilled_template, parse_yaml_scalar, reference_text,
-    resolve_voice_guide,
-)
+from . import voice_book
+from .common import is_unfilled_template, parse_yaml_scalar, reference_text
 
 
 # ============================================================================
@@ -140,78 +138,22 @@ def build_ai_tell_constraint(words: list[dict[str, str]],
 
 
 # ============================================================================
-# Voice profile
+# Banned words and tense
 # ============================================================================
 
-def load_voice_profile(project_dir: str) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
-    """Load the voice profile from reference/voice-profile.csv.
-
-    Args:
-        project_dir: Path to the book project root.
-
-    Returns:
-        Tuple of (project_data, character_data).
-        project_data: dict of field -> value for the _project row.
-        character_data: dict of character_id -> {field: value}.
-        Both empty dicts if file not found.
-    """
-    path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
-    if not os.path.isfile(path):
-        return {}, {}
-
-    with open(path, encoding='utf-8') as f:
-        raw = f.read().replace('\r\n', '\n').replace('\r', '')
-
-    lines = [l for l in raw.splitlines() if l.strip()]
-    if len(lines) < 2:
-        return {}, {}
-
-    header = lines[0].split('|')
-    project_data = {}
-    character_data = {}
-
-    for line in lines[1:]:
-        fields = line.split('|')
-        row = {header[i]: (fields[i] if i < len(fields) else '')
-               for i in range(len(header))}
-
-        char_id = row.get('character', '').strip()
-        if char_id == '_project':
-            project_data = {k: v for k, v in row.items() if k != 'character' and v.strip()}
-        elif char_id:
-            character_data[char_id] = {k: v for k, v in row.items()
-                                        if k != 'character' and v.strip()}
-
-    return project_data, character_data
+def banned_words(ai_tell_words: list[dict[str, str]]) -> list[str]:
+    """The high-severity AI-tell words, sorted (`load_ai_tell_words`)."""
+    return sorted({e['word'] for e in ai_tell_words if e.get('severity') == 'high'})
 
 
-def merge_banned_words(project_profile: dict[str, str],
-                       ai_tell_words: list[dict[str, str]]) -> list[str]:
-    """Merge project-level banned words with universal AI-tell high-severity words.
-
-    Args:
-        project_profile: Project-level voice profile data (from load_voice_profile).
-        ai_tell_words: Output of load_ai_tell_words().
-
-    Returns:
-        Deduplicated sorted list of banned words.
-    """
-    banned = set()
-
-    # Project-level banned words
-    project_banned = project_profile.get('banned_words', '')
-    if project_banned:
-        for w in project_banned.split(';'):
-            w = w.strip()
-            if w:
-                banned.add(w)
-
-    # Universal high-severity AI-tell words
-    for entry in ai_tell_words:
-        if entry.get('severity') == 'high':
-            banned.add(entry['word'])
-
-    return sorted(banned)
+def tense_line(scene: Mapping[str, str]) -> str:
+    """The scene's tense for a writing prompt (`scenes.csv`'s `tense`), or
+    '' when it doesn't say one."""
+    tense = (scene.get('tense') or '').strip().lower()
+    if tense not in voice_book.TENSES:
+        return ''
+    return (f'**Tense: {tense}.** Tell this scene\'s narration in the {tense} tense '
+            f'(speech is as people speak).')
 
 
 # ============================================================================
@@ -442,11 +384,19 @@ def list_reference_files(project_dir: str) -> list[str]:
         return []
 
     extensions = {'.md', '.csv', '.yaml', '.yml', '.txt'}
+    # the voice is inlined on its own (`voice_book.resolve`), and its
+    # checks.md must never reach a writing prompt; the old voice files are
+    # no longer read
+    skip_dir = os.path.join(project_dir, voice_book.VOICE_DIR) + os.sep
+    old = {os.path.normpath(os.path.join(project_dir, rel)) for rel, _ in voice_book.OLD_FILES}
     result = []
     for root, _dirs, files in os.walk(ref_dir):
         for fname in files:
             if os.path.splitext(fname)[1] in extensions:
                 full = os.path.join(root, fname)
+                if (full.startswith(skip_dir) or os.path.normpath(full) in old
+                        or os.path.normpath(root) in old):
+                    continue
                 rel = os.path.relpath(full, project_dir)
                 result.append(rel)
 
@@ -699,9 +649,9 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     # --- Previous scene ---
     prev_scene = get_previous_scene(scene_id, project_dir)
 
-    # --- Voice guide --- (this prompt names the file, so the older
-    # persistent-prompt.md counts: common.resolve_voice_guide)
-    voice = resolve_voice_guide(project_dir, briefs=False)
+    # --- The voice (`voice_book.resolve`), inlined: the folder's checks.md
+    # must never reach a writing prompt, so the files aren't listed to read
+    voice = voice_book.resolve(project_dir)
     voice.raise_if_unreadable(project_dir)
     voice_guide = voice.path if voice.kind == 'ok' else ''
 
@@ -754,58 +704,11 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         craft_sections += f'\n\n## Scene-Specific Notes\n{overrides}'
 
     # --- AI-tell vocabulary constraint ---
-    # When system_context is True, the AI-tell word list and voice profile
-    # are provided in the system parameter — skip inlining them here.
+    # When system_context is True, the AI-tell word list is provided in the
+    # system parameter — skip inlining it here.
     ai_tell_words = [] if system_context else load_ai_tell_words(plugin_dir)
     ai_tell_block = build_ai_tell_constraint(ai_tell_words)
-
-    # --- Voice profile ---
-    if system_context:
-        voice_profile_project, voice_profile_chars = {}, {}
-    else:
-        voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
-    pov_char = ''
-    if csv_file:
-        pov_char = read_csv_field(csv_file, scene_id, 'pov')
-
-    # Merge banned words: project profile + universal AI-tell list
-    if voice_profile_project or ai_tell_words:
-        merged_banned = merge_banned_words(voice_profile_project, ai_tell_words)
-        if merged_banned:
-            banned_str = ', '.join(merged_banned)
-            ai_tell_block = (
-                'VOCABULARY CONSTRAINT: Do not use these words or phrases — they '
-                'are banned for this project:\n'
-                f'{banned_str}\n'
-                'Replace with concrete, specific words grounded in the scene and character.'
-            )
-
-    # Character-specific constraints
-    char_voice_block = ''
-    if pov_char:
-        # Normalize POV name to slug form for matching (e.g. "Dorren Hayle" -> "dorren-hayle")
-        pov_slug = pov_char.lower().replace(' ', '-')
-        char_key = pov_char if pov_char in voice_profile_chars else (
-            pov_slug if pov_slug in voice_profile_chars else '')
-        if char_key:
-            char_data = voice_profile_chars[char_key]
-            parts = []
-            if char_data.get('preferred_words'):
-                parts.append(f'Favor these words (they define this character\'s voice): '
-                            f'{char_data["preferred_words"].replace(";", ", ")}')
-            if char_data.get('metaphor_families'):
-                parts.append(f'Source metaphors from: '
-                            f'{char_data["metaphor_families"].replace(";", ", ")}')
-            if char_data.get('rhythm_preference'):
-                parts.append(f'Sentence rhythm: '
-                            f'{char_data["rhythm_preference"].replace(";", ", ")}')
-            if char_data.get('dialogue_style'):
-                parts.append(f'Dialogue style: '
-                            f'{char_data["dialogue_style"].replace(";", ", ")}')
-            if parts:
-                char_voice_block = (
-                    f'CHARACTER VOICE ({pov_char}):\n' + '\n'.join(f'- {p}' for p in parts)
-                )
+    scene_row = {'tense': read_csv_field(csv_file, scene_id, 'tense')} if csv_file else {}
 
     # --- Title line ---
     title_part = f'"{title}"' if title else '"Untitled"'
@@ -823,7 +726,7 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     lines.append('===== STEP 1: REFERENCE MATERIALS =====')
     if system_context:
         lines.append('')
-        lines.append('Reference materials (world bible, character bible, voice guide, '
+        lines.append('Reference materials (world bible, character bible, the voice, '
                      'story architecture, craft engine, vocabulary constraints) have '
                      'been provided in the system context. Internalize them before writing.')
         # the system context carries no key decisions (#596)
@@ -851,8 +754,7 @@ def build_scene_prompt(scene_id: str, project_dir: str,
 
     if voice_guide and not system_context:
         lines.append('')
-        lines.append('Pay special attention to the voice guide — this is the '
-                     'voice and style guide. Follow it exactly.')
+        lines.append(voice.text)
 
     if craft_sections:
         lines.append('')
@@ -870,24 +772,9 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         lines.append('')
         lines.append(ai_tell_block)
 
-    if char_voice_block:
+    if tense_line(scene_row):
         lines.append('')
-        lines.append('===== CHARACTER VOICE =====')
-        lines.append('')
-        lines.append(char_voice_block)
-
-    if voice_profile_project.get('register'):
-        lines.append('')
-        lines.append(f'PROSE REGISTER: {voice_profile_project["register"].replace(";", ", ")}')
-
-    # The author's voice from the book's `voice:` block (#652); nothing
-    # without one
-    if coaching_level == 'full':
-        from .voice_repo import author_voice_section
-        author_voice = author_voice_section(project_dir)
-        if author_voice:
-            lines.append('')
-            lines.append(author_voice)
+        lines.append(tense_line(scene_row))
 
     # ===== STEP 2: PREVIOUS SCENE =====
     lines.append('')
@@ -1054,10 +941,8 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('Write the complete scene following these rules:')
         lines.append('')
         lines.append('VOICE AND STYLE:')
-        lines.append('- Follow the voice guide exactly')
+        lines.append("- Write toward the voice's passages")
         lines.append("- Maintain the POV character's distinct voice throughout")
-        lines.append('- Let the style rules govern every sentence — word '
-                     'choice, rhythm, metaphor, dialogue density')
         lines.append('')
         lines.append('PROSE NATURALNESS:')
         lines.append('- Em dashes are rare — use at most one per scene. '
@@ -1116,21 +1001,18 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('')
         lines.append('===== IMPORTANT NOTES =====')
         lines.append('- Focus entirely on writing the best possible scene.')
-        lines.append('- Let the craft principles, voice guide, and continuity '
+        lines.append('- Let the craft principles, the voice, and continuity '
                      'tracker guide every sentence.')
     else:
         title_suffix = f': {scene_title}' if scene_title else ''
-        vg_ref = f' ({voice_guide})' if voice_guide else ''
 
         lines.append('===== STEP 4: DRAFT THE SCENE =====')
         lines.append('')
         lines.append('Write the complete scene following these rules:')
         lines.append('')
         lines.append('VOICE AND STYLE:')
-        lines.append(f'- Follow the voice guide{vg_ref} exactly')
+        lines.append("- Write toward the voice's passages")
         lines.append("- Maintain the POV character's distinct voice throughout")
-        lines.append('- Let the style rules govern every sentence — word '
-                     'choice, rhythm, metaphor, dialogue density')
         lines.append('')
         lines.append('PROSE NATURALNESS:')
         lines.append('- Em dashes are rare — use at most one per scene. '
@@ -1316,56 +1198,6 @@ This POV character's interiority is grounded in the physical world. Reflective p
         return """### POV Restraint Level: MAXIMUM (Protagonist)
 
 This POV character withholds. Their interiority is sparse, physical, professional. Emotions are shown through action and observation, rarely named. Do not editorialize their feelings. Let the reader infer from what the character does and what they notice."""
-
-
-def _load_prose_exemplars(project_dir: str, pov: str = '') -> str:
-    """Load prose exemplar text, preferring per-POV files.
-
-    Loading order:
-    1. reference/exemplars/{pov-slug}.md (per-POV, if pov is provided)
-    2. reference/prose-exemplars.md (flat file fallback)
-
-    Returns formatted prompt block, or empty string if no exemplars found.
-    """
-    content = ''
-
-    # Try per-POV file first
-    if pov:
-        pov_slug = pov.lower().replace(' ', '-')
-        pov_path = os.path.join(project_dir, 'reference', 'exemplars', f'{pov_slug}.md')
-        if os.path.isfile(pov_path):
-            with open(pov_path, encoding='utf-8') as f:
-                content = f.read().strip()
-
-    # Fall back to flat file
-    if not content:
-        flat_path = os.path.join(project_dir, 'reference', 'prose-exemplars.md')
-        if os.path.isfile(flat_path):
-            with open(flat_path, encoding='utf-8') as f:
-                content = f.read().strip()
-
-    if not content:
-        return ''
-
-    # Extract rhythm signature if possible
-    rhythm_block = ''
-    try:
-        from .exemplars import compute_rhythm_signature, format_rhythm_for_prompt
-        sig = compute_rhythm_signature(content)
-        if sig:
-            rhythm_block = '\n\n' + format_rhythm_for_prompt(sig)
-    except (ImportError, Exception):
-        pass
-
-    return (
-        "## Voice Calibration — Write Like This\n\n"
-        "These passages represent the manuscript's target voice. "
-        "Study their rhythm, restraint, and specificity. "
-        "Notice what they do NOT do: they don't summarize, don't explain emotions, "
-        "don't end with philosophical reflections.\n\n"
-        + content
-        + rhythm_block
-    )
 
 
 # ============================================================================
@@ -2066,10 +1898,10 @@ def build_scene_prompt_from_briefs(
 
     voice_guide = ''
     if not system_context:
-        voice = resolve_voice_guide(project_dir)
+        voice = voice_book.resolve(project_dir)
         voice.raise_if_unreadable(project_dir)
         if voice.kind == 'ok':
-            voice_guide = f"## Voice Guide\n\n{voice.text}"
+            voice_guide = voice.text
 
     char_block = ''
     on_stage = scene.get('on_stage', '')
@@ -2132,76 +1964,26 @@ def build_scene_prompt_from_briefs(
     craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
 
     # --- AI-tell vocabulary constraint ---
-    # When system_context is True, AI-tell words and voice profile are in the
-    # system parameter — skip inlining them here.
+    # When system_context is True, the AI-tell words are in the system
+    # parameter — skip inlining them here.
     ai_tell_words = [] if system_context else load_ai_tell_words(plugin_dir)
     ai_tell_block = build_ai_tell_constraint(ai_tell_words)
-
-    # --- Voice profile ---
-    if system_context:
-        voice_profile_project, voice_profile_chars = {}, {}
-    else:
-        voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
     pov_char = scene.get('pov', '')
-
-    # Merge banned words: project profile + universal AI-tell list
-    if voice_profile_project or ai_tell_words:
-        merged_banned = merge_banned_words(voice_profile_project, ai_tell_words)
-        if merged_banned:
-            banned_str = ', '.join(merged_banned)
-            ai_tell_block = (
-                'VOCABULARY CONSTRAINT: Do not use these words or phrases — they '
-                'are banned for this project:\n'
-                f'{banned_str}\n'
-                'Replace with concrete, specific words grounded in the scene and character.'
-            )
-
-    # Character-specific voice constraints
-    char_voice_block = ''
-    if pov_char:
-        pov_slug = pov_char.lower().replace(' ', '-')
-        char_key = pov_char if pov_char in voice_profile_chars else (
-            pov_slug if pov_slug in voice_profile_chars else '')
-        if char_key:
-            char_data = voice_profile_chars[char_key]
-            parts = []
-            if char_data.get('preferred_words'):
-                parts.append(f'Favor these words (they define this character\'s voice): '
-                            f'{char_data["preferred_words"].replace(";", ", ")}')
-            if char_data.get('metaphor_families'):
-                parts.append(f'Source metaphors from: '
-                            f'{char_data["metaphor_families"].replace(";", ", ")}')
-            if char_data.get('rhythm_preference'):
-                parts.append(f'Sentence rhythm: '
-                            f'{char_data["rhythm_preference"].replace(";", ", ")}')
-            if char_data.get('dialogue_style'):
-                parts.append(f'Dialogue style: '
-                            f'{char_data["dialogue_style"].replace(";", ", ")}')
-            if parts:
-                char_voice_block = (
-                    f'CHARACTER VOICE ({pov_char}):\n' + '\n'.join(f'- {p}' for p in parts)
-                )
 
     vocab_block = ''
     if ai_tell_block:
         vocab_block = f"## Vocabulary Constraints\n\n{ai_tell_block}"
 
     char_voice_section = ''
-    if char_voice_block:
-        char_voice_section = f"## Character Voice\n\n{char_voice_block}"
     from .narrator import is_narrator, prompt_line
     if is_narrator(pov_char):
         # The reserved narrator POV (#555): no character's eyes, the book's
-        # narrator, as the voice guide gives it
+        # narrator, as the voice gives it
         char_voice_section = (
             "## Narrator\n\nThis scene's POV is the narrator: tell it in the book's "
-            "narrating voice, as the voice guide describes the narrator, through no "
-            f"character's eyes. {prompt_line(project_dir, always=True)}"
-            + (f"\n\n{char_voice_block}" if char_voice_block else ''))
-
-    register_line = ''
-    if voice_profile_project.get('register'):
-        register_line = f"PROSE REGISTER: {voice_profile_project['register'].replace(';', ', ')}"
+            "narrating voice, as the voice shows the narrator, through no "
+            f"character's eyes. {prompt_line(project_dir, always=True)}")
+    register_line = tense_line(scene)
 
     # Target word count
     target_words = scene.get('target_words', '') or scene.get('word_count', '')
@@ -2261,7 +2043,7 @@ Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
 - Vary sentence and paragraph length — follow thought patterns, not templates
 - Contractions in interiority and dialogue
 - Enter late, leave early
-- Match the voice guide exactly
+- Write toward the voice's passages
 
 **Scene ending:** no set shape. Stop when what happens is done: on an action, a line, an image, or running on toward what comes next. Do NOT close on a reflection, a thematic echo, or a landscape-as-metaphor sentence.
 
@@ -2300,17 +2082,9 @@ Do NOT add creative interpretation or suggestions."""
     pov = scene.get('pov', '')
     pov_restraint = _build_pov_restraint_block(pov, ref_dir) if coaching_level == 'full' else ''
 
-    # Prose exemplars (optional, per-POV preferred)
-    exemplar_block = _load_prose_exemplars(project_dir, pov) if coaching_level == 'full' else ''
-    # The author's voice, read in place from the voice repo the book's
-    # `voice:` block names (#652): '' without one, so other prompts are byte
-    # for byte what they were
-    if coaching_level == 'full':
-        from .voice_repo import author_voice_section
-        author_voice = author_voice_section(project_dir)
-        if author_voice:
-            exemplar_block = (f'{author_voice}\n\n{exemplar_block}' if exemplar_block
-                              else author_voice)
+    # The voice (`voice_book.resolve`: the author repo, book.md and the
+    # anchors) is `voice_guide`, after the facts
+    exemplar_block = ''
 
     return f"""You are drafting a scene for "{title}" ({genre}).
 

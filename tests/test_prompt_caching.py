@@ -90,7 +90,7 @@ class TestBuildSharedContext:
         _shared_context_cache.clear()
         result = build_shared_context(fixture_dir, model='claude-sonnet-4-6')
         all_text = ' '.join(b['text'] for b in result)
-        assert 'Voice Guide' in all_text
+        assert '=== The Voice ===' in all_text
         assert 'Character Bible' in all_text
 
     def test_includes_registries(self, fixture_dir, plugin_dir):

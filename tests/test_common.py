@@ -31,7 +31,7 @@ def test_read_yaml_field_phase(fixture_dir):
 
 
 def test_check_file_exists_present(fixture_dir):
-    assert os.path.isfile(os.path.join(fixture_dir, 'reference', 'voice-guide.md'))
+    assert os.path.isfile(os.path.join(fixture_dir, 'reference', 'voice', 'book.md'))
 
 
 def test_check_file_exists_missing(fixture_dir):

@@ -51,9 +51,15 @@ class TestFileState:
         assert _state(project, _put(project, 'reference/voice-guide.md', '\n  \n')) == 'empty'
 
     def test_template_copy(self, project):
-        shutil.copy(os.path.join(TEMPLATES, 'voice-guide.md'),
-                    project / 'reference' / 'voice-guide.md')
-        assert _state(project, 'reference/voice-guide.md') == 'template'
+        shutil.copy(os.path.join(TEMPLATES, 'world-bible.md'),
+                    project / 'reference' / 'world-bible.md')
+        assert _state(project, 'reference/world-bible.md') == 'template'
+
+    def test_the_voice_folder_template_copy(self, project):
+        os.makedirs(project / 'reference' / 'voice', exist_ok=True)
+        shutil.copy(os.path.join(TEMPLATES, 'voice', 'book.md'),
+                    project / 'reference' / 'voice' / 'book.md')
+        assert _state(project, 'reference/voice/book.md') == 'template'
 
     def test_template_saved_with_crlf_and_bom_is_still_the_template(self, project):
         with open(os.path.join(TEMPLATES, 'world-bible.md'), encoding='utf-8') as f:
@@ -121,10 +127,10 @@ class TestFileState:
         assert _state(project, 'reference/voice-guide.md') == 'edited'
 
     def test_extracted_then_reset_to_template_is_free_again(self, project):
-        _write(project, 'reference/voice-guide.md', '# Voice\n\nDescribed.\n')
-        shutil.copy(os.path.join(TEMPLATES, 'voice-guide.md'),
-                    project / 'reference' / 'voice-guide.md')
-        assert _state(project, 'reference/voice-guide.md') == 'template'
+        _write(project, 'reference/voice/book.md', '# Voice\n\nDescribed.\n')
+        shutil.copy(os.path.join(TEMPLATES, 'voice', 'book.md'),
+                    project / 'reference' / 'voice' / 'book.md')
+        assert _state(project, 'reference/voice/book.md') == 'template'
 
     def test_extracted_csv_cleared_to_its_header_is_free_again(self, project):
         _write(project, 'reference/themes.csv', 'id|name|tier|description\nhope|Hope|1|x\n',

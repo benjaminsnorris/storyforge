@@ -65,14 +65,24 @@ def main(argv=None):
     if os.path.isfile(ledger.ledger_path(project_dir)):
         knowledge = validate_knowledge_granularity(ref_dir, project_dir)
 
-    from storyforge.schema import validate_voice_profile
-    vp_result = validate_voice_profile(project_dir)
-    if vp_result['errors']:
-        say(f'Voice profile: {len(vp_result["errors"])} issues')
-        for err in vp_result['errors']:
-            say(f'  {err["row"]}: {err["message"]}')
-    elif vp_result['has_project_row']:
-        say(f'Voice profile: valid ({vp_result["character_count"]} characters)')
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        # a graphic novel's script still has its voice profile
+        from storyforge.schema import validate_voice_profile
+        vp_result = validate_voice_profile(project_dir)
+        if vp_result['errors']:
+            say(f'Voice profile: {len(vp_result["errors"])} issues')
+            for err in vp_result['errors']:
+                say(f'  {err["row"]}: {err["message"]}')
+        elif vp_result['has_project_row']:
+            say(f'Voice profile: valid ({vp_result["character_count"]} characters)')
+    else:
+        from storyforge import voice_book
+        voice = voice_book.resolve(project_dir)
+        say(f'Voice: {voice.path}' if voice.kind == 'ok' else f'Voice: {voice.detail}')
+        old = voice_book.old_files_note(project_dir)
+        if old:
+            say(f'NOTE: {old}.')
 
     from storyforge.schema import validate_illustration_plan
     illus_result = validate_illustration_plan(project_dir)

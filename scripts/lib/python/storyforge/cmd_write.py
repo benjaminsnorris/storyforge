@@ -435,21 +435,21 @@ def _note_unmarked_dialogue(project_dir: str, scene_ids: list[str]) -> None:
 
 def _check_reference_docs(project_dir: str, use_briefs: bool, coaching: str,
                           dry_run: bool) -> None:
-    """The voice guide and key decisions the drafting prompt carries (#596).
+    """The voice (`voice_book.resolve`) and key decisions the drafting
+    prompt carries (#596).
 
     One that exists but can't be read stops the run (ERROR, exit 1, naming
     it; SF-1): the prompt must not go out as if it weren't there. With no
-    voice guide to follow (missing, init's template, empty, or only
-    persistent-prompt.md, which the brief-based prompt doesn't read), a
-    full-coaching run drafts no prose (SF-2): the drafts would have no voice.
-    A dry run and coach/strict (which write briefs, not prose) say so and go
-    on. Key decisions left out (missing, template, empty) are a NOTE: a book
-    may have none (SF-4).
+    voice to follow (no reference/voice/book.md and anchor, and no author
+    repo), a full-coaching run drafts no prose (SF-2): the drafts would have
+    no voice. A dry run and coach/strict (which write briefs, not prose) say
+    so and go on. Key decisions left out (missing, template, empty) are a
+    NOTE: a book may have none (SF-4). The old voice files a book still has
+    are a NOTE: they are no longer read.
     """
-    from storyforge.common import VOICE_GUIDE_REMEDY, doc_state, resolve_voice_guide
-    voice = resolve_voice_guide(project_dir, briefs=use_briefs)
-    for detail in voice.skipped:
-        log(f'WARNING: {detail}; passed over for the next voice guide.')
+    from storyforge import voice_book
+    from storyforge.common import doc_state
+    voice = voice_book.resolve(project_dir)
     decisions = doc_state(project_dir, 'reference/key-decisions.md')
     for state in (voice, decisions):
         if state.kind == 'unreadable':
@@ -458,21 +458,20 @@ def _check_reference_docs(project_dir: str, use_briefs: bool, coaching: str,
             sys.exit(1)
     if decisions.kind != 'ok':
         log(f'NOTE: {decisions.detail}, so the drafting prompts carry no key decisions.')
+    old = voice_book.old_files_note(project_dir)
+    if old:
+        log(f'NOTE: {old}.')
     if voice.kind == 'ok':
-        log(f'Voice guide: {voice.path}')
+        log(f'Voice: {voice.path}')
         return
-    remedy = VOICE_GUIDE_REMEDY
-    if voice.kind == 'unread':
-        remedy = (f'move its text into reference/voice-guide.md, or name it in '
-                  f'storyforge.yaml (artifacts.voice_guide.path), or run {VOICE_GUIDE_REMEDY}')
     if coaching == 'full' and not dry_run:
-        log(f'ERROR: {voice.detail}: the drafting prompt would have no voice guide, and the '
-            f'drafts no voice to follow. Fill it first: {remedy}. Nothing was drafted.')
+        log(f'ERROR: {voice.detail}: the drafting prompt would have no voice, and the drafts '
+            f'nothing to follow. First {voice_book.REMEDY}. Nothing was drafted.')
         sys.exit(1)
     why = ('a real run stops here' if coaching == 'full'
            else f'{coaching} coaching writes no prose, so it goes on')
-    log(f'WARNING: {voice.detail}: the prompts have no voice guide ({why}). '
-        f'Fill it: {remedy}.')
+    log(f'WARNING: {voice.detail}: the prompts have no voice ({why}). To give them one, '
+        f'{voice_book.REMEDY}.')
 
 
 def _resolve_filter(args) -> tuple:

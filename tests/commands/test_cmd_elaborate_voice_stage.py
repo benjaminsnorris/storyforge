@@ -1,22 +1,13 @@
-"""#551: `elaborate --stage voice` (Gawain G-017: the voice guide and
-profile were written by hand), and stages set the artifact flags they fill
-(Beowulf B-017: every artifact read exists: false after architecture)."""
+"""#551 and the ready-to-draft plan (2026-11-14): `elaborate --stage voice`
+sets up a prose book's reference/voice/ (no model writes the voice), and
+stages set the artifact flags they fill (Beowulf B-017: every artifact read
+exists: false after architecture)."""
 
 import os
 
 import pytest
 
 from storyforge.cmd_elaborate import VALID_STAGES, main
-
-VOICE_REPLY = (
-    '```voice-guide\n# Voice Guide\n\nPlain, cold, exact.\n```\n'
-    '```voice-profile-csv\n'
-    'character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style\n'
-    '_project||suddenly;very|||spare;cold|\n'
-    'dorren-hayle|map;grid|||short||clipped\n'
-    '```\n'
-)
-
 
 @pytest.fixture
 def novel(project_dir, monkeypatch, mock_git, mock_costs):
@@ -42,15 +33,41 @@ def test_voice_is_a_stage():
     assert 'voice' in VALID_STAGES
 
 
-def test_the_voice_stage_writes_the_guide_and_profile(novel, mock_api):
+def test_the_voice_stage_sets_up_the_folder_and_calls_no_model(novel, mock_api, mock_git,
+                                                             capsys):
+    import shutil
+    shutil.rmtree(os.path.join(novel, 'reference', 'voice'))
     phase_before = [l for l in _read(novel, 'storyforge.yaml').splitlines()
                     if l.startswith('phase:')]
-    _run(mock_api, 'voice', VOICE_REPLY)
-    assert 'Plain, cold, exact.' in _read(novel, 'reference/voice-guide.md')
-    profile = _read(novel, 'reference/voice-profile.csv')
-    assert profile.splitlines()[2] == 'dorren-hayle|map;grid|||short||clipped'
+    _run(mock_api, 'voice', 'unused')
+    assert mock_api.calls == []
+    assert 'What the voice does' in _read(novel, 'reference/voice/book.md')
+    assert os.path.isfile(os.path.join(novel, 'reference', 'voice', 'checks.md'))
+    assert os.path.isdir(os.path.join(novel, 'reference', 'voice', 'anchors'))
+    assert not os.path.exists(os.path.join(novel, 'reference', 'voice-guide.md'))
+    out = capsys.readouterr().out
+    assert "The voice isn't ready: reference/voice/book.md is still init's template" in out
+    commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
+    assert commits and 'reference/voice/book.md' in commits[-1][2]
     assert [l for l in _read(novel, 'storyforge.yaml').splitlines()
             if l.startswith('phase:')] == phase_before
+
+
+def test_the_voice_stage_never_writes_over_the_authors_voice(novel, mock_api, mock_git,
+                                                             capsys):
+    before = _read(novel, 'reference/voice/book.md')
+    _run(mock_api, 'voice', 'unused')
+    assert _read(novel, 'reference/voice/book.md') == before
+    assert 'The voice is ready: reference/voice' in capsys.readouterr().out
+    assert not [c for c in mock_git.calls if c[0] == 'commit_and_push']
+
+
+def test_the_voice_stage_notes_old_voice_files(novel, mock_api, capsys):
+    with open(os.path.join(novel, 'reference', 'voice-guide.md'), 'w') as f:
+        f.write('# Old\n')
+    _run(mock_api, 'voice', 'unused')
+    assert 'NOTE: reference/voice-guide.md is no longer read' in capsys.readouterr().out
+    assert os.path.isfile(os.path.join(novel, 'reference', 'voice-guide.md'))
 
 
 def _artifact(proj, name):

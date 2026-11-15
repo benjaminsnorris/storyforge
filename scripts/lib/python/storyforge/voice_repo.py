@@ -40,9 +40,10 @@ A book names the repo in its `storyforge.yaml`:
       narrator: fiction/close-third # optional: the fiction anchor, in the repo
 
 `book_voice` loads it: the description, the exemplar bank and the fiction
-anchor (which must be under the repo's `fiction/`), plus the book's own
-`reference/voice/book.md` when it has one. `author_voice_section` renders it for the drafting prompt; a
-book without the block gets '' and its prompt is exactly what it was. A block
+anchor (which must be under the repo's `fiction/`). `author_voice_section`
+renders it; `voice_book.resolve` puts it before the book's own
+`reference/voice/` folder in the writing prompt. A book without the block
+gets ''. A block
 that can't be used (a key it doesn't take, a repo that isn't there or isn't
 a voice repo or is inside a book, no description or exemplars yet, a narrator
 outside `fiction/` or a folder with no `.md` file) raises `VoiceError`, a `source.SourceError`, so the dispatcher
@@ -92,8 +93,6 @@ SETTINGS_KEYS = ('author', 'kinds', 'min_words')
 
 #: the keys the book's `voice:` block takes
 BLOCK_KEYS = ('author', 'narrator')
-#: the book's own voice notes, read beside the author's voice
-BOOK_NOTES = os.path.join('reference', 'voice', 'book.md')
 #: scalar values that mean "nothing" in YAML: never a path
 _NOT_A_PATH = ('~', 'null', 'none', 'nil')
 
@@ -570,7 +569,6 @@ class BookVoice:
     description: str
     exemplars: ExemplarBank
     anchor: tuple[tuple[str, str], ...]
-    book_notes: str
 
 
 def _anchor(ref: VoiceRef) -> tuple[tuple[str, str], ...]:
@@ -622,7 +620,7 @@ def book_voice(project_dir: str) -> BookVoice | None:
             bank is missing, can't be read or is empty (they're the voice
             the drafting prompt carries: `voice propose` and `voice accept`
             make them); the narrator isn't under the repo's fiction/, is
-            missing, empty or unreadable; reference/voice/book.md can't be read.
+            missing, empty or unreadable.
     """
     from storyforge import voiceprint_proposals as vpp
     ref = voice_ref(project_dir)
@@ -649,14 +647,7 @@ def book_voice(project_dir: str) -> BookVoice | None:
     if not bank.exemplars:
         raise VoiceError(f'{where}: the exemplar bank ({EXEMPLARS_DIR}/exemplars.csv) holds '
                          f'no passage')
-    notes = ''
-    notes_path = os.path.join(project_dir, BOOK_NOTES)
-    if os.path.isfile(notes_path):
-        try:
-            notes = _read(notes_path).strip()
-        except (OSError, UnicodeDecodeError) as e:
-            raise VoiceError(f'{BOOK_NOTES} can\'t be read ({e})') from e
-    return BookVoice(ref, settings.author, description, bank, _anchor(ref), notes)
+    return BookVoice(ref, settings.author, description, bank, _anchor(ref))
 
 
 def require_voice(project_dir: str) -> list[str]:
@@ -675,8 +666,7 @@ def require_voice(project_dir: str) -> list[str]:
     who = voice.author or voice.ref.author
     lines = [f'Voice: {who} ({voice.ref.author}), read in place: the description, '
              f'{len(bank.exemplars)} exemplar(s)'
-             + (f', the fiction anchor {voice.ref.narrator}' if voice.anchor else '')
-             + (f', {BOOK_NOTES}' if voice.book_notes else '')]
+             + (f', the fiction anchor {voice.ref.narrator}' if voice.anchor else '')]
     if bank.unlisted:
         lines.append(f'WARNING: {voice.ref.author}/{EXEMPLARS_DIR}/ holds '
                      f'{len(bank.unlisted)} file(s) its exemplars.csv doesn\'t name, left out '
@@ -700,9 +690,9 @@ def _demote(markdown: str, by: int = 2) -> str:
 
 
 def author_voice_section(project_dir: str) -> str:
-    """The author's voice for the drafting prompt: the description, the
-    exemplars by job, the fiction anchor and the book's own voice notes.
-    '' without a `voice:` block.
+    """The author's voice for the writing prompt: the description, the
+    exemplars by job and the fiction anchor. '' without a `voice:` block
+    (`voice_book.render` puts it before the book's own folder).
 
     Raises:
         VoiceError: as `book_voice`.
@@ -710,18 +700,15 @@ def author_voice_section(project_dir: str) -> str:
     voice = book_voice(project_dir)
     if voice is None:
         return ''
-    parts = ['## The Author\'s Voice — Write Like This', VOICE_PREAMBLE,
-             '### The voice, described', _demote(voice.description.strip())]
-    parts.append('### The author\'s prose (exemplars)')
+    parts = ['### The author\'s voice', VOICE_PREAMBLE,
+             '#### The voice, described', _demote(voice.description.strip(), 4)]
+    parts.append('#### The author\'s prose (exemplars)')
     for i, ex in enumerate(voice.exemplars.exemplars, start=1):
         note = f': {ex.why}' if ex.why else ''
-        parts.append(f'#### Passage {i} ({ex.job}){note}\n\n{ex.text.strip()}')
+        parts.append(f'##### Passage {i} ({ex.job}){note}\n\n{ex.text.strip()}')
     if voice.anchor:
-        parts.append(f'### The narrator for this book (fiction anchor: {voice.ref.narrator})')
+        parts.append(f'#### The narrator for this book (fiction anchor: {voice.ref.narrator})')
         parts.append('The author wrote or chose this fiction in their voice for this '
                      'narrator. Hold the narration to its stance, distance and tense.')
-        parts.extend(_demote(text, 3) for _, text in voice.anchor)
-    if voice.book_notes:
-        parts.append(f'### This book\'s voice ({BOOK_NOTES})')
-        parts.append(_demote(voice.book_notes))
+        parts.extend(_demote(text, 4) for _, text in voice.anchor)
     return '\n\n'.join(parts)

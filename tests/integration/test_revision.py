@@ -370,7 +370,8 @@ class TestOutputFormatBlocks:
 
     def test_claudep_read_instructions_has_reference_files(self):
         block = _claudep_read_instructions()
-        assert 'voice-guide.md' in block
+        # the voice is in the prompt itself; checks.md must never be read
+        assert 'voice-guide.md' not in block and 'reference/voice' not in block
         assert 'scenes.csv' in block
         assert 'scene-intent.csv' in block
 

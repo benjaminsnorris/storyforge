@@ -88,8 +88,8 @@ def _project_context(project_dir: str) -> str:
 
 
 # The reference docs the stage prompts carry, in order. The shared system
-# context (common.build_shared_context) already carries the bibles and voice
-# guide, so a prompt built with system_context leaves those out, and only
+# context (common.build_shared_context) already carries the bibles and the
+# voice, so a prompt built with system_context leaves those out, and only
 # those: the story summary, architecture and key decisions are in no system
 # block, and a stage that skipped them would build on decisions it never saw.
 _REFERENCE_DOCS = [
@@ -97,7 +97,8 @@ _REFERENCE_DOCS = [
     ('story-architecture.md', 'Story Architecture', False),
     ('character-bible.md', 'Character Bible', True),
     ('world-bible.md', 'World Bible', True),
-    ('voice-guide.md', 'Voice Guide', True),
+    # what the voice does; the anchors are in the shared context only
+    ('voice/book.md', 'The Voice (reference/voice/book.md)', True),
     ('key-decisions.md', 'Key Decisions', False),
 ]
 
@@ -111,6 +112,10 @@ def reference_doc(project_dir: str, name: str) -> str:
         common.ReferenceDocError: the file exists but can't be read.
     """
     from .common import reference_text
+    if name.startswith('voice/'):
+        # the voice folder's own template check (`voice_book._read`)
+        from .voice_book import _read
+        return _read(project_dir, os.path.join('reference', name))
     return reference_text(os.path.join(project_dir, 'reference', name))
 
 
@@ -118,7 +123,7 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
     """Include any existing reference materials.
 
     With `shared`, the prompt goes with the shared system context, so the
-    docs that context carries (the bibles, the voice guide, the source
+    docs that context carries (the bibles, the voice, the source
     bibles, the series canon) are left out and the rest are kept. A doc still holding its
     template text is skipped (F-130)."""
     sections = []
@@ -594,6 +599,8 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
                        system_context: bool = False) -> str:
     """Build the prompt for the voice stage.
 
+    Graphic-novel mode only: a prose book's voice is reference/voice/,
+    found from samples, never written by a model (`voice_book`).
     Produces reference/voice-guide.md and reference/voice-profile.csv.
 
     In graphic-novel mode, also asks for caption_voice and lettering_style

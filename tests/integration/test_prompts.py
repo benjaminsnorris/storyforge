@@ -15,8 +15,8 @@ from storyforge.prompts import (
     _strip_yaml_value,
     load_ai_tell_words,
     build_ai_tell_constraint,
-    load_voice_profile,
-    merge_banned_words,
+    banned_words,
+    tense_line,
     _read_csv_header_and_rows,
     read_csv_field,
     _get_csv_row_dict,
@@ -34,7 +34,6 @@ from storyforge.prompts import (
     _build_full_steps,
     _get_pov_restraint_level,
     _build_pov_restraint_block,
-    _load_prose_exemplars,
 )
 
 
@@ -147,58 +146,29 @@ class TestBuildAiTellConstraint:
 # Voice profile
 # ============================================================================
 
-class TestLoadVoiceProfile:
-    """Tests for loading voice-profile.csv."""
+class TestBannedWords:
+    """The high-severity AI-tell words (the voice profile's own list is gone)."""
 
-    def test_loads_project_row(self, project_dir):
-        proj, chars = load_voice_profile(project_dir)
-        # Project row should have banned_words from the _project row
-        assert 'register' in proj
-        assert 'literary' in proj['register']
-
-    def test_loads_character_rows(self, project_dir):
-        proj, chars = load_voice_profile(project_dir)
-        assert 'dorren-hayle' in chars
-        assert 'tessa-merrin' in chars
-
-    def test_character_has_voice_data(self, project_dir):
-        _, chars = load_voice_profile(project_dir)
-        dorren = chars['dorren-hayle']
-        assert 'preferred_words' in dorren
-        assert 'calibrated' in dorren['preferred_words']
-
-    def test_missing_file_returns_empty(self, tmp_path):
-        proj, chars = load_voice_profile(str(tmp_path))
-        assert proj == {}
-        assert chars == {}
-
-
-class TestMergeBannedWords:
-    """Tests for merging project banned words with AI-tell words."""
-
-    def test_merges_project_and_ai_tell(self):
-        profile = {'banned_words': 'journey;beacon'}
+    def test_high_severity_only_sorted_once(self):
         ai_words = [
+            {'word': 'zeal', 'severity': 'high'},
+            {'word': 'delve', 'severity': 'high'},
             {'word': 'delve', 'severity': 'high'},
             {'word': 'vibrant', 'severity': 'medium'},
         ]
-        result = merge_banned_words(profile, ai_words)
-        assert 'journey' in result
-        assert 'beacon' in result
-        assert 'delve' in result
-        # medium severity should NOT be included (only high)
-        assert 'vibrant' not in result
+        assert banned_words(ai_words) == ['delve', 'zeal']
 
-    def test_deduplicates(self):
-        profile = {'banned_words': 'delve'}
-        ai_words = [{'word': 'delve', 'severity': 'high'}]
-        result = merge_banned_words(profile, ai_words)
-        assert result.count('delve') == 1
 
-    def test_sorted_output(self):
-        profile = {'banned_words': 'zebra;apple'}
-        result = merge_banned_words(profile, [])
-        assert result == ['apple', 'zebra']
+class TestTenseLine:
+    """scenes.csv's `tense` in a writing prompt."""
+
+    def test_says_the_tense(self):
+        assert '**Tense: present.**' in tense_line({'tense': ' Present '})
+        assert 'past tense' in tense_line({'tense': 'past'})
+
+    def test_nothing_for_blank_or_unknown(self):
+        assert tense_line({}) == ''
+        assert tense_line({'tense': 'future'}) == ''
 
 
 # ============================================================================
@@ -453,31 +423,29 @@ class TestBuildScenePrompt:
         prompt = build_scene_prompt('act1-sc01', project_dir)
         assert 'reference/' in prompt
 
-    def test_voice_guide_mentioned(self, project_dir):
+    def test_the_voice_is_inlined(self, project_dir):
         prompt = build_scene_prompt('act1-sc01', project_dir)
-        assert 'voice guide' in prompt.lower() or 'voice-guide' in prompt.lower()
+        assert '## The Voice' in prompt and 'The village was not there' in prompt
 
-    def test_character_voice_block_for_pov(self, project_dir):
+    def test_banned_words_are_the_ai_tells(self, project_dir):
         prompt = build_scene_prompt('act1-sc01', project_dir)
-        # Dorren Hayle is POV, should have character voice constraints
-        assert 'CHARACTER VOICE' in prompt
-        assert 'Dorren Hayle' in prompt
+        assert 'VOCABULARY CONSTRAINT' in prompt or 'delve' in prompt.lower()
 
-    def test_character_preferred_words(self, project_dir):
-        prompt = build_scene_prompt('act1-sc01', project_dir)
-        # dorren-hayle has preferred_words containing "calibrated"
-        assert 'calibrated' in prompt
+    def test_the_scene_tense_is_said(self, project_dir):
+        _add_tense(project_dir, {'act1-sc01': 'present'})
+        assert '**Tense: present.**' in build_scene_prompt('act1-sc01', project_dir)
+        assert '**Tense:' not in build_scene_prompt('act1-sc02', project_dir)
 
-    def test_banned_words_included(self, project_dir):
-        prompt = build_scene_prompt('act1-sc01', project_dir)
-        # Project-level banned words include journey, beacon, etc.
-        assert 'VOCABULARY CONSTRAINT' in prompt
-        assert 'journey' in prompt
 
-    def test_register_included(self, project_dir):
-        prompt = build_scene_prompt('act1-sc01', project_dir)
-        assert 'PROSE REGISTER' in prompt
-        assert 'literary' in prompt
+def _add_tense(project_dir, tenses):
+    """A `tense` column on the fixture's scenes.csv."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    out = [lines[0] + '|tense']
+    out += [line + '|' + tenses.get(line.split('|')[0], '') for line in lines[1:]]
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(out) + '\n')
 
 
 # ============================================================================
@@ -664,15 +632,14 @@ class TestBuildScenePromptFromBriefs:
             'nonexistent-scene', project_dir, plugin_dir)
         assert 'ERROR' in prompt
 
-    def test_voice_guide_included(self, project_dir, plugin_dir):
+    def test_the_voice_is_included(self, project_dir, plugin_dir):
         prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
-        assert 'Voice Guide' in prompt
+        assert '## The Voice' in prompt and 'The village was not there' in prompt
 
-    def test_character_voice_for_pov(self, project_dir, plugin_dir):
+    def test_the_scene_tense_is_said(self, project_dir, plugin_dir):
+        _add_tense(project_dir, {'act1-sc01': 'past'})
         prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
-        # Dorren Hayle is POV; should include character voice constraints
-        assert 'CHARACTER VOICE' in prompt
-        assert 'calibrated' in prompt
+        assert '**Tense: past.**' in prompt
 
     def test_banned_words_included(self, project_dir, plugin_dir):
         prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
@@ -689,35 +656,3 @@ class TestBuildScenePromptFromBriefs:
         assert 'Key dialogue checklist' in prompt or 'key_dialogue' in prompt
 
 
-# ============================================================================
-# Prose exemplars
-# ============================================================================
-
-class TestLoadProseExemplars:
-    """Tests for _load_prose_exemplars."""
-
-    def test_returns_empty_when_no_files(self, project_dir):
-        result = _load_prose_exemplars(project_dir, 'Dorren Hayle')
-        assert result == ''
-
-    def test_loads_flat_exemplars(self, project_dir):
-        # Create a prose-exemplars.md file
-        exemplars_dir = os.path.join(project_dir, 'reference')
-        with open(os.path.join(exemplars_dir, 'prose-exemplars.md'), 'w') as f:
-            f.write('The morning light cut across the desk.\n'
-                    'She measured twice, wrote once.')
-        result = _load_prose_exemplars(project_dir)
-        assert 'Voice Calibration' in result
-        assert 'morning light' in result
-
-    def test_per_pov_exemplars_preferred(self, project_dir):
-        # Create both flat and per-POV files
-        exemplars_dir = os.path.join(project_dir, 'reference', 'exemplars')
-        os.makedirs(exemplars_dir, exist_ok=True)
-        with open(os.path.join(exemplars_dir, 'dorren-hayle.md'), 'w') as f:
-            f.write('Dorren-specific exemplar text.')
-        with open(os.path.join(project_dir, 'reference', 'prose-exemplars.md'), 'w') as f:
-            f.write('Generic exemplar text.')
-        result = _load_prose_exemplars(project_dir, 'Dorren Hayle')
-        assert 'Dorren-specific' in result
-        assert 'Generic' not in result
