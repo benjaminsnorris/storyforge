@@ -379,27 +379,66 @@ recording the same day (judge shown the samples' real names, since
 replaced; same drafting prompt) put her first in all three runs, by 0.018
 to 0.069, so over six drafts she is nearest in four, and never by much.
 Every draft is further from her than any of her own held-out chunks (median
-0.462, furthest 0.630). The drafts that missed are the short ones (about
-1,450 words against a 2,000 target, and the meter's measures are steadiest
-at a 2,000-word chunk). The measures furthest from her are function words;
-the leaders change from draft to draft.
+0.462, furthest 0.630). The measures furthest from her are function words
+(more *a*, *at*, *very*, *over*, fewer *any* than she uses); the leaders
+change from draft to draft.
+
+**Length doesn't explain the misses.** The two that missed are the short
+drafts (about 1,450 words), but the meter tells her own prose apart at that
+length. Cut into chunks of each size, *Emma* and *Persuasion* rank her
+nearest of the eight:
+
+| chunk | chunks | her place 1 | median margin |
+|---|---|---|---|
+| 1,000 words | 225 | 98% | 0.231 |
+| 1,450 words | 159 | 99% | 0.258 |
+| 2,000 words | 116 | 100% | 0.293 |
+
+Her own prose leads by about 0.26 at the drafts' length; the drafts led by
+-0.08 to +0.08. A 2,000-word draft would gain about 0.03, so the misses are
+the drafts, not the meter.
 
 **The judge names her every time**, but it isn't blind: with the names
-replaced it still says Austen's sample "is in fact from *Persuasion*", and
-its reasons lean on the Regency drawing room, which only her sample and
-Brunton's share. So the judge shows the drafts read as Austen's kind of
-book; the meter, which can't see the setting, is the harder half, and it is
-the half that's unsteady.
+replaced it still says Austen's sample "is in fact from *Persuasion*" (and,
+once, names "Mary and Charles Musgrove", which are not in the sample: it
+knows the book), and its reasons lean on the Regency drawing room, which
+only her sample and Brunton's share.
 
-What the suite doesn't show is that the exemplars made the difference: the
-control would be a book with no voice, which `write` won't draft, so it
-would measure a prompt `write` never sends.
+### The control (`voice-austen-control`)
+
+The same scene drafted with the same request less the voice: the fixture's
+`voice:` block is cut, so the shared context has no description and no
+exemplars, and everything else is byte for byte what `voice-austen` sends
+(a test checks it). `write` itself won't send it (it refuses a book with no
+voice), and its prompt still says "Write toward the voice's passages", with
+none to write toward. Frozen; the gates hold run 1's values in the
+direction of the comparison (`meter_rank >= 8`, `judge_austen <= 4`).
+**Recorded 2026-11-15** as three runs, $1.17 (Ben's approval over the
+monthly budget):
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| words | 1930 | 1739 | 1782 |
+| meter: Austen's place among eight | 8 | 7 | 6 |
+| nearest | Gatsby | Brimming Cup | Brimming Cup |
+| her distance | 1.019 | 1.039 | 0.966 |
+| margin | -0.254 | -0.266 | -0.195 |
+| judge named her | 4 of 4 | 4 of 4 | 4 of 4 |
+
+**The exemplars move the meter a long way; the judge doesn't see it.**
+With the voice, her distance is 0.72 to 0.89 and she is first or second;
+without it, 0.97 to 1.04 and sixth to last, nearest the twentieth-century
+Americans. The judge names her 4 of 4 either way, so in this suite it
+measures the setting and the comedy of manners, not the voice: test 6's
+judge half doesn't tell a voiced draft from one with none. The meter is the
+half that does, and it says the exemplars get the drafts most of the way
+to her, not all of it.
 
 To re-record (only when a decision depends on it):
-`python3 evals/run.py --mode record --suite voice-austen --runs 3`, then
-set `RECORDED_RANK` and `RECORDED_JUDGE` in the suite from run 1.
-`evals/consistency.py` doesn't read it (E6's suites only): the table above
-is the spread.
+`python3 evals/run.py --mode record --suite voice-austen --runs 3` (or
+`--suite voice-austen-control`), then set `RECORDED_RANK` and
+`RECORDED_JUDGE` in that suite from run 1. `evals/consistency.py` doesn't
+read them (E6's suites only): the tables above are the spread.
 
 ## Recorded API calls
 

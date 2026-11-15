@@ -42,10 +42,10 @@ The gates hold what was recorded (#488), with the target in the notes.
 as three runs: `python3 evals/run.py --mode record --suite voice-austen
 --runs 3` (each run drafts its own scene).
 
-What this does not show: that the exemplars are what made the draft sound
-like her. A period scene told to an Opus writer without the voice might come
-close too; the control would be a book with no voice, which `write` won't
-draft, so it would measure a prompt `write` never sends.
+What the exemplars earn is `voice-austen-control`'s: the same request less
+the voice (`project` and `draft` with `voiced=False`; `measure` is shared).
+Recorded, it puts her sixth to last on the meter and the judge still names
+her every time (evals/README.md, "Writing in the voice").
 """
 
 import glob

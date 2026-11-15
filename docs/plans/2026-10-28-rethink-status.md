@@ -40,7 +40,9 @@ Status section says what's built and how Ben starts the redraft).
   suite (2026-11-15, three runs): the judge names Austen from four every
   time, but the meter puts `write`'s draft nearest her in one run of three,
   so the plan's target holds only half (`evals/README.md`, "Writing in the
-  voice").
+  voice"). Its control, `voice-austen-control` (no voice), puts her sixth
+  to last on the meter while the judge still names her every time: the
+  exemplars move the drafts most of the way, and the judge can't see it.
 
 **Next:** Ben fills Wrath's `reference/voice/` and runs the Act 1 pilot.
 Reading a drafted scene's marks from a PR has no issue yet. Then #656 and #659, then #657 and #658.

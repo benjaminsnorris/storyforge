@@ -219,7 +219,10 @@ blind read of the old draft against the session pilot).
   judge names Austen from four in every ordering of every run; the meter
   puts `write`'s draft nearest her in one run of three (four drafts of six
   that day), never by much, and each draft is further from her than her
-  own held-out chunks (`evals/README.md`, "Writing in the voice").
+  own held-out chunks (`evals/README.md`, "Writing in the voice"). The
+  control, `voice-austen-control` (the same request with no voice), puts
+  her sixth to last; the judge names her for it too, so the meter is the
+  half that sees the voice.
 - **Not built yet:**
   - `revise --marks` reads only a file; reading a drafted scene's marks
     from a PR has no issue yet.
