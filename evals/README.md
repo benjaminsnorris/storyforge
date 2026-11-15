@@ -346,44 +346,58 @@ manners (a card party in a country town about 1810, about 2,000 words, none
 of her characters or events) whose `voice:` block names
 `references/voiceprints/austen`, so the drafting prompt carries her
 description and exemplars (all from *Pride and Prejudice*). The scene is
-drafted as `write` drafts it (shared context plus `cmd_write._build_prompt`,
-no gate), then:
+drafted as `write` drafts it in direct mode (its default, not `--session`):
+the shared context plus `cmd_write._build_prompt`, the reply held to
+`write`'s checks, no gate and no refusal fallback. Then:
 
 - **the meter** (free) compares the draft with her fingerprint and with the
   seven other authors' of the reference tests: `meter_rank` (1: she is
   nearest), `meter_distance_austen`, `meter_margin` (nearest other minus
   hers), and `austen_held_out_median` (her own held-out chunks' distance,
-  for scale);
+  for scale). Her fingerprint is the whole of *Pride and Prejudice*, each
+  other author's ten chunks, which favours her a little;
 - **the judge** (Opus) reads the draft beside four unlabelled samples of
   about 500 words, Austen (*Persuasion*, held out), Brunton (*Self-Control*),
-  Eliot (*Middlemarch*) and Dickens (*A Christmas Carol*), and names whose
-  voice it is, four times with her sample in each place: `judge_austen`.
+  Eliot (*Middlemarch*) and Dickens (*A Christmas Carol*), every name in them
+  replaced by an invented one, and names whose voice it is, four times, the
+  order turned so each sample sits in each place once: `judge_austen`.
 
-It is **frozen**; the gates hold run 1's values (rank 1, judge 4 of 4).
-**Recorded 2026-11-15** as three runs, $1.18 (Ben's approval over the
-monthly budget):
+It is **frozen**; the gates hold run 1's values (rank 2, judge 4 of 4) and
+the plan's target (rank 1, judge naming her) is in the notes. **Recorded
+2026-11-15** as three runs, $0.87 (Ben's approval over the monthly budget):
 
 | | run 1 | run 2 | run 3 |
 |---|---|---|---|
-| words | 1946 | 1945 | 1783 |
-| meter: Austen's place among eight | 1 | 1 | 1 |
-| her distance | 0.768 | 0.773 | 0.824 |
-| the nearest other author, and the margin | Dickens, 0.069 | Fisher, 0.035 | Dickens, 0.018 |
+| words | 1417 | 1462 | 1856 |
+| meter: Austen's place among eight | 2 (Dickens nearer) | 2 (Brunton nearer) | 1 |
+| her distance | 0.890 | 0.858 | 0.717 |
+| margin (nearest other minus hers) | -0.054 | -0.081 | 0.083 |
 | judge named her | 4 of 4 | 4 of 4 | 4 of 4 |
 
-Her held-out chunks sit at a median 0.462 from her fingerprint, so the
-drafts are near her but well outside her own range, and the margins over the
-next author are thin. The measures furthest from her are function words
-(`at`, `it`, `very`, `would` more often than she uses them; `much` and
-`such` less). The judge's reasons quote the narrator's ironic antitheses
-and free indirect style, but also the Regency drawing room, which no other
-sample has: the setting helps it. What the suite doesn't show is that the
-exemplars made the difference; a book with no voice would be the control,
-and `write` refuses to draft one.
+**The meter misses the plan's target in two runs of three.** An earlier
+recording the same day (judge shown the samples' real names, since
+replaced; same drafting prompt) put her first in all three runs, by 0.018
+to 0.069, so over six drafts she is nearest in four, and never by much.
+Every draft is further from her than any of her own held-out chunks (median
+0.462, furthest 0.630). The drafts that missed are the short ones (about
+1,450 words against a 2,000 target, and the meter's measures are steadiest
+at a 2,000-word chunk). The measures furthest from her are function words;
+the leaders change from draft to draft.
+
+**The judge names her every time**, but it isn't blind: with the names
+replaced it still says Austen's sample "is in fact from *Persuasion*", and
+its reasons lean on the Regency drawing room, which only her sample and
+Brunton's share. So the judge shows the drafts read as Austen's kind of
+book; the meter, which can't see the setting, is the harder half, and it is
+the half that's unsteady.
+
+What the suite doesn't show is that the exemplars made the difference: the
+control would be a book with no voice, which `write` won't draft, so it
+would measure a prompt `write` never sends.
 
 To re-record (only when a decision depends on it):
-`python3 evals/run.py --mode record --suite voice-austen --runs 3`, then set
-`RECORDED_RANK` and `RECORDED_JUDGE` in the suite from run 1.
+`python3 evals/run.py --mode record --suite voice-austen --runs 3`, then
+set `RECORDED_RANK` and `RECORDED_JUDGE` in the suite from run 1.
 `evals/consistency.py` doesn't read it (E6's suites only): the table above
 is the spread.
 

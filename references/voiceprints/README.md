@@ -162,10 +162,11 @@ voices the same way: ghostwritten posts, quoted material, a decade of drift.
 
 **Test 6, writing in the voice** (#654), is a frozen eval suite, not a unit
 test: `voice-austen` (`evals/README.md`, "Writing in the voice"). `write`
-drafts an original scene with this voiceprint; the meter puts the draft
-nearest Austen among the eight authors and an Opus judge names her from four
-samples, in each of three recorded runs (her distance 0.77 to 0.82, the next
-author 0.02 to 0.07 further; her held-out chunks' median is 0.46).
+drafts an original scene with this voiceprint. An Opus judge names her from
+four samples (names replaced) in every run, but the meter puts the draft
+nearest her in only one of the three recorded runs (four of six drafts that
+day), and every draft is further from her (0.72 to 0.89) than any of her
+own held-out chunks (median 0.46).
 
 ## The author voice repo (B0, B1, #652)
 

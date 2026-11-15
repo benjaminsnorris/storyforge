@@ -215,11 +215,11 @@ blind read of the old draft against the session pilot).
   anchor, saves it, hand edits included, and commits it off `main`
   (`references/voice-folder.md`, "Finding anchors"). `status` now recommends `write --session` for a prose book
   (`write --keep-going` for a graphic novel); E5 re-recorded.
-- **#654's test 6** (2026-11-15): the frozen `voice-austen` suite. A scene
-  `write` drafts with the Austen reference voice is nearest her on the
-  meter, and an Opus judge names her from four in every ordering, in all
-  three recorded runs, though the margins are thin and the drafts sit well
-  outside her own range (`evals/README.md`, "Writing in the voice").
+- **#654's test 6** (2026-11-15): the frozen `voice-austen` suite. An Opus
+  judge names Austen from four in every ordering of every run; the meter
+  puts `write`'s draft nearest her in one run of three (four drafts of six
+  that day), never by much, and each draft is further from her than her
+  own held-out chunks (`evals/README.md`, "Writing in the voice").
 - **Not built yet:**
   - `revise --marks` reads only a file; reading a drafted scene's marks
     from a PR has no issue yet.
