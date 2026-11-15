@@ -50,7 +50,9 @@ def test_an_edit_inside_its_sentence_is_applied_and_kept_flags_are_kept():
              'kept': [{'flag': 2, 'why': 'it lands'}]}
     rev = vr.apply_revision(PROSE, _flags(), reply)
     assert 'Nothing came out of it.' in rev.prose and rev.dropped == []
-    assert rev.kept[0][1] == 'it lands' and rev.untouched == []
+    assert rev.outcomes[1].kept == 'it lands' and rev.untouched == 0
+    assert (rev.rewritten, rev.kept) == (1, 1)
+    assert rev.summary() == '1 line(s) rewritten, 1 kept'
 
 
 @pytest.mark.parametrize('edit, why', [
@@ -60,8 +62,10 @@ def test_an_edit_inside_its_sentence_is_applied_and_kept_flags_are_kept():
 ])
 def test_an_edit_outside_its_flag_is_refused(edit, why):
     rev = vr.apply_revision(PROSE, _flags(), {'edits': [edit], 'kept': []})
-    assert rev.prose == PROSE and why in rev.dropped[0]
-    assert rev.untouched == _flags()
+    assert rev.prose == PROSE
+    said = rev.dropped + [r for o in rev.outcomes for r in o.refused]
+    assert any(why in x for x in said)
+    assert rev.rewritten == 0
 
 
 def test_overlapping_edits_are_both_refused():
@@ -69,7 +73,9 @@ def test_overlapping_edits_are_both_refused():
     reply = {'edits': [{'flag': 1, 'find': 'Nothing came out of it', 'replace': 'Silence'},
                        {'flag': 2, 'find': 'out of it, which', 'replace': 'x'}], 'kept': []}
     rev = vr.apply_revision(PROSE, flags, reply)
-    assert rev.prose == PROSE and len(rev.dropped) == 2
+    assert rev.prose == PROSE
+    assert [o.refused for o in rev.outcomes] == [['its edit overlaps another']] * 2
+    assert rev.refused == 2
 
 
 def test_the_reviser_never_sees_the_checks_and_the_reviewer_does(project_dir, monkeypatch):
@@ -107,7 +113,7 @@ def test_a_cut_off_review_is_an_error(project_dir, monkeypatch):
 
 def test_the_record_says_what_happened(project_dir):
     flags = _flags()
-    rev = vr.Review(flags=flags, unverified=[vr.Flag('gone', '3', 'x')])
+    rev = vr.Review(flags=list(flags), unverified=[vr.Flag('gone', '3', 'x')])   # a copy
     revision = vr.apply_revision(PROSE, flags, {
         'edits': [{'flag': 1, 'find': ', which frightened him more than tears would have',
                    'replace': ''}], 'kept': [{'flag': 2, 'why': 'it lands'}]})
@@ -118,5 +124,48 @@ def test_the_record_says_what_happened(project_dir):
 
 
 def test_authors_marks_are_flags_for_the_reviser():
-    flags = vr.flags_from_marks([('He opened his mouth.', 'more like this'), ('  ', 'x')])
-    assert flags == [vr.Flag('He opened his mouth.', vr.AUTHOR, 'more like this')]
+    flags = vr.flags_from_marks([('He opened his mouth.', 'cut'), ('  ', 'x')])
+    assert flags == [vr.Flag('He opened his mouth.', '', 'cut', vr.AUTHOR)]
+
+
+def test_a_reviewer_cant_claim_the_authors_note():
+    rev = vr.parse_review(json.dumps({'flags': [
+        {'quote': 'He opened his mouth', 'check': 'author', 'why': 'x'}]}), PROSE)
+    assert rev.flags[0].source == vr.REVIEWER
+    assert "the author's note" not in vr.build_revise_prompt('s', PROSE, '', rev.flags)
+
+
+def test_several_edits_to_one_flag_are_all_recorded_and_count_once(project_dir):
+    flags = [vr.Flag('Nothing came out of it, which frightened him more than tears would have',
+                     '1', 'x')]
+    reply = {'edits': [{'flag': 1, 'find': 'Nothing came', 'replace': 'Nothing'},
+                       {'flag': 1, 'find': ', which frightened him more than tears would have',
+                        'replace': ''}],
+             'kept': [{'flag': 1, 'why': 'fine'}]}
+    rev = vr.apply_revision(PROSE, flags, reply)
+    assert rev.rewritten == 1 and len(rev.outcomes[0].edits) == 2 and rev.kept == 0
+    assert any('both edited and kept' in d for d in rev.dropped)
+    rel = vr.record(project_dir, 's', vr.Review(flags=flags), rev)
+    with open(os.path.join(project_dir, rel)) as f:
+        assert f.read().count('Rewritten:') == 2
+
+
+def test_a_keep_is_shown_and_protected():
+    keeps = ['She did not let go.']
+    prompt = vr.build_revise_prompt('s', PROSE, '', _flags()[:1], keeps)
+    assert 'marked as working' in prompt and 'She did not let go.' in prompt
+    flags = [vr.Flag('She did not let go', '1', 'x')]
+    rev = vr.apply_revision(PROSE, flags, {'edits': [
+        {'flag': 1, 'find': 'She did not let go.', 'replace': 'She held on.'}], 'kept': []},
+        protected=keeps)
+    assert rev.prose == PROSE and 'marked keep' in rev.outcomes[0].refused[0]
+
+
+def test_refused_edits_are_recorded_against_their_flag(project_dir):
+    flags = _flags()
+    rev = vr.apply_revision(PROSE, flags, {'edits': [
+        {'flag': 1, 'find': 'He opened his mouth.', 'replace': 'x'}], 'kept': []})
+    rel = vr.record(project_dir, 's', vr.Review(flags=flags), rev)
+    with open(os.path.join(project_dir, rel)) as f:
+        text = f.read()
+    assert 'Edit refused: its edit reaches outside' in text

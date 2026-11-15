@@ -422,6 +422,7 @@ def chat(messages: list[dict], model: str, max_tokens: int = 4096, label: str = 
 
     Raises:
         RefusalError: the model refused (the log is written first).
+        RuntimeError: the request failed (HTTP, network, retries spent).
     """
     body = {
         'model': model,
@@ -727,6 +728,27 @@ def extract_text_from_file(log_file: str) -> str:
             return extract_text(json.load(f))
     except (json.JSONDecodeError, FileNotFoundError):
         return ''
+
+
+def log_reply(project_dir: str, response: dict, operation: str, target: str,
+              model: str) -> float:
+    """One cost-ledger row for a reply (priced as the model that wrote it,
+    a refusal fallback's when one did). Returns the cost. A row that can't
+    be written is a WARNING: the spend still happened."""
+    from storyforge.common import log
+    from storyforge.costs import log_operation
+    try:
+        model = fallback_model(response) or model
+        usage = extract_usage(response)
+        cost = calculate_cost_from_usage(usage, model)
+        log_operation(project_dir, operation, model, usage['input_tokens'],
+                      usage['output_tokens'], cost, target=target,
+                      cache_read=usage.get('cache_read', 0),
+                      cache_create=usage.get('cache_create', 0))
+        return cost
+    except Exception as e:   # the ledger only; never the run
+        log(f'WARNING: could not log the cost of {operation} {target}: {e}')
+        return 0.0
 
 
 def extract_usage(response: dict) -> dict:

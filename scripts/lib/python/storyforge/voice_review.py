@@ -20,8 +20,10 @@ Code keeps both honest:
 - The reviser may keep a flagged line as it is, saying why
   (`Revision.kept`): the reviewer can be wrong.
 
-The author's own marks (keep, cut, more like this, a note) go to the same
-reviser as `Flag`s whose `check` is `author` (`flags_from_marks`).
+The author's own marks go to the same reviser (`flags_from_marks`): a mark
+asking for a change is a `Flag` whose `source` is `AUTHOR`; a keep (a line
+that works) is shown as an example and never edited. Only `flags_from_marks`
+makes an author flag: a reviewer's `check` can't claim it.
 
 `record` writes what happened to `working/voice-reviews/<scene>.md`, for the
 author to read. Nothing here commits.
@@ -40,8 +42,8 @@ from storyforge.quotes import normalize, quote_in
 REVIEWS_DIR = os.path.join('working', 'voice-reviews')
 #: the reviewer's flags per scene, at most
 MAX_FLAGS = 12
-#: `Flag.check` for a line the author marked
-AUTHOR = 'author'
+#: `Flag.source`s: the reviewer flagged it, or the author marked it
+REVIEWER, AUTHOR = 'review', 'author'
 
 REVIEW_SCHEMA = {
     'type': 'object',
@@ -86,31 +88,74 @@ class VoiceReviewError(RuntimeError):
 @dataclass(frozen=True)
 class Flag:
     """A line to look at: the scene's words, the check it matches (a
-    check's name or number from checks.md, or `AUTHOR`), and why."""
+    check's name or number from checks.md; '' for the author's mark), why,
+    and who flagged it (`REVIEWER` or `AUTHOR`)."""
     quote: str
     check: str
     why: str
+    source: str = REVIEWER
 
 
 @dataclass
 class Review:
-    """The reviewer's flags whose quotes are in the scene, and the ones that
-    weren't (dropped)."""
+    """The reviewer's flags whose quotes are in the scene; the ones that
+    weren't (`unverified`, dropped); how many past `MAX_FLAGS`
+    (`over_cap`); and how many repeated a quote already flagged
+    (`repeated`)."""
     flags: list[Flag] = field(default_factory=list)
     unverified: list[Flag] = field(default_factory=list)
     over_cap: int = 0
+    repeated: int = 0
+
+
+@dataclass
+class Outcome:
+    """What became of one flag: the edits applied to it (find, replace),
+    why it was kept as it is ('' when not), and why code refused its edits."""
+    edits: list[tuple[str, str]] = field(default_factory=list)
+    kept: str = ''
+    refused: list[str] = field(default_factory=list)
+
+    @property
+    def rewritten(self) -> bool:
+        return bool(self.edits)
 
 
 @dataclass
 class Revision:
-    """What the reviser did: the prose after it, the edits applied (each
-    with its flag), the flags it kept as they are (with why), and what code
-    dropped (with why)."""
+    """What the reviser did: the prose after it, one `Outcome` per flag (in
+    the flags' order), and what code dropped that names no flag."""
     prose: str
-    applied: list[tuple[Flag, str, str]] = field(default_factory=list)
-    kept: list[tuple[Flag, str]] = field(default_factory=list)
+    outcomes: list[Outcome] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
-    untouched: list[Flag] = field(default_factory=list)
+
+    @property
+    def rewritten(self) -> int:
+        """How many flagged lines were rewritten (not how many edits)."""
+        return sum(o.rewritten for o in self.outcomes)
+
+    @property
+    def kept(self) -> int:
+        return sum(bool(o.kept) and not o.rewritten for o in self.outcomes)
+
+    @property
+    def refused(self) -> int:
+        return sum(bool(o.refused) and not o.rewritten for o in self.outcomes)
+
+    @property
+    def untouched(self) -> int:
+        """Flags the reviser neither edited nor kept, and code refused nothing for."""
+        return sum(not (o.edits or o.kept or o.refused) for o in self.outcomes)
+
+    def summary(self) -> str:
+        parts = [f'{self.rewritten} line(s) rewritten']
+        if self.kept:
+            parts.append(f'{self.kept} kept')
+        if self.refused:
+            parts.append(f'{self.refused} whose edits were refused')
+        if self.untouched:
+            parts.append(f'{self.untouched} not answered')
+        return ', '.join(parts)
 
 
 # ============================================================================
@@ -185,10 +230,14 @@ def parse_review(text: str, prose: str) -> Review:
     out = Review()
     seen = set()
     for item in data['flags']:
+        # always the reviewer's: a `check` naming the author claims nothing
         flag = Flag(str(item['quote']).strip(), str(item['check']).strip(),
-                    str(item['why']).strip())
+                    str(item['why']).strip(), REVIEWER)
         key = normalize(flag.quote)
-        if not flag.quote or key in seen:
+        if not flag.quote:
+            continue
+        if key in seen:
+            out.repeated += 1
             continue
         seen.add(key)
         if not flag_spans(prose, flag.quote):
@@ -216,7 +265,8 @@ def review(project_dir: str, scene_id: str, prose: str, *, model: str,
     voice.raise_if_unreadable(project_dir)
     text = _call(build_review_prompt(scene_id, prose, voice.text if voice.kind == 'ok' else '',
                                      checks),
-                 model, REVIEW_SCHEMA, f'voice review {scene_id}', log_file, 6000, scene_id)
+                 model, REVIEW_SCHEMA, f'voice review {scene_id}', log_file, 6000, scene_id,
+                 project_dir)
     try:
         return parse_review(text, prose)
     except (ValueError, KeyError, TypeError) as e:
@@ -238,7 +288,7 @@ For each flag, either edit the sentence it quotes or keep it:
 
 `flag` is the flag's number.
 
-{voice}
+{voice}{keeps}
 
 ## Flags
 
@@ -249,62 +299,81 @@ For each flag, either edit the sentence it quotes or keep it:
 {prose}"""
 
 
-def build_revise_prompt(scene_id: str, prose: str, voice: str, flags: list[Flag]) -> str:
+def build_revise_prompt(scene_id: str, prose: str, voice: str, flags: list[Flag],
+                        keeps: list[str] | tuple = ()) -> str:
     listing = '\n'.join(
-        f'{n}. "{f.quote}": {f.why}' + (' (the author\'s note)' if f.check == AUTHOR else '')
+        f'{n}. "{f.quote}": {f.why}' + (' (the author\'s note)' if f.source == AUTHOR else '')
         for n, f in enumerate(flags, start=1))
-    return REVISE_PROMPT.format(voice=voice, flags=listing, scene_id=scene_id, prose=prose)
+    keep_block = ''
+    if keeps:
+        keep_block = ('\n\n## Lines in this scene the author marked as working\n\n'
+                      'Write toward these too. They aren\'t flags: never edit them.\n\n'
+                      + '\n'.join(f'- "{k}"' for k in keeps))
+    return REVISE_PROMPT.format(voice=voice, keeps=keep_block, flags=listing,
+                                scene_id=scene_id, prose=prose)
 
 
-def apply_revision(prose: str, flags: list[Flag], reply: dict) -> Revision:
+def apply_revision(prose: str, flags: list[Flag], reply: dict,
+                   protected: list[str] | tuple = ()) -> Revision:
     """The reviser's edits applied to `prose`, each only inside its flag's
-    sentence; everything code refused is in `dropped`."""
+    sentence and never touching a `protected` line (the author's keeps);
+    one `Outcome` per flag. A flag both edited and kept counts as edited
+    (the keep is noted in `dropped`)."""
     from storyforge.gate import GateError, apply_edits
-    out = Revision(prose)
+    out = Revision(prose, [Outcome() for _ in flags])
+    keep_spans = [span for k in protected for span in flag_spans(prose, k)]
     ok: list[tuple[int, dict, tuple[int, int]]] = []
     for e in reply.get('edits', []):
         n, find = e.get('flag'), e.get('find') or ''
         if not isinstance(n, int) or not 1 <= n <= len(flags):
             out.dropped.append(f'an edit names flag {n!r}, which there isn\'t')
             continue
-        flag = flags[n - 1]
+        refused = out.outcomes[n - 1].refused
         count = prose.count(find) if find else 0
         if count != 1:
-            out.dropped.append(f'flag {n}: its edit\'s words occur {count} times in the scene: '
-                               f'{find[:80]!r}')
+            refused.append(f'its edit\'s words occur {count} times in the scene: {find[:80]!r}')
             continue
         start = prose.index(find)
         span = (start, start + len(find))
-        allowed = flag_spans(prose, flag.quote)
+        allowed = flag_spans(prose, flags[n - 1].quote)
         if not any(a <= span[0] and span[1] <= b for a, b in allowed):
-            out.dropped.append(f'flag {n}: its edit reaches outside the flagged sentence: '
-                               f'{find[:80]!r}')
+            refused.append(f'its edit reaches outside the flagged sentence: {find[:80]!r}')
+            continue
+        if any(span[0] < b and a < span[1] for a, b in keep_spans):
+            refused.append(f'its edit touches a line the author marked keep: {find[:80]!r}')
             continue
         ok.append((n, e, span))
     ok.sort(key=lambda t: t[2])
     clash = {i for i in range(len(ok) - 1) if ok[i + 1][2][0] < ok[i][2][1]}
     clash |= {i + 1 for i in clash}
     for i in sorted(clash):
-        out.dropped.append(f'flag {ok[i][0]}: its edit overlaps another')
+        out.outcomes[ok[i][0] - 1].refused.append('its edit overlaps another')
     ok = [t for i, t in enumerate(ok) if i not in clash]
     try:
         out.prose = apply_edits(prose, [e for _, e, _ in ok])
     except GateError as e:   # checked above; said if it ever happens
         out.dropped.append(f'the edits could not be applied ({e})')
         ok = []
-    out.applied = [(flags[n - 1], e['find'], e.get('replace') or '') for n, e, _ in ok]
+    for n, e, _ in ok:
+        out.outcomes[n - 1].edits.append((e['find'], e.get('replace') or ''))
     for k in reply.get('kept', []):
         n = k.get('flag')
-        if isinstance(n, int) and 1 <= n <= len(flags):
-            out.kept.append((flags[n - 1], str(k.get('why', '')).strip()))
-    answered = {id(f) for f, _, _ in out.applied} | {id(f) for f, _ in out.kept}
-    out.untouched = [f for f in flags if id(f) not in answered]
+        if not isinstance(n, int) or not 1 <= n <= len(flags):
+            out.dropped.append(f'a keep names flag {n!r}, which there isn\'t')
+            continue
+        o = out.outcomes[n - 1]
+        why = str(k.get('why', '')).strip() or '(no reason given)'
+        if o.edits:
+            out.dropped.append(f'flag {n} was both edited and kept ({why}): the edit stands')
+        else:
+            o.kept = why
     return out
 
 
 def revise(project_dir: str, scene_id: str, prose: str, flags: list[Flag], *, model: str,
-           log_file: str = '') -> Revision:
-    """`prose` with the flagged lines rewritten toward the voice.
+           log_file: str = '', keeps: list[str] | tuple = ()) -> Revision:
+    """`prose` with the flagged lines rewritten toward the voice; `keeps`
+    (the author's lines that work) are shown as examples and protected.
 
     Raises:
         VoiceReviewError: the call failed, was cut off or isn't the schema.
@@ -315,21 +384,22 @@ def revise(project_dir: str, scene_id: str, prose: str, flags: list[Flag], *, mo
     voice = voice_book.resolve(project_dir)
     voice.raise_if_unreadable(project_dir)
     text = _call(build_revise_prompt(scene_id, prose, voice.text if voice.kind == 'ok' else '',
-                                     flags),
-                 model, REVISE_SCHEMA, f'voice revise {scene_id}', log_file, 8000, scene_id)
+                                     flags, keeps),
+                 model, REVISE_SCHEMA, f'voice revise {scene_id}', log_file, 8000, scene_id,
+                 project_dir)
     try:
         reply = json.loads(text)
         if not isinstance(reply.get('edits'), list) or not isinstance(reply.get('kept'), list):
             raise ValueError('edits and kept must be lists')
     except (ValueError, AttributeError) as e:
         raise VoiceReviewError(f'{scene_id}: the reviser\'s reply could not be read ({e})') from e
-    return apply_revision(prose, flags, reply)
+    return apply_revision(prose, flags, reply, protected=keeps)
 
 
-def flags_from_marks(marks: list[tuple[str, str]]) -> list[Flag]:
-    """The author's marks, (the scene's words, the note), as flags for the
-    reviser."""
-    return [Flag(q.strip(), AUTHOR, n.strip()) for q, n in marks if q.strip()]
+def flags_from_marks(marks) -> list[Flag]:
+    """The author's marks asking for a change, (the scene's words, the
+    note), as flags for the reviser (keeps are `marks.SceneMarks.keeps`)."""
+    return [Flag(q.strip(), '', n.strip(), AUTHOR) for q, n in marks if q.strip()]
 
 
 # ============================================================================
@@ -340,31 +410,40 @@ def record(project_dir: str, scene_id: str, rev: Review, revision: Revision | No
            notes: list[str] | tuple = ()) -> str:
     """Write what the review found and what was done to
     `working/voice-reviews/<scene>.md` (replacing an earlier one). Returns
-    its path, relative to the project."""
+    its path, relative to the project. `revision` None: the reviser didn't
+    run (no flag, or it failed: `notes` say which)."""
     lines = [f'# Voice review: {scene_id}', '']
     lines += [f'NOTE: {n}' for n in notes]
     if notes:
         lines.append('')
     if not rev.flags:
         lines.append('No line was flagged.')
-    applied = {id(f): (a, b) for f, a, b in (revision.applied if revision else [])}
-    kept = {id(f): why for f, why in (revision.kept if revision else [])}
+    outcomes = revision.outcomes if revision else []
     for n, f in enumerate(rev.flags, start=1):
-        lines += [f'## {n}. {f.check}', '', f'> {f.quote}', '', f.why, '']
-        if id(f) in applied:
-            a, b = applied[id(f)]
+        who = 'the author' if f.source == AUTHOR else f'check {f.check}'
+        lines += [f'## {n}. {who}', '', f'> {f.quote}', '', f.why, '']
+        o = outcomes[n - 1] if n - 1 < len(outcomes) else None
+        if o is None:
+            continue
+        for a, b in o.edits:
             lines += ['Rewritten:', '', f'- before: {a}', f'- after: {b or "(cut)"}', '']
-        elif id(f) in kept:
-            lines += [f'Kept: {kept[id(f)]}', '']
-        elif revision is not None:
+        if o.kept and not o.edits:
+            lines += [f'Kept: {o.kept}', '']
+        for why in o.refused:
+            lines += [f'Edit refused: {why}', '']
+        if not (o.edits or o.kept or o.refused):
             lines += ['Not changed (the reviser gave no edit and no reason).', '']
     if rev.unverified:
         lines += ['## Flags left out (their words aren\'t in the scene)', '']
-        lines += [f'- "{f.quote}" ({f.check}): {f.why}' for f in rev.unverified] + ['']
+        lines += [f'- "{f.quote}" ({f.check or f.source}): {f.why}' for f in rev.unverified]
+        lines.append('')
     if rev.over_cap:
         lines += [f'{rev.over_cap} more flag(s) past the cap of {MAX_FLAGS} were left out.', '']
+    if rev.repeated:
+        lines += [f'{rev.repeated} flag(s) repeating a quote already flagged were left out.',
+                  '']
     if revision and revision.dropped:
-        lines += ['## Edits left out', ''] + [f'- {d}' for d in revision.dropped] + ['']
+        lines += ['## Left out', ''] + [f'- {d}' for d in revision.dropped] + ['']
     rel = os.path.join(REVIEWS_DIR, f'{scene_id}.md')
     path = os.path.join(project_dir, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -374,10 +453,12 @@ def record(project_dir: str, scene_id: str, rev: Review, revision: Revision | No
 
 
 def _call(prompt: str, model: str, schema: dict, label: str, log_file: str, tokens: int,
-          scene_id: str) -> str:
-    from storyforge.api import RefusalError, extract_text, invoke, is_truncated
+          scene_id: str, project_dir: str = '') -> str:
+    from storyforge.api import RefusalError, extract_text, invoke, is_truncated, log_reply
     try:
         response = invoke(prompt, model, tokens, label=label, output_schema=schema)
+        if project_dir:
+            log_reply(project_dir, response, 'voice-review', scene_id, model)
     except RefusalError as e:
         raise VoiceReviewError(f'{scene_id}: {label} was refused ({e})') from e
     except RuntimeError as e:
