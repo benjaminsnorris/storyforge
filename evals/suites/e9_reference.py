@@ -4,11 +4,12 @@ Runs phase 5 (5a-5g) on *A Christmas Carol* (the E2 book: 40 scenes with
 prose, its registries migrated into the ledger) and checks that it leaves a
 complete project, as #440 set out:
 
-- every file init's reference templates provide, plus `chapter-map.csv` and
-  `voice-profile.csv` (which have none), is filled: none is missing, empty,
-  header-only or still its template, except what decision 1 exempts
-  (`key-decisions.md`, `visual-style.md`, `canon/`: an author's decisions and
-  art direction can't be extracted);
+- every file init's reference templates provide, plus `chapter-map.csv`
+  (which has none), is filled: none is missing, empty, header-only or still
+  its template, except what decision 1 exempts (`key-decisions.md`,
+  `visual-style.md`, `canon/`: an author's decisions and art direction can't
+  be extracted). The voice folder counts as `voice/book.md` and step 5f's
+  first anchor; its `checks.md` is the author's own marks, exempt too;
 - every file phase 5 changed is in what it commits (`WRITTEN_PATHS`);
 - the L0-L6 floor checks pass, and L0-L4 (what phase 5 writes) alone. L5-L6
   check the scene layer (phases 1-3; phase 5 only marks status and fills
@@ -34,7 +35,10 @@ BOOK = os.path.join(EVALS_DIR, 'fixtures', 'e2-carol', 'book')
 #: Decision 1: never extracted
 EXEMPT = frozenset({'key-decisions.md', 'visual-style.md', 'canon'})
 #: Files phase 5 writes that have no template under templates/reference/
-NO_TEMPLATE = ('chapter-map.csv', 'voice-profile.csv')
+NO_TEMPLATE = ('chapter-map.csv',)
+#: What the voice folder (templates/reference/voice/) counts as: the
+#: description and step 5f's first anchor; checks.md is the author's marks
+VOICE_FILES = ('voice/book.md', 'voice/anchors/extracted-1.md')
 
 
 def _snapshot(project_dir: str) -> dict[str, str]:
@@ -96,7 +100,8 @@ def run(ctx):
     templates = os.path.join(get_plugin_dir(), 'templates', 'reference')
     provenance = read_provenance(project) or {}
     unfilled, extracted = [], 0
-    for name in sorted(os.listdir(templates)) + list(NO_TEMPLATE):
+    names = [n for n in sorted(os.listdir(templates)) if n != 'voice']
+    for name in names + list(NO_TEMPLATE) + list(VOICE_FILES):
         if name in EXEMPT:
             continue
         state = file_state(project, f'reference/{name}', provenance)
