@@ -190,10 +190,26 @@ blind read of the old draft against the session pilot).
   - The skills offer the session for drafting and `--marks` for revision;
     `revise --polish --loop` and `--naturalness` still run but aren't
     offered as defaults.
+- **Section 4, `voice sample` (#654): built.** In a book, `storyforge
+  voice sample --scene <id>` writes a round (shuffled, unlabelled, one
+  sentence per line) to `working/voice-samples/round-<n>.md` and opens a
+  PR; the key goes under `~/.storyforge/voice-sample-keys/`. Each sample
+  gets the blocking read and, with `checks.md`, the voice review before the
+  author sees it, a reviser fixing only the flagged lines; the PR body says
+  what was found and fixed. `--from-pr N` reads every page of the PR's
+  comments (`pr_marks`) and writes the next round toward the keeps;
+  `--take X --versions "a;b"` revises one sample in versions that differ in
+  one thing; `--promote <round file> --sample X --name N` saves the winner,
+  hand edits included, as an anchor (`references/voice-folder.md`, "Finding
+  anchors"). `status` now recommends `write --session` for a prose book
+  (`write --keep-going` for a graphic novel); E5 re-recorded.
 - **Not built yet:**
-  - `voice sample` (section 4), whose rounds read the author's marks from
-    a PR's comments: #654, next. `revise --marks` reads only a file;
-    reading a drafted scene's marks from a PR has no issue yet.
+  - #654's test 6: a scene written with the Austen exemplars scores closer
+    to her on the meter than to the other authors, and a judge picks Austen
+    from four. A frozen eval suite; it needs a paid recording and Ben's
+    approval.
+  - `revise --marks` reads only a file; reading a drafted scene's marks
+    from a PR has no issue yet.
   - Sessions at coach or strict coaching (flags to the author, nothing
     rewritten): `--session` takes full coaching only.
   - `score --voice` drift and the question layer inside a session; the

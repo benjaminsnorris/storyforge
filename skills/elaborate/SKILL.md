@@ -360,21 +360,21 @@ If the book still has `reference/voice-guide.md`, `voice-profile.csv`, `persiste
 
 Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, scene index).
 
-**Running sample rounds by hand.** `storyforge voice sample` (#654) will run these as PRs. Until it exists, run them in the session:
+**Running sample rounds.** At full coaching, `storyforge voice sample` runs them as PRs (`references/voice-folder.md`, "Finding anchors", has the flags):
 
-1. Read what the book has: the character bible, story architecture, key decisions, any existing `reference/voice/` files, and anything the author points to as a model (their own earlier prose, a writer they admire).
-2. Pick one scene that matters and that the author will know well, and write it several ways (three to five variants) that differ in real choices: distance, tense, whose POV, rhythm, how much is said.
-3. Before showing them, check every sample yourself: physical slips (a character holding two things, in two places, seeing what they can't see) and any pattern you promised the author was gone. Fix them first.
-4. Put the samples on a branch, unlabelled (call them A, B, C; keep which-is-which out of the repo), one sentence per line so the author can mark single sentences in a PR. Open the PR and ask the author to mark keeps, cuts, "more like this" and notes.
-5. Read every page of the PR's comments. Write the next take toward the keeps, not away from the cuts. After the second round, two versions that differ in one named thing (tense, or whose POV) teach more than five blends.
-6. When a sample is close, the author finishes it by hand. Save it as `reference/voice/anchors/<name>.md`, with `kind:`, `tense:` and `pov:` header lines when they help. Add anchors for other kinds of scene the book needs (a battle reads differently from a farewell).
+1. Read what the book has: the character bible, story architecture, key decisions, any existing `reference/voice/` files, and anything the author points to as a model (their own earlier prose, a writer they admire). Settle with the author which writers to blend (`--influences`) and what the versions should vary (`--vary`; default narrator stance, distance, tense).
+2. Pick one scene that matters and that the author will know well; it must be in `scenes.csv`. Run `storyforge voice sample --scene <id>` (`--dry-run` first to show the cost). It writes the samples unlabelled and shuffled, one sentence per line, in `working/voice-samples/round-<n>.md`, checks each one before the author sees it (the blocking read for physical slips, the voice review when `checks.md` has checks, a reviser fixing only the flagged lines), and opens a PR. The key (which sample tried what) stays outside the repo, under `~/.storyforge/voice-sample-keys/`; don't reveal it until the round is marked.
+3. Ask the author to mark sentences in the PR: keep, cut, "more like this", a reason, a `suggestion` with their own wording, and general reactions.
+4. Run `storyforge voice sample --from-pr <N>` for the next round, written toward the keeps, not away from the cuts. After the second round, a take teaches more than five blends: `--from-pr <N> --take <label> --versions "present tense;past tense"` (or two points of view).
+5. When a sample is close, the author finishes it by hand in the round file. Then `storyforge voice sample --promote working/voice-samples/round-<n>.md --sample <label> --name <name>` with `--kind`, `--tense` and `--pov` when they help saves it as `reference/voice/anchors/<name>.md` and commits it. Add anchors for other kinds of scene the book needs (a battle reads differently from a farewell).
+6. Without `gh`, or for a scene not in `scenes.csv` yet, run a round by hand the same way: samples on a branch, unlabelled, one sentence per line, checked for physical slips first, the key kept out of the repo, every page of the PR's comments read.
 7. Write `book.md` from the anchors: each thing the voice does, with the quoted line that does it. Put the people (each POV character, and the narrator when scenes have `pov` `narrator` or key-decisions.md says `narrator_pov: limited N`: who they are and how close they stand; an adaptation's narrator is the novel's, not the translator's) and the decided rules under their headings. Turn the author's cut marks into `checks.md`, each check with the example it came from.
 8. If tense follows POV, fill `scenes.csv`'s `tense` column (`present` or `past`).
 9. Commit: `git add -A -- . && git commit -m "Voice: <what changed>" && git push`
 
-Voice work in coach mode: Claude writes no samples. Ask what the author hears: tone, rhythm, distance, which passages by others feel close. Help the author pick or write their own anchor, then help them describe it in `book.md` by pointing at its lines, and turn their marks into `checks.md`.
+Voice work in coach mode: Claude writes no samples and doesn't run `voice sample` (it writes prose). The author writes their own samples; they can still put them on a branch one sentence per line, open a PR, and save the winner in `anchors/` by hand. Ask what the author hears: tone, rhythm, distance, which passages by others feel close. Help the author pick or write their own anchor, then help them describe it in `book.md` by pointing at its lines, and turn their marks into `checks.md`.
 
-Voice work in strict mode: no prose and no creative proposals from Claude. Set up the folder (`elaborate --stage voice`), explain the anchor header format and the `book.md` sections, file the author's own passages and words into the right places, and fill the `tense` column from their decisions.
+Voice work in strict mode: no prose and no creative proposals from Claude, so no `voice sample`; the author writes the samples. Set up the folder (`elaborate --stage voice`), explain the anchor header format and the `book.md` sections, file the author's own passages and words into the right places, and fill the `tense` column from their decisions.
 
 ### Graphic-novel mode
 
