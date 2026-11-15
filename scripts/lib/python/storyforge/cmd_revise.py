@@ -86,6 +86,18 @@ def parse_args(argv):
                              'change, toward the voice and the keeps; each scene is gated and '
                              'committed, or rolled back when the gate rejects it. See '
                              'storyforge.marks')
+    parser.add_argument('--marks-from-pr', metavar='N', type=int, default=None,
+                        help='Revise by reaction (#691), the marks read from PR N (the '
+                             'draft PR `write --session` made): its author\'s line comments '
+                             'on scenes/*.md (a comment marks its paragraph, or the words it '
+                             'quotes; "keep" or no note is a keep), their suggestion blocks '
+                             'applied as written first. Run on the PR\'s branch, at its head. '
+                             'Comments an earlier run acted on are left out. With --dry-run, '
+                             'lists the marks and what was left out, spending nothing. See '
+                             'storyforge.pr_scene_marks')
+    parser.add_argument('--since', metavar='ISO_TIME', default='',
+                        help='With --marks-from-pr: leave out comments made before this time '
+                             '(ISO 8601, e.g. 2026-11-15T09:00:00Z)')
     parser.add_argument('--polish', action='store_true',
                         help='Auto-generate craft-only polish plan')
     parser.add_argument('--scores', action='store_true',
@@ -3411,6 +3423,27 @@ def main(argv=None):
         return _main(argv)
 
 
+def _marks_preflight(project_dir: str, dry_run: bool) -> bool:
+    """The voice the reviser writes toward, and (unless a dry run) the API
+    key: False, said, when either is missing."""
+    from storyforge import voice_book
+    from storyforge.common import ReferenceDocError
+    try:
+        voice = voice_book.resolve(project_dir)
+        voice.raise_if_unreadable(project_dir)
+    except ReferenceDocError as e:
+        log(f'ERROR: {e}')
+        return False
+    if voice.kind != 'ok':
+        log(f'ERROR: {voice.detail}: the reviser writes toward the voice. First '
+            f'{voice_book.REMEDY}.')
+        return False
+    if not dry_run and not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY not set; nothing was revised.')
+        return False
+    return True
+
+
 def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool) -> int:
     """`revise --marks`: each marked scene's lines asking for a change
     rewritten toward the voice by the voice reviser, the author's keeps
@@ -3423,11 +3456,7 @@ def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool
     when the file can't be used, a scene isn't drafted, a reviser call
     fails, a revision is rolled back or committed provisionally, a re-check
     doesn't finish, or a commit fails; else 0."""
-    from storyforge import api, cmd_write, gate, marks as marks_mod, voice_book, voice_review
-    from storyforge.common import ReferenceDocError
-    from storyforge.costs import RunBudget
-    from storyforge.git import CommitError, commit_or_raise
-    from storyforge.illustrations import keep_markers, read_scene_prose, read_scene_raw
+    from storyforge import marks as marks_mod
     try:
         with open(marks_file, encoding='utf-8-sig') as f:
             scenes = marks_mod.parse_marks(f.read())
@@ -3437,21 +3466,116 @@ def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool
     if not scenes:
         log(f'ERROR: {marks_file} marks no scene (`## <scene id>`, then `> words`)')
         return 1
-    try:
-        voice = voice_book.resolve(project_dir)
-        voice.raise_if_unreadable(project_dir)
-    except ReferenceDocError as e:
-        log(f'ERROR: {e}')
-        return 1
-    if voice.kind != 'ok':
-        log(f'ERROR: {voice.detail}: the reviser writes toward the voice. First '
-            f'{voice_book.REMEDY}.')
+    if not _marks_preflight(project_dir, dry_run):
         return 1
     if not dry_run:
-        if not os.environ.get('ANTHROPIC_API_KEY'):
-            log('ERROR: ANTHROPIC_API_KEY not set; nothing was revised.')
-            return 1
         create_branch('revise', project_dir)
+    return _revise_scenes(project_dir, scenes, marks_file, log_dir, dry_run)
+
+
+def _revise_marks_from_pr(project_dir: str, pr: int, since: str, log_dir: str,
+                          dry_run: bool) -> int:
+    """`revise --marks-from-pr N` (#691): the PR author's comments on the
+    drafted scenes (`pr_marks.fetch`) mapped to marks
+    (`pr_scene_marks.map_comments`) and listed, with every comment left out
+    and why. Then (not on a dry run) the author's suggestions are applied
+    as written and committed, and the marks revised as `--marks` revises
+    them, on the PR's own branch. The checkout must be that branch, at the
+    PR's head, its scenes unchanged, so the marks are read against the text
+    they were made on. Returns 1 when that isn't so, the PR can't be read,
+    nothing is left to send, or as `_revise_scenes`; else 0."""
+    from storyforge import pr_marks, pr_scene_marks as psm
+    from storyforge.git import CommitError, commit_or_raise
+    from storyforge.illustrations import read_scene_raw
+    try:
+        info = pr_marks.pr_info(pr, project_dir)
+    except pr_marks.PrMarksError as e:
+        log(f'ERROR: PR #{pr}: {e}')
+        return 1
+    branch = current_branch(project_dir)
+    if not info['head_ref'] or branch != info['head_ref']:
+        log(f'ERROR: this checkout is on {branch or "no branch"}, not PR #{pr}\'s branch '
+            f'({info["head_ref"] or "unknown"}): check it out first (`gh pr checkout {pr}`)')
+        return 1
+    head = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
+    if head != info['head_sha']:
+        log(f'ERROR: this checkout is at {head[:10]}, PR #{pr}\'s head at '
+            f'{info["head_sha"][:10]}: pull (or push) first, so the marks are read against '
+            f'the text they were made on')
+        return 1
+    dirty = _git(project_dir, 'status', '--porcelain', '--', 'scenes/', check=False)
+    if dirty.returncode != 0 or dirty.stdout.strip():
+        log(f'ERROR: scenes/ has changes not committed: commit or discard them first, so the '
+            f'marks are read against PR #{pr}\'s text')
+        return 1
+    prefix = _git(project_dir, 'rev-parse', '--show-prefix', check=False).stdout.strip()
+    try:
+        prs = pr_marks.fetch(pr, project_dir, since=since, author=info['author'])
+    except pr_marks.PrMarksError as e:
+        log(f'ERROR: PR #{pr}: {e}')
+        return 1
+    mapped = psm.map_comments(prs, lambda sid: read_scene_raw(project_dir, sid), prefix,
+                              skip_ids=psm.used_comment_ids(project_dir, pr), since=since)
+    log(f'Marks from PR #{pr} (by {info["author"] or "its author"}):')
+    for line in psm.describe(mapped, pr):
+        log(f'  {line}')
+    for note in prs.notes:
+        log(f'  NOTE: {note}')
+    if not mapped.has_work:
+        log(f'ERROR: PR #{pr} has nothing left to send: no suggestion and no line asking for '
+            f'a change' + (' (comments in an unsubmitted review can\'t be read: submit it)'
+                           if not mapped.already_used else ''))
+        return 1
+    if not _marks_preflight(project_dir, dry_run):
+        return 1
+    if dry_run:   # the suggestions aren't applied, so their wording isn't a keep yet
+        wording = {(s.scene_id, s.text.strip()) for s in mapped.suggestions}
+        scenes = [type(sm)(sm.scene_id, [m for m in sm.marks
+                                         if (sm.scene_id, m.quote) not in wording])
+                  for sm in mapped.scenes]
+        return _revise_scenes(project_dir, scenes, f'PR #{pr}', log_dir, True)
+    create_branch('revise', project_dir)   # the PR's branch: resumed
+    from storyforge import voice_review
+    by_scene: dict[str, list] = {}
+    for s in mapped.suggestions:
+        by_scene.setdefault(s.scene_id, []).append(s)
+    for sid, sugs in by_scene.items():
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        with open(path, encoding='utf-8', newline='') as f:
+            raw = f.read()
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(psm.apply_suggestions(raw, sugs))
+        ids = [s.comment_id for s in sugs if s.comment_id]
+        notes = [f'The author\'s suggestion{"s" if len(sugs) > 1 else ""} from PR #{pr}, '
+                 f'applied as written (not rewritten, not gated).']
+        notes += psm.used_notes(project_dir, sid, pr, ids)
+        rel = voice_review.record(project_dir, sid, voice_review.Review(flags=[]), None,
+                                  notes=notes)
+        log(f'{sid}: {len(sugs)} suggestion(s) applied as written ({rel})')
+        try:
+            commit_or_raise(project_dir, f'Apply the author\'s suggestions on {sid} (PR #{pr})',
+                            [f'scenes/{sid}.md', voice_review.REVIEWS_DIR.replace(os.sep, '/')
+                             + '/'])
+        except CommitError as e:
+            log(f'ERROR: {sid}: {e}; commit it by hand. Nothing was revised.')
+            return 1
+    return _revise_scenes(project_dir, mapped.scenes, f'PR #{pr}', log_dir, False,
+                          pr=pr, change_ids=mapped.change_ids)
+
+
+def _revise_scenes(project_dir: str, scenes: list, source: str, log_dir: str, dry_run: bool,
+                   pr: int = 0, change_ids: dict | None = None) -> int:
+    """The revision `_revise_marks` describes, of `scenes` (`SceneMarks`)
+    from `source` (the marks file, or the PR). With `pr`, each scene's
+    record names the comments it acted on (`change_ids`), unless its
+    revision is rolled back; a record always keeps the comments its earlier
+    one named (`pr_scene_marks.used_notes`)."""
+    from storyforge import api, cmd_write, gate, pr_scene_marks as psm, voice_review
+    from storyforge.common import ReferenceDocError
+    from storyforge.costs import RunBudget
+    from storyforge.git import CommitError, commit_or_raise
+    from storyforge.illustrations import keep_markers, read_scene_prose, read_scene_raw
+    change_ids = change_ids or {}
     model = select_model('revision') if not dry_run else ''
     before = gate.snapshot(project_dir) if not dry_run else None
     budget = RunBudget()
@@ -3479,8 +3603,9 @@ def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool
         log(f'{sid}: {len(flags)} line(s) to revise, {len(keeps)} kept as examples')
         if dry_run or not flags:
             continue
-        notes = [f'From the author\'s marks ({marks_file}).']
+        notes = [f'From the author\'s marks ({source}).']
         notes += [f'Marked words not in the scene, left out: "{q[:80]}"' for q in missing]
+        carried = psm.used_notes(project_dir, sid)
         try:
             with api.metered() as meter:
                 revision = voice_review.revise(
@@ -3491,8 +3616,9 @@ def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool
             log(f'ERROR: {e}')
             code = 1
             continue
+        used = psm.used_notes(project_dir, sid, pr, change_ids.get(sid, ()))
         rel = voice_review.record(project_dir, sid, voice_review.Review(flags=flags), revision,
-                                  notes=notes)
+                                  notes=notes + used)
         log(f'  {revision.summary()} ({rel})')
         paths = [review_dir]
         message = f'Revise {sid} from the author\'s marks'
@@ -3508,6 +3634,9 @@ def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool
             if not passed and not cmd_write.is_provisional(project_dir, sid):
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(raw)   # the gate rejected it: the scene as it was
+                if used != carried:   # not acted on: a later run may send its marks again
+                    voice_review.record(project_dir, sid, voice_review.Review(flags=flags),
+                                        revision, notes=notes + carried)
                 log(f'ERROR: {sid}: the revision did not pass the gate ({why}); it is rolled '
                     f'back, the record kept ({rel})')
                 message = f'Record a rolled-back revision of {sid} (did not pass the gate)'
@@ -3602,8 +3731,17 @@ def _main(argv=None):
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
+    if args.marks and args.marks_from_pr is not None:
+        log('ERROR: --marks and --marks-from-pr are two ways to give the marks: give one')
+        sys.exit(1)
+    if args.since and args.marks_from_pr is None:
+        log('ERROR: --since goes with --marks-from-pr')
+        sys.exit(1)
     if args.marks:
         sys.exit(_revise_marks(project_dir, args.marks, log_dir, args.dry_run))
+    if args.marks_from_pr is not None:
+        sys.exit(_revise_marks_from_pr(project_dir, args.marks_from_pr, args.since, log_dir,
+                                       args.dry_run))
     set_log_file(os.path.join(log_dir, 'revision-log.txt'))
     _note_reference_docs(project_dir)
 
