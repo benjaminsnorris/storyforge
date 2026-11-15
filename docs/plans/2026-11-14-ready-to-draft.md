@@ -223,9 +223,11 @@ blind read of the old draft against the session pilot).
   control, `voice-austen-control` (the same request with no voice), puts
   her sixth to last; the judge names her for it too, so the meter is the
   half that sees the voice.
+- **Marks from the PR (#691):** `revise --marks-from-pr N` reads the
+  author's line comments and suggestions on a session's scenes from its
+  PR, applies suggestions as written, and revises the rest as `--marks`
+  does, on the PR's branch.
 - **Not built yet:**
-  - `revise --marks` reads only a file; reading a drafted scene's marks
-    from a PR has no issue yet.
   - Sessions at coach or strict coaching (flags to the author, nothing
     rewritten): `--session` takes full coaching only.
   - `score --voice` drift and the question layer inside a session; the

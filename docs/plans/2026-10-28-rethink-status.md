@@ -45,7 +45,7 @@ Status section says what's built and how Ben starts the redraft).
   exemplars move the drafts most of the way, and the judge can't see it.
 
 **Next:** Ben fills Wrath's `reference/voice/` and runs the Act 1 pilot.
-Reading a drafted scene's marks from a PR has no issue yet. Then #656 and #659, then #657 and #658.
+Marks on drafted scenes can be read from the session's PR (`revise --marks-from-pr`, #691). Then #656 and #659, then #657 and #658.
 
 ## Latest: the gate-and-voiceprint plan, phases 1–5 merged (2026-11-09, v1.173.0)
 
