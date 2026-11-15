@@ -212,3 +212,76 @@ class TestSession:
         _configure(project_dir, sheets)
         assert 'characters new to this session' not in session.scene_plan(
             project_dir, 'act1-sc01', notes=False)
+
+
+def _measured(rows):
+    table = '\n'.join(f'| {a} | {b} | {c} |' for a, b, c in rows)
+    return ('# x\n\n## Body\n\nTall.\n\n## Measurements\n\n'
+            '| Measurement | Metric | Imperial |\n| --- | --- | --- |\n' + table + '\n\n## Next\n')
+
+
+ACHILLES = [('Height', '188 cm', '74 in'), ('Weight', '86 kg', '190 lb'),
+            ('Chest', '104 cm', '41 in'), ('Waist', '80 cm', '31.5 in'),
+            ('Hips', '96 cm', '38 in'), ('Inseam', '89 cm', '35 in'),
+            ('Shoulder width', '46 cm', '18 in'), ('Sleeve', '91 cm', '36 in'),
+            ('Neck', '40 cm', '15.5 in'), ('Head', '58 cm', '23 in'),
+            ('Calf', '39 cm', '15.5 in'), ('Foot', '28.5 cm', '11.25 in')]
+
+
+class TestMeasurements:
+    def test_a_full_set_reads_and_fits(self):
+        m, problems = series.sheet_measurements(_measured(ACHILLES))
+        assert problems == [] and m['inseam'] == 89 and m['weight'] == 86
+        assert series.implausible(m) == []
+
+    def test_no_section_is_nothing(self):
+        assert series.sheet_measurements('# x\n\nNo table.\n') == ({}, [])
+
+    def test_rows_that_cant_be_used(self):
+        rows = ACHILLES[:2] + [('Cup size', 'C', ''), ('Chest', '104 in', ''),
+                               ('Waist', '80 cm', '40 in'), ('Waist', '81 cm', '')]
+        m, problems = series.sheet_measurements(_measured(rows), 'achilles.md')
+        assert any("'Cup size' is not one of" in p for p in problems)
+        assert any("chest: '104 in' is not a number in cm" in p for p in problems)
+        assert any('waist: 40 in is 101.6 cm, not 80 cm' in p for p in problems)
+        assert any('waist is given twice' in p for p in problems)
+        assert all(p.startswith('achilles.md: ') for p in problems)
+
+    def test_a_body_that_doesnt_fit(self):
+        m = dict(height=188, weight=40, inseam=110, bust=90, underbust=95,
+                 waist=120, chest=100, hips=100)
+        why = ' '.join(series.implausible(m))
+        assert 'inseam 110 cm is 0.59 of the height' in why
+        assert 'body-mass index of 11' in why
+        assert 'underbust 95 cm is not under the bust' in why
+        assert 'waist 120 cm is over both chest/bust and hips' in why
+
+    def test_a_god_or_giant_keeps_human_proportions(self):
+        scale = 600 / 175
+        giant = {'height': 600, 'weight': round(78 * scale ** 3), 'inseam': 270, 'head': 190}
+        assert series.implausible(giant) == []
+
+    def test_validate_blocks_a_bad_row_and_advises_on_a_bad_body(self, project_dir, sheets):
+        (sheets / 'dorren-hayle.md').write_text(
+            _sheet('dorren-hayle', _measured([('Height', '170 cm', ''), ('Shoe', '40', '')])))
+        (sheets / 'tessa-merrin.md').write_text(
+            _sheet('tessa-merrin', _measured([('Height', '170 cm', ''), ('Inseam', '100 cm', '')])))
+        _configure(project_dir, sheets)
+        found = series.measurement_findings(project_dir)
+        assert ('blocking', "series.characters: "
+                + os.path.join(os.path.relpath(sheets, project_dir), 'dorren-hayle.md')
+                + ": measurement 'Shoe' is not one of " + ', '.join(series.MEASUREMENTS)) in found
+        assert any(sev == 'advisory' and 'tessa-merrin.md: inseam 100 cm' in msg
+                   for sev, msg in found)
+
+
+class TestValidateCommand:
+    def test_a_bad_measurement_row_blocks_validate(self, project_dir, sheets, monkeypatch, capsys):
+        from test_series_canon import TestValidate
+        (sheets / 'dorren-hayle.md').write_text(
+            _sheet('dorren-hayle', _measured([('Height', '170 cm', ''), ('Shoe', '40', '')])))
+        _configure(project_dir, sheets)
+        code, out = TestValidate()._run(project_dir, monkeypatch, capsys)
+        assert code == 1
+        assert "measurement 'Shoe' is not one of" in out
+        assert 'Series character sheets: 3 in' in out

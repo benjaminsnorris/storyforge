@@ -451,3 +451,142 @@ def cast_sheets_block(project_dir: str, scene: dict[str, str]) -> str:
     return ("## How this scene's characters look\n\n" + SHEETS_NOTE + '\n\n'
             + '\n\n'.join(f'<reference file="{name}">\n{text}\n</reference>'
                             for name, text in sheets))
+
+
+# ============================================================================
+# Measurements: a costume department's sheet, in a character sheet's
+# `## Measurements` table
+# ============================================================================
+
+#: the measurements a sheet may give, by lower-cased row label, with the
+#: metric unit each is written in
+MEASUREMENTS = {
+    'height': 'cm', 'weight': 'kg', 'chest': 'cm', 'bust': 'cm', 'underbust': 'cm',
+    'waist': 'cm', 'hips': 'cm', 'inseam': 'cm', 'shoulder width': 'cm', 'sleeve': 'cm',
+    'neck': 'cm', 'head': 'cm', 'calf': 'cm', 'foot': 'cm',
+}
+#: each imperial unit, and its value in the metric one
+_IMPERIAL = {'in': 2.54, 'lb': 0.45359237}
+#: the share of height each length plausibly takes in an adult human body
+#: (anthropometric ranges, widened at both ends for heroes, the old and the
+#: gods, who keep a human's proportions at any size); outside one is advisory
+RATIO_BANDS = {
+    'chest': (0.45, 0.75), 'bust': (0.45, 0.75), 'underbust': (0.38, 0.60),
+    'waist': (0.33, 0.72), 'hips': (0.45, 0.75), 'inseam': (0.40, 0.50),
+    'shoulder width': (0.19, 0.30), 'sleeve': (0.42, 0.53), 'neck': (0.17, 0.27),
+    'head': (0.25, 0.38), 'calf': (0.17, 0.27), 'foot': (0.13, 0.17),
+}
+#: body-mass index, scaled to a 175 cm body so a giant of human proportions
+#: (weight growing as the cube of height) reads like a man
+BMI_BAND = (15.0, 40.0)
+#: how far the imperial column may drift from the metric one
+IMPERIAL_TOLERANCE = 0.03
+
+_MEASURE_HEADING = re.compile(r'^##\s+Measurements\s*$', re.M | re.I)
+_NUMBER = re.compile(r'(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?')
+
+
+def _table_after(text: str, heading: re.Pattern) -> list[list[str]] | None:
+    """The cells of the first markdown table under `heading` (header and
+    separator rows dropped); None without the heading."""
+    m = heading.search(text)
+    if not m:
+        return None
+    rows = []
+    for line in text[m.end():].splitlines():
+        if line.startswith('## '):
+            break
+        if not line.strip().startswith('|'):
+            if rows:
+                break
+            continue
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        if all(re.fullmatch(r':?-+:?', c) for c in cells if c):
+            continue
+        rows.append(cells)
+    return rows[1:] if rows else []
+
+
+def sheet_measurements(text: str, shown: str = '') -> tuple[dict[str, float], list[str]]:
+    """({measurement: metric value}, problems) from a sheet's
+    `## Measurements` table: rows `| <measurement> | <metric> | <imperial> |`,
+    e.g. `| Chest | 104 cm | 41 in |`. ({}, []) without the section. A
+    problem is a row that can't be used: an unknown measurement, one given
+    twice, a metric value that isn't a number in its unit, or an imperial
+    value more than `IMPERIAL_TOLERANCE` from it."""
+    rows = _table_after(text, _MEASURE_HEADING)
+    where = f'{shown}: ' if shown else ''
+    if rows is None:
+        return {}, []
+    out: dict[str, float] = {}
+    problems: list[str] = []
+    if not rows:
+        return {}, [f'{where}## Measurements holds no table']
+    for cells in rows:
+        label = cells[0].lower().strip('* ')
+        if label not in MEASUREMENTS:
+            problems.append(f'{where}measurement {cells[0]!r} is not one of '
+                            + ', '.join(MEASUREMENTS))
+            continue
+        if label in out:
+            problems.append(f'{where}{label} is given twice')
+            continue
+        unit = MEASUREMENTS[label]
+        m = _NUMBER.fullmatch((cells[1] if len(cells) > 1 else '').strip())
+        if not m or (m.group(2) or unit) != unit:
+            problems.append(f'{where}{label}: {(cells[1] if len(cells) > 1 else "")!r} is not '
+                            f'a number in {unit}')
+            continue
+        value = float(m.group(1))
+        out[label] = value
+        imperial = (cells[2] if len(cells) > 2 else '').strip()
+        im = _NUMBER.fullmatch(imperial)
+        if imperial and im and im.group(2) in _IMPERIAL:
+            converted = float(im.group(1)) * _IMPERIAL[im.group(2)]
+            if abs(converted - value) > IMPERIAL_TOLERANCE * value:
+                problems.append(f'{where}{label}: {imperial} is {converted:.1f} {unit}, '
+                                f'not {cells[1]}')
+    return out, problems
+
+
+def implausible(m: dict[str, float]) -> list[str]:
+    """Why a set of measurements doesn't fit one body ([] when it does): a
+    length outside `RATIO_BANDS` for its height, a scaled body-mass index
+    outside `BMI_BAND`, an underbust not under the bust, or a waist over
+    both chest (or bust) and hips."""
+    out = []
+    h = m.get('height')
+    if not h:
+        return ['no height, so nothing else can be checked'] if len(m) > 1 else []
+    for key, (lo, hi) in RATIO_BANDS.items():
+        if key in m and not lo <= m[key] / h <= hi:
+            out.append(f'{key} {m[key]:g} cm is {m[key] / h:.2f} of the height '
+                       f'(a body takes {lo:.2f}-{hi:.2f})')
+    if 'weight' in m:
+        bmi = m['weight'] / (h / 100) ** 2 * (175 / h)
+        if not BMI_BAND[0] <= bmi <= BMI_BAND[1]:
+            out.append(f'weight {m["weight"]:g} kg at {h:g} cm is a body-mass index of '
+                       f'{bmi:.0f} (scaled to 175 cm; a body takes {BMI_BAND[0]:g}-{BMI_BAND[1]:g})')
+    if 'underbust' in m and 'bust' in m and m['underbust'] >= m['bust']:
+        out.append(f'underbust {m["underbust"]:g} cm is not under the bust ({m["bust"]:g} cm)')
+    top = m.get('chest') or m.get('bust')
+    if top and 'waist' in m and 'hips' in m and m['waist'] > top and m['waist'] > m['hips']:
+        out.append(f'waist {m["waist"]:g} cm is over both chest/bust and hips')
+    return out
+
+
+def measurement_findings(project_dir: str) -> list[tuple[str, str]]:
+    """[(severity, message)] for every sheet's measurements: a row that
+    can't be used is blocking (the costume department would misread it);
+    a set that doesn't fit one body is advisory (a giant, a child or a
+    hunchback may be meant). [] without `series.characters`.
+
+    Raises:
+        SeriesError: as `sheet_text`.
+    """
+    out = []
+    for cid, (shown, _) in character_sheets(project_dir).items():
+        m, problems = sheet_measurements(sheet_text(project_dir, cid), shown)
+        out += [('blocking', f'series.characters: {p}') for p in problems]
+        out += [('advisory', f'series.characters: {shown}: {p}') for p in implausible(m)]
+    return out
