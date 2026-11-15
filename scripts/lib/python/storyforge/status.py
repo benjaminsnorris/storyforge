@@ -148,7 +148,7 @@ def ladder_states(project_dir: str, medium: str = 'novel',
 
 # Scene statuses that count as drafted-or-later.
 _DRAFTED_STATUSES = {'drafted', 'polished'}
-_EXCLUDED_STATUSES = {'cut', 'merged'}
+from storyforge.schema import INACTIVE_STATUSES as _EXCLUDED_STATUSES  # noqa: E402
 
 # yaml / legacy phase names normalized onto the post-briefs ladder phases.
 _PHASE_ALIASES = {

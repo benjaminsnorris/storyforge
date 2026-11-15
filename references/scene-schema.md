@@ -123,7 +123,7 @@ A name that is also in characters.csv isn't checked (the note says so). A name n
 | `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night, unstated | map | Time of day when the scene takes place; unstated when the scene's text gives none (blank means not filled in yet). |
 | `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |
 | `type` | enum: action, character, confrontation, dialogue, introspection, plot, revelation, transition, world | map | Narrative purpose of the scene. |
-| `status` | enum: architecture, briefed, drafted, mapped, polished, spine | all | Elaboration depth — tracks how far the scene has progressed through the pipeline. |
+| `status` | enum: architecture, archived, briefed, cut, drafted, mapped, merged, polished, spine | all | Elaboration depth — tracks how far the scene has progressed through the pipeline. cut, merged and archived take the scene out of the book; its row stays. |
 | `word_count` | integer | draft | Actual word count (0 until drafted). |
 | `target_words` | integer | map | Target word count for the scene. |
 
