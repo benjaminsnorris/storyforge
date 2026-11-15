@@ -127,8 +127,9 @@ def _apply_scene_filter(metadata_csv: str, filter_mode: str,
     """Apply scene filter and return list of scene IDs."""
     from storyforge.elaborate import _read_csv
     rows = _read_csv(metadata_csv)
-    # Exclude cut scenes, sort by seq
-    active = [r for r in rows if r.get('status', '') != 'cut']
+    # Exclude inactive (cut, merged, archived) scenes, sort by seq
+    from storyforge.schema import INACTIVE_STATUSES
+    active = [r for r in rows if (r.get('status') or '').strip() not in INACTIVE_STATUSES]
     active.sort(key=lambda r: int(r.get('seq', 0)) if r.get('seq', '').isdigit() else 0)
     all_ids = [r['id'] for r in active]
 

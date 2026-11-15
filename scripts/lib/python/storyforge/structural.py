@@ -950,9 +950,10 @@ def assess_flashbacks(scenes_map, briefs_map):
         except ValueError:
             return None
 
-    # Cut and merged scenes are not part of the book's reading order
+    # Cut, merged and archived scenes are not part of the book's reading order
+    from storyforge.schema import INACTIVE_STATUSES
     ordered = sorted(((sid, sc) for sid, sc in scenes_map.items()
-                      if _s(sc.get('status')).strip() not in ('cut', 'merged')), key=_seq)
+                      if _s(sc.get('status')).strip() not in INACTIVE_STATUSES), key=_seq)
     total_words = sum(_int(sc.get('word_count')) or 0 for _, sc in ordered)
 
     passages, current = [], None

@@ -117,9 +117,15 @@ OUTCOME_GUIDE = (
     'something genuinely goes their way)'
 )
 
+# Statuses that take a scene out of the book: an author's decision (a cut,
+# a merge into another scene, an archived draft), kept on the row so the
+# scene's history and links survive. Source of truth for every module that
+# skips inactive scenes; import it rather than repeating the set.
+INACTIVE_STATUSES = frozenset({'cut', 'merged', 'archived'})
+
 VALID_STATUSES = frozenset({
     'spine', 'architecture', 'mapped', 'briefed', 'drafted', 'polished',
-})
+}) | INACTIVE_STATUSES
 
 # Statuses that mean the scene has at least been mapped (i.e., participates
 # in the manuscript tier as opposed to just the structural-anchor tier).
@@ -245,7 +251,7 @@ COLUMN_SCHEMA = {
     'status': {
         'type': 'enum', 'values': VALID_STATUSES,
         'file': 'scenes.csv', 'stage': 'all',
-        'description': 'Elaboration depth — tracks how far the scene has progressed through the pipeline.',
+        'description': 'Elaboration depth — tracks how far the scene has progressed through the pipeline. cut, merged and archived take the scene out of the book; its row stays.',
     },
     'word_count': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'draft',
@@ -905,7 +911,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         scenes_rows = _read_csv(os.path.join(ref_dir, 'scenes.csv'))
         for row in scenes_rows:
             status = (row.get('status') or '').strip()
-            if status in ('cut', 'merged'):
+            if status in INACTIVE_STATUSES:
                 continue
             if not (row.get('target_pages') or '').strip():
                 failed += 1

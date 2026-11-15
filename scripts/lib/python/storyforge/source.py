@@ -1702,9 +1702,9 @@ def finding(severity: str, message: str, scene_id: str = '') -> dict:
             'check': 'source', 'category': 'source', 'passed': False}
 
 
-# Scene statuses that take a scene out of the book (as elsewhere: chapter
-# map freshness, schema); such a scene adapts nothing
-INACTIVE_STATUSES = frozenset({'cut', 'merged', 'archived'})
+# Scene statuses that take a scene out of the book; such a scene adapts
+# nothing. Defined in schema, kept importable from here.
+from storyforge.schema import INACTIVE_STATUSES  # noqa: E402
 
 
 def active_scenes(project_dir: str) -> list[dict[str, str]]:
