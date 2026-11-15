@@ -752,6 +752,16 @@ def build_scene_prompt(scene_id: str, project_dir: str,
                      'story architecture, timeline, and all other reference '
                      'material for the project. Internalize them before writing.')
 
+    # The series' character sheets for this scene's cast; never in the
+    # system context, which is the same for every scene
+    from .elaborate import get_scene
+    from .series import cast_sheets_block
+    sheets = cast_sheets_block(
+        project_dir, get_scene(scene_id, os.path.join(project_dir, 'reference')) or {})
+    if sheets:
+        lines.append('')
+        lines.append(sheets)
+
     if voice_guide and not system_context:
         lines.append('')
         lines.append(voice.text)
@@ -1914,6 +1924,12 @@ def build_scene_prompt_from_briefs(
         canon = '\n\n'.join(f'## {label}\n\n{text}' for label, text in canon_text(project_dir))
         if canon:
             char_block = f'{char_block}\n\n{canon}' if char_block else canon
+    # The series' character sheets for this scene's cast, with or without the
+    # system context, which is the same for every scene and so never has them
+    from .series import cast_sheets_block
+    sheets = cast_sheets_block(project_dir, scene)
+    if sheets:
+        char_block = f'{char_block}\n\n{sheets}' if char_block else sheets
 
     # Physical state context
     state_block = ''

@@ -171,6 +171,12 @@ def main(argv=None):
         lines = series_mod.summary_lines(project_dir)
         if lines:
             series_result = {'lines': lines, 'findings': []}
+            # the character sheets' measurements: a row that can't be read
+            # blocks, a body that doesn't fit is advisory
+            for severity, message in series_mod.measurement_findings(project_dir):
+                problem = source_mod.finding(severity, message)
+                problem.update(check='series', category='series')
+                series_result['findings'].append(problem)
     except series_mod.SeriesError as e:
         problem = source_mod.finding('blocking', str(e))
         problem.update(check='series', category='series')
