@@ -1767,17 +1767,29 @@ def _stop_after(project_dir: str, asked: int | None) -> int:
     return 0 if has_prose else 3
 
 
+def _session_model(dry_run: bool) -> str:
+    """The session writer's model (`select_model('drafting')`). A dry run
+    without an API key can't ask the Models API, so it names the tier's
+    newest listed model, said once; a real run has stopped on the key."""
+    try:
+        return select_model('drafting')
+    except RuntimeError as e:
+        if not dry_run:
+            raise
+        from storyforge import costs
+        from storyforge.common import _TASK_TIER
+        model = costs._TIER_FALLBACK[_TASK_TIER['drafting']]
+        if not getattr(_session_model, 'said', False):
+            log(f'NOTE: the dry run takes the writer as {model} ({e})')
+            _session_model.said = True
+        return model
+
+
 def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: str):
     """`costs.WriteForecast` for a writing session (`session.forecast`)."""
     from storyforge import session, voice_book
     from storyforge.costs import WriteForecast
-    try:
-        model = select_model('drafting')
-    except RuntimeError as e:
-        from storyforge import costs
-        from storyforge.common import _TASK_TIER
-        model = costs._TIER_FALLBACK[_TASK_TIER['drafting']]
-        log(f'NOTE: the forecast prices the session at {model} ({e})')
+    model = _session_model(dry_run=True)
     try:
         system = session.system_blocks(project_dir)
         story, _ = session.story_so_far(project_dir, pending_ids[0],
@@ -1810,7 +1822,7 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
     from storyforge.git import _git
     order = ledger.scene_order(project_dir)
     pending_ids = sorted(pending_ids, key=lambda s: order.get(s, float('inf')))
-    model = select_model('drafting')
+    model = _session_model(dry_run)
     try:
         system = session.system_blocks(project_dir)
         notes_wanted = session.brief_notes_wanted(project_dir)

@@ -346,3 +346,19 @@ def test_no_checks_md_no_review_and_said(project_dir, loop, requests, capsys):
     loop['run'](['act1-sc01'])
     assert 'has no checks yet, so no scene gets a voice review' in capsys.readouterr().out
     assert not [r for r in requests if r.get('output_config')]
+
+
+def test_the_story_cap_without_a_key_is_the_fallback_window(monkeypatch, capsys):
+    from storyforge import api
+    monkeypatch.setattr(api, 'max_input_tokens',
+                        lambda m: (_ for _ in ()).throw(RuntimeError('ANTHROPIC_API_KEY not set')))
+    cap = session.story_cap_words('claude-opus-5-5')
+    assert cap == int(session.FALLBACK_WINDOW * session.STORY_SHARE / session.TOKENS_PER_WORD)
+    assert 'taken as 200,000 tokens' in capsys.readouterr().out
+
+
+def test_a_craft_label_outcome_is_left_out_of_the_plan(project_dir):
+    _brief(project_dir, outcome='yes-but')
+    assert '## How it ends' not in session.scene_plan(project_dir, SCENE, notes=False)
+    _brief(project_dir, outcome='She keeps the map and tells no one.')
+    assert 'She keeps the map' in session.scene_plan(project_dir, SCENE, notes=False)

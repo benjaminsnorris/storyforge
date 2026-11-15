@@ -64,6 +64,9 @@ STAGE_OPEN = '<stage>'
 STAGE_CLOSE = '</stage>'
 SCENE_OPEN = '<scene>'
 SCENE_CLOSE = '</scene>'
+#: outcome values that are a craft framework's label, not an ending
+#: (`schema.VALID_OUTCOMES`)
+from storyforge.schema import VALID_OUTCOMES as CRAFT_OUTCOMES  # noqa: E402
 #: the brief fields a session's plan shows, as facts
 FACT_FIELDS = ('key_actions', 'outcome', 'knowledge_out', 'physical_state_out')
 
@@ -160,10 +163,22 @@ def system_blocks(project_dir: str) -> list[dict]:
     return blocks
 
 
+#: the context window assumed when the Models API can't be asked (a dry
+#: run without a key): the smallest current window
+FALLBACK_WINDOW = 200_000
+
+
 def story_cap_words(model: str) -> int:
-    """How many words of the story so far a session sends."""
+    """How many words of the story so far a session sends: `STORY_SHARE` of
+    the model's context window (`FALLBACK_WINDOW`, said, when the Models
+    API can't be asked)."""
     from storyforge.api import max_input_tokens
-    return int(max_input_tokens(model) * STORY_SHARE / TOKENS_PER_WORD)
+    try:
+        window = max_input_tokens(model)
+    except RuntimeError as e:
+        log(f'NOTE: the context window of {model} is taken as {FALLBACK_WINDOW:,} tokens ({e})')
+        window = FALLBACK_WINDOW
+    return int(window * STORY_SHARE / TOKENS_PER_WORD)
 
 
 def story_so_far(project_dir: str, first_scene: str, cap_words: int) -> tuple[str, list[str]]:
@@ -282,8 +297,11 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
     events = [e.strip() for e in (scene.get('key_actions') or '').split(';') if e.strip()]
     if events:
         lines += ['', '## What happens'] + [f'{n}. {e}' for n, e in enumerate(events, 1)]
-    if (scene.get('outcome') or '').strip():
-        lines += ['', f'## How it ends\n\n{scene["outcome"].strip()}']
+    outcome = (scene.get('outcome') or '').strip()
+    # an older brief's outcome is a craft label (yes-but, no-and): a scene
+    # needn't fit a framework (#643), and it says nothing of the ending
+    if outcome and outcome.lower() not in CRAFT_OUTCOMES:
+        lines += ['', f'## How it ends\n\n{outcome}']
     know = _statements(project_dir, scene.get('knowledge_out') or '', 'knowledge')
     if know:
         lines += ['', '## Known by the end'] + [f'- {k}' for k in know]
