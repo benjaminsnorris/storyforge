@@ -182,50 +182,83 @@ people and tense still belong in `book.md`.
 scene is written several ways, you mark sentences, the next round writes
 toward what you kept, and the winner becomes an anchor. The scene must be in
 `scenes.csv`; its plan comes from the briefs, as in a writing session. The
-book needs no voice yet: round 1 is how it is found.
+book needs no voice yet: round 1 is how it is found. It works for a book in
+a subfolder of its repo. At coach or strict coaching Claude writes no
+samples; running the command is your choice.
 
 1. **Round 1:** `storyforge voice sample --scene <id>`. One call writes
    `--variants` versions (default 5, 2 to 8) that vary `--vary` (default
    narrator stance, distance, tense), optionally blending `--influences
-   "Pressfield, Renault"`. They're shuffled and labelled `Sample A`,
-   `Sample B`... in `working/voice-samples/round-<n>.md`, one sentence per
-   line, committed on a branch with a draft PR. `--no-pr` commits without
-   the PR; `--dry-run` says what the round would do and cost (about $1 for
-   the round and $0.30 a sample for the checks) and spends nothing.
+   "Pressfield, Renault"`. A reply without exactly that many versions, each
+   with text, is an error (run it again); nothing is written. They're
+   shuffled and labelled `Sample A`, `Sample B`... in
+   `working/voice-samples/round-<n>.md`, one sentence per line, committed
+   on a branch with a draft PR. `--no-pr` commits without the PR;
+   `--dry-run` says what the round would do and spends nothing. Its cost
+   line is a rough guess (about $1 for the round, and $0.30 to $0.60 a
+   sample for the checks), not a forecast.
 2. **Mark it in the PR's Files changed:** a comment on a sentence (keep, cut,
-   more like this, a reason), a `suggestion` with your own wording, or a
-   general reaction in a review or the conversation. Every page of comments
-   is read. A comment on a line that has since changed is placed by its
-   original line, and said.
+   more like this, a reason), a `suggestion` with your own wording (an empty
+   one cuts the line; every suggestion block in a comment is kept), a
+   comment on a sample's heading or word-count line for the whole sample, or
+   a general reaction in a review, the conversation, or a comment on the
+   whole file. **Submit the review**: comments in a review not yet submitted
+   can't be read. Every page of comments is read.
 3. **The next round:** `storyforge voice sample --from-pr <N>`. It reads the
    marks on the latest round in `working/voice-samples/` (so `N` is that
-   round's PR) and writes a new round toward the keeps and your wordings,
-   not away from the cuts: a round that only avoided the cuts came out flat.
-   The scene and influences carry over from the last round unless given.
+   round's PR, and it must change that file) and writes a new round toward
+   the keeps and your wordings, not away from the cuts: a round that only
+   avoided the cuts came out flat. The scene, influences and vary list carry
+   over from the last round unless given.
 4. **A take:** `--from-pr <N> --take B --versions "present tense;past
    tense"` revises one marked sample toward its marks, in versions that
-   differ only in that one named thing (or two points of view). After a
-   round or two this teaches more than another five blends.
+   differ only in that one named thing (or two points of view). Name at
+   least two, all different; `--take` needs `--versions`. Each version is
+   headed by its name (`## present tense`), so the next round, or
+   `--promote --sample "present tense"`, names it. After a round or two a
+   take teaches more than another five blends.
 5. **The winner:** `--promote working/voice-samples/round-<n>.md --sample B
    --name <name> [--kind K] [--tense present|past] [--pov P]` saves it as
-   `anchors/<name>.md`, with those header lines, and commits it. It reads
-   the round file as it is now, so finish the sample by hand in the file
-   first. `--force` replaces an anchor of that name. Then say in `book.md`
-   what it does, quoting it.
+   `anchors/<name>.md`, with those header lines, and commits it on a branch
+   (never `main`). It reads the round file as it is now, so finish the
+   sample by hand in the file first, and pull the branch if you edited it
+   on GitHub. The sample is checked as an anchor before anything is
+   written: an empty one is refused, even with `--force`, which otherwise
+   replaces an anchor of that name. `--dry-run` writes nothing. Then say in
+   `book.md` what it does, quoting it.
+
+**How the marks are read.** `--from-pr` reads the round file as it is at
+the PR's head, and refuses if your copy differs (edits or suggestions
+committed on GitHub): pull the branch first, so the marks are read against
+the same text. Only the PR author's comments count; a bot's or anyone
+else's are left out and counted in a NOTE. General comments made before
+the round was committed are left out (an earlier round's reactions). A
+line comment is placed only when its line still says what GitHub showed;
+one on a line since changed is counted and left out. A PR with none of its
+author's marks on the round is refused, unless `--allow-unmarked`. A
+latest round file that isn't committed as it is is refused.
 
 **The key is kept outside the repo**, under
-`~/.storyforge/voice-sample-keys/<book>-<hash>/round-<n>.json`: what each
-sample tried, the scene, the influences. You mark blind; the next round's
-writer is given the key. A round made on another machine has no key here:
-the next round still runs, from your marks without what each sample tried
-(said), and needs `--scene`.
+`~/.storyforge/voice-sample-keys/<book folder>-<hash of its path>/round-<n>.json`:
+the round, its scene, what it varied and blended, what each sample tried,
+the take, the round it came from, and a hash of its samples. Another clone
+or worktree of the book has its own. It is saved only after the round is
+committed, and no command shows it to you: you mark blind; the next round's
+writer is given it. A round with no key here (made elsewhere) still runs,
+from your marks without what each sample tried (a NOTE), and needs
+`--scene`. A key whose hash doesn't match the round's samples (the round
+was edited or remade) isn't used (a NOTE). A key that can't be read is an
+error.
 
 **Each sample is checked before you see it:** the blocking read (one
 reading, for physical slips: hands, what is held, where people are) and,
 when `checks.md` has checks, the voice review against it. A separate
-reviser rewrites only the flagged lines. What was found and fixed, and any
-check that didn't finish, is listed in the PR's description.
+reviser rewrites only the flagged lines. What was found, fixed and left
+out (flags whose words aren't in the sample, unverified findings, any
+check that didn't finish) is listed in the PR's description. The round's
+spend is logged as `voice-sample`, the blocking reads as
+`voice-sample-check`, the reviews as `voice-review`.
 
-Each round is its own branch and PR when run from `main`. Run from a
-round's branch, it is committed to that branch and its open PR, whose
-description isn't updated with the new round's checks (they're printed).
+Each round is its own branch and PR: off `main`, or, run from a round's
+branch, off that branch. If the branch or the PR can't be made, it's an
+error (exit 1); the round is committed by then if only the PR failed.

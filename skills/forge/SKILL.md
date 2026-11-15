@@ -69,9 +69,11 @@ Before doing anything else, orient yourself:
      `references/voice-folder.md`). `storyforge write` refuses to draft until
      it's there. Route to the `elaborate` skill's Voice Stage, where the
      author finds anchors through sample rounds (`storyforge voice sample
-     --scene <id>`: blind rounds as PRs the author marks, `--from-pr N` for
-     the next, `--promote` to save the winner as an anchor; at coach or
-     strict coaching the author writes the samples); `storyforge elaborate
+     --scene <id>`: blind rounds, each its own branch and PR the author
+     marks, `--from-pr N` for the next, `--promote` to save the winner as
+     an anchor; at coach or strict coaching Claude writes no samples and
+     doesn't run it: the author writes the samples, and running the command
+     is their choice); `storyforge elaborate
      --stage voice` only sets up the folder's files. Draft after.
 3. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
 4. **Scan for key artifacts** — check for the existence of:
