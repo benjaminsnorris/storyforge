@@ -14,18 +14,22 @@ Status section says what's built and how Ben starts the redraft).
   `anchors/`, `checks.md`) is a prose book's voice, read through
   `voice_book.resolve`; the old voice files are no longer read; `scenes.csv`
   has `tense`. `checks.md` never reaches a writing prompt.
-- **#655, long writing sessions** (the PR after #682):
+- **#655, long writing sessions** (PR #685):
   `storyforge write --session` drafts a stretch with one writer in one
   conversation (`session`, `api.chat`). Each scene gets the free tense
   check, the voice review (`voice_review`: a reviewer flags lines against
-  `checks.md`, a separate reviser rewrites only those), and the gate with
-  the same writer as its fixer. A book with no prose stops after 3 scenes.
-  `storyforge revise --marks FILE` sends the author's marks to the same
-  reviser. `drafting.brief_notes: exclude` leaves the old briefs' notes out.
+  `checks.md`, a separate reviser rewrites only those), the gate with
+  the same writer as its fixer, and the re-checks; it commits as
+  `--keep-going` does. A book with no prose stops after 3 scenes. The
+  writer's stage note isn't compared yet (write's gate keeps no extracted
+  sheet; each scene gets a NOTE). `storyforge revise --marks FILE` sends
+  the author's marks to the same reviser, their keeps as examples it never
+  edits; a revision the gate rejects is rolled back. `drafting.brief_notes: exclude` leaves the old briefs' notes out.
   The skills now offer these; `--polish --loop` and `--naturalness` are no
   longer the default.
 
-**Next:** #654 (`voice sample`, and reading marks from a PR's comments).
+**Next:** #654 (`voice sample`, whose rounds read marks from a PR's
+comments; reading a drafted scene's marks from a PR has no issue yet).
 Ben fills Wrath's `reference/voice/` and runs the Act 1 pilot. Then #656
 and #659, then #657 and #658.
 

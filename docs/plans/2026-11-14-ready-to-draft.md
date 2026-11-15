@@ -157,7 +157,7 @@ blind read of the old draft against the session pilot).
 - **Section 1, the voice folder, and section 2's tense column: done** (PR
   #682). `reference/voice/` is the voice (`references/voice-folder.md`),
   the old voice files are no longer read, and `scenes.csv` has `tense`.
-- **Section 3, long writing sessions (#655): built** in the PR after #682.
+- **Section 3, long writing sessions (#655): built** in PR #685.
   - `storyforge write --session`: one writer drafts the scenes in one
     conversation, with `book.md`, the anchors, the key decisions, the canon,
     the cast and the story so far word for word. Each scene's plan is lean,
@@ -167,19 +167,33 @@ blind read of the old draft against the session pilot).
     writer once), the voice review (a reviewer flags lines against
     `checks.md`; a separate reviser, never shown `checks.md`, rewrites only
     those lines; decision 2), the gate with the same writer fixing its
-    findings, the writer's stage note against the extracted one, and the
-    commit.
+    findings, the writer's stage note against the extracted one, the
+    commit, and the re-checks the scene owes. The session works as
+    `--keep-going` does (a scene the gate stops on only for the check's
+    findings is committed provisionally). It stops at a scene still in the
+    wrong tense, one that fails verification or the gate outright, and the
+    cost threshold, naming the scenes it didn't attempt. A drafted scene
+    between two to draft goes into the conversation in its place.
+  - The stage-sheet comparison doesn't run yet: write's gate reads
+    blocking whole and keeps no extracted sheet, so each scene gets a NOTE.
+    It works once the stage sheet is the gate's method. The writer's stage
+    note is carried to the next scene only when it is of the committed
+    prose.
   - `--dry-run` gives the forecast and the first scene's plan. A book with
     no prose stops after 3 scenes for a read (`--stop-after N`). Running it
     again resumes.
   - `storyforge revise --marks FILE`: the author's marks on drafted scenes
-    go to the same reviser, then the gate and a commit.
+    go to the same reviser, on a revise branch. A quote with no note, or
+    `keep` / `more like this`, is a keep: an example the reviser never
+    edits. Then the gate (a revision it rejects is rolled back), a commit
+    and the re-checks.
   - The skills offer the session for drafting and `--marks` for revision;
     `revise --polish --loop` and `--naturalness` still run but aren't
     offered as defaults.
 - **Not built yet:**
-  - Reading marks from a PR's comments, and `voice sample` (section 4):
-    #654, next.
+  - `voice sample` (section 4), whose rounds read the author's marks from
+    a PR's comments: #654, next. `revise --marks` reads only a file;
+    reading a drafted scene's marks from a PR has no issue yet.
   - Sessions at coach or strict coaching (flags to the author, nothing
     rewritten): `--session` takes full coaching only.
   - `score --voice` drift and the question layer inside a session; the

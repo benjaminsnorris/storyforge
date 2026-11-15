@@ -59,17 +59,17 @@ Based on the author's request and project state:
 cut: reads like AI
 
 > Andromache did not smile.
-more like this
+keep
 ```
 
-Each `## <scene id>` starts a scene. Each `>` line quotes the scene's words, copied exactly (several `>` lines join into one quote). The lines after it are the note: keep, cut, more like this, or anything the author wants to say. A quote with no note means keep: it tells the reviser what works. Then:
+Each `## <scene id>` starts a scene. Each `>` line quotes the scene's words, copied exactly (several `>` lines in a row join into one quote; a blank line ends it). The lines after a quote, up to a blank line, are its note: cut, or anything the author wants to say. A quote with no note, or a note of `keep`, `more like this`, `yes`, `love this` or `perfect`, is a **keep**: the reviser is shown it as an example of what works and never edits it. The file is refused, naming the line, for a heading that isn't `## <scene id>`, a scene given twice, an empty quote, or a note with no quote above it. The marks come from this file only; reading a drafted scene's marks from a PR's comments has no issue yet. Then:
 
 ```bash
-./storyforge revise --marks working/marks.md --dry-run   # counts each scene's marks; names marked words not in the scene
+./storyforge revise --marks working/marks.md --dry-run   # "N line(s) to revise, M kept as examples" per scene; names marked words not in the scene; spends nothing
 ./storyforge revise --marks working/marks.md
 ```
 
-Each scene's marks go to the voice reviser: it gets `reference/voice/book.md`, the anchors and the marks (never `checks.md`), and rewrites only the marked sentences toward the anchors, or keeps one and says why. Code drops any edit outside the sentence its mark quotes. Marked words that aren't in the scene are a WARNING and left out. Then the scene is gated and committed ("Revise <id> from the author's marks"). The record of what was rewritten, kept and refused is in `working/voice-reviews/<scene>.md`; go through it with the author. The book needs its voice (`reference/voice/`, or an author voice repo); without it the command stops.
+The command needs `ANTHROPIC_API_KEY` and works on a revise branch. Each scene's marks go to the voice reviser: it gets `reference/voice/book.md`, the anchors, the lines asking for a change and the keeps as examples (never `checks.md`), and rewrites only the marked sentences toward the anchors and the keeps, or keeps one and says why. Code refuses any edit outside the sentence its mark quotes or touching a keep. Marked words that aren't in the scene are a WARNING and left out. Then the scene, its illustration markers kept, is gated against the book as it was before the run and committed ("Revise <id> from the author's marks"), and the re-checks it owes run. A revision the gate rejects that can't be committed provisionally is rolled back (the old prose restored, the record committed); one committed provisionally is listed in `working/gate-pending.csv`; either way the command exits 1. When nothing was rewritten, only the record is committed. The record of what was rewritten, kept and refused is in `working/voice-reviews/<scene>.md`; go through it with the author. The book needs its voice (`reference/voice/`, or an author voice repo); without it the command stops.
 
 The checks the author keeps repeating in marks belong in `reference/voice/checks.md` (`references/voice-folder.md`), so the voice review in the next writing session (`storyforge write --session`) catches them before the author has to.
 

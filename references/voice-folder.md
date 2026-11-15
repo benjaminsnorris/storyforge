@@ -99,7 +99,9 @@ in a fresh context, gets `book.md`, the anchors and the flagged lines, never
 `checks.md`, and rewrites only those lines toward the anchors, or keeps one
 and says why. Code keeps each edit inside the sentence its flag quotes; a
 flag whose words aren't in the scene, or an edit outside its sentence, is
-dropped and said. What happened is in `working/voice-reviews/<scene>.md`.
+dropped and said. What happened to each flag (rewritten, kept, or its edits
+refused) is in `working/voice-reviews/<scene>.md`. If the review fails, the
+scene goes to the gate without it, and the session lists it at the end.
 
 `storyforge revise --marks FILE` sends your own marks on drafted scenes to
 the same reviser. A marks file:
@@ -110,12 +112,26 @@ the same reviser. A marks file:
 cut: reads like AI
 
 > Andromache did not smile.
-more like this
+keep
 ```
 
-Each `## <scene id>` starts a scene; each `>` line quotes the scene's words;
-the lines after it are your note. A quote with no note means keep. Each
-scene is then gated and committed.
+Each `## <scene id>` starts a scene. Each `>` line quotes the scene's
+words, copied exactly; lines in a row join into one quote, and a blank line
+ends it. The lines after a quote, up to a blank line, are your note. A
+quote with no note, or with the note `keep`, `more like this`, `yes`,
+`love this` or `perfect`, is a keep: the reviser is shown it as an example
+of what works and may never edit it. Any other note asks for a change, and
+only those lines are rewritten. A file that can't be read for sure (a
+heading that isn't `## <scene id>`, a scene given twice, an empty quote, a
+note with no quote above it) is refused, naming the line.
+
+Each scene is then gated against the book as it was before the run, and
+committed on a revise branch. A revision the gate rejects, and that can't
+be committed provisionally, is rolled back: the old prose stays, and the
+record is committed so you can see what was tried. `--dry-run` counts each scene's lines to revise and keeps, and
+spends nothing. The marks come from the file only: `voice sample` (#654)
+will read a sample round's marks from a PR's comments, but reading a
+drafted scene's marks from a PR isn't planned in an issue yet.
 
 `checks.md` never goes into a writing prompt. Writing from a list of things
 to avoid makes flat prose: the writer steers away from the list instead of
@@ -131,7 +147,8 @@ speak and doesn't count.
 
 A writing session checks each scene's narration against it, for free. A
 scene in the wrong tense goes back to the writer once, for the whole scene
-again; still wrong after that is a WARNING. A scene with too few common verb
+again; still wrong after that, or wrong once the review and the gate have
+changed it, stops the session. A scene with too few common verb
 forms to judge (under 12) is not checked, and the session says so. A value
 other than `present` or `past` is a WARNING in `write`, and that scene's
 prompt states no tense. The gate doesn't check tense.

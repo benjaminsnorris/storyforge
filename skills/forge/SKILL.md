@@ -146,7 +146,7 @@ Check that `reference/scenes.csv` exists with scenes, and that `storyforge statu
 ./storyforge write --session --act 1 --dry-run   # the forecast and the first scene's plan; nothing spent
 ./storyforge write --session --act 1             # the real run
 ```
-After each scene the session runs the tense check (`scenes.csv`'s `tense`; a scene in the wrong tense goes back to the writer once), the voice review (a reviewer flags lines against `reference/voice/checks.md`; a separate reviser that never sees checks.md rewrites only those lines; the record is in `working/voice-reviews/<scene>.md`), and the gate, whose problems go back to the same writer. Then it commits the scene. When the book has no prose yet it stops after 3 scenes (`--stop-after N` changes that; `0` never stops), so the author reads the first pages before the rest are written: the first pages are where a voice goes wrong. Running the same command again goes on from where it stopped; the drafted scenes become the story so far. A scene the gate can only commit provisionally is committed that way and the session goes on; one it can't commit stops the session.
+After each scene the session runs the tense check (`scenes.csv`'s `tense`; a scene in the wrong tense goes back to the writer once), the voice review (a reviewer flags lines against `reference/voice/checks.md`; a separate reviser that never sees checks.md rewrites only those lines; the record is in `working/voice-reviews/<scene>.md`), and the gate, whose problems go back to the same writer. Then it commits the scene and runs the re-checks it owes. When the book has no prose yet it stops after 3 scenes (`--stop-after N` changes that; `0` never stops), so the author reads the first pages before the rest are written: the first pages are where a voice goes wrong. Running the same command again goes on from where it stopped; the drafted scenes become the story so far. The session works as `--keep-going` does: a scene the gate stops on only for the check's findings is committed provisionally and the session goes on; one it can't commit stops the session. It also stops at a scene still in the wrong tense after its rewrite, one that fails verification, a failed commit, and the cost threshold (the next scene's forecast reserved); it names the scenes it didn't attempt. Session logs in `working/logs/session/` aren't committed; the voice reviews are.
 
 Before the first session, tell the author to check: a `tense` in `scenes.csv` for each scene when tense follows POV, a `checks.md` with checks (with none, no scene gets a voice review), and `drafting.brief_notes: exclude` in `storyforge.yaml` when the briefs' note columns were written by a model (briefs from before #644).
 
@@ -162,12 +162,12 @@ Check that scene files exist in `scenes/`. If ready, provide the command:
 **"Revise" / "Fix issues" / "Plan revision" / "Polish":**
 Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
 
-For the prose itself, revise by reaction (#655): the author reads the drafted scenes and marks lines in a marks file (`## <scene id>`, then `> the scene's words`, then a note such as `cut: reads like AI` or `more like this`; a quote with no note means keep), and runs:
+For the prose itself, revise by reaction (#655): the author reads the drafted scenes and marks lines in a marks file (`## <scene id>`, then `> the scene's words`, then a note such as `cut: reads like AI`; a quote with no note, or a note such as `keep` or `more like this`, is a keep: an example for the reviser that is never edited; a blank line ends a quote), and runs:
 ```bash
-./storyforge revise --marks working/marks.md --dry-run   # counts each scene's marks; flags words not in the scene
+./storyforge revise --marks working/marks.md --dry-run   # each scene's lines to revise and keeps; flags words not in the scene; spends nothing
 ./storyforge revise --marks working/marks.md
 ```
-Each scene's marked lines are rewritten toward the voice by the voice reviser, then gated and committed. The record is in `working/voice-reviews/<scene>.md`.
+Each scene's lines asking for a change are rewritten toward the voice (and the keeps) by the voice reviser, then gated and committed on a revise branch. A revision the gate rejects, if it can't be committed provisionally, is rolled back to the old prose. The record is in `working/voice-reviews/<scene>.md`. The marks come from the file only; reading a drafted scene's marks from a PR's comments has no issue yet.
 
 `./storyforge revise --polish` (and `--polish --loop`, `--naturalness`) still run, but they are no longer offered as the default (#655): revision of the prose is by reaction, the author's marks. Run them when the author asks for them.
 
