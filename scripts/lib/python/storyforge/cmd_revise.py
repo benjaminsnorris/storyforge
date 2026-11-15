@@ -78,6 +78,11 @@ def parse_args(argv):
                         help='Auto-generate plan from structural proposals (CSV-only)')
     parser.add_argument('--naturalness', action='store_true',
                         help='Auto-generate 3-pass plan targeting AI prose patterns')
+    parser.add_argument('--marks', metavar='FILE', default=None,
+                        help='Revise by reaction (#655): the author\'s marks on drafted '
+                             'scenes (`## <scene id>`, `> the scene\'s words`, a note), each '
+                             'scene\'s marked lines rewritten toward the voice by the voice '
+                             'reviser, then gated and committed. See storyforge.marks')
     parser.add_argument('--polish', action='store_true',
                         help='Auto-generate craft-only polish plan')
     parser.add_argument('--scores', action='store_true',
@@ -3403,6 +3408,79 @@ def main(argv=None):
         return _main(argv)
 
 
+def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool) -> int:
+    """`revise --marks`: each marked scene's lines rewritten toward the voice
+    (`voice_review.revise`), recorded in working/voice-reviews/, gated and
+    committed. A mark whose words aren't in the scene is said and left out.
+    Returns the exit code: 1 when the file can't be used, a scene isn't
+    drafted, or a scene doesn't pass the gate."""
+    from storyforge import marks as marks_mod, voice_book, voice_review
+    from storyforge.cmd_write import _gate_drafted_scene, is_provisional
+    from storyforge.git import commit_or_raise, CommitError
+    from storyforge.illustrations import read_scene_prose
+    try:
+        with open(marks_file, encoding='utf-8-sig') as f:
+            scenes = marks_mod.parse_marks(f.read())
+    except (OSError, UnicodeDecodeError, marks_mod.MarksError) as e:
+        log(f'ERROR: {marks_file}: {e}')
+        return 1
+    if not scenes:
+        log(f'ERROR: {marks_file} marks no scene (`## <scene id>`, then `> words`)')
+        return 1
+    voice = voice_book.resolve(project_dir)
+    if voice.kind != 'ok':
+        log(f'ERROR: {voice.detail}: the reviser writes toward the voice. First '
+            f'{voice_book.REMEDY}.')
+        return 1
+    code = 0
+    for sm in scenes:
+        path = os.path.join(project_dir, 'scenes', f'{sm.scene_id}.md')
+        prose = read_scene_prose(path) if os.path.isfile(path) else ''
+        if not prose.strip():
+            log(f'ERROR: {sm.scene_id} has no prose; its marks are left out')
+            code = 1
+            continue
+        flags = voice_review.flags_from_marks(sm.marks)
+        missing = [f for f in flags if not voice_review.flag_spans(prose, f.quote)]
+        for f in missing:
+            log(f'  WARNING: {sm.scene_id}: marked words not in the scene, left out: '
+                f'"{f.quote[:80]}"')
+        flags = [f for f in flags if f not in missing]
+        log(f'{sm.scene_id}: {len(flags)} mark(s)')
+        if dry_run or not flags:
+            continue
+        try:
+            revision = voice_review.revise(
+                project_dir, sm.scene_id, prose, flags, model=select_model('revision'),
+                log_file=os.path.join(log_dir, 'marks', f'{sm.scene_id}.json'))
+        except voice_review.VoiceReviewError as e:
+            log(f'ERROR: {e}')
+            code = 1
+            continue
+        rel = voice_review.record(project_dir, sm.scene_id,
+                                  voice_review.Review(flags=flags), revision,
+                                  notes=[f'From the author\'s marks ({marks_file}).'])
+        log(f'  {len(revision.applied)} line(s) rewritten, {len(revision.kept)} kept'
+            + (f', {len(revision.dropped)} edit(s) refused' if revision.dropped else '')
+            + f' ({rel})')
+        if revision.prose == prose:
+            continue
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(revision.prose)
+        passed, why = _gate_drafted_scene(project_dir, sm.scene_id, path, 'revise', log_dir,
+                                          keep_going=True)
+        if not passed and not is_provisional(project_dir, sm.scene_id):
+            log(f'ERROR: {sm.scene_id} did not pass the gate: {why}')
+            code = 1
+        try:
+            commit_or_raise(project_dir, f'Revise {sm.scene_id} from the author\'s marks',
+                            [f'scenes/{sm.scene_id}.md', 'reference/', 'working/'])
+        except CommitError as e:
+            log(f'ERROR: {sm.scene_id}: {e}; commit it by hand')
+            return 1
+    return code
+
+
 def _note_reference_docs(project_dir: str) -> None:
     """Tell the author what the revision prompts leave out (#596, SF-3/SF-4):
     with no voice (`voice_book.resolve`) they take it from the existing
@@ -3458,6 +3536,8 @@ def _main(argv=None):
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
+    if args.marks:
+        sys.exit(_revise_marks(project_dir, args.marks, log_dir, args.dry_run))
     set_log_file(os.path.join(log_dir, 'revision-log.txt'))
     _note_reference_docs(project_dir)
 
