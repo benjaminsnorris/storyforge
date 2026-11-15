@@ -521,17 +521,17 @@ class TestBuildFullSteps:
     """Tests for _build_full_steps."""
 
     def test_api_mode_drafts_scene(self):
-        lines = _build_full_steps('test-scene', 'Test Title', 'reference/voice-guide.md', api_mode=True)
+        lines = _build_full_steps('test-scene', 'Test Title', api_mode=True)
         text = '\n'.join(lines)
         assert 'DRAFT THE SCENE' in text
 
     def test_cli_mode_has_quality_review(self):
-        lines = _build_full_steps('test-scene', 'Test Title', 'reference/voice-guide.md', api_mode=False)
+        lines = _build_full_steps('test-scene', 'Test Title', api_mode=False)
         text = '\n'.join(lines)
         assert 'QUALITY REVIEW' in text
 
     def test_cli_mode_has_git_commit(self):
-        lines = _build_full_steps('test-scene', 'Test Title', 'reference/voice-guide.md', api_mode=False)
+        lines = _build_full_steps('test-scene', 'Test Title', api_mode=False)
         text = '\n'.join(lines)
         assert 'GIT COMMIT' in text
 

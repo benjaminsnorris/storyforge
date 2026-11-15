@@ -76,8 +76,13 @@ anchor. The template has four sections:
   `scene: <id>` (several with `scenes:`). This replaces the old voice guide's
   register exemptions.
 
-The drafting prompt, revision prompts, evaluation, hone and the elaboration
-prompts all carry `book.md` and every anchor.
+The drafting and revision prompts, the shared system context (evaluation,
+scoring, the elaboration stages) and, for the claude CLI, a `voice.md` file
+in the evaluation's folder carry `book.md` and every anchor. Hone, which
+rewrites brief cells rather than prose, carries `book.md` alone (its first
+6,000 characters, said in the log when cut). An anchor file left out (not a
+top-level `.md` file, or a header it can't read) is a WARNING in `write`,
+`revise`, `evaluate` and `validate`, and a NOTE in `status`.
 
 ## `checks.md`
 
@@ -105,7 +110,8 @@ Earlier versions kept the voice in `reference/voice-guide.md`,
 `reference/voice-profile.csv`, `reference/persistent-prompt.md`,
 `reference/prose-exemplars.md` and `reference/exemplars/<pov>.md`. A prose
 book no longer reads any of them. If your book still has them, `status`,
-`write`, `revise`, `evaluate` and `validate` print a NOTE, and `cleanup`
+`write`, `revise`, `evaluate`, `validate` and the voice stage print a NOTE,
+and `cleanup`
 reports an `old_voice_file` warning. They are never deleted for you: move
 what you want to keep into `book.md` or an anchor, then delete them.
 

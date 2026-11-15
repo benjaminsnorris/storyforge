@@ -98,7 +98,7 @@ def test_drafting_prompts_leave_out_a_left_over_profile(project_dir, plugin_dir)
 def test_naturalness_and_polish_leave_out_a_left_over_profile(project_dir):
     from storyforge.cmd_revise import _build_naturalness_pass3_guidance, _generate_polish_plan
     _profile(project_dir)
-    assert 'journey' not in _build_naturalness_pass3_guidance(project_dir)
-    rows = _generate_polish_plan('', project_dir, write=False)
+    assert 'journey' not in _build_naturalness_pass3_guidance()
+    rows = _generate_polish_plan('', write=False)
     assert 'journey' not in rows[0]['guidance']
 

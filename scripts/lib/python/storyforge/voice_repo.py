@@ -560,8 +560,8 @@ def voice_ref(project_dir: str) -> VoiceRef | None:
 class BookVoice:
     """The voice a book is written in: the author repo's name, description
     (provenance comments left out), exemplar bank, fiction anchor (each
-    file as (path in the repo, text); empty without `narrator`), and the
-    book's own `reference/voice/book.md` ('' without one). The fingerprint
+    file as (path in the repo, text); empty without `narrator`). The book's
+    own reference/voice/ is `voice_book`'s. The fingerprint
     isn't here: `score --voice` reads it from `ref.author_dir`
     (`voiceprint_meter.load_source`)."""
     ref: VoiceRef

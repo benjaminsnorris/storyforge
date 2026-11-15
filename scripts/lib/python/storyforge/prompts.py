@@ -607,14 +607,14 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         api_mode: When True, inline reference file contents directly into
             the prompt. When False, emit file paths for ``claude -p``.
         system_context: When True, shared reference material (reference files,
-            craft engine, AI-tell vocabulary, voice profile) is provided via
+            craft engine, AI-tell vocabulary, the voice) is provided via
             the API ``system`` parameter and should NOT be inlined in the
             user prompt. Project-specific weighted directives, scene briefs,
             and per-scene overrides are still included, and so are the key
             decisions, which the system context doesn't carry (#596).
 
     Raises:
-        common.ReferenceDocError: the voice guide or an inlined reference
+        common.ReferenceDocError: a file of the voice (reference/voice/) or an inlined reference
             file exists but can't be read.
 
     Returns:
@@ -823,7 +823,7 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     elif coaching_level == 'strict':
         lines.extend(_build_strict_steps(scene_id, scene_title, api_mode))
     else:
-        lines.extend(_build_full_steps(scene_id, scene_title, voice_guide,
+        lines.extend(_build_full_steps(scene_id, scene_title,
                                        api_mode))
 
     return '\n'.join(lines)
@@ -878,7 +878,7 @@ def _build_coach_steps(scene_id: str, scene_title: str,
                  '"Ground the opening in the smell of wet stone and the sound '
                  'of dripping water — Kael notices environmental details '
                  'before people" is useful.')
-    lines.append('- Reference the voice guide, continuity tracker, and craft '
+    lines.append('- Reference the voice, continuity tracker, and craft '
                  'principles concretely.')
     return lines
 
@@ -892,7 +892,7 @@ def _build_strict_steps(scene_id: str, scene_title: str,
     lines.append('You are in STRICT mode. Do NOT write prose.')
     lines.append('')
     lines.append('Produce a constraint list covering:')
-    lines.append('- Voice rules: which voice guide rules apply to this scene '
+    lines.append('- Voice: which of the voice\'s passages and notes apply to this scene '
                  'and POV character')
     lines.append('- Continuity requirements: locked details, character states, '
                  'thread obligations')
@@ -930,8 +930,7 @@ def _build_strict_steps(scene_id: str, scene_title: str,
     return lines
 
 
-def _build_full_steps(scene_id: str, scene_title: str,
-                      voice_guide: str, api_mode: bool) -> list[str]:
+def _build_full_steps(scene_id: str, scene_title: str, api_mode: bool) -> list[str]:
     """Build the FULL mode prompt steps."""
     lines = []
 
@@ -1826,8 +1825,8 @@ def build_scene_prompt_from_briefs(
         coaching_level: full/coach/strict.
         dep_scenes: Scene IDs this scene depends on (from continuity_deps).
                     Their brief rows are included for context.
-        system_context: When True, shared reference material (voice guide,
-            character bible, AI-tell vocabulary, voice profile) is provided
+        system_context: When True, shared reference material (the voice,
+            character bible, AI-tell vocabulary) is provided
             via the API ``system`` parameter and should NOT be inlined. The
             key decisions are in the prompt either way: the system context
             doesn't carry them (#596).
@@ -1887,7 +1886,7 @@ def build_scene_prompt_from_briefs(
     if source_block:
         dep_block = f'{dep_block}\n\n{source_block}' if dep_block else source_block
 
-    # Key decisions, voice guide and character bible, each left out when
+    # Key decisions, the voice and character bible, each left out when
     # missing or still its template (F-130, #596). The key decisions go in
     # with or without system_context, which doesn't carry them; the voice
     # guide and character bible only without it, since it carries both.
@@ -2082,17 +2081,12 @@ Do NOT add creative interpretation or suggestions."""
     pov = scene.get('pov', '')
     pov_restraint = _build_pov_restraint_block(pov, ref_dir) if coaching_level == 'full' else ''
 
-    # The voice (`voice_book.resolve`: the author repo, book.md and the
-    # anchors) is `voice_guide`, after the facts
-    exemplar_block = ''
 
     return f"""You are drafting a scene for "{title}" ({genre}).
 
 {prohibition_block}
 
 {pov_restraint}
-
-{exemplar_block}
 
 ## Scene Brief: {scene_id}
 

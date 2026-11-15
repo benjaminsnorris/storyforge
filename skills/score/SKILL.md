@@ -439,7 +439,7 @@ Reference these scoring concepts as needed:
 
 - **Effective weight** = author_weight if set, otherwise the default weight. This determines how much a principle matters in diagnosis priority.
 - **Diagnosis priority** = based on average score, regression from previous cycle, and effective weight. High priority means the principle needs attention.
-- **Proposals** = suggested changes (weight adjustments, additions to `reference/voice/book.md` or `checks.md`, scene-level overrides) based on diagnosis.
+- **Proposals** = suggested changes (weight adjustments, and global or scene-level directives in `working/overrides.csv`) based on diagnosis. Changing the voice itself (`reference/voice/`) is the author's, by hand.
 - **Tuning ledger** = history of all weight changes and their effects, used to detect validated patterns.
 - **Exemplars** = passages scoring 5 (masterful) that demonstrate craft excellence, useful as reference during revision.
 - **Author deltas** = systematic differences between system and author scores, revealing calibration gaps.

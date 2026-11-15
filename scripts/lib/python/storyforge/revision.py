@@ -823,8 +823,7 @@ def _claudep_read_instructions() -> str:
         'You are performing a revision pass on a novel manuscript. Follow these rules precisely:\n\n'
         '### 1. Read Reference Context First\n\n'
         'Before making any changes, read these reference files to understand the project\'s '
-        'voice and continuity state:\n\n'
-        +
+        'continuity state (the voice is in this prompt, above):\n\n'
         '- `reference/scenes.csv` — the master scene list for structural context.\n'
         '- `reference/scene-intent.csv` — narrative dynamics, MICE threads, and character presence.\n'
         '- `reference/commitments.csv` — the commitments ledger: canonical knowledge facts '
