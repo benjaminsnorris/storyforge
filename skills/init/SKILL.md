@@ -211,7 +211,7 @@ This project uses the Storyforge plugin for Claude Code. Key commands:
 - `./storyforge score` — score the manuscript against craft principles
 - `./storyforge revise` — execute revision passes from a plan
 - `./storyforge evaluate` — run multi-evaluator assessment
-- `./storyforge write --keep-going` — draft scenes autonomously (a scene the gate can't pass is committed provisionally for you, not a stop)
+- `./storyforge write --session` — draft scenes in a long writing session, one writer with the voice and the story so far (`--dry-run` first for the forecast; a first session stops after 3 scenes for a read)
 
 ## Where to Find Things
 - `storyforge.yaml` — project configuration (title, genre, phase, coaching level)

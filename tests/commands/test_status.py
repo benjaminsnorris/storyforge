@@ -166,7 +166,7 @@ def test_recommend_prose_and_terminal_stages():
         assert nxt['command'] == f'storyforge score --level {level}'
         assert then['stage'] == 'story-power'   # story-power is then-only
     nxt, then = status._recommend('draft')
-    assert nxt['command'] == 'storyforge write --keep-going'
+    assert nxt['command'] == 'storyforge write --session'
     assert then['stage'] == 'evaluate'
     nxt, then = status._recommend('evaluate')
     assert nxt['command'] == 'storyforge evaluate'
@@ -279,7 +279,7 @@ def test_all_solid_some_drafted_recommends_draft(tmp_path, monkeypatch):
                         lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['phase'] == 'draft'
-    assert v['next']['command'] == 'storyforge write --keep-going'
+    assert v['next']['command'] == 'storyforge write --session'
     assert v['then']['stage'] == 'evaluate'
 
 
@@ -681,3 +681,14 @@ def test_an_advisory_row_the_scene_moved_past_says_so(project_dir):
     with open(briefs, 'w') as f:
         f.write(text)
     assert _gate_advisory(status.build_status(project_dir))[0]['stale'] == gate.STALE_BRIEF
+
+
+def test_a_graphic_novel_is_drafted_scene_by_scene(tmp_path, monkeypatch):
+    # #655: sessions draft prose; a graphic novel's script keeps write --keep-going
+    pd = str(tmp_path)
+    _briefed(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
+    v = status.build_status(pd, 'graphic-novel')
+    assert v['next']['command'] == 'storyforge write --keep-going'
+    assert status.write_command('novel') == 'storyforge write --session'
