@@ -49,7 +49,17 @@ ELABORATE_STAGE = {
 
 #: what status recommends for drafting (Storyforge's unattended drafting
 #: passes --keep-going, Ben 2026-11-04)
-WRITE_COMMAND = 'storyforge write --keep-going'
+#: a prose book is drafted in long writing sessions (#655; Ben, 2026-11-14):
+#: one writer, the voice and the story so far in context. A session commits
+#: provisionally as --keep-going does
+WRITE_COMMAND = 'storyforge write --session'
+#: a graphic novel's script is drafted scene by scene
+GN_WRITE_COMMAND = 'storyforge write --keep-going'
+
+
+def write_command(medium: str = 'novel') -> str:
+    """What status recommends for drafting a book of `medium`."""
+    return GN_WRITE_COMMAND if medium == MEDIUM_GRAPHIC_NOVEL else WRITE_COMMAND
 #: what clears scenes waiting on the gate; `next.stage` 'check' while any
 #: wait, unless write can still draft a scene past them (#641)
 CHECK_COMMAND = 'storyforge check --pending'
@@ -220,7 +230,7 @@ def draft_stage(project_dir: str) -> tuple[Stage, int, int]:
     return 'draft', drafted, total
 
 
-def _recommend(stage: Stage) -> tuple[dict, dict | None]:
+def _recommend(stage: Stage, medium: str = 'novel') -> tuple[dict, dict | None]:
     """Map the current stage to (next, then) step objects."""
     if stage in PROSE_STAGES:
         level = {'logline': 0, 'synopsis': 1, 'act-shape': 2}[stage]
@@ -248,7 +258,7 @@ def _recommend(stage: Stage) -> tuple[dict, dict | None]:
                     'reason': ''}
         else:
             then = {'stage': 'draft', 'action': 'Draft scenes',
-                    'command': WRITE_COMMAND, 'reason': ''}
+                    'command': write_command(medium), 'reason': ''}
         return nxt, then
     if stage == VOICE_STAGE:
         return ({'stage': VOICE_STAGE, 'action': 'Find the voice',
@@ -257,10 +267,10 @@ def _recommend(stage: Stage) -> tuple[dict, dict | None]:
                             'reference/voice/book.md and an anchor passage (see the voice '
                             'blocker)')},
                 {'stage': 'draft', 'action': 'Draft scenes',
-                 'command': WRITE_COMMAND, 'reason': ''})
+                 'command': write_command(medium), 'reason': ''})
     if stage == 'draft':
         return ({'stage': 'draft', 'action': 'Draft scenes',
-                 'command': WRITE_COMMAND,
+                 'command': write_command(medium),
                  'reason': 'Briefs are complete; scenes are ready to draft'},
                 {'stage': 'evaluate', 'action': 'Evaluate drafted scenes',
                  'command': 'storyforge evaluate', 'reason': ''})
@@ -417,7 +427,7 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
                        f"rung(s) not yet solid: {names}"),
         })
 
-    nxt, then = _recommend(phase)
+    nxt, then = _recommend(phase, medium)
     # #556's review: scenes waiting on the gate (a provisional commit from
     # `write --keep-going` among them) are blockers, and come before the
     # next rung, except while write can draft a scene (#641): it drafts past
