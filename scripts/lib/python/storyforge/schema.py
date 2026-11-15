@@ -282,6 +282,15 @@ COLUMN_SCHEMA = {
                        'flashback, a told scene is a device, never an error.',
     },
 
+    'tense': {
+        'type': 'enum', 'values': ['present', 'past'],
+        'file': 'scenes.csv', 'stage': 'map',
+        'description': 'The tense the scene\'s narration is told in: present or past (speech '
+                       'is as people speak). Empty: not said, and the writer follows the voice\'s '
+                       'anchors. The voice may vary it by POV (one book tells its mortals in '
+                       'present and its gods in past); the drafting prompt states it.',
+    },
+
     # architecture.csv — structural anchor tier
     'spine_event': {
         'type': 'free_text', 'file': 'architecture.csv', 'stage': 'architecture',

@@ -84,6 +84,9 @@ _SCENES_COLS = [
     # song or report a character gives there); empty for a scene lived on
     # the page (#548)
     'told_by',
+    # The narration's tense (present | past; empty: not said). The book's
+    # voice may vary it by POV (Wrath: mortals present, gods past)
+    'tense',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',

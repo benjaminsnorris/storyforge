@@ -36,9 +36,10 @@ def _structural(scenes, intent=None):
 
 
 class TestSchema:
-    def test_the_column_is_in_scenes_csv_last(self):
+    def test_the_column_is_in_scenes_csv_after_the_others(self):
         from storyforge.elaborate import _FILE_MAP
-        assert _FILE_MAP['scenes.csv'][-1] == 'told_by'
+        # tense came after it (the ready-to-draft plan, 2026-11-14)
+        assert _FILE_MAP['scenes.csv'][-2:] == ['told_by', 'tense']
 
     def test_it_names_scene_ids(self):
         from storyforge.schema import COLUMN_SCHEMA
@@ -51,7 +52,7 @@ class TestSchema:
 
     def test_the_template_has_it(self):
         with open(os.path.join(PLUGIN_DIR, 'templates', 'reference', 'scenes.csv')) as f:
-            assert f.readline().strip().split('|')[-1] == 'told_by'
+            assert f.readline().strip().split('|')[-2:] == ['told_by', 'tense']
 
     def test_an_unknown_scene_fails_the_schema(self, project_dir):
         from storyforge.elaborate import update_scene

@@ -89,8 +89,12 @@ class TestInit:
         assert cmd_init.main([str(project), '--title', 'Beowulf', '--no-commit']) == 0
         text = (project / 'reference' / 'key-decisions.md').read_text()
         assert 'Key Decisions — Beowulf' in text
-        for f in (project / 'reference').iterdir():
-            assert 'PROJECT_TITLE' not in f.read_text(), f.name
+        for f in (project / 'reference').rglob('*'):
+            if f.is_file():
+                assert 'PROJECT_TITLE' not in f.read_text(), f.name
+        # init sets up the voice folder (reference/voice/)
+        assert (project / 'reference' / 'voice' / 'book.md').is_file()
+        assert (project / 'reference' / 'voice' / 'anchors').is_dir()
 
     def test_the_translator_is_named(self, tmp_path, git_env):
         # beowulf B-001: "Beowulf by Anonymous (1909)" for Gummere's translation
