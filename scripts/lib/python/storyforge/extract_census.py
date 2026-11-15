@@ -277,10 +277,11 @@ def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
     from .common import log
     from .elaborate import _read_csv
     from .hone import read_registry, write_registry
+    from .schema import INACTIVE_STATUSES
     ref_dir = os.path.join(project_dir, 'reference')
     scenes_dir = os.path.join(project_dir, 'scenes')
     rows = [r for r in _read_csv(os.path.join(ref_dir, 'scenes.csv'))
-            if (r.get('status') or '').strip() not in ('cut', 'merged')]
+            if (r.get('status') or '').strip() not in INACTIVE_STATUSES]
     texts = {}
     for r in rows:
         path = os.path.join(scenes_dir, f'{r["id"]}.md')

@@ -24,6 +24,24 @@ class TestEnumValidation:
         assert _check_enum('+/-', VALID_VALUE_SHIFTS) is True
         assert _check_enum('revelation', VALID_TURNING_POINTS) is True
 
+    def test_inactive_statuses_are_valid(self):
+        """#683: cut, merged and archived are valid statuses, outside the
+        mapped-or-later set that scoring reads."""
+        from storyforge.schema import (
+            _check_enum, VALID_STATUSES, INACTIVE_STATUSES, MAPPED_OR_LATER_STATUSES,
+        )
+        assert INACTIVE_STATUSES == {'cut', 'merged', 'archived'}
+        for status in INACTIVE_STATUSES:
+            assert _check_enum(status, VALID_STATUSES) is True
+        assert not INACTIVE_STATUSES & MAPPED_OR_LATER_STATUSES
+
+    def test_modules_share_one_inactive_set(self):
+        """#683: the modules that skip inactive scenes read schema's set, so
+        a status added there reaches them all."""
+        from storyforge import schema, source, status
+        assert source.INACTIVE_STATUSES is schema.INACTIVE_STATUSES
+        assert status._EXCLUDED_STATUSES is schema.INACTIVE_STATUSES
+
     def test_invalid_values(self):
         from storyforge.schema import _check_enum, VALID_TYPES, VALID_ACTION_SEQUEL, VALID_OUTCOMES, VALID_VALUE_SHIFTS
         assert _check_enum('setup', VALID_TYPES) is False
@@ -135,6 +153,18 @@ class TestValidateSchema:
             os.chdir(old)
         assert ('[advisory] ' in buf.getvalue()
                 and 'reference/mice-threads.csv, which has no rows: not checked' in buf.getvalue())
+
+    def test_inactive_statuses_pass_validate(self, project_dir):
+        """#683: a scene marked cut, merged or archived failed the schema's
+        status check, though every other module accepts those statuses."""
+        from storyforge.elaborate import update_scene
+        from storyforge.schema import validate_schema
+        ref = os.path.join(project_dir, 'reference')
+        for scene_id, status in (('act1-sc01', 'cut'), ('act1-sc02', 'merged'),
+                                 ('new-x1', 'archived')):
+            update_scene(scene_id, ref, {'status': status})
+        report = validate_schema(ref, project_dir)
+        assert [e for e in report['errors'] if e['column'] == 'status'] == []
 
     def test_without_project_dir_skips_registry(self, fixture_dir):
         from storyforge.schema import validate_schema

@@ -247,6 +247,17 @@ class TestApplySceneFilter:
         assert len(result) >= 1
         assert 'act1-sc01' in result
 
+    def test_all_mode_skips_merged_and_archived(self, project_dir):
+        """#683: enrich skipped only cut scenes; merged and archived ones
+        are out of the book too."""
+        from storyforge.elaborate import update_scene
+        ref = os.path.join(project_dir, 'reference')
+        update_scene('act1-sc01', ref, {'status': 'merged'})
+        update_scene('act1-sc02', ref, {'status': 'archived'})
+        result = _apply_scene_filter(os.path.join(ref, 'scenes.csv'), 'all', '', project_dir)
+        assert 'act1-sc01' not in result
+        assert 'act1-sc02' not in result
+
     def test_scenes_mode(self, project_dir):
         meta = os.path.join(project_dir, 'reference', 'scenes.csv')
         result = _apply_scene_filter(meta, 'scenes', 'act1-sc01,act1-sc02', project_dir)

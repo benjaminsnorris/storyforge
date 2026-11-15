@@ -920,7 +920,7 @@ def _validate_told(scenes_map, intent_map, checks, ref_dir=''):
 
     Blocking: a cell naming more than one scene, a scene told by itself,
     a cycle (a tale that tells the scene telling it), and a telling scene
-    that is cut or merged. A tale inside a told tale is fine. Advisory: a
+    that is cut, merged or archived. A tale inside a told tale is fine. Advisory: a
     telling scene later in reading order than its tale. An id not in scenes.csv is the schema's
     `scene_ids` check, so it is skipped here. Advisory: the told scene's
     pov is its teller, who should be in the telling scene's cast
@@ -928,6 +928,7 @@ def _validate_told(scenes_map, intent_map, checks, ref_dir=''):
     narrator (`narrator.is_narrator`, #555: no body) is not checked. A
     narrator-told scene still counts toward `narrator_pov: limited N`.
     """
+    from .schema import INACTIVE_STATUSES
     told = {sid: told_by(row) for sid, row in scenes_map.items() if told_by(row)}
     if not told:
         return
@@ -955,7 +956,7 @@ def _validate_told(scenes_map, intent_map, checks, ref_dir=''):
         + '; '.join(cycles) if cycles else 'No told_by cycle'))
     gone = sorted(f'{sid} (told in {frame}, {scenes_map[frame].get("status", "").strip()})'
                   for sid, frame in told.items() if frame in scenes_map
-                  and (scenes_map[frame].get('status') or '').strip().lower() in ('cut', 'merged'))
+                  and (scenes_map[frame].get('status') or '').strip().lower() in INACTIVE_STATUSES)
     checks.append(_check(
         'told', 'told-by-cut-scene', not gone,
         'Told in a cut or merged scene (nothing tells the tale now): ' + '; '.join(gone)
