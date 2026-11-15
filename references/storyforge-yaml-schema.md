@@ -307,9 +307,20 @@ series:
 
 Hone, illustrate and the graphic-novel commands don't read it.
 
+**Character sheets.** A series can also keep one appearance sheet per character, specific enough to cast or illustrate from, in a directory named by `characters:`:
+
+```yaml
+series:
+  canon:
+    - ../../homer/series-bible/gods.md
+  characters: ../../homer/series-bible/characters
+```
+
+Each sheet is `<id>.md`, where `<id>` is the character's id in `reference/characters.csv`, and opens with frontmatter whose `canon_id` is that id (the same frontmatter as `reference/canon/characters/`). A `README.md` there is skipped. A sheet is never sent to every prompt the way the canon is. Each scene's drafting prompt (with or without the system context) and its continuity check get the sheets of that scene's cast only: its `pov`, `characters` and `on_stage`, with names resolved to ids through `characters.csv`. They come under "How this scene's characters look", each as `series-character-<id>.md`, and a finding may cite one (a TRT contradiction). A cast of thirty sheets costs a scene only the people in it. `characters:` alone is a valid block. Errors, as for the canon: `characters:` given a list or no value, a directory that isn't there or holds no sheet, and a sheet that is empty, not UTF-8, or without a `canon_id` naming its file. `validate` adds `Series character sheets: N in <path>`.
+
 **Read-only.** Storyforge never writes to the canon. The book's own `reference/` bibles hold what is particular to that book, and the stages that rewrite a bible rewrite the book's. Don't symlink the canon into `reference/`: a stage that rewrites that bible would rewrite the shared file for every book.
 
-**Errors.** A canon that can't be used is never skipped. These are errors: a `series:` block that names no canon; a value that isn't a path (`~`, `null`, a flow list like `[a.md, b.md]`); `series:` given twice, indented under another block, or `canon:` at the top level; a key other than `canon`; a path that isn't there; a directory that can't be listed or holds no `.md` file; a file that is empty or not UTF-8. `write`, `revise`, `score`, `evaluate`, `elaborate` and `extract` check the canon first, before a forecast, a branch or a call, and stop with `ERROR: storyforge.yaml: ...` (the block) or `ERROR: series.canon: ...` (a path or file). `validate` makes it a blocking finding, and otherwise prints `Series canon: N file(s), W words, read in place and never written` and the files. Without a `series:` block nothing changes. `project.series_name` and `project.series_position` are the book's metadata and are separate from this block.
+**Errors.** A canon that can't be used is never skipped. These are errors: a `series:` block that names no canon; a value that isn't a path (`~`, `null`, a flow list like `[a.md, b.md]`); `series:` given twice, indented under another block, or `canon:` at the top level; a key other than `canon` or `characters`; a path that isn't there; a directory that can't be listed or holds no `.md` file; a file that is empty or not UTF-8. `write`, `revise`, `score`, `evaluate`, `elaborate` and `extract` check the canon first, before a forecast, a branch or a call, and stop with `ERROR: storyforge.yaml: ...` (the block) or `ERROR: series.canon: ...` (a path or file). `validate` makes it a blocking finding, and otherwise prints `Series canon: N file(s), W words, read in place and never written` and the files. Without a `series:` block nothing changes. `project.series_name` and `project.series_position` are the book's metadata and are separate from this block.
 
 ---
 
