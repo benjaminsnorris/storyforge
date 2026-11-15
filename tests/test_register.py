@@ -189,7 +189,19 @@ def test_load_exemptions_reads_the_books_voice(tmp_path):
 
 def test_an_old_voice_guide_is_not_read_for_exemptions(tmp_path):
     _write(tmp_path, {'reference/voice-guide.md': GUIDE})
-    assert register.load_exemptions(str(tmp_path)) == Exemptions()
+    ex = register.load_exemptions(str(tmp_path))
+    assert ex.phrases == () and ex.scenes == frozenset()
+    assert ex.problems == ('reference/voice-guide.md has register exemptions, which are no '
+                           'longer read: move them to reference/voice/book.md\'s '
+                           '`## Register exemptions`',)
+
+
+def test_an_unreadable_anchor_never_costs_book_mds_exemptions(tmp_path):
+    _write(tmp_path, {'reference/voice/book.md': GUIDE})
+    os.makedirs(tmp_path / 'reference' / 'voice' / 'anchors')
+    (tmp_path / 'reference' / 'voice' / 'anchors' / 'x.md').write_bytes(b'\xff\xfe')
+    ex = register.load_exemptions(str(tmp_path))
+    assert 'god keep you' in ex.phrases and ex.problems == ()
 
 
 # --- source echo ---

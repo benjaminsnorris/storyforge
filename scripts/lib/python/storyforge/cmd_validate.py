@@ -76,13 +76,26 @@ def main(argv=None):
                 say(f'  {err["row"]}: {err["message"]}')
         elif vp_result['has_project_row']:
             say(f'Voice profile: valid ({vp_result["character_count"]} characters)')
-    else:
+    voice_result = None
+    if get_medium(project_dir) != 'graphic-novel':
+        # the voice (reference/voice/): reported, in --json too; a file that
+        # can't be read or a `voice:` block that can't be used fails validate,
+        # a voice not found yet doesn't (status's voice rung says so)
         from storyforge import voice_book
-        voice = voice_book.resolve(project_dir)
+        from storyforge.voice_repo import VoiceError
+        try:
+            voice = voice_book.resolve(project_dir)
+        except VoiceError as e:
+            voice = voice_book.DocState('unreadable', 'storyforge.yaml', str(e))
         say(f'Voice: {voice.path}' if voice.kind == 'ok' else f'Voice: {voice.detail}')
+        if voice.skipped:
+            say(voice_book.skipped_warning(voice))
         old = voice_book.old_files_note(project_dir)
         if old:
             say(f'NOTE: {old}.')
+        voice_result = {'kind': voice.kind, 'path': voice.path,
+                        'detail': '' if voice.kind == 'ok' else voice.detail,
+                        'skipped': list(voice.skipped), 'old_files': old}
 
     from storyforge.schema import validate_illustration_plan
     illus_result = validate_illustration_plan(project_dir)
@@ -194,6 +207,8 @@ def main(argv=None):
         combined['source'] = source_result
     if series_result is not None:
         combined['series'] = series_result
+    if voice_result is not None:
+        combined['voice'] = voice_result
 
     if args.json_output:
         print(json.dumps(combined))
@@ -209,8 +224,9 @@ def main(argv=None):
         f['severity'] == 'blocking' for f in source_result['findings'])
     series_ok = series_result is None or not any(
         f['severity'] == 'blocking' for f in series_result['findings'])
+    voice_ok = voice_result is None or voice_result['kind'] != 'unreadable'
     sys.exit(0 if structural_ok and schema_ok and illustrations_ok and canon_ok
-             and source_ok and series_ok else 1)
+             and source_ok and series_ok and voice_ok else 1)
 
 
 def _status_logger(args):

@@ -11,6 +11,7 @@ from .elaborate import _read_csv, _FILE_MAP
 from . import mice
 from .enrich import load_alias_map
 from .narrator import NARRATOR_POV
+from .voice_book import TENSES
 
 
 # ============================================================================
@@ -283,7 +284,7 @@ COLUMN_SCHEMA = {
     },
 
     'tense': {
-        'type': 'enum', 'values': ['present', 'past'],
+        'type': 'enum', 'values': list(TENSES),
         'file': 'scenes.csv', 'stage': 'map',
         'description': 'The tense the scene\'s narration is told in: present or past (speech '
                        'is as people speak). Empty: not said, and the writer follows the voice\'s '

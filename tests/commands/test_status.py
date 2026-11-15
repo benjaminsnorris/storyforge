@@ -204,7 +204,7 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     assert data['next']['stage'] == 'logline'
     # Full verdict contract forge/elaborate route on — lock the whole shape.
     assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
-                         'ladder', 'next', 'then', 'blockers', 'advisory'}
+                         'ladder', 'next', 'then', 'blockers', 'notes', 'advisory'}
     assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
     assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
     assert isinstance(data['blockers'], list)
@@ -527,11 +527,48 @@ def test_old_voice_files_alone_are_a_voice_blocker_and_said(tmp_path, monkeypatc
                         lambda pd_, medium='novel', floors=None: _all_solid_ladder())
     v = status.build_status(pd)
     assert v['next']['stage'] == 'voice'
-    old = [b for b in v['blockers'] if b['source'] == 'old-voice-files']
-    assert len(old) == 1
+    assert [b['source'] for b in v['blockers']] == ['voice']
+    assert len(v['notes']) == 1
     assert ('reference/voice-guide.md, reference/persistent-prompt.md are no longer read'
-            in old[0]['detail'])
+            in v['notes'][0])
+    assert 'NOTE: reference/voice-guide.md' in cmd_status.render_human(v)
     assert os.path.isfile(os.path.join(pd, 'reference', 'voice-guide.md'))
+
+
+def test_old_voice_files_beside_a_good_voice_block_nothing(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    _write(os.path.join(pd, 'reference', 'voice-guide.md'), '# Voice\n\nTerse.\n')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft' and v['blockers'] == []
+    assert 'no longer read' in v['notes'][0]
+
+
+def test_a_skipped_anchor_is_a_note_even_when_the_voice_is_ready(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    _write(os.path.join(pd, 'reference', 'voice', 'anchors', 'bad.md'), 'tense: future\n\nX.')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft'
+    assert any('bad.md' in n and 'left out' in n for n in v['notes'])
+
+
+def test_a_bad_voice_block_is_a_blocker_not_a_crash(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    _write(os.path.join(pd, 'storyforge.yaml'), 'voice:\n  author: ../nope\n')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'voice'
+    assert 'voice.author: ../nope is not there' in v['blockers'][0]['detail']
 
 
 def test_a_graphic_novel_keeps_its_voice_files_unremarked(tmp_path, monkeypatch):

@@ -358,9 +358,16 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     # every scene is drafted only the blocker is reported, since evaluation
     # and revision read the voice too.
     voice_blocker = None
+    notes: list[str] = []
     if phase in ('draft', 'evaluate') and medium != MEDIUM_GRAPHIC_NOVEL:
         from storyforge import voice_book
-        voice = voice_book.resolve(project_dir)
+        from storyforge.voice_repo import VoiceError
+        try:
+            voice = voice_book.resolve(project_dir)
+        except VoiceError as e:   # a bad `voice:` block is a blocker, not a crash
+            voice = voice_book.DocState('unreadable', 'storyforge.yaml', str(e))
+        if voice.skipped:
+            notes.append(voice_book.skipped_warning(voice).removeprefix('WARNING: '))
         if voice.kind != 'ok':
             voice_blocker = {
                 'source': VOICE_STAGE, 'level': -1,  # sentinel: not a ladder rung
@@ -396,12 +403,12 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     if voice_blocker:
         blockers.insert(0, voice_blocker)
     if medium != MEDIUM_GRAPHIC_NOVEL:
-        # the pipeline's voice files, ignored since reference/voice/: said,
-        # never deleted (the author's text)
+        # the pipeline's voice files, ignored since reference/voice/: a note
+        # (they block nothing), never deleted (the author's text)
         from storyforge import voice_book
         old = voice_book.old_files_note(project_dir)
         if old:
-            blockers.append({'source': 'old-voice-files', 'level': -1, 'detail': old})
+            notes.append(old)
     if declared and not matches:
         names = ', '.join(r['name'] for r in unmet)
         blockers.insert(0, {
@@ -462,6 +469,9 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'next': nxt,
         'then': then,
         'blockers': blockers,
+        # what the author should know that blocks nothing: old voice files
+        # no longer read, anchors left out of the voice
+        'notes': notes,
         # one list of records, never blockers (#642): the gate's broken
         # promises, then the craft-framework floor checks of rungs that
         # exist (#643, `source` CRAFT_ADVISORY_SOURCE)

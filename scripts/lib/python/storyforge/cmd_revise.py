@@ -1093,7 +1093,7 @@ def _update_pass_field(rows, pass_num, field, value, plan_file):
 # Auto-generated plans
 # ============================================================================
 
-def _generate_polish_plan(plan_file, project_dir='', *, write=True):
+def _generate_polish_plan(plan_file, *, write=True):
     """Generate a single-pass craft-only polish plan (`write=False`: the
     rows only, for `_save_plan` once the run's forecast is approved)."""
     # Load AI-tell vocabulary for inclusion in guidance
@@ -1128,7 +1128,7 @@ def _generate_polish_plan(plan_file, project_dir='', *, write=True):
     return rows
 
 
-def _build_naturalness_pass3_guidance(project_dir: str = '') -> str:
+def _build_naturalness_pass3_guidance() -> str:
     """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv."""
     from storyforge.prompts import banned_words, load_ai_tell_words
 
@@ -1225,7 +1225,7 @@ def _generate_naturalness_plan(plan_file, project_dir='', *, write=True):
             'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
             'scope': 'full',
             'targets': '',
-            'guidance': _build_naturalness_pass3_guidance(project_dir),
+            'guidance': _build_naturalness_pass3_guidance(),
             'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
             'findings': 'naturalness',
             'status': 'pending',
@@ -3424,6 +3424,8 @@ def _note_reference_docs(project_dir: str) -> None:
     old = voice_book.old_files_note(project_dir)
     if old:
         log(f'NOTE: {old}.')
+    if voice.skipped:
+        log(voice_book.skipped_warning(voice))
     if decisions.kind != 'ok':
         log(f'NOTE: {decisions.detail}, so the prose passes and redrafts carry no '
             'key decisions.')
@@ -3505,7 +3507,7 @@ def _main(argv=None):
     upstream_scenes: list[str] = []   # naturalness: briefs to fix before the passes
     if args.polish:
         log('Polish mode -- generating craft-only revision plan...')
-        plan_rows = _generate_polish_plan(csv_plan_file, project_dir, write=False)
+        plan_rows = _generate_polish_plan(csv_plan_file, write=False)
         new_plan = 'single-pass polish'
     elif args.naturalness:
         log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')

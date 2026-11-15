@@ -160,9 +160,9 @@ def main(argv=None):
             log('  Or use --interactive to run via claude -p instead.')
             sys.exit(1)
 
-    # The voice guide and key decisions the prompts carry (#596)
+    # The voice (`voice_book.resolve`) and key decisions the prompts carry (#596)
     use_briefs = _detect_briefs(project_dir)
-    _check_reference_docs(project_dir, use_briefs, coaching, args.dry_run)
+    _check_reference_docs(project_dir, coaching, args.dry_run)
 
     # Build and filter scene list
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -184,6 +184,7 @@ def main(argv=None):
 
     if use_briefs:
         _note_unmarked_dialogue(project_dir, pending_ids)
+    _note_bad_tense(metadata_csv, pending_ids)
 
     # A scene that didn't pass the gate has no facts in the ledger: a scene
     # that depends on it would be drafted from an incomplete ledger, so it
@@ -433,8 +434,20 @@ def _note_unmarked_dialogue(project_dir: str, scene_ids: list[str]) -> None:
             + '. Start a line with must: to require it word for word.')
 
 
-def _check_reference_docs(project_dir: str, use_briefs: bool, coaching: str,
-                          dry_run: bool) -> None:
+def _note_bad_tense(metadata_csv: str, scene_ids: list[str]) -> None:
+    """A WARNING for each scene whose scenes.csv `tense` is set but isn't
+    present or past: its drafting prompt states no tense."""
+    from storyforge.voice_book import TENSES
+    bad = [(s, v) for s in scene_ids
+           if (v := (get_field(metadata_csv, s, 'tense') or '').strip())
+           and v.lower() not in TENSES]
+    if bad:
+        log(f'WARNING: scenes.csv\'s tense must be {" or ".join(TENSES)}; the prompts of '
+            f'{len(bad)} scene(s) state no tense: '
+            + ', '.join(f'{s} ({v!r})' for s, v in bad[:10]) + (' ...' if len(bad) > 10 else ''))
+
+
+def _check_reference_docs(project_dir: str, coaching: str, dry_run: bool) -> None:
     """The voice (`voice_book.resolve`) and key decisions the drafting
     prompt carries (#596).
 
@@ -461,6 +474,8 @@ def _check_reference_docs(project_dir: str, use_briefs: bool, coaching: str,
     old = voice_book.old_files_note(project_dir)
     if old:
         log(f'NOTE: {old}.')
+    if voice.skipped:
+        log(voice_book.skipped_warning(voice))
     if voice.kind == 'ok':
         log(f'Voice: {voice.path}')
         return

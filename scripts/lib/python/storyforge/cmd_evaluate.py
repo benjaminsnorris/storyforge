@@ -186,9 +186,11 @@ def _resolve_voice(project_dir):
     read stops the evaluation (ERROR, exit 1), naming it."""
     from storyforge import voice_book
     voice = voice_book.resolve(project_dir)
-    if voice.kind in ('template', 'empty'):
+    if voice.kind in ('missing', 'template', 'empty'):
         log(f'WARNING: {voice.detail}; the evaluation has no voice to judge against. To give '
             f'it one, {voice_book.REMEDY}.')
+    if voice.skipped:
+        log(voice_book.skipped_warning(voice))
     if voice.kind == 'unreadable':
         log(f'ERROR: {voice.detail}')
         sys.exit(1)
@@ -625,7 +627,16 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
                   'reference/story-architecture.md', 'references/story-architecture.md']
     ref_text = {}
     if voice.kind == 'ok':
-        ref_text[voice.path] = voice.text
+        if api_mode:
+            ref_text[voice.path] = voice.text
+        else:
+            # the claude CLI reads files: the voice as resolved (the author
+            # repo's, book.md, the anchors; never checks.md), one file
+            voice_file = os.path.join(eval_dir, 'voice.md')
+            os.makedirs(eval_dir, exist_ok=True)
+            with open(voice_file, 'w', encoding='utf-8') as f:
+                f.write(voice.text + '\n')
+            ref_text[os.path.relpath(voice_file, project_dir)] = voice.text
     for ref in candidates:
         text = reference_text(os.path.join(project_dir, ref), strip=False)
         if text:
@@ -638,7 +649,7 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
     # Build sections based on which files exist
     sections = []
     for ref in ref_files:
-        if voice.kind == 'ok' and ref == voice.path:
+        if voice.kind == 'ok' and ref_text.get(ref) == voice.text:
             sections.append('## Voice Alignment\nDid the prose deliver the voice its passages and notes show?')
         elif 'story-architecture' in ref:
             sections.append('## Story Architecture Alignment\nDid the structural intentions land?')
@@ -985,8 +996,6 @@ def main(argv=None):
     vg_path, voice_guide_content = _resolve_voice(project_dir)
     if vg_path:
         log(f'Voice: {vg_path}')
-    else:
-        log('WARNING: No voice found.')
 
     # Build file list
     scene_files, scope_description, input_type = _build_file_list(

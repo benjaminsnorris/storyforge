@@ -2,8 +2,8 @@
 grammar, idiom and words (#615).
 
 A novel retold from an old translation (Weston's *Gawain*, Butler's or
-Lang's Homer) re-voices the source's speeches. The voice's banned list
-catches archaic *words*; this also catches the translator's *grammar and
+Lang's Homer) re-voices the source's speeches. Archaic *words* are the
+easy part; this also catches the translator's *grammar and
 idiom* left in modern speech: "bade Gawain take the other", "I'll not",
 "fail of my errand", "while my lord is from home", "But that you're Gawain,
 I very much doubt".
@@ -255,16 +255,30 @@ def read_exemptions(text: str) -> Exemptions:
 
 def load_exemptions(project_dir: str) -> Exemptions:
     """`read_exemptions` of reference/voice/book.md (its `## Register
-    exemptions` section); empty without one. A book.md that can't be read
-    is a problem, not an exception."""
+    exemptions` section); empty without one. A book.md that can't be read is
+    a problem, not an exception; so is an old voice-guide.md that still holds
+    exemptions, which are no longer read."""
     from storyforge import voice_book
     from storyforge.common import ReferenceDocError
+    old = []
+    guide = os.path.join(project_dir, 'reference', 'voice-guide.md')
+    if os.path.isfile(guide):
+        try:
+            with open(guide, encoding='utf-8-sig') as f:
+                lines = f.read().splitlines()
+            if any(_EXEMPT_HEADING_RE.match(ln) for ln in lines):
+                old.append('reference/voice-guide.md has register exemptions, which are no '
+                               f'longer read: move them to {voice_book.BOOK_FILE}\'s '
+                               f'`## Register exemptions`')
+        except (OSError, UnicodeDecodeError):
+            pass   # cleanup and the other commands name the old file
     try:
-        text = voice_book.read_folder(project_dir).notes
+        text = voice_book._read(project_dir, voice_book.BOOK_FILE)
     except ReferenceDocError as e:
         return Exemptions(problems=(f"{voice_book.BOOK_FILE} can't be read, so no register "
-                                    f"exemptions apply ({e})",))
-    return read_exemptions(text) if text else Exemptions()
+                                    f"exemptions apply ({e})", *old))
+    ex = read_exemptions(text) if text else Exemptions()
+    return Exemptions(ex.phrases, ex.scenes, ex.problems + tuple(old)) if old else ex
 
 
 def _tokens(text: str) -> list[tuple[str, int, int]]:

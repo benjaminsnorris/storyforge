@@ -369,7 +369,7 @@ def _check(project_dir, capsys, briefs=True, coaching='full', dry_run=False, set
         setup()
     code = None
     try:
-        _check_reference_docs(project_dir, briefs, coaching, dry_run)
+        _check_reference_docs(project_dir, coaching, dry_run)
     except SystemExit as e:
         code = e.code
     out = capsys.readouterr()
