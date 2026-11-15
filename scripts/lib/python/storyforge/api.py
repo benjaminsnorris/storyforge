@@ -410,6 +410,42 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
     return response
 
 
+def chat(messages: list[dict], model: str, max_tokens: int = 4096, label: str = '',
+         timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+         output_schema: dict | None = None, log_file: str = '') -> dict:
+    """One request in a conversation the caller keeps (#655's writing
+    session): ``messages`` as the Messages API takes them, alternating user
+    and assistant. The request is auto-cached (as ``converse``'s), so each
+    turn reads the conversation so far from cache. ``max_tokens`` is the
+    answer's budget (``THINKING_ALLOWANCE`` is added). ``log_file``, if
+    given, gets the reply. Check ``is_truncated`` on the reply.
+
+    Raises:
+        RefusalError: the model refused (the log is written first).
+    """
+    body = {
+        'model': model,
+        'max_tokens': request_max_tokens(model, max_tokens),
+        'messages': messages,
+        'cache_control': {'type': 'ephemeral'},
+    }
+    if system:
+        body['system'] = system
+    if output_schema:
+        body['output_config'] = _output_config(output_schema)
+    heartbeat = _Heartbeat(label or model)
+    heartbeat.start()
+    try:
+        response = _api_request('messages', body, method='POST', timeout=timeout)
+    finally:
+        heartbeat.stop()
+    _meter(response, model)
+    if log_file:
+        _write_log(log_file, response)
+    _check_refusal(response)
+    return response
+
+
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
            timeout: int = API_TIMEOUT, system: list[dict] | None = None,
            output_schema: dict | None = None, fallback: bool = False) -> dict:

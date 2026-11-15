@@ -3227,7 +3227,7 @@ def run_log_dir(log_dir: str, scene_id: str, *, now=None, pid: int | None = None
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None,
-                 before: Snapshot | None = None) -> GatedScene:
+                 before: Snapshot | None = None, fixer=None) -> GatedScene:
     """Gate `prose`; while it doesn't pass, fix it and gate the fixed prose,
     at most `FIX_ROUNDS` times (plan §3.2 step 3). Each fix after the first is
     sent the earlier fixes' problems and edits (`rounds`, `build_fix_prompt`).
@@ -3285,6 +3285,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     `.result.passed`: when it passed, the ledger was already committed with
     quotes from that prose.
 
+    `fixer` replaces `fix_scene` (same signature and contract: the fixed
+    prose, the edits appended to `edits_out`, `GateError` on a failure). A
+    writing session passes one that sends the problems to the writer that
+    wrote the scene (#655), so every rule above holds for its fixes too.
+
     Raises:
         GateError: from the first gate run, the first fix or its re-gate; it
             carries the first run as `.first` (None when the first run itself
@@ -3334,9 +3339,9 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             try:
                 with api.metered() as meter:
                     try:
-                        fixed = fix_scene(scene_id, current, result, log_dir=run_dir,
-                                          model=fix_model, protected=protected,
-                                          earlier=tuple(rounds), edits_out=edits)
+                        fixed = (fixer or fix_scene)(
+                            scene_id, current, result, log_dir=run_dir, model=fix_model,
+                            protected=protected, earlier=tuple(rounds), edits_out=edits)
                     finally:
                         _log_spend(meter, project_dir, 'gate-fix', scene_id)
             except GateError as e:
