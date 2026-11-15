@@ -323,9 +323,6 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
             os.environ['STORYFORGE_CASSETTE'] = cassette_dir
             os.environ['STORYFORGE_CASSETTE_MODE'] = mode
             os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
-            # each recording holds its own catalog request (#689 review CR-1)
-            from storyforge.common import reset_model_catalog
-            reset_model_catalog()
             output = suite.run(SuiteContext(suite.name, mode, cassette_dir, work_dir))
             if not isinstance(output, SuiteOutput):
                 raise TypeError(f'run() returned {type(output).__name__}, not SuiteOutput')

@@ -719,25 +719,36 @@ def test_each_test_has_its_own_eval_spend_ledger(tmp_path):
     assert os.environ[eval_spend.LEDGER_ENV] == str(tmp_path / 'eval-spend.jsonl')
 
 
-def test_each_suite_run_fetches_its_own_model_catalog(tmp_path):
-    """Every run of a suite starts without the process's model catalog, so
-    each recording directory (run 1, run2/, run3/) holds its own catalog
-    request and replays alone (#689 review CR-1: runs 2 and 3 of a
-    `--runs 3` recording replayed stale on `GET models`)."""
+
+def test_each_suite_run_fetches_its_own_model_catalog(tmp_path, monkeypatch):
+    """Every run of a suite in a process (run 1, run2/, run3/) fetches the
+    model catalog under its own cassette, so each recording directory holds
+    the request and replays alone (#689 review CR-1: runs 2 and 3 of a
+    `--runs 3` recording replayed stale on `GET models`). A stubbed catalog
+    is left alone."""
+    import storyforge.api as api
     from storyforge import common
-    seen = []
+    fetched = []
+
+    def list_models():
+        fetched.append(os.environ.get('STORYFORGE_CASSETTE'))
+        return [{'id': 'claude-opus-5-5', 'created_at': '2026-01-01', 'max_tokens': 1}]
+
+    monkeypatch.setattr(api, 'list_models', list_models)
+    monkeypatch.setattr(common, '_catalog', None)
+    monkeypatch.setattr(common, '_fetched', None)
 
     def run(ctx):
-        seen.append(common._catalog)
-        common._catalog = [{'id': 'claude-opus-5-5'}]  # as a fetch would leave it
+        common.model_catalog()
+        common.model_catalog()  # once per cassette, not per call
         return harness.SuiteOutput(gates=[harness.Gate('ok', 1, '==', 1)])
 
     suite = harness.Suite('catalog', 'reads the catalog', run)
-    saved = common._catalog
-    try:
-        common._catalog = [{'id': 'left-over'}]
-        for label in ('', 'run2', 'run3'):
-            harness.run_suite(suite, 'replay', str(tmp_path), run=label)
-    finally:
-        common._catalog = saved
-    assert seen == [None, None, None]
+    for root in ('one', 'run2', 'run3'):
+        assert harness.run_suite(suite, 'replay', str(tmp_path / root))['status'] == 'pass'
+    assert fetched == [str(tmp_path / r / 'catalog') for r in ('one', 'run2', 'run3')]
+
+    stub = [{'id': 'stub'}]
+    monkeypatch.setattr(common, '_catalog', stub)
+    harness.run_suite(suite, 'replay', str(tmp_path / 'four'))
+    assert common._catalog is stub and len(fetched) == 3
