@@ -39,6 +39,28 @@ _CRAFT_NOTES = ('action_sequel, emotional_arc, value_at_stake, value_shift and '
                 'scene type or turning point as diagnostics, not errors.')
 
 
+#: #656: the voice is found before the structure deepens, and the narrator
+#: stance it settles feeds the POVs the architecture and map assign
+VOICE_POV_RULE = ('POV follows the voice: The Voice (reference/voice/book.md) settles the '
+                  'narrator stance (whether a narrator holds scenes, how many POV characters, '
+                  'how close or distant). Give every scene a POV that stance allows, and keep '
+                  'to the POV characters it names unless the story needs another')
+
+
+def voice_pov_rule(project_dir: str) -> str:
+    """`VOICE_POV_RULE` as a rule line (`\\n- ...`) when a prose book's
+    book.md has the author's text; '' otherwise, so a book without a voice
+    gets its prompt unchanged.
+
+    Raises:
+        common.ReferenceDocError: book.md is there but can't be read.
+    """
+    from .common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return ''
+    return f'\n- {VOICE_POV_RULE}' if reference_doc(project_dir, 'voice/book.md') else ''
+
+
 def _read_file(path: str) -> str:
     """Read a file's contents, or return empty string if missing."""
     if not os.path.isfile(path):
@@ -352,7 +374,7 @@ If the world needs a bible, output:
 - Every thread introduced must have a planned resolution
 - Acts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
 - Character arcs need structural progression: lie reinforced → challenged → confronted → truth/refusal
-- {NOTES_RULE}
+- {NOTES_RULE}{voice_pov_rule(project_dir)}
 """
 
 
@@ -461,7 +483,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 - Location names must be consistent (same place = same name)
 - Total target_words should sum to within 10% of the manuscript target ({read_yaml_field(os.path.join(project_dir, 'storyforge.yaml'), 'project.target_words') or 'not set'})
 - {_CRAFT_NOTES}
-- {NOTES_RULE}
+- {NOTES_RULE}{voice_pov_rule(project_dir)}
 """
 
 

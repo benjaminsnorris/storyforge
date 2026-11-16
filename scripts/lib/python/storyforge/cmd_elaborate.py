@@ -1932,6 +1932,16 @@ def _run_voice_stage(project_dir: str, dry_run: bool) -> int:
         return 1
     if voice.kind == 'ok':
         log(f'The voice is ready: {voice.path}')
+        # #656: the short second check, once the map has fixed the POVs
+        try:
+            gaps = voice_book.pov_gaps(project_dir)
+        except ReferenceDocError as e:
+            log(f'ERROR: {e}: the voice check after the map can\'t run.')
+            return 1
+        if gaps:
+            log(f'The voice check after the map: {voice_book.BOOK_FILE} says nothing of '
+                f'{len(gaps)} POV(s): {", ".join(gaps)}. Say how each one\'s scenes are told '
+                f'(who, how close, the tense), so the voice holds across the POV mix.')
         return 0
     log(f'The voice isn\'t ready: {voice.detail}. Next: {voice_book.REMEDY}.')
     return 0

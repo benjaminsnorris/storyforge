@@ -62,6 +62,30 @@ def test_the_voice_stage_never_writes_over_the_authors_voice(novel, mock_api, mo
     assert not [c for c in mock_git.calls if c[0] == 'commit_and_push']
 
 
+def test_the_voice_stage_runs_the_check_after_the_map(novel, mock_api, capsys):
+    # #656: the fixture's map has Kael Maren as a POV; book.md names Dorren
+    # and Tessa only
+    _run(mock_api, 'voice', 'unused')
+    out = capsys.readouterr().out
+    assert ('The voice check after the map: reference/voice/book.md says nothing of 1 '
+            'POV(s): Kael Maren') in out
+    with open(os.path.join(novel, 'reference', 'voice', 'book.md'), 'a') as f:
+        f.write('\n- **Kael** speaks in the archive\'s hush.\n')
+    _run(mock_api, 'voice', 'unused')
+    assert 'The voice check after the map' not in capsys.readouterr().out
+    assert mock_api.calls == []
+
+
+def test_the_voice_stage_before_the_map_names_the_moment_rounds(novel, mock_api, capsys):
+    import shutil
+    shutil.rmtree(os.path.join(novel, 'reference', 'voice'))
+    os.remove(os.path.join(novel, 'reference', 'scenes.csv'))
+    _run(mock_api, 'voice', 'unused')
+    out = capsys.readouterr().out
+    assert '--moment "..."` before the scene map' in out
+    assert 'The voice check after the map' not in out
+
+
 def test_the_voice_stage_notes_old_voice_files(novel, mock_api, capsys):
     with open(os.path.join(novel, 'reference', 'voice-guide.md'), 'w') as f:
         f.write('# Old\n')
@@ -91,3 +115,36 @@ def test_a_stage_sets_the_flags_of_what_it_wrote(novel, mock_api):
     entry = _artifact(novel, 'story_architecture')
     assert entry['exists'] == 'true' and entry['updated']
     assert _artifact(novel, 'systems_bible')['exists'] == 'false'
+
+
+# --- #656: the narrator stance the voice settles feeds the POVs ---
+
+@pytest.mark.parametrize('build', ['build_architecture_prompt', 'build_map_prompt'])
+@pytest.mark.parametrize('system_context', [False, True])
+def test_the_voice_feeds_the_povs_of_the_architecture_and_map(project_dir, build,
+                                                             system_context):
+    import shutil
+    from storyforge import prompts_elaborate as pe
+    plugin = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    voiced = getattr(pe, build)(project_dir, plugin, system_context=system_context)
+    assert pe.VOICE_POV_RULE in voiced
+    # without the author's book.md the prompt is as it was (the eval
+    # recordings replay): the rule line is all that differs
+    shutil.rmtree(os.path.join(project_dir, 'reference', 'voice'))
+    from storyforge import voice_book
+    voice_book.scaffold(project_dir)   # init's template is no voice
+    plain = getattr(pe, build)(project_dir, plugin, system_context=system_context)
+    assert pe.VOICE_POV_RULE not in plain
+    if system_context:   # book.md is in the shared context, not the prompt
+        assert voiced.replace(f'\n- {pe.VOICE_POV_RULE}', '') == plain
+
+
+def test_a_graphic_novel_gets_no_voice_pov_rule(project_dir):
+    from storyforge import prompts_elaborate as pe
+    with open(os.path.join(project_dir, 'storyforge.yaml'), encoding='utf-8') as f:
+        text = f.read()
+    with open(os.path.join(project_dir, 'storyforge.yaml'), 'w', encoding='utf-8') as f:
+        f.write(text.replace('project:\n', 'project:\n  medium: graphic-novel\n', 1))
+    from storyforge.common import get_medium
+    assert get_medium(project_dir) == 'graphic-novel'
+    assert pe.voice_pov_rule(project_dir) == ''
