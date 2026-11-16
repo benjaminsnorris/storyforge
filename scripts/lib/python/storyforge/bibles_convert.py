@@ -40,6 +40,9 @@ MAX_TOKENS = 12_000
 REVIEW_DIR = os.path.join('working', 'bibles')
 #: The facts file's columns (`bibles import` reads it)
 FACT_COLUMNS = ('type', 'subject', 'statement', 'known_by', 'category')
+#: Categories that mark a description of how someone speaks: never a fact
+#: (#657: a voice is lines of them speaking), so such a row is left out
+SPEECH_CATEGORIES = ('voice', 'speech', 'dialogue', 'diction')
 #: Forecast: tokens per character of prompt, and the reply's tokens
 _TOKENS_PER_CHAR = 0.3
 FORECAST_OUTPUT = 4_000
@@ -152,7 +155,7 @@ def build_prompt(name: str, essay: str, characters: list[dict], places: list[dic
 **facts**: one row for each fact the essay settles. Every settled fact, not a sample: a person's age, kin, history, want, need, wound, lie; who is related to whom, who owes whom; each rule of the world or of a system, each cost and limit.
 - `type`: `trait` (about one person), `relationship` (between people; the statement names both), `world` (a rule of the world, a place, an institution, a system and its costs) or `knowledge` (a secret: something someone knows that others don't).
 - `subject`: the character's or place's id from the lists above; empty for the world as a whole. A relationship's subject is one of the two.
-- `statement`: the fact in a few plain words, in your own words, never a sentence lifted for its style. No interpretation: leave out what a character represents or symbolises, what a theme means, what the arc does for the reader, and advice to the writer.
+- `statement`: the fact in a few plain words, in your own words, never a sentence lifted for its style. No interpretation: leave out what a character represents or symbolises, what a theme means, what the arc does for the reader, whose point of view a scene takes, and advice to the writer. How someone speaks is not a fact either: leave it out (their quoted lines go in voices).
 - `known_by`: only for `knowledge`, the ids of who knows it from the start, `;`-separated.
 - `category`: one word for the kind (want, need, wound, lie, age, kinship, history, rule, cost, limit, institution, ...). A secret is `knowledge` with category `secret`.
 - A question the essay leaves open is a row whose statement ends in `?`.
@@ -160,7 +163,7 @@ def build_prompt(name: str, essay: str, characters: list[dict], places: list[dic
 
 **voices**: the lines the essay quotes a character saying, each copied exactly as the essay has it, word for word, with the character's id. Never write a line, finish one or tidy one; a description of how someone speaks is not a line (leave it out). None when the essay quotes no one.
 
-**notes**: only what resists rows (a culture's feel, a history's shape), each a terse line. None is fine.
+**notes**: only what resists rows (a culture's feel, a history's shape), each a terse line. Interpretation is not a note either: leave out arcs, themes, symbols, point-of-view plans, how a scene should feel and advice to the writer. None is fine.
 """
 
 
@@ -189,7 +192,9 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
     schema's JSON object; every item left out is in `left_out` with why: a
     fact with no statement, a `|`, a secret's category on a type that isn't
     knowledge, a repeat; a voice line the essay doesn't quote as written, or
-    whose speaker is no character; an empty note. A subject or `known_by`
+    whose speaker is no character; a fact of a speech category
+    (`SPEECH_CATEGORIES`: a description of how someone speaks); an empty
+    note. A subject or `known_by`
     given as a name is turned into its id."""
     try:
         data = json.loads(reply)
@@ -221,6 +226,10 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
         if row['type'] != 'knowledge' and row['category'].lower() in REVEAL_CATEGORIES:
             conv.left_out.append(f'{where}: category {row["category"]!r} on a {row["type"]} '
                                  f'fact (a secret is a knowledge fact)')
+            continue
+        if row['category'].lower() in SPEECH_CATEGORIES:
+            conv.left_out.append(f'{where}: a description of how someone speaks (category '
+                                 f'{row["category"]!r}); a voice is lines, never a fact')
             continue
         row['subject'] = anyone.get(row['subject'].lower(), row['subject'])
         if row['type'] == 'knowledge':

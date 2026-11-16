@@ -1,5 +1,5 @@
 {
-  "about": "Synthetic essays for an invented book (The Salt Ledger), written for #702's bibles-convert eval: no real book's prose. A label's `all` is a list of keyword groups, each 'a|b' alternatives, every group found (lowercase, as a substring) in one fact's statement; `without` keywords must not be in it. `subject` and `types` are what a correct row has (a null subject isn't scored: the world as a whole may be blank or the island); `secret` wants a knowledge fact of category secret or reveal; `open` wants a statement ending in '?'. `traps` are the essay's interpretation: a fact matching one is a leak. `voices` are the lines the essay quotes; `not_voices` are its descriptions of speech, which are not lines. `notes` are what resists rows, matched in the notes.",
+  "about": "Synthetic essays for an invented book (The Salt Ledger), written for #702's bibles-convert eval: no real book's prose. A label's `all` is a list of keyword groups, each 'a|b' alternatives, every group found (lowercase, as a substring) in one fact's statement; `without` keywords must not be in it. `subject` and `types` are what a correct row has (a null subject isn't scored: the world as a whole may be blank or the island; a list is either side of a relationship); `secret` wants a knowledge fact of category secret or reveal; `open` wants a statement ending in '?'. `traps` are the essay's interpretation: a fact matching one is a leak. `voices` are the lines the essay quotes; `not_voices` are its descriptions of speech, which are neither lines nor facts (#657: a voice is lines, never a description). `notes` are what resists rows, matched in the notes.",
   "essays": {
     "character-bible.md": {
       "facts": [
@@ -20,15 +20,15 @@
         {"id": "c15", "all": ["forty|40"], "subject": "ivo-voss", "types": ["knowledge"], "secret": true},
         {"id": "c16", "all": ["boat"], "subject": "ivo-voss", "types": ["trait"], "without": ["smuggl", "dark"]},
         {"id": "c17", "all": ["smuggl"], "subject": "lise-anker", "types": ["trait"], "without": ["board", "caught"]},
-        {"id": "c18", "all": ["lover"], "subject": "lise-anker", "types": ["relationship", "knowledge"]},
+        {"id": "c18", "all": ["lover"], "subject": ["lise-anker", "ivo-voss"], "types": ["relationship", "knowledge"]},
         {"id": "c19", "all": ["month"], "subject": "lise-anker", "types": ["trait"]},
-        {"id": "c20", "all": ["train|teach|taught"], "subject": "hallam-reed", "types": ["relationship"]},
+        {"id": "c20", "all": ["train|teach|taught"], "subject": ["hallam-reed", "mara-voss"], "types": ["relationship"]},
         {"id": "c21", "all": ["blind"], "subject": "hallam-reed", "types": ["trait"]},
         {"id": "c22", "all": ["anchor"], "subject": "hallam-reed", "types": ["trait", "knowledge"], "open": true},
-        {"id": "c23", "all": ["sister|sibling|brother"], "subject": "mara-voss", "types": ["relationship"], "without": ["debt"]},
-        {"id": "c24", "all": ["sign"], "subject": "teodor-brack", "types": ["relationship"]},
-        {"id": "c25", "all": ["sunday"], "subject": "mara-voss", "types": ["relationship"]},
-        {"id": "c26", "all": ["twice"], "subject": "mara-voss", "types": ["relationship", "trait"]}
+        {"id": "c23", "all": ["sister|sibling|brother"], "subject": ["mara-voss", "ivo-voss"], "types": ["relationship"]},
+        {"id": "c24", "all": ["sign"], "subject": ["teodor-brack", "mara-voss"], "types": ["relationship"]},
+        {"id": "c25", "all": ["sunday"], "subject": ["mara-voss", "hallam-reed"], "types": ["relationship"]},
+        {"id": "c26", "all": ["twice"], "subject": ["mara-voss", "ivo-voss"], "types": ["relationship", "trait"]}
       ],
       "traps": [
         {"id": "ct1", "any": ["emblem", "confession", "curdled"]},
@@ -43,19 +43,19 @@
         {"character": "teodor-brack", "line": "A debt is the only honest thing on this island."},
         {"character": "ivo-voss", "line": "Everyone owes Brack something. I just owe him more interestingly."}
       ],
-      "not_voices": ["low and careful", "clipped, practical", "terms of his ledger", "talks fast"],
+      "not_voices": ["low and careful", "clipped, practical", "terms of his ledger", "talks fast", "jokes when", "counts things"],
       "notes": []
     },
     "world-bible.md": {
       "facts": [
-        {"id": "w01", "all": ["ferry"], "subject": null, "types": ["world"], "without": ["january"]},
+        {"id": "w01", "all": ["ferry"], "subject": null, "types": ["world"]},
         {"id": "w02", "all": ["january"], "subject": null, "types": ["world"]},
         {"id": "w03", "all": ["storm", "november|march"], "subject": null, "types": ["world"]},
         {"id": "w04", "all": ["forty-one|41"], "subject": "kessin-light", "types": ["world"]},
         {"id": "w05", "all": ["flood"], "subject": "salt-flats", "types": ["world"]},
         {"id": "w06", "all": ["cut"], "subject": "salt-flats", "types": ["world"]},
         {"id": "w07", "all": ["board", "year"], "subject": null, "types": ["world"]},
-        {"id": "w08", "all": ["crown"], "subject": "harbor-office", "types": ["world"]},
+        {"id": "w08", "all": ["crown"], "subject": null, "types": ["world"]},
         {"id": "w09", "all": ["lost"], "subject": null, "types": ["world"]},
         {"id": "w10", "all": ["smuggl", "boat"], "subject": null, "types": ["world"]},
         {"id": "w11", "all": ["doctor"], "subject": null, "types": ["world"]},
@@ -81,7 +81,7 @@
         {"id": "s03", "all": ["flat", "day"], "subject": null, "types": ["world"]},
         {"id": "s04", "all": ["fog"], "subject": null, "types": ["world"]},
         {"id": "s05", "all": ["crack|recast"], "subject": null, "types": ["world"]},
-        {"id": "s06", "all": ["sleep|next night|following night"], "subject": null, "types": ["world"]},
+        {"id": "s06", "all": ["sleep|the next|following night"], "subject": null, "types": ["world"]},
         {"id": "s07", "all": ["recogni"], "subject": null, "types": ["world"]},
         {"id": "s08", "all": ["trust"], "subject": null, "types": ["world"]}
       ],

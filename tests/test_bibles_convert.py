@@ -46,6 +46,8 @@ REPLY = {
         {'type': 'trait', 'subject': 'dorren-hayle', 'statement': 'head cartographer of the office.',
          'known_by': '', 'category': 'role'},
         {'type': 'trait', 'subject': 'pell', 'statement': '', 'known_by': '', 'category': ''},
+        {'type': 'trait', 'subject': 'pell', 'statement': 'Speaks in short bursts',
+         'known_by': '', 'category': 'Voice'},
     ],
     'voices': [
         {'character': 'dorren-hayle', 'line': 'A line the essay never quotes, made up whole.'},
@@ -95,6 +97,7 @@ class TestParse:
         left = '\n'.join(conv.left_out)
         assert "category 'secret' on a trait fact" in left
         assert 'a `|` in a field' in left and 'given twice' in left and 'no statement' in left
+        assert 'a description of how someone speaks' in left   # a voice is lines
 
     def test_a_voice_line_must_be_the_essays_words(self, project_dir):
         """#702: a line the essay doesn't quote would be the model's."""
@@ -226,7 +229,9 @@ def _perfect(labels):
         conv = bc.Conversion(name)
         for f in essay['facts']:
             words = ' '.join(g.split('|')[0] for g in f['all'])
-            conv.facts.append({'type': f['types'][0], 'subject': f.get('subject') or '',
+            subject = f.get('subject') or ''
+            subject = subject[-1] if isinstance(subject, list) else subject
+            conv.facts.append({'type': f['types'][0], 'subject': subject,
                                'statement': words + ('?' if f.get('open') else ''),
                                'known_by': '',
                                'category': 'secret' if f.get('secret') else 'x'})
@@ -267,9 +272,15 @@ class TestSuite:
             ('lise-anker', 'Her speech is low and careful, all questions.'))
         convs['character-bible.md'].left_out.append('voice 9 (x): not in the essay as written, '
                                                     'so not the author\'s line')
+        convs['character-bible.md'].notes.append('Brack is a mirror of Mara')
+        convs['character-bible.md'].facts.append(
+            {'type': 'trait', 'subject': 'ivo-voss', 'statement': 'Talks fast when cornered',
+             'known_by': '', 'category': 'voice'})
         m = mod['score'](labels, convs)['metrics']
         assert (m['interpretation_rows'], m['description_as_voice'], m['invented_lines']) \
             == (1, 1, 1)
+        # interpretation in a note leaks too; a description of speech is no fact
+        assert m['interpretation_notes'] == 1 and m['speech_descriptions'] == 1
         assert 'below the trust bar' in mod['trust_notes'](m)[0]
 
     def test_a_wrong_type_or_subject_is_scored(self):

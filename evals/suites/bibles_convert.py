@@ -16,7 +16,10 @@ one call at the command's default model) and scored:
   `subject_accuracy` over those found (a null subject isn't scored);
   `secrets_kept` (a secret as a knowledge row of category secret or
   reveal), `open_kept` (an open question as a row ending in `?`);
-- `interpretation_rows`: kept rows carrying the essay's interpretation;
+- `interpretation_rows` and `interpretation_notes`: kept rows, and notes,
+  carrying the essay's interpretation (drafting reads bible-notes.md whole,
+  so a note leaks as a row does); `speech_descriptions`: a description of
+  how someone speaks kept as a fact or a note (#657: a voice is lines);
 - `voice_recall`: quoted lines kept; `description_as_voice`: a description
   of speech kept as a line; `invented_lines`: lines the reply gave that the
   essay doesn't quote (left out by code: counted, never kept);
@@ -25,8 +28,9 @@ one call at the command's default model) and scored:
 
 Gates hold each recorded value exactly (`FLOORS`, #488); the trust bar the
 command is judged against is in the notes. Cheap and not frozen: a prompt
-change is a re-record of three calls. Until it's recorded, a replay is
-unavailable (`stale`, "not recorded yet"), not an error.
+change is a re-record of three calls (about $0.07 on sonnet). With `FLOORS`
+unset and no recordings, a replay is unavailable (`stale`, "not recorded
+yet"), not an error.
 """
 
 from __future__ import annotations
@@ -43,18 +47,23 @@ LABELS = os.path.join(SET_DIR, 'labels.json')
 BOOK = os.path.join(SET_DIR, 'book')
 
 #: The recorded values, each held exactly (#488: a gain moves its floor in
-#: the same commit; a loss is a decision). None until recorded
+#: the same commit; a loss is a decision). Recorded 2026-11-15 on sonnet 5.5
+#: ($0.07 for the three essays; a first recording, before the prompt said
+#: interpretation and descriptions of speech aren't notes or facts either,
+#: put two interpretation notes and four speech descriptions in: $0.07)
 FLOORS: dict[str, float | None] = {
-    'fact_recall': None, 'type_accuracy': None, 'subject_accuracy': None,
-    'secrets_kept': None, 'open_kept': None, 'interpretation_rows': None,
-    'voice_recall': None, 'description_as_voice': None, 'invented_lines': None,
-    'note_recall': None,
+    'fact_recall': 1.0, 'type_accuracy': 0.9796, 'subject_accuracy': 0.9655,
+    'secrets_kept': 2, 'open_kept': 2, 'interpretation_rows': 0,
+    'interpretation_notes': 0, 'speech_descriptions': 0,
+    'voice_recall': 1.0, 'description_as_voice': 0, 'invented_lines': 0,
+    'note_recall': 0.5,
 }
 
 #: What the command must reach before its rows are imported without a
 #: read (the notes compare): not gated, since a gate no run passes says
 #: nothing (#488)
 TRUST_BAR = {'fact_recall': 0.9, 'type_accuracy': 0.9, 'interpretation_rows': 0,
+             'interpretation_notes': 0, 'speech_descriptions': 0,
              'voice_recall': 1.0, 'description_as_voice': 0}
 
 
@@ -94,8 +103,9 @@ def validate(labels: dict, book_dir: str = BOOK) -> list[str]:
                 problems.append(f'{f["id"]}: no keyword groups')
             if not set(f.get('types', [])) <= set(IMPORT_TYPES) or not f.get('types'):
                 problems.append(f'{f["id"]}: types {f.get("types")} not all row types')
-            if f.get('subject') and f['subject'] not in ids:
-                problems.append(f'{f["id"]}: subject {f["subject"]!r} is in no registry')
+            for subject in _subjects(f) or []:
+                if subject and subject not in ids:
+                    problems.append(f'{f["id"]}: subject {subject!r} is in no registry')
         for v in essay['voices']:
             if v['character'] not in ids:
                 problems.append(f'{name}: voice speaker {v["character"]!r} is in no registry')
@@ -105,6 +115,13 @@ def validate(labels: dict, book_dir: str = BOOK) -> list[str]:
             if d.lower() not in text:
                 problems.append(f'{name}: the description {d!r} is not in the essay')
     return problems
+
+
+def _subjects(label: dict) -> list[str] | None:
+    """A label's right subjects: None when it isn't scored, a list (either
+    side of a relationship) or the one subject."""
+    subject = label.get('subject')
+    return None if subject is None else subject if isinstance(subject, list) else [subject]
 
 
 def _has(statement: str, group: str) -> bool:
@@ -125,7 +142,8 @@ def score(labels: dict, conversions: dict) -> dict:
     from storyforge.bibles import REVEAL_CATEGORIES
     from storyforge.bibles_convert import _normal
     found = typed = placed = scored = secrets = secrets_kept = opens = opens_kept = 0
-    total = leaks = lines = lines_kept = described = invented = notes = notes_found = 0
+    total = leaks = note_leaks = lines = lines_kept = described = invented = 0
+    speech = notes = notes_found = 0
     missed, wrong, leaked = [], [], []
     for name, essay in labels['essays'].items():
         conv = conversions[name]
@@ -138,14 +156,20 @@ def score(labels: dict, conversions: dict) -> dict:
                 missed.append(label['id'])
                 continue
             found += 1
-            subject = label.get('subject')
-            best = next((r for r in rows if subject is None or r['subject'] == subject), rows[0])
-            ok_type = best['type'] in label['types']
+            subjects = _subjects(label)
+
+            def right(row: dict) -> tuple[bool, bool]:
+                return (row['type'] in label['types'],
+                        subjects is None or row['subject'] in subjects)
+            # the row that states it best: a fact several rows touch is
+            # found right when one of them has its type and subject
+            best = max(rows, key=right)
+            ok_type, ok_subject = right(best)
             typed += ok_type
-            if subject is not None:
+            if subjects is not None:
                 scored += 1
-                placed += best['subject'] == subject
-            if not ok_type or (subject is not None and best['subject'] != subject):
+                placed += ok_subject
+            if not (ok_type and ok_subject):
                 wrong.append(f'{label["id"]} ({best["type"]}, {best["subject"] or "-"})')
             if label.get('secret') and any(
                     r['type'] == 'knowledge' and r['category'].lower() in REVEAL_CATEGORIES
@@ -156,8 +180,12 @@ def score(labels: dict, conversions: dict) -> dict:
         for trap in essay['traps']:
             hits = [r for r in conv.facts
                     if any(k in r['statement'].lower() for k in trap['any'])]
+            in_notes = [n for n in conv.notes if any(k in n.lower() for k in trap['any'])]
             leaks += len(hits)
-            leaked += [trap['id']] * len(hits)
+            note_leaks += len(in_notes)
+            leaked += [trap['id']] * len(hits) + [f'{trap["id"]} (a note)'] * len(in_notes)
+        speech += sum(any(d in text.lower() for d in essay['not_voices'])
+                      for text in [r['statement'] for r in conv.facts] + conv.notes)
         kept = {(who, _normal(line)) for who, line in conv.voices}
         for v in essay['voices']:
             lines += 1
@@ -173,6 +201,7 @@ def score(labels: dict, conversions: dict) -> dict:
         'fact_recall': r(found, total), 'type_accuracy': r(typed, found),
         'subject_accuracy': r(placed, scored), 'secrets_kept': secrets_kept,
         'open_kept': opens_kept, 'interpretation_rows': leaks,
+        'interpretation_notes': note_leaks, 'speech_descriptions': speech,
         'voice_recall': r(lines_kept, lines), 'description_as_voice': described,
         'invented_lines': invented, 'note_recall': r(notes_found, notes),
         'facts_labelled': total, 'secrets_labelled': secrets, 'open_labelled': opens,
