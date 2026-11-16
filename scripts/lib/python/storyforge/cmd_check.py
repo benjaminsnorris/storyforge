@@ -99,8 +99,9 @@ for each binding ledger fact no typed check compares (every type but
 promise rows; knowledge facts someone knows are the knowledge check's) whose
 subject is in the scene (its typed state's `at` records, its scenes.csv
 locations, or a registry name its prose uses) or is in no registry,
-Storyforge writes a question, a small model answers each twice, and only two
-yeses with a quote in the scene make a finding. The brief's promises are
+Storyforge writes a question, a small model answers each twice (a third
+time when the two split), and only two yeses with a quote in the scene make
+a finding. The brief's promises are
 asked the same way (does the scene deliver it?): two noes are a broken
 promise (advisory, or blocking for a `must:` beat, which also blocks when
 the answers are in doubt), and a promised registry fact found established
@@ -180,8 +181,8 @@ def parse_args(argv):
     parser.add_argument('--questions', action='store_true',
                         help='Check each scene against the book with yes/no questions from '
                              'the ledger (facts no typed check compares, about who or where '
-                             'is in the scene; each asked twice, a finding only when both '
-                             'say yes and the quote is in the scene) and the brief\'s promises '
+                             'is in the scene; each asked twice, a third time when the two '
+                             'split, a finding on two yeses with the quote in the scene) and the brief\'s promises '
                              '(does the scene deliver each?) instead of the open checker. '
                              'Contradictions with prose no ledger fact records are not looked '
                              'for. Model: STORYFORGE_QUESTIONS_MODEL (default the extraction '

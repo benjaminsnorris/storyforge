@@ -5,8 +5,10 @@ it finds; the gate takes the union of two such readings
 (`checker.merge_readings`), which raises recall and multiplies false
 alarms. The stage sheet's fallback (#647) and the gate's question layer
 (#649, `storyforge.questions`) ask narrow questions instead, each one
-twice, and keep only what every asking agrees on: the intersection of
-narrow readings, not the union of open ones.
+twice: the stage sheet keeps only what every asking agrees on, the
+intersection of narrow readings, not the union of open ones; the question
+layer asks the questions the two split on a third time (`structured_call`,
+`questions.TIE_ASKING`), two yeses of three a finding.
 
 This is the machinery both share; each caller owns its prompt, its schema
 and what an answer means:
@@ -21,7 +23,8 @@ and what an answer means:
 - `parse_answers`: n → the answer's fields, for questions 1..count, each
   answered exactly once.
 - `agreed`: the questions every asking gave the same answer to, and how
-  many got split answers (never a finding: the caller says so).
+  many got split answers (what a split means is the caller's: never a
+  finding for the stage sheet, a third asking for the question layer).
 """
 
 from __future__ import annotations
@@ -30,7 +33,8 @@ import json
 import os
 from collections.abc import Callable
 
-#: How many times each question is asked; a finding needs every asking
+#: How many times each question is asked (the stage sheet's finding needs
+#: every asking; the question layer breaks a split with one more)
 ASKINGS = 2
 
 
@@ -115,7 +119,8 @@ def ask(build_prompt: Callable[[int], str], count: int, *, model: str, log_file:
 def agreed(answers: list[dict[int, dict[str, str]]], count: int, answer: str
            ) -> tuple[list[int], int]:
     """The questions (1..count) every asking answered `answer`, and how many
-    got that answer from some askings but not all (split: not a finding)."""
+    got that answer from some askings but not all (split: the caller's to
+    rule)."""
     every, split = [], 0
     for n in range(1, count + 1):
         said = [a[n]['answer'] for a in answers]

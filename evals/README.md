@@ -287,8 +287,9 @@ scene and a verdict on one known error, an E1 `tool-introduced` case.
 ## The question set (#649)
 
 `question-set` measures the gate's question layer (`storyforge.questions`,
-plan A3): narrow yes/no questions from the ledger, each asked twice, a
-finding only when both answers say yes and the quote is in the scene. The
+plan A3): narrow yes/no questions from the ledger, each asked twice (a
+third time when the two split), a finding on two yeses with the quote in the
+scene. The
 cases are *A Christmas Carol* (public domain, the E2 book) and facts Dickens
 establishes, written as ledger facts of the types the layer asks about
 (`evals/fixtures/question-set/cases.json`): 17 of E2's injected errors that
@@ -321,7 +322,9 @@ evals/fixtures/tier-comparison/<model>` so the default's recordings stay
 the baseline's. A recording costs cents on haiku.
 
 **Recorded 2026-11-16 on haiku 5.5 (about $0.05): recall 0.76 (13 of 17), no
-false alarm, 3 split answers; a second recording gave the same.** Two
+false alarm; a second recording gave the same.** Three questions split
+(the qs-016, qs-033 and qs-035 variants): the third asking made qs-016's
+salary a finding (`tie_found` 1), and the other two split, then no. Two
 changes did it, from the misses' own reasons: the prompt counts dialogue
 and a character's memory as the book's word unless the scene itself shows
 it wrong (a wrong name, kinship, place or past in a character's mouth was
@@ -330,16 +333,21 @@ elsewhere in the scene was cancelling a contradiction in one sentence
 ("When in doubt, no" is gone); and a question the two askings split on is
 asked a third time, two yeses of three a finding (three of the first
 version's misses were splits). Still missed: qs-009 (a "heavy, sturdy boy"
-against Tiny Tim's crutch, an inference), qs-018 (the gate wouldn't ask it),
+against Tiny Tim's crutch, an inference), qs-018 (asked, and answered no:
+the scene never names Marley; the gate's selection wouldn't ask it either),
 qs-033 (the niece smiling at the unseen Scrooge) and qs-035 (Islington as
-where the turkey goes, not said to be their home). The scorer's `lands_on`
-now takes a quote shorter than `SHARED_RUN` when it holds every word the
-injection changed (`changed_words`): qs-013's `"Frank!"` was a catch scored
-as a miss. A first try put one case's words in the prompt as an example
-(15 of 17); it was taken out, since a prompt fitted to its test set says
-nothing about other books. 17 cases is a small set, tuned on: the gate set
-(#677) is the check on prose it hasn't seen. The tier-comparison recordings
-below are of the 2026-11-09 prompt, stale until re-recorded.
+where the turkey goes, not said to be their home); the last two split. The
+scorer's `lands_on` now takes a quote shorter than `SHARED_RUN` when it
+holds every word the injection changed (`changed_words`; `validate` refuses
+an error case whose injection changes none): an earlier try's qs-013
+finding quoted only `"Frank!"` and was scored a miss. In the committed
+recording every catch quotes three words or more, so the old scorer gives
+the same 0.76. A first try put one case's words in the prompt as an
+example (15 of 17); it was taken out, since a prompt fitted to its test set
+says nothing about other books. 17 cases is a small set, tuned on: the gate set
+(#677) is the check on prose it hasn't seen. The tier-comparison recording
+below (sonnet) is of the 2026-11-09 prompt: a replay of it now errors on its
+first call (a cassette miss) until it is re-recorded.
 
 Recorded 2026-11-09 on haiku 5.5 ($0.04): recall 0.47 (8 of 17; PHY 0.8,
 TRT 0.5, REL 0.4, WLD 0.0), no false alarm on 79 questions whose answer is

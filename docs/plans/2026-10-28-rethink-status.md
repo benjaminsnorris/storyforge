@@ -61,11 +61,11 @@ character is in, for the Homer series.
 2. #659 (blind pairwise reads, pipeline prose against session prose) once
    there's enough session prose to pair.
 3. Judge the stage sheet and the question layer again on session prose
-   (the plan says so once sessions exist). #677's gate set is built and
-   waits to be recorded (about $180 for three runs of each suite, Ben's
-   approval) until the question layer is a candidate to replace the open
-   checker: on #649's numbers it caught 8 of 17 against the open checker's
-   about 12.
+   (the plan says so once sessions exist). The question layer caught 8 of
+   17 on #649's numbers against the open checker's about 12; since PR #714
+   (2026-11-16) it catches 13 of 17 with no false alarm, twice. That is
+   the case for recording #677's gate set (about $180 for three runs of
+   each suite, Ben's approval) on prose the prompt wasn't tuned on.
 4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
 5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
    (gold notes, judging, a re-score) is all that's left. Since then 5d and
@@ -139,7 +139,7 @@ fixes in.
 | #670 | #646 | the blocking-set eval; its cases are in private storyforge-evals (#77) |
 | #671 | #647 | the stage sheet, behind `check --stage-sheet`; recall 0.22 with too many false alarms, so the blocking read stays the default |
 | #672 | #648 | typed state and free deterministic checks; `time_mode` gains memory, dream and ghost |
-| #673 | #649 | the yes/no question layer, behind `check --questions`: 8 of 17 caught against the open checker's ~12, at about half the cost per scene |
+| #673 | #649 | the yes/no question layer, behind `check --questions`: 8 of 17 caught against the open checker's ~12, at about half the cost per scene (13 of 17 after #714) |
 | #662, #665, #667, #669 | #650, #651, #653, #652 | voiceprint: fingerprint and Austen reference, described voice and exemplars, `score --voice`, the author voice repo and the book's `voice:` block |
 
 The stage sheet and the question layer stay behind flags. They are kept
