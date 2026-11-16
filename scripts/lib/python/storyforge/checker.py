@@ -23,10 +23,10 @@ the book it sees.
   template bible is left out (F-130), and the prompt names what is. They
   are sent uncapped, as drafting's shared context sends them, with their
   own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
-  A book that has converted its bibles to rows (#657) sends the rows
-  instead: the plan's facts true from the start, with their ids, as
-  `commitments.csv` (`bibles.checker_doc`), and its terse notes
-  (`bible-notes.md`); a retired essay is in reference/archive/, unread.
+  A book with bible rows (#657) also sends them: the plan's facts true
+  from the start, with their ids, as `commitments.csv`
+  (`bibles.checker_doc`), and its terse notes (`bible-notes.md`). An essay
+  stops being sent only once it is retired to reference/archive/.
   A series' shared canon (`series.canon`) goes with them, each file as
   `series-canon-<file name>`.
 - The earlier scenes follow them in the system prompt, whole: the story so
@@ -108,10 +108,9 @@ MAX_LEDGER_ROWS = 60
 PASSAGE_CHARS = 700
 SNIPPET_CHARS = 300
 MAX_TURNS = 24
-#: The reference docs the checker reads whole (the ones drafting's shared
-#: context sends, and E4's judge reads): the bible essays a book hasn't
-#: converted to rows yet (#657: a retired essay is in reference/archive/,
-#: so it isn't found), and the terse notes that resist rows. The rows
+#: The reference docs the checker reads whole: the bible essays a book
+#: hasn't retired yet (#657: a retired essay is in reference/archive/, so
+#: it isn't found), and the terse notes that resist rows. The rows
 #: themselves come as `bibles.FACTS_DOC` (`reference_docs`)
 REFERENCE_DOCS = ('character-bible.md', 'world-bible.md', 'systems-bible.md', 'bible-notes.md')
 
@@ -371,11 +370,12 @@ def reference_docs(project_dir: str) -> dict[str, str]:
     # The bibles as rows (#657): the plan's facts true from the start, with
     # their ids; none for a book without them, so its prompt is as before
     from storyforge import bibles
+    from storyforge.common import ReferenceDocError
     from storyforge.ledger import LedgerError
     try:
         facts = bibles.checker_doc(project_dir)
-    except LedgerError as e:
-        raise CheckError(f'the ledger can\'t be read ({e}); the checker needs it') from e
+    except (LedgerError, ReferenceDocError) as e:
+        raise CheckError(f'the plan\'s facts can\'t be read ({e}); the checker needs them') from e
     if facts:
         docs[bibles.FACTS_DOC] = facts
     # A series' shared canon, which every scene must agree with too; named by
