@@ -366,7 +366,7 @@ drafting:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `prior_prose` | `full` | The earlier prose a scene is drafted with. `full`: the manuscript so far (past 100,000 words it falls back to `window`, with a WARNING). `window`: the scene before, and the latest scene of each MICE thread the scene carries. `none`. `--prior-prose` overrides it. A writing session (`write --session`) ignores it: it always has the story so far word for word. Revise's redraft-from-brief reads it too. |
-| `brief_notes` | `include` | Whether a writing session's scene plan shows the brief's author-note columns (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs, motif_details), as notes, not requirements. `exclude` leaves them out: use it for briefs written before #644, whose notes a model wrote. Read only by `write --session`. |
+| `brief_notes` | `include` | Whether a writing session's scene plan shows the brief's author-note columns (goal, conflict, crisis, decision, key_dialogue, subtext, emotions, motifs, motif_details), as notes, not requirements. `exclude` leaves them out: use it for briefs written before #644, whose notes a model wrote. Either way, a `key_dialogue` line or `key_actions` item marked `must:` is in the plan as required (the gate stops a scene without it), never among the notes. Read only by `write --session`. |
 
 Any other value stops the run with an error (`write`, and `revise` for `prior_prose`).
 

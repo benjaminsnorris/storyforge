@@ -14,7 +14,7 @@ import json
 from storyforge.common import detect_project_root, get_medium
 from storyforge.status import CRAFT_ADVISORY_SOURCE, build_status
 
-_STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—'}
+_STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—', 'unreadable': '!'}
 
 
 def parse_args(argv):
@@ -28,6 +28,20 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
+def _voice_line(voice: dict) -> str:
+    """The voice's line in the ladder (#656): where it sits, and the POVs
+    the check after the map found book.md silent on."""
+    parts = [voice['detail']] if voice['detail'] else []
+    if voice['when'] != 'first':
+        parts.append(f"later (key-decisions.md: voice_stage: {voice['when']})")
+    if voice['pov_gaps']:
+        parts.append(f"book.md says nothing of POV(s): {', '.join(voice['pov_gaps'])}")
+    elif voice['pov_gaps'] == []:   # None: the check after the map didn't run
+        parts.append('book.md names every POV of the map')
+    detail = f" — {'; '.join(parts)}" if parts else ''
+    return f"  V  {voice['name']:<13} {_STATE_MARK[voice['state']]} {voice['state']}{detail}"
+
+
 def render_human(verdict: dict) -> str:
     lines = []
     match = ('matches storyforge.yaml' if verdict['phase_matches_yaml']
@@ -35,10 +49,15 @@ def render_human(verdict: dict) -> str:
     suffix = '' if not verdict['phase_declared'] else f'  ({match})'
     lines.append(f"PHASE: {verdict['phase']}{suffix}")
     lines.append('LADDER:')
+    voice = verdict.get('voice')
     for r in verdict['ladder']:
+        if voice and r['level'] == 3 and voice['when'] == 'first':
+            lines.append(_voice_line(voice))   # #656: the voice before the spine
         mark = _STATE_MARK[r['state']]
         detail = f" — {r['detail']}" if r['detail'] else ''
         lines.append(f"  L{r['level']} {r['name']:<13} {mark} {r['state']}{detail}")
+    if voice and voice['when'] != 'first':
+        lines.append(_voice_line(voice))   # voice_stage: later, before drafting
     nxt = verdict['next']
     cmd = f"  [{nxt['command']}]" if nxt['command'] else ''
     lines.append(f"NEXT:  {nxt['action']}{cmd}")

@@ -125,9 +125,13 @@ def parse_args(argv):
     acc.add_argument('--force', action='store_true',
                      help='With --auto-pick, replace picks already in the shortlist')
     samp = sub.add_parser('sample', help='In a book: a round of blind voice samples of one '
-                                          'scene, as a PR to mark; a take on a marked sample; '
-                                          'or a winner saved as an anchor (#654)')
+                                          'scene (or, before the scene map, a moment), as a '
+                                          'PR to mark; a take on a marked sample; or a '
+                                          'winner saved as an anchor (#654, #656)')
     samp.add_argument('--scene', help='The scene to write several ways')
+    samp.add_argument('--moment', metavar='TEXT',
+                      help='Before the scene map (#656): a moment of the book, in a sentence '
+                           'or two, to write several ways in place of a scene')
     samp.add_argument('--variants', type=int, default=5,
                       help='How many versions in a round (default 5)')
     samp.add_argument('--vary', default=None,
@@ -545,8 +549,15 @@ def _sample(args) -> int:
             return 1
         prev_key = None
         marked = ''
-        scene = args.scene
+        scene = args.scene or ''
+        moment = (args.moment or '').strip()
         notes: list[str] = []
+        if scene and args.moment is not None:
+            log('ERROR: give --scene or --moment, not both')
+            return 1
+        if args.moment is not None and not moment:
+            log('ERROR: --moment is empty: say the moment to write, in a sentence or two')
+            return 1
         if args.from_pr:
             if latest < 1:
                 log('ERROR: --from-pr: there is no earlier round in working/voice-samples/')
@@ -599,16 +610,19 @@ def _sample(args) -> int:
                     'Pass --allow-unmarked to write the round anyway')
                 return 1
             marked = vs.describe_marks(samples, marks, prev_key, prs.general)
-            if prev_key and args.scene and args.scene != prev_key.scene:
-                notes.append(f'--scene {args.scene} is not the scene round {latest} marked '
-                             f'({prev_key.scene})')
-            scene = scene or (prev_key.scene if prev_key else '')
+            if prev_key and (scene or moment) and (scene, moment) != (prev_key.scene,
+                                                                      prev_key.moment):
+                notes.append(f'{"--scene " + scene if scene else "--moment"} is not what round '
+                             f'{latest} marked ({prev_key.subject})')
+            if not (scene or moment) and prev_key:
+                scene, moment = prev_key.scene, prev_key.moment
             log(f'Round {latest}: {counted} mark(s) on {len(samples)} sample(s), '
                 f'{len(prs.general)} general reaction(s), from PR #{args.from_pr}')
-        if not scene:
+        if not (scene or moment):
             for note in notes:
                 log(f'NOTE: {note}')
-            log('ERROR: name the scene (--scene)'
+            log('ERROR: name the scene (--scene), or before the scene map a moment '
+                '(--moment "...")'
                 + (': the last round\'s key, which would name it, isn\'t usable here'
                    if args.from_pr else ''))
             return 1
@@ -623,7 +637,8 @@ def _sample(args) -> int:
         if args.take and len(versions) < 2:
             log('ERROR: --take needs --versions, at least two, separated by ";"')
             return 1
-        log(f'Round {n}: {scene}, '
+        subject = scene or vs.moment_title(moment)
+        log(f'Round {n}: {subject}, '
             + (f'a take on sample {args.take}' if args.take else f'{args.variants} versions'))
         if args.dry_run:
             log('Dry run: nothing written or spent. A real run makes one call for the round '
@@ -642,11 +657,11 @@ def _sample(args) -> int:
         if args.take:
             rnd = vs.write_take(project_dir, scene, sample=args.take, marked=marked,
                                 versions=versions, model=model, log_dir=log_dir,
-                                previous=prev_key)
+                                previous=prev_key, moment=moment)
         else:
             rnd = vs.write_round(project_dir, scene, variants=args.variants, vary=vary,
                                  influences=influences, model=model, log_dir=log_dir,
-                                 marked=marked, previous=prev_key)
+                                 marked=marked, previous=prev_key, moment=moment)
         os.makedirs(os.path.join(project_dir, vs.SAMPLES_DIR), exist_ok=True)
         with open(os.path.join(project_dir, rnd.rel), 'w', encoding='utf-8') as f:
             f.write(rnd.text)
@@ -657,7 +672,7 @@ def _sample(args) -> int:
     log(f'Round {rnd.number}: {rnd.rel}')
     for note in rnd.notes:
         log(f'  {note}')
-    if not git.commit_and_push(project_dir, f'Voice: round {rnd.number} samples of {scene}',
+    if not git.commit_and_push(project_dir, f'Voice: round {rnd.number} samples of {subject}',
                                [rnd.rel.replace(os.sep, '/')]):
         log(f'ERROR: {rnd.rel} is written but not committed ({git.last_commit_error}); its '
             f'key isn\'t saved')
@@ -680,7 +695,7 @@ def _sample(args) -> int:
             f'<label> --name <name>`.\n'
             + ('\n## Checked before you see it\n\n' + '\n'.join(f'- {x}' for x in rnd.notes)
                if rnd.notes else ''))
-    if not git.create_draft_pr(f'Voice: round {rnd.number} samples of {scene}', body,
+    if not git.create_draft_pr(f'Voice: round {rnd.number} samples of {subject}', body,
                                project_dir):
         log(f'ERROR: round {rnd.number} is committed, but no PR was opened (is the branch '
             f'pushed, and gh set up?). Open one by hand, or run with --no-pr next time')
