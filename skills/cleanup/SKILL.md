@@ -98,6 +98,7 @@ These require running a Storyforge command. Present the command to the author us
 | Type | Command |
 |------|---------|
 | `scene_artifacts` | `storyforge cleanup --scenes` |
+| `scene_layout` | `storyforge cleanup --scenes` (info: lays a book drafted before scenes were a sentence per line out that way, once, on its own branch commit, so the author's PR line comments mark a sentence; drafting and revision lay out only what they change. Paragraphs whose line breaks aren't at sentence ends, verse or a letter, are left and named. Run it before the author marks a PR, not between marking and `revise --marks-from-pr`, which would outdate their comments) |
 | `crlf_line_endings` | `find reference working -name '*.csv' -exec sed -i '' $'s/\r$//' {} + && sed -i '' $'s/\r$//' storyforge.yaml` |
 | `seq_needs_renumber` | `storyforge scenes-setup --renumber` (no model call; renumbers `seq` to 1..N in reading order and commits; `--dry-run` previews) |
 

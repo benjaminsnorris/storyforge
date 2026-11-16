@@ -56,7 +56,7 @@ RAW_READS = {
                                              '(the gate exception, docs/history.md)',
     ('cmd_write.py', '_interactive_problem'): 'compares the file to what was there; '
                                               'its floor counts prose',
-    ('cmd_write.py', '_keep_cli_markers'): 'restores markers into the file the CLI wrote',
+    ('cmd_write.py', '_finish_cli_scene'): 'restores markers into the file the CLI wrote',
     ('cmd_write.py', '_run_direct_mode'): 'the scene before the CLI rewrote it, whose '
                                           'markers it keeps',
     ('gate.py', 'snapshot'): 'byte comparison: the book before this run',

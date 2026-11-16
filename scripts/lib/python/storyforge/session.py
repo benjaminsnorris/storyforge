@@ -101,7 +101,7 @@ Reply to each plan with the scene, then the stage at its end, in exactly this fo
 (the scene's prose, and nothing else: no title, no notes)
 {scene_close}
 {stage_open}
-(a JSON list of the stage at the scene's very end, one object per fact: {{"who": "<name>", "field": "<field>", "item": "<thing, for worn, light or door>", "value": "<value>", "quote": "<the scene's words that set it, or empty>"}}. Fields: posture (standing, sitting, kneeling, lying, crouching, mounted, down), hand_left and hand_right (what the hand holds, or empty), worn (on or off, with the item), present (here or gone), position, facing. Only what the scene shows.)
+(a JSON list of the stage at the scene's very end, one object per fact: {{"who": "<name>", "field": "<field>", "item": "<thing, for worn, light or door>", "value": "<value>", "quote": "<the scene's words that set it, or \"\">"}}. Fields: posture (standing, sitting, kneeling, lying, crouching, mounted, down), hand_left and hand_right (what the hand holds, or the word "empty" for an empty hand: never ""), worn (on or off, with the item), present (here or gone), position, facing. Only what the scene shows.)
 {stage_close}
 
 Some turns are notes on a scene you wrote: a check found something wrong. Answer them exactly as the note asks."""
@@ -418,7 +418,9 @@ class Draft:
 
 
 def parse_reply(text: str, scene_id: str) -> Draft:
-    """The scene and the stage note from a reply.
+    """The scene, laid out a sentence per line (`scene_layout`, so the
+    review, the writer's sheet and the file hold the same prose), and the
+    stage note from a reply.
 
     Raises:
         SessionError: no scene in the reply.
@@ -427,7 +429,8 @@ def parse_reply(text: str, scene_id: str) -> Draft:
     if not m or not m.group(1).strip():
         raise SessionError(f'{scene_id}: the writer\'s reply has no {SCENE_OPEN} ... '
                            f'{SCENE_CLOSE} block')
-    draft = Draft(m.group(1).strip() + '\n')
+    from storyforge.scene_layout import sentence_lines
+    draft = Draft(sentence_lines(m.group(1).strip() + '\n'))
     s = re.search(re.escape(STAGE_OPEN) + r'\s*(.*?)\s*' + re.escape(STAGE_CLOSE), text, re.S)
     if not s:
         draft.stage_problem = 'the reply has no stage note'

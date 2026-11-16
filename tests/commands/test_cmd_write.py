@@ -204,6 +204,19 @@ class TestMainDryRun:
         branch_calls = mock_git.calls_for('create_branch')
         assert len(branch_calls) == 0
 
+    @pytest.mark.parametrize('extra', [[], ['--coaching', 'coach', '--batch']])
+    def test_dry_run_commits_nothing(self, mock_api, mock_git, mock_costs, project_dir,
+                                     monkeypatch, extra):
+        """Not even the end-of-run bookkeeping (#699), in direct or batch."""
+        # --coaching sets STORYFORGE_COACHING for the process: undone after
+        monkeypatch.setenv('STORYFORGE_COACHING', 'full')
+        monkeypatch.setattr('storyforge.cmd_write.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_write._commit',
+                            lambda *a: pytest.fail('committed'))
+        main(['--dry-run', '--scenes', 'act1-sc01', *extra])
+        assert mock_git.calls_for('commit_and_push') == []
+
     def test_dry_run_does_not_write_scene_files(self, mock_api, mock_git,
                                                  mock_costs, project_dir,
                                                  monkeypatch):

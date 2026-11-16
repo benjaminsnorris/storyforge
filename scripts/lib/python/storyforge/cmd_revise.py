@@ -2476,8 +2476,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
                 f'revised prose, so it could not be restored. Re-anchor the '
                 f'plan row and run `storyforge illustrate --embed`')
 
-        with open(scene_file, 'w', encoding='utf-8') as f:
-            f.write(preserved['text'])
+        from storyforge.scene_layout import write_scene
+        write_scene(scene_file, preserved['text'], old=original_prose, log=log, who=scene_id)
         count += 1
         log(f'  Re-drafted {scene_id}')
         why = _gate_redraft(project_dir, scene_id, scene_file, log_dir, before=baseline)
@@ -3230,6 +3230,18 @@ def _unsafe_scene_writes(project_dir: str, before: dict[str, str]) -> list[str]:
         if reason:
             problems.append(f'scene {sid} was rewritten unsafely: {reason}')
     return problems
+
+
+def _lay_out_scenes(project_dir: str, scene_ids: list[str], before: dict[str, str]) -> None:
+    """Lay out what a CLI session changed in these scenes a sentence per
+    line (`scene_layout`, `before` their text before it), as the extracted
+    replies are."""
+    from storyforge.scene_layout import sentence_lines, write_scene
+    for sid in scene_ids:
+        text = read_scene_raw(project_dir, sid)
+        if text and sentence_lines(text, old=before.get(sid)) != text:
+            write_scene(os.path.join(project_dir, 'scenes', f'{sid}.md'), text,
+                        old=before.get(sid), log=log, who=sid)
 
 
 def _content_snapshot(project_dir: str) -> dict[str, str]:
@@ -4405,6 +4417,7 @@ Rules:
                 sys.exit(1)
             rewritten = [sid for sid, text in _scene_texts(project_dir).items()
                          if scenes_before.get(sid) != text]
+            _lay_out_scenes(project_dir, rewritten, scenes_before)
             exit_code = 0
         else:
             # Direct API mode

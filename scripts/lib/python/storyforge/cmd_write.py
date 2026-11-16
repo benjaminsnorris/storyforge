@@ -60,6 +60,7 @@ from storyforge.costs import (
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
 from storyforge.illustrations import count_prose_words, read_scene_prose, read_scene_raw
+from storyforge.scene_layout import sentence_lines
 
 
 def parse_args(argv):
@@ -266,7 +267,11 @@ def main(argv=None):
     session_start_iso = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     # Branch + PR setup
+    changed_before = None
     if not args.dry_run:
+        # what was already changed: the run's closing commit leaves it alone
+        from storyforge.git import changed_files
+        changed_before = changed_files(project_dir)
         create_branch('write', project_dir)
 
         # Advance project phase
@@ -323,35 +328,44 @@ def main(argv=None):
     # Main drafting
     from storyforge import git as _gitmod
     pushes_failed_before = len(_gitmod.unpushed)
-    if write_mode == 'session':
-        from storyforge import api
-        from storyforge.costs import RunBudget
-        with api.metered() as meter:
-            outcome = _run_session_mode(
+    try:
+        if write_mode == 'session':
+            from storyforge import api
+            from storyforge.costs import RunBudget
+            with api.metered() as meter:
+                outcome = _run_session_mode(
+                    pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
+                    dry_run=args.dry_run, budget=RunBudget(meter),
+                    stop_after=_stop_after(project_dir, args.stop_after),
+                    scene_forecast=scene_forecast)
+        elif write_mode == 'batch' and not args.dry_run:
+            outcome = _run_batch_mode(
                 pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-                dry_run=args.dry_run, budget=RunBudget(meter),
-                stop_after=_stop_after(project_dir, args.stop_after),
-                scene_forecast=scene_forecast)
-    elif write_mode == 'batch' and not args.dry_run:
-        outcome = _run_batch_mode(
-            pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-            coaching, use_briefs, args.force, filter_mode,
-        )
-    else:
-        # The threshold is one budget for the run: the re-checks get what
-        # drafting actually spent (metered) and the scenes still to draft
-        # leave (`costs.RunBudget`)
-        from storyforge import api
-        from storyforge.costs import RunBudget
-        with api.metered() as meter:
-            outcome = _run_direct_mode(
-                pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-                coaching, use_briefs, args.force, filter_mode, write_mode,
-                args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
-                scene_forecast=scene_forecast, draft_forecast=draft_forecast,
-                keep_going=args.keep_going, held=held,
+                coaching, use_briefs, args.force, filter_mode,
             )
-
+        else:
+            # The threshold is one budget for the run: the re-checks get what
+            # drafting actually spent (metered) and the scenes still to draft
+            # leave (`costs.RunBudget`)
+            from storyforge import api
+            from storyforge.costs import RunBudget
+            with api.metered() as meter:
+                outcome = _run_direct_mode(
+                    pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
+                    coaching, use_briefs, args.force, filter_mode, write_mode,
+                    args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
+                    scene_forecast=scene_forecast, draft_forecast=draft_forecast,
+                    keep_going=args.keep_going, held=held,
+                )
+    except SystemExit:
+        # a mode stopped part-way (a prompt it couldn't build, a batch it
+        # couldn't submit): what it spent and wrote is still committed. Not
+        # on an interrupt, which can land between a scene's files and its
+        # commit
+        from storyforge import common
+        if not args.dry_run and not common._shutting_down:
+            _commit_bookkeeping(project_dir, changed_before)
+        raise
     drafted_count, total_words = outcome.drafted, outcome.words
     failed, recheck_open, uncommitted = outcome.failed, outcome.recheck_open, outcome.uncommitted
     provisional = outcome.provisional
@@ -393,6 +407,17 @@ def main(argv=None):
         from storyforge.gate import advisory_summary
         for line in advisory_summary(project_dir, pending_ids):
             log(line)
+    bookkept = True
+    if args.dry_run:
+        pass
+    elif uncommitted:
+        # the bookkeeping paths would sweep the uncommitted files in under
+        # the wrong message: they're committed by hand with the rest
+        log('WARNING: the run\'s bookkeeping (at least the cost ledger) is not committed '
+            'either: commit it with the files named below.')
+        bookkept = False
+    else:
+        bookkept = _commit_bookkeeping(project_dir, changed_before)
 
     if failed:
         log(f'ERROR: {len(failed)} scene(s) not drafted:')
@@ -430,7 +455,7 @@ def main(argv=None):
             log(f'  {entry}')
         log('Fix the prose and run `storyforge check --pending`, or accept a verified '
             'contradiction with `storyforge check --accept <id>`.')
-    if failed or recheck_open or uncommitted or provisional:
+    if failed or recheck_open or uncommitted or provisional or not bookkept:
         sys.exit(1)
 
 
@@ -1171,16 +1196,18 @@ def _interactive_problem(scene_file: str, before: str) -> str:
     return ''
 
 
-def _keep_cli_markers(project_dir: str, scene_id: str, scene_file: str, before: str) -> None:
-    """Put back the illustration markers `before` (the scene the CLI
-    rewrote) carried and the CLI's prose dropped (#610's review, SF-W)."""
+def _finish_cli_scene(project_dir: str, scene_id: str, scene_file: str, before: str) -> None:
+    """Finish the scene the CLI wrote: put back the illustration markers
+    `before` (the scene it rewrote) carried and its prose dropped (#610's
+    review, SF-W), and lay out what it changed a sentence per line
+    (`scene_layout`)."""
     from storyforge.illustrations import keep_markers
+    from storyforge.scene_layout import write_scene
     with open(scene_file, encoding='utf-8') as f:
         written = f.read()
     kept = keep_markers(project_dir, scene_id, before, written, 'the CLI', log)
-    if kept != written:
-        with open(scene_file, 'w', encoding='utf-8') as f:
-            f.write(kept)
+    if sentence_lines(kept, old=before) != written:
+        write_scene(scene_file, kept, old=before, log=log, who=scene_id)
 
 
 def _pend(project_dir: str, scene_id: str, command: str, why: str) -> str:
@@ -1453,6 +1480,10 @@ def _extract_scene_from_response(log_file: str, out_file: str,
             content = keep_markers(os.path.dirname(os.path.dirname(os.path.abspath(out_file))),
                                    os.path.basename(out_file)[:-len('.md')],
                                    old_text, content, 'the redraft', log)
+        notes: list[str] = []
+        content = sentence_lines(content, old=old_text, notes=notes)
+        for note in notes:
+            log(f'  NOTE: {os.path.basename(out_file)[:-len(".md")]}: {note}')
     else:
         content = text
 
@@ -1507,6 +1538,75 @@ def _commit(project_dir: str, message: str, paths: list[str]) -> None:
     stays a WARNING (the commit is made) and goes in the closing summary."""
     from storyforge import git
     git.commit_or_raise(project_dir, message, paths)
+
+
+#: where a write run leaves files after (or besides) its scenes' commits,
+#: committed at its end (#699): the cost ledger (every call, including those
+#: after the last commit), the pipeline row the review phase updates after
+#: its own commits (and its review and recommendations, if those commits
+#: failed), the drift check's cues, and `reference/` (as a scene commit takes
+#: it), for what the last commit's pre-commit sync regenerated after staging,
+#: such as scenes-review.md. `working/logs/` is ignored in a book
+#: (`templates/gitignore`); it is listed for a repo that tracks it. Only what
+#: the run changed is committed (`_commit_bookkeeping`).
+BOOKKEEPING_PATHS = ('working/costs/', 'working/pipeline.csv', 'working/timeline-cues.csv',
+                     'working/reviews/', 'working/logs/', 'reference/')
+
+
+def _is_bookkeeping(rel: str) -> bool:
+    """`rel` (relative to the project, `/`-separated) is under
+    `BOOKKEEPING_PATHS`, or is a `working/recommendations*.md`."""
+    if any(rel == p or (p.endswith('/') and rel.startswith(p)) for p in BOOKKEEPING_PATHS):
+        return True
+    return (rel.startswith('working/recommendations') and rel.endswith('.md')
+            and '/' not in rel[len('working/'):])
+
+
+def _commit_bookkeeping(project_dir: str, before: dict[str, str] | None) -> bool:
+    """Commit what the run left under `BOOKKEEPING_PATHS` (#699), on any
+    run that gets this far: one that finished, stopped for a read, had
+    scenes fail, or stopped part-way through its mode (`main` calls it on
+    that `SystemExit` too). Not called after a failed commit (`main`).
+
+    `before` is `git.changed_files` as the run started. Only files the run
+    changed are committed: one already changed before it, and changed
+    again, is the author's to commit (named, WARNING), so the commit never
+    takes edits that aren't the run's. After the commit, anything the run
+    changed that is still uncommitted, anywhere in the project, is named
+    (WARNING). False, with an ERROR, when the commit fails or git can't
+    say what changed: the run then exits 1. A failed push is a WARNING and
+    in the closing summary, as for every commit `write` makes."""
+    from storyforge import git
+    try:
+        now = git.changed_files(project_dir)
+        if before is None or now is None:
+            log('ERROR: the run\'s bookkeeping (cost ledger, pipeline row, reviews) is not '
+                'committed: git could not say what the run changed. Commit it by hand '
+                '(`git status`), and push.')
+            return False
+        # git names them relative to the project, `/`-separated
+        ours = sorted(p for p in now if _is_bookkeeping(p) and p not in before)
+        theirs = sorted(p for p in now if _is_bookkeeping(p) and p in before
+                        and now[p] != before[p])
+        if theirs:
+            log(f'WARNING: {len(theirs)} file(s) the run wrote to were already changed before '
+                f'it, so they are not committed with its bookkeeping (your edits would go in '
+                f'too): {", ".join(theirs[:8])}' + (' ...' if len(theirs) > 8 else '')
+                + '. Commit them yourself.')
+        if ours:
+            _commit(project_dir, 'Write: run bookkeeping (costs, pipeline, reviews)', ours)
+        after = git.changed_files(project_dir) or {}
+    except (CommitError, OSError) as e:
+        log(f'ERROR: the run\'s bookkeeping is not committed: {e}. Commit it by hand '
+            f'(`git status`), and push.')
+        return False
+    left = sorted(p for p in after if p not in theirs
+                  and (p not in before or after[p] != before[p]))
+    if left:
+        log(f'WARNING: the run left {len(left)} file(s) uncommitted: '
+            f'{", ".join(left[:8])}' + (' ...' if len(left) > 8 else '')
+            + '. Check them (`git status`) and commit them by hand.')
+    return True
 
 
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
@@ -1994,6 +2094,7 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
         raw = read_scene_raw(project_dir, sid)
         with open(scene_file, 'w', encoding='utf-8') as f:
             # a redraft keeps the scene's illustration markers
+            # laid out a sentence per line already (`session.parse_reply`)
             f.write(keep_markers(project_dir, sid, raw, prose, 'the session', log)
                     if raw else prose)
         command = 'redraft' if raw and raw.strip() else 'draft'
@@ -2265,7 +2366,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             if exit_code == 0 and coaching == 'full':
                 reason = _interactive_problem(scene_file, before)
                 if not reason and before:
-                    _keep_cli_markers(project_dir, scene_id, scene_file, before)
+                    _finish_cli_scene(project_dir, scene_id, scene_file, before)
         else:
             # Direct API mode
             max_tokens = 16384 if write_mode != 'direct' else 8192

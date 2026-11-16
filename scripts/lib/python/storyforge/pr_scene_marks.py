@@ -8,18 +8,24 @@ comments (`pr_marks.fetch`) into the same `marks.SceneMarks` a marks file
 gives (`marks.parse_marks`), plus the suggestions to apply and what was
 left out and why.
 
-A scene file holds about a paragraph per line (the drafter writes
-paragraphs; `parsing.clean_scene_content` doesn't reflow them), so a line
-comment marks a paragraph:
+A scene file holds a sentence per line (`scene_layout`; a scene drafted
+before that, a paragraph per line), so a line comment marks its line, a
+sentence:
 
 - **The scene:** a comment on `scenes/<id>.md` belongs to scene `<id>`; a
   comment on any other file is left out and named.
 - **The quote:** the words the comment quotes (`>` lines, or a "quoted"
   phrase at the start or end of the comment) when they're in the
-  paragraph; otherwise the whole paragraph (and the note says what it
-  quoted). Words that occur more than once in the scene would land on
-  their first occurrence, so then the paragraph is the quote too (the
-  note says which words). A comment over several lines marks them all.
+  commented lines; otherwise those lines (and the note says what it
+  quoted). A comment over several lines marks them all. The reviser finds
+  a quote by its first occurrence, so a quote must occur once in the
+  scene, as the reviser's edit must: quoted words that occur more than
+  once give way to the commented lines, and lines that occur more than once
+  (a short sentence, `"No."`) take in the line before or after them in
+  their paragraph until they're unique (`_widen`; a keep, never edited,
+  needs only to be the first occurrence: `_placed`). The note says so,
+  unless the mark is a keep. Lines that can't be placed are left out and
+  named.
 - **The note:** the comment without the quoted words. Empty, or one of
   `marks.KEEP_NOTES`: a keep.
 - **A `suggestion` block** is the author's own wording, so nothing
@@ -134,28 +140,28 @@ def _prose(lines: list[str]) -> str:
     return re.sub(r'\n{3,}', '\n\n', MARKER_ANY_RE.sub('', text)).strip()
 
 
-def _found(quote: str, paragraph: str) -> bool:
+def _found(quote: str, commented: str) -> bool:
     from storyforge.voice_review import flag_spans
-    return bool(quote.strip()) and bool(flag_spans(paragraph, quote))
+    return bool(quote.strip()) and bool(flag_spans(commented, quote))
 
 
-def split_body(body: str, paragraph: str) -> tuple[str, str]:
-    """(the quote, the note) from a comment on `paragraph`: the words the
-    comment quotes when they're in the paragraph, else the paragraph."""
+def split_body(body: str, commented: str) -> tuple[str, str]:
+    """(the quote, the note) from a comment on the lines `commented`: the
+    words the comment quotes when they're in those lines, else the lines."""
     lines = body.replace('\r\n', '\n').split('\n')
     quoted = ' '.join(ln[1:].strip() for ln in lines if ln.startswith('>')).strip()
     rest = ' '.join(ln.strip() for ln in lines if not ln.startswith('>')).strip()
     if quoted:
-        if _found(quoted, paragraph):
+        if _found(quoted, commented):
             return quoted, rest.strip(_EDGE)
-        return paragraph, (f'{rest} ' if rest else '') + f'(the comment quoted "{quoted}")'
+        return commented, (f'{rest} ' if rest else '') + f'(the comment quoted "{quoted}")'
     text = body.strip()
     for m in _INLINE_QUOTE.finditer(text):
         words = m.group(1) or m.group(2)
         at_edge = not text[:m.start()].strip(_EDGE) or not text[m.end():].strip(_EDGE)
-        if at_edge and _found(words, paragraph):
+        if at_edge and _found(words, commented):
             return words, (text[:m.start()] + ' ' + text[m.end():]).strip(_EDGE)
-    return paragraph, text
+    return commented, text
 
 
 def _scene_id(path: str, prefix: str) -> str:
@@ -231,15 +237,29 @@ def map_comments(prs, read_scene, prefix: str = '', skip_ids=frozenset(),
                 continue
             out.suggestions.append(Suggestion(sid, start, c.line, text, c.body.strip(), c.id))
             continue
-        paragraph = _prose(lines[start - 1:c.line])
-        if not paragraph:
+        commented = _prose(lines[start - 1:c.line])
+        if not commented:
             out.left_out.append(f'{where}: on a blank line or an illustration marker')
             continue
-        quote, note = split_body(c.body, paragraph)
-        if quote != paragraph and not _unique(quote, _prose(lines)):
-            note = f'{note} (on "{quote}", which occurs more than once in the scene)'.strip()
-            quote = paragraph
-        marks.append((sid, start, c.line, Mark(quote, note or 'keep', c.id)))
+        quote, note = split_body(c.body, commented)
+        keep = is_keep(Mark(quote, note or 'keep'))
+        whole = _prose(lines)
+        if quote != commented and not _unique(quote, whole):
+            if not keep:   # a keep stays a keep: the reviser never edits it
+                note = f'{note} (on "{quote}", which occurs more than once in the scene)'
+            quote = commented
+        if not _placed(quote, lines, start, whole, keep):
+            wider = _widen(lines, start, c.line, whole, keep)
+            if not wider:
+                out.left_out.append(f'{where}: its line occurs more than once in the scene, '
+                                    f'with the lines around it too; quote words that occur '
+                                    f'once')
+                continue
+            if not keep:
+                note = (f'{note} (its line occurs more than once in the scene, so the '
+                        f'line next to it is in the quote)')
+            quote = wider
+        marks.append((sid, start, c.line, Mark(quote, note.strip() or 'keep', c.id)))
     # suggestions: the first on a line wins; the lines are then the author's
     taken: dict[str, list[tuple[int, int]]] = {}
     kept = []
@@ -259,6 +279,31 @@ def map_comments(prs, read_scene, prefix: str = '', skip_ids=frozenset(),
             continue
         _scene_for(out.scenes, sid).marks.append(mark)
     return out
+
+
+def _widen(lines: list[str], start: int, end: int, prose: str, keep: bool) -> str:
+    """The commented lines `start`..`end` (1-based) with the line before or
+    after them in their paragraph (or both), the first of those `_placed`
+    in `prose`; '' when none is."""
+    def usable(n: int) -> bool:
+        return 1 <= n <= len(lines) and bool(lines[n - 1].strip()) and \
+            not _is_marker(lines[n - 1])
+    for lo, hi in ((start - 1, end), (start, end + 1), (start - 1, end + 1)):
+        if (lo == start or usable(lo)) and (hi == end or usable(hi)):
+            quote = _prose(lines[lo - 1:hi])
+            if _placed(quote, lines, lo, prose, keep):
+                return quote
+    return ''
+
+
+def _placed(quote: str, lines: list[str], start: int, prose: str, keep: bool) -> bool:
+    """Whether a mark quoting `quote` (lines from `start`, 1-based) works:
+    a change needs words that occur once, since the reviser's edit must
+    (`scene_layout.find_span`); a keep, never edited, needs only that its
+    first occurrence, which the reviser protects, is these lines."""
+    if _unique(quote, prose):
+        return True
+    return keep and quote in prose and quote not in _prose(lines[:start - 1])
 
 
 def _unique(quote: str, prose: str) -> bool:

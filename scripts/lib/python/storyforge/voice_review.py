@@ -14,7 +14,8 @@ Code keeps both honest:
 - A flag whose quote isn't in the scene (`quotes.quote_in`) is dropped and
   said (`Review.unverified`).
 - An edit must replace words that occur once in the scene, inside the
-  sentence its flag quotes (`sentence_spans`); any other edit is dropped and
+  sentence its flag quotes (`sentence_spans`; whitespace loosened within a
+  paragraph, `scene_layout.find_span`); any other edit is dropped and
   said (`Revision.dropped`). Edits that overlap are dropped together. So the
   reviser can't touch a line nobody flagged.
 - The reviser may keep a flagged line as it is, saying why
@@ -162,19 +163,8 @@ class Revision:
 # Sentences
 # ============================================================================
 
-_SENTENCE_END = re.compile(r'(?<=[.!?…])["”’\')\]]*\s+|\n\s*\n|\n')
-
-
-def sentence_spans(prose: str) -> list[tuple[int, int]]:
-    """(start, end) of each sentence (or line) in `prose`, in order."""
-    spans, start = [], 0
-    for m in _SENTENCE_END.finditer(prose):
-        if prose[start:m.start()].strip():
-            spans.append((start, m.start()))
-        start = m.end()
-    if prose[start:].strip():
-        spans.append((start, len(prose)))
-    return spans
+# the splitter is the scene layout's (re-exported: the reviser's scope is a sentence)
+from storyforge.scene_layout import sentence_spans  # noqa: E402
 
 
 def flag_spans(prose: str, quote: str) -> list[tuple[int, int]]:
@@ -314,12 +304,15 @@ def build_revise_prompt(scene_id: str, prose: str, voice: str, flags: list[Flag]
 
 
 def apply_revision(prose: str, flags: list[Flag], reply: dict,
-                   protected: list[str] | tuple = ()) -> Revision:
+                   protected: list[str] | tuple = (), layout: bool = True) -> Revision:
     """The reviser's edits applied to `prose`, each only inside its flag's
     sentence and never touching a `protected` line (the author's keeps);
     one `Outcome` per flag. A flag both edited and kept counts as edited
-    (the keep is noted in `dropped`)."""
+    (the keep is noted in `dropped`). `layout`: the paragraphs edited are
+    laid out a sentence per line (`gate.apply_edits`); False for a voice
+    sample, which keeps its own layout."""
     from storyforge.gate import GateError, apply_edits
+    from storyforge.scene_layout import find_span
     out = Revision(prose, [Outcome() for _ in flags])
     keep_spans = [span for k in protected for span in flag_spans(prose, k)]
     ok: list[tuple[int, dict, tuple[int, int]]] = []
@@ -329,12 +322,11 @@ def apply_revision(prose: str, flags: list[Flag], reply: dict,
             out.dropped.append(f'an edit names flag {n!r}, which there isn\'t')
             continue
         refused = out.outcomes[n - 1].refused
-        count = prose.count(find) if find else 0
-        if count != 1:
-            refused.append(f'its edit\'s words occur {count} times in the scene: {find[:80]!r}')
+        found = find_span(prose, find)
+        span = found.span
+        if span is None:
+            refused.append(f'its edit\'s words occur {found.problem(find)}')
             continue
-        start = prose.index(find)
-        span = (start, start + len(find))
         allowed = flag_spans(prose, flags[n - 1].quote)
         if not any(a <= span[0] and span[1] <= b for a, b in allowed):
             refused.append(f'its edit reaches outside the flagged sentence: {find[:80]!r}')
@@ -350,7 +342,7 @@ def apply_revision(prose: str, flags: list[Flag], reply: dict,
         out.outcomes[ok[i][0] - 1].refused.append('its edit overlaps another')
     ok = [t for i, t in enumerate(ok) if i not in clash]
     try:
-        out.prose = apply_edits(prose, [e for _, e, _ in ok])
+        out.prose = apply_edits(prose, [e for _, e, _ in ok], layout=layout)
     except GateError as e:   # checked above; said if it ever happens
         out.dropped.append(f'the edits could not be applied ({e})')
         ok = []
@@ -371,9 +363,10 @@ def apply_revision(prose: str, flags: list[Flag], reply: dict,
 
 
 def revise(project_dir: str, scene_id: str, prose: str, flags: list[Flag], *, model: str,
-           log_file: str = '', keeps: list[str] | tuple = ()) -> Revision:
+           log_file: str = '', keeps: list[str] | tuple = (), layout: bool = True) -> Revision:
     """`prose` with the flagged lines rewritten toward the voice; `keeps`
     (the author's lines that work) are shown as examples and protected.
+    `layout`: as `apply_revision` (False for a voice sample).
 
     Raises:
         VoiceReviewError: the call failed, was cut off or isn't the schema.
@@ -393,7 +386,7 @@ def revise(project_dir: str, scene_id: str, prose: str, flags: list[Flag], *, mo
             raise ValueError('edits and kept must be lists')
     except (ValueError, AttributeError) as e:
         raise VoiceReviewError(f'{scene_id}: the reviser\'s reply could not be read ({e})') from e
-    return apply_revision(prose, flags, reply, protected=keeps)
+    return apply_revision(prose, flags, reply, protected=keeps, layout=layout)
 
 
 def flags_from_marks(marks) -> list[Flag]:

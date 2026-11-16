@@ -36,6 +36,31 @@ def _first_line(text: str) -> str:
     return next((ln.strip() for ln in (text or '').splitlines() if ln.strip()), '')
 
 
+def changed_files(project_dir: str) -> dict[str, str] | None:
+    """Every file under project_dir that differs from HEAD (staged or not,
+    deleted included) or is untracked and not ignored, relative to
+    project_dir, each with a digest of its content ('' for a deleted file),
+    so a later call tells a file that changed since from one that was
+    already changed and left alone. None when git can't say (no HEAD, git
+    failed)."""
+    import hashlib
+    diff = _git(project_dir, 'diff', 'HEAD', '--name-only', '--relative', '--no-renames',
+                '-z', check=False)
+    new = _git(project_dir, 'ls-files', '--others', '--exclude-standard', '-z', check=False)
+    if diff.returncode != 0 or new.returncode != 0:
+        return None
+    out: dict[str, str] = {}
+    for rel in {p for p in (diff.stdout + '\0' + new.stdout).split('\0') if p}:
+        try:
+            with open(os.path.join(project_dir, rel), 'rb') as f:
+                out[rel] = hashlib.sha1(f.read()).hexdigest()
+        except FileNotFoundError:
+            out[rel] = ''
+        except OSError as e:   # unreadable: its error stands in for the digest
+            out[rel] = f'unreadable: {e}'
+    return out
+
+
 def work_tree_problem(project_dir: str) -> str:
     """Why project_dir isn't in a usable git work tree; '' when it is.
 
@@ -919,7 +944,7 @@ Long files are excerpted: the start and end are shown and the middle is marked a
 ## How to read these files
 
 - Judge files by the contents shown. A file named above but not shown, or the omitted middle of an excerpt, has not been read: draw no conclusions about it from its size or line count.
-- Scene files (`scenes/*.md`) hold one paragraph per line, so a scene with few lines is not a stub. Use the word counts.
+- Scene files (`scenes/*.md`) hold a sentence per line (older ones a paragraph per line), paragraphs a blank line apart, so a scene's line count is not its length. Use the word counts.
 - Uneven scene length is a deliberate choice in this project, not a defect. Do not flag scenes for being shorter or longer than others, and do not suggest splitting or merging scenes to even them out.
 
 ## Instructions
