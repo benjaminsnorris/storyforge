@@ -154,6 +154,21 @@ def _status(project_dir: str, cfg) -> int:
         log(f'Source {p.slug}: {p.path} ({state})'
             + (f', name map {p.name_map}' if p.name_map else '')
             + (f', adapting {p.range.describe()}' if p.range else ''))
+    # #658: where the book enters the ladder, and its interpretation decisions
+    from storyforge import adaptation
+    found = adaptation.entry(project_dir)
+    if found is not None and found.higher:
+        log('Ladder: enters at the scene map (the source and the interpretation decisions '
+            'give the logline, synopsis, spine and architecture)')
+    elif found is not None:
+        log('Ladder: the full ladder (the book has a spine or architecture of its own)')
+    if found is not None and found.decisions is not None:
+        dec = found.decisions
+        log(f'{dec.summary()} (reference/key-decisions.md)' if dec.ok
+            else f'WARNING: {dec.summary()}' if found.higher else dec.summary())
+        for key, label in adaptation.DECISIONS:
+            if key in dec.found:
+                log(f'  {label}: {dec.found[key]}')
     result = source.check_coverage(project_dir, cfg)
     for line in result['lines']:
         log(line)

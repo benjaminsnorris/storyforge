@@ -1937,6 +1937,25 @@ def _run_voice_stage(project_dir: str, dry_run: bool) -> int:
     return 0
 
 
+def _note_adaptation_entry(project_dir: str, stage: str) -> None:
+    """#658 (plan D8): an adaptation enters the ladder at the scene map. The
+    spine and architecture stages are still there for one that strays far
+    from its source (running one puts the book on the full ladder), and
+    the map stage says which interpretation decisions it is built without."""
+    from storyforge import adaptation
+    found = adaptation.entry(project_dir)
+    if found is None or not found.higher:
+        return
+    if stage in ('spine', 'architecture'):
+        log(f'NOTE: this adaptation\'s source gives its spine and architecture (it enters '
+            f'the ladder at the scene map). Running the {stage} stage builds them yourself, '
+            f'as an original does, and from then on status climbs the full ladder.')
+    elif stage == 'map' and found.decisions is not None and not found.decisions.ok:
+        log(f'WARNING: the map is built from the source and the interpretation decisions, '
+            f'and {found.decisions.summary()}: the map prompt goes without them '
+            f'(`storyforge source status` lists them)')
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -2018,6 +2037,8 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     except source_mod.SourceError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
+    if source_cfg is not None:
+        _note_adaptation_entry(project_dir, stage)
     source_map_problem = ''
 
     # Build shared context once for all stage API calls (prompt caching)

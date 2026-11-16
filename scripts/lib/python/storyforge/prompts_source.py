@@ -278,6 +278,26 @@ scene_id|source_scenes|treatment|note
     return '\n\n'.join(parts) + rules_block(project_dir, cfg)
 
 
+def entry_section(project_dir: str) -> str:
+    """#658 (plan D8): for an adaptation entering the ladder at the scene map
+    (a `source:` block, no spine or architecture of its own), what the map
+    is built from in their place: the source's events and the interpretation
+    decisions. '' for any other book, so its map prompt is unchanged."""
+    from storyforge import adaptation
+    found = adaptation.entry(project_dir)
+    if found is None or not found.higher:
+        return ''
+    labels = ', '.join(label.lower() for _, label in adaptation.DECISIONS)
+    return f"""### Entering at the scene map
+
+This adaptation has no spine or architecture of its own: its source gives them. Its logline, synopsis, spine and architecture are the source's events read through the author's interpretation decisions (Key Decisions, `## {adaptation.HEADING}`: {labels}). Build the scene map from those, not from an architecture:
+
+- Group the source events into scenes, each with its POV (whose eyes the decisions give) and the turn.
+- Leave `architecture_scene` empty: there are no architecture scenes.
+- Cut what the decisions cut, end where they end, and invent only what they invent; an invented scene's map `note` says in one line why it is there.
+- Fidelity means the source's events happen in the novel. It doesn't mean replaying the source's staging or the order of its speeches."""
+
+
 # ----------------------------------------------------------------------------
 # Briefs
 # ----------------------------------------------------------------------------

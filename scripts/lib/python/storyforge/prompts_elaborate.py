@@ -395,9 +395,11 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
 
     lo, hi = _scene_count_range(project_dir)
-    from .prompts_source import map_section
+    from .prompts_source import entry_section, map_section
     src = map_section(project_dir)
     registries_section += f'\n{src}\n' if src else ''
+    entering = entry_section(project_dir)   # #658: an adaptation entering at the map
+    registries_section += f'\n{entering}\n' if entering else ''
 
     return f"""You are mapping a novel — expanding the architecture into a complete scene-by-scene plan with locations, timeline, characters, and thread tracking.
 
