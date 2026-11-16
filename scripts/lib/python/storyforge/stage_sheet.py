@@ -298,7 +298,8 @@ class Entry:
             value = raw.strip()
         if not value:
             allowed = (', '.join(VALUES[f]) if f in VALUES
-                       else 'a thing held or empty' if f in HANDS else 'a value')
+                       else 'a thing held or the word "empty" (an empty hand is "empty", '
+                            'never blank)' if f in HANDS else 'a value')
             raise bad(f'has value {raw!r}, not {allowed}')
         return cls(who, f, item, value, it.get('quote', ''), origin=origin,
                    side_guessed=guessed)

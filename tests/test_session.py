@@ -74,6 +74,26 @@ def test_a_stage_note_that_cant_be_used_is_said(stage, problem):
     assert d.prose == 'She sat.\n' and problem in d.stage_problem and d.stage == []
 
 
+def test_a_blank_hand_is_not_read_as_empty_and_the_note_says_why():
+    """The writer wrote '' for an empty hand (#700): blank can also mean "not
+    known", so it isn't guessed to be empty. The note isn't used, the
+    problem names the marker to write, and the writer's instructions name it."""
+    blank = {'who': 'D', 'field': 'hand_left', 'item': '', 'value': '', 'quote': ''}
+    d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
+                            + json.dumps([blank]) + '\n</stage>', SCENE)
+    assert d.stage == []
+    assert "value ''" in d.stage_problem and 'the word "empty"' in d.stage_problem
+    assert 'or the word "empty" for an empty hand: never ""' in session.INSTRUCTIONS
+
+
+def test_an_empty_hand_written_as_empty_is_carried():
+    empty = {'who': 'D', 'field': 'hand_left', 'item': '', 'value': 'empty', 'quote': ''}
+    d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
+                            + json.dumps([empty]) + '\n</stage>', SCENE)
+    assert d.stage_problem == '' and d.stage[0]['value'] == 'empty'
+    assert 'empty' in session.carried_text(d.stage)
+
+
 def test_a_half_good_stage_note_is_not_used_at_all():
     good = {'who': 'D', 'field': 'posture', 'item': '', 'value': 'sitting', 'quote': ''}
     bad = {'who': 'D', 'field': 'wings', 'item': '', 'value': 'up', 'quote': ''}
