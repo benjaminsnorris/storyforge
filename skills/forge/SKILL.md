@@ -50,7 +50,17 @@ Before doing anything else, orient yourself:
      observations, never as work to clear before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice is not a ladder rung, it shows as the `voice`
-     stage and blocker).
+     stage and blocker). In an adaptation (a `source:` block, #658) the
+     upper rungs, logline through architecture, read `given`: the source
+     and the author's interpretation decisions supply them.
+   - **`next.stage` is `interpretation`** (an adaptation entering at the
+     scene map): the source isn't imported (`next.command` is `storyforge
+     source import`) or the interpretation decisions in
+     `reference/key-decisions.md` aren't all recorded (`storyforge source
+     status` lists them; the `interpretation` blockers say what's missing).
+     Route to the `elaborate` skill's Adaptations section. After them come
+     the voice and the scene map, never the spine or architecture unless the
+     author wants the full ladder.
 
    Two stages route the same in every phase, elaboration or not:
    - **`next.stage` is `check`**: scenes wait on the gate. Have the author run
