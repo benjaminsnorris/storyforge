@@ -134,7 +134,9 @@ spends nothing.
 **Marking a drafted scene on its PR.** `write --session` drafts onto a
 branch with a draft PR. Mark the scenes there, as you marked the voice
 rounds, then run `storyforge revise --marks-from-pr N` (first with
-`--dry-run`) on that branch, pulled to the PR's head:
+`--dry-run`) on that branch, pulled to the PR's head, with nothing
+uncommitted under `scenes/` (the run checks all three). Even the dry run
+needs the book's voice.
 
 - A scene file holds a paragraph per line, so a line comment marks its
   paragraph. Quote the words you mean (a `>` line, or "words in quotes"
@@ -144,18 +146,23 @@ rounds, then run `storyforge revise --marks-from-pr N` (first with
   this`, `yes`, `love this` or `perfect`: a keep.
 - A `suggestion` block is your own wording: it's applied as written,
   before the reviser runs, and committed on its own ("Apply the author's
-  suggestions on <id>"); an empty one cuts the line. Nothing rewrites it,
-  and other comments on its lines are left out. Give one suggestion per
-  comment.
+  suggestions on <id>"); an empty one cuts the commented lines. Nothing
+  rewrites it, and other comments on its lines are left out. Give one
+  suggestion per comment, and keep any illustration marker it covers (one
+  that would remove a marker is left out). Its comment's other words are
+  shown, not sent.
 - A comment that's outdated, on a line that no longer says what it said,
   on a blank line or an illustration marker, or on another file is left
   out and named. Review bodies and conversation comments are listed, not
   sent: they aren't tied to a line.
 
-Only your comments count (never a bot's or a review agent's). The revision
+Only the PR author's comments count (a bot's, or anyone else's, are left
+out); a tool that comments with your GitHub login counts as you. The revision
 commits and pushes on the PR's branch, so the next round of marks goes on
 the same PR. Each scene's record names the comments it acted on (your
-changes and suggestions), and the next run leaves those out; keeps stay
+suggestions, and the changes the reviser rewrote or kept, saying why), and
+the next run leaves those out, naming them; a change it didn't answer, or
+a revision rolled back, is sent again; keeps stay
 examples while their lines still match. `--since TIME` also leaves out
 comments made before a time. A run with nothing left to send exits 1.
 
