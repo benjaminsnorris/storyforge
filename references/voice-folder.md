@@ -141,7 +141,10 @@ needs the book's voice.
 - A scene file holds a paragraph per line, so a line comment marks its
   paragraph. Quote the words you mean (a `>` line, or "words in quotes"
   at the start or end of the comment) to mark just those; a comment over
-  several lines marks them all.
+  several lines marks them all. The reviser rewrites only what you marked
+  (the quoted words' sentences, or the lines), and never a keep inside it,
+  so to rework a passage (an ending that jumps ahead, say), select all of
+  its lines, not just the first.
 - The rest of the comment is your note. No note, or `keep`, `more like
   this`, `yes`, `love this` or `perfect`: a keep.
 - A `suggestion` block is your own wording: it's applied as written,
@@ -157,7 +160,10 @@ needs the book's voice.
   sent: they aren't tied to a line.
 
 Only the PR author's comments count (a bot's, or anyone else's, are left
-out); a tool that comments with your GitHub login counts as you. The revision
+out); a tool that comments with your GitHub login counts as you. Only the
+comment that starts a thread is a mark: replies ("Applied in ...", and
+your own follow-ups) are left out and named, unless they hold a
+suggestion. Put a new note in its own comment. The revision
 commits and pushes on the PR's branch, so the next round of marks goes on
 the same PR. Each scene's record names the comments it acted on (your
 suggestions, and the changes the reviser rewrote or kept, saying why), and
@@ -264,7 +270,9 @@ samples; running the command is your choice.
 the PR's head, and refuses if your copy differs (edits or suggestions
 committed on GitHub): pull the branch first, so the marks are read against
 the same text. Only the PR author's comments count; a bot's or anyone
-else's are left out and counted in a NOTE. General comments made before
+else's are left out and counted in a NOTE, and so are replies in a thread
+(only its first comment, or a reply with a suggestion, is a mark). General
+comments made before
 the round was committed are left out (an earlier round's reactions). A
 line comment is placed only when its line still says what GitHub showed;
 one on a line since changed is counted and left out. A PR with none of its
