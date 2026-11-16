@@ -635,3 +635,46 @@ def test_migrate_preserves_readme_and_notes_in_scenes_dir(project_dir, monkeypat
     # the-opening.md should NOT be in scenes/ (archived)
     assert not os.path.isfile(os.path.join(scenes_dir, 'the-opening.md')), \
         'the-opening.md should have been archived'
+
+
+def test_step8_copies_in_essays_a_prose_book_never_had(project_dir):
+    """#702: init no longer gives a prose book the bible essays, so the move
+    to a graphic novel copies each in from its template (title filled in)
+    before appending the Visual note; a retired essay is still left alone."""
+    from storyforge.bibles import ESSAYS
+    ref = os.path.join(project_dir, 'reference')
+    for name in ESSAYS:
+        path = os.path.join(ref, name)
+        if os.path.exists(path):
+            os.remove(path)
+    assert step8_add_bible_visual_notes(project_dir, dry_run=True)
+    assert not any(os.path.exists(os.path.join(ref, n)) for n in ESSAYS)   # dry run
+    modified = step8_add_bible_visual_notes(project_dir, dry_run=False)
+    assert sorted(os.path.basename(m) for m in modified) == sorted(ESSAYS)
+    assert len(modified) == len(set(modified))
+    for name in ESSAYS:
+        with open(os.path.join(ref, name), encoding='utf-8') as f:
+            text = f.read()
+        assert 'PROJECT_TITLE' not in text
+    with open(os.path.join(ref, 'character-bible.md'), encoding='utf-8') as f:
+        assert 'Visual' in f.read()
+
+
+def test_step8_says_the_rows_belong_in_an_empty_template(project_dir, capsys):
+    """#705 review SF-M8: a prose book's facts are rows; the template copied
+    in for the script is empty, and that is said, with the count. The dry run
+    reports the same files the real run writes."""
+    from storyforge import bibles
+    from storyforge.bibles import ESSAYS
+    ref = os.path.join(project_dir, 'reference')
+    for name in ESSAYS:
+        if os.path.exists(os.path.join(ref, name)):
+            os.remove(os.path.join(ref, name))
+    bibles.add_facts(project_dir, [{'type': 'world', 'subject': '',
+                                    'statement': 'Ink remembers'}], command='test')
+    dry = step8_add_bible_visual_notes(project_dir, dry_run=True)
+    assert '(dry run)' in capsys.readouterr().out
+    real = step8_add_bible_visual_notes(project_dir, dry_run=False)
+    assert sorted(dry) == sorted(real)
+    out = capsys.readouterr().out
+    assert 'world-bible.md is the empty template, and the book has 1 plan fact(s)' in out

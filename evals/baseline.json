@@ -2019,10 +2019,143 @@
       "started_at": "2026-11-15T20:04:04+00:00",
       "status": "pass",
       "suite": "voice-austen-control"
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 4,
+        "input_tokens": 6757,
+        "output_tokens": 5243,
+        "replayed_calls": 4,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0659,
+        "usd_spent": 0.0
+      },
+      "description": "`bibles convert` (#702) on synthetic essays with labelled facts, lines and interpretation",
+      "duration_s": 0.01,
+      "error": null,
+      "frozen": false,
+      "gates": [
+        {
+          "actual": 1.0,
+          "name": "fact_recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 0.9796,
+          "name": "type_accuracy",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.9796
+        },
+        {
+          "actual": 0.9655,
+          "name": "subject_accuracy",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.9655
+        },
+        {
+          "actual": 2,
+          "name": "secrets_kept",
+          "op": "==",
+          "passed": true,
+          "threshold": 2
+        },
+        {
+          "actual": 2,
+          "name": "open_kept",
+          "op": "==",
+          "passed": true,
+          "threshold": 2
+        },
+        {
+          "actual": 0,
+          "name": "interpretation_rows",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "interpretation_notes",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "speech_descriptions",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 1.0,
+          "name": "voice_recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 0,
+          "name": "description_as_voice",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "invented_lines",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0.5,
+          "name": "note_recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.5
+        }
+      ],
+      "metrics": {
+        "description_as_voice": 0,
+        "fact_recall": 1.0,
+        "facts_labelled": 49,
+        "interpretation_notes": 0,
+        "interpretation_rows": 0,
+        "invented_lines": 0,
+        "left_out": 0,
+        "note_recall": 0.5,
+        "open_kept": 2,
+        "open_labelled": 2,
+        "rows": 56,
+        "secrets_kept": 2,
+        "secrets_labelled": 2,
+        "speech_descriptions": 0,
+        "subject_accuracy": 0.9655,
+        "type_accuracy": 0.9796,
+        "voice_recall": 1.0
+      },
+      "mode": "replay",
+      "notes": [
+        "model: claude-sonnet-5-5",
+        "missed (0 of 49): ",
+        "found with the wrong type or subject: c22 (world, -)",
+        "interpretation kept as rows: none",
+        "at or past the trust bar on every measure"
+      ],
+      "stale": null,
+      "started_at": "2026-11-16T04:22:26+00:00",
+      "status": "pass",
+      "suite": "bibles-convert"
     }
   ],
   "schema_version": 1,
   "status": "stale",
   "storyforge_version": "1.179.0",
-  "suite_count": 19
+  "suite_count": 20
 }

@@ -337,6 +337,50 @@ layer caught (qs-017, qs-021), so the two together caught 14. Its
 E5 and recheck-set error on this base); the next full `--baseline` rewrites
 it the same.
 
+## Converting a bible essay (#702)
+
+`bibles-convert` measures `storyforge bibles convert` (`storyforge.bibles_convert`:
+one structured call turns a character, world or systems bible essay into
+fact rows, the lines it quotes and terse notes) on a labelled set:
+`fixtures/bibles-convert/`, an invented book (*The Salt Ledger*) written for
+the suite, so no real prose is in it. Its three essays are shaped like the
+essays the elaborate stages wrote before #657, interpretation and
+descriptions of speech included. `labels.json` gives, per essay, the facts
+it settles (keyword groups a row's statement must hold, the type and subject
+a right row has, which are secrets and which are open questions), its
+interpretation (traps), the lines it quotes, its descriptions of speech, and
+what resists rows. The suite reports `fact_recall`, `type_accuracy`,
+`subject_accuracy`, `secrets_kept`, `open_kept`, `interpretation_rows` and
+`interpretation_notes` (drafting reads bible-notes.md whole, so a note leaks
+as a row does), `speech_descriptions` (a description of speech kept as a
+fact or note), `voice_recall`, `description_as_voice`, `invented_lines`
+(lines the reply gave that the essay doesn't quote: code leaves them out)
+and `note_recall`, each gated on its recorded value (`FLOORS`, #488); how a
+run compares with the bar for importing unread (`TRUST_BAR`) is a note.
+
+**Recorded 2026-11-15** on sonnet 5.5, the command's default (`MODEL_TASK`,
+the evaluation tier), for $0.07: every one of 49 labelled facts found,
+type right on 48, subject right on 28 of 29 scored, both secrets as
+knowledge rows, both open questions as `?` rows, every quoted line kept and
+none invented, no interpretation and no description of speech in a row or
+a note; one of the two notes came back as a world fact (`note_recall`
+0.5). A first recording ($0.07), before the prompt said interpretation and
+descriptions of speech aren't notes or facts either, put the essay's arc,
+POV plan and "mirror" framing in two notes and four descriptions of speech
+in trait rows; the prompt and a code rule (`SPEECH_CATEGORIES`) changed for
+it, and the scoring then counted notes too. Four labels were corrected
+after that first reading, each a matcher fault, never a widened answer: a
+combined ferry fact a `without` word excluded, "the next" for "the next
+night", a relationship's subject as either side, and a world fact's subject
+left unscored. Three essays are a small set: it shows the prompt's rules
+hold on essays shaped like the old stages', not how a long real bible
+converts, which is why `convert` writes rows for review by default.
+
+Not frozen (three cheap calls): a change to the prompt or schema is a
+recording miss, re-recorded with `--mode auto --suite bibles-convert`.
+With `FLOORS` unset and no recordings, a replay is unavailable (`stale`),
+not an error.
+
 ## Writing in the voice (#654)
 
 `voice-austen` is the Austen reference voiceprint's test 6 (plan B7): can

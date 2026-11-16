@@ -96,6 +96,19 @@ class TestInit:
         assert (project / 'reference' / 'voice' / 'book.md').is_file()
         assert (project / 'reference' / 'voice' / 'anchors').is_dir()
 
+    def test_a_prose_book_gets_no_bible_essays(self, tmp_path, git_env):
+        """#702: a new prose book's bibles are rows, so init copies no
+        character, world or systems bible essay (a graphic novel keeps
+        them; `migrate-medium` copies them in)."""
+        from storyforge import bibles
+        project = tmp_path / 'book'
+        assert cmd_init.main([str(project), '--title', 'Beowulf', '--no-commit']) == 0
+        for name in bibles.ESSAYS:
+            assert name in cmd_init.GN_ONLY
+            assert not (project / 'reference' / name).exists(), name
+        assert (project / 'reference' / 'commitments.csv').is_file()
+        assert bibles.unconverted(str(project)) == []
+
     def test_the_translator_is_named(self, tmp_path, git_env):
         # beowulf B-001: "Beowulf by Anonymous (1909)" for Gummere's translation
         meta = tmp_path / 'meta.json'

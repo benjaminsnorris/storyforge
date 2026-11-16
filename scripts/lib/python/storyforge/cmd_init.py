@@ -39,8 +39,15 @@ import sys
 
 from storyforge.common import PROJECT_TITLE, get_plugin_dir, install_signal_handlers, log
 
-# Graphic-novel-only templates that a prose project does not get.
-GN_ONLY = {'canon', 'visual-style.md'}
+# Graphic-novel-only templates that a prose project does not get: the
+# canon tree and art direction, and the character, world and systems bible
+# essays (#702). A prose book's bibles are rows (`storyforge.bibles`: facts
+# in the ledger, character-voices.csv, bible-notes.md), written by the
+# elaborate stages; an essay copied in would sit unfilled beside them. A
+# graphic novel keeps the essays, since its script reads their Visual
+# sections (`migrate-medium` copies them in for a prose book it converts).
+GN_ONLY = {'canon', 'visual-style.md',
+           'character-bible.md', 'world-bible.md', 'systems-bible.md'}
 
 PIPELINE_HEADER = ('cycle|started|status|evaluation|scoring|plan|review|'
                    'recommendations|summary')

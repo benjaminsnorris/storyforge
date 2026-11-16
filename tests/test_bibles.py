@@ -755,6 +755,106 @@ class TestOtherReaders:
 
 def test_migrate_medium_says_a_retired_essay_got_no_note(facts_project_dir, capsys):
     from storyforge.cmd_migrate_medium import step8_add_bible_visual_notes
-    assert step8_add_bible_visual_notes(facts_project_dir, dry_run=True) == []
+    modified = step8_add_bible_visual_notes(facts_project_dir, dry_run=True)
+    # the retired essay isn't brought back; an essay the book never had is (#702)
+    assert 'character-bible.md' not in {os.path.basename(m) for m in modified}
     out = capsys.readouterr()
     assert 'character-bible.md is retired' in out.out + out.err
+
+
+# ---------------------------------------------------------------------------
+# Voice lines from the anchors (#702)
+# ---------------------------------------------------------------------------
+
+ANCHOR = ('pov: tessa-merrin\n\n'
+          '"The survey was wrong before you touched it," said Dorren, not looking up.\n\n'
+          'Tessa set the lamp down. "Then somebody wanted it wrong," I said.\n\n'
+          '"Ask the Archivist what he keeps in the cellar," Kael said, and laughed.\n\n'
+          '"Nobody here will say it aloud," muttered somebody behind them.\n')
+
+
+def _anchor(project_dir, name, text):
+    path = _ref(project_dir, 'voice', 'anchors', name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _write(path, text)
+
+
+class TestAnchorVoices:
+    def test_lines_are_the_anchors_words_by_their_tags(self, project_dir):
+        _anchor(project_dir, 'tessa.md', ANCHOR)
+        lines, notes = bibles.anchor_voices(project_dir)
+        got = {(v.character, v.line) for v in lines if v.source.endswith('tessa.md')}
+        assert ('dorren-hayle', 'The survey was wrong before you touched it,') in got
+        # "I said" is the anchor's pov: character's
+        assert ('tessa-merrin', 'Then somebody wanted it wrong,') in got
+        assert ('kael-maren', 'Ask the Archivist what he keeps in the cellar,') in got
+        # an untagged line (no character named) is no one's
+        assert not any('aloud' in line for _, line in got)
+
+    def test_every_line_is_in_an_anchor_as_written(self, project_dir):
+        _anchor(project_dir, 'tessa.md', ANCHOR)
+        lines, _ = bibles.anchor_voices(project_dir)
+        assert lines and all(v.line.rstrip(',') in ANCHOR for v in lines)
+
+    def test_no_anchor_is_said(self, tmp_path):
+        lines, notes = bibles.anchor_voices(str(tmp_path))
+        assert lines == [] and any('no anchor' in n for n in notes)
+
+    def test_an_anchor_without_a_tagged_line_is_said(self, project_dir):
+        lines, notes = bibles.anchor_voices(project_dir)   # the fixture's has no dialogue
+        assert lines == []
+        assert any('dorren-at-the-survey.md: no line' in n for n in notes)
+
+    def test_the_command_adds_them_once(self, project_dir, monkeypatch, capsys):
+        from storyforge import cmd_bibles
+        _anchor(project_dir, 'tessa.md', ANCHOR)
+        monkeypatch.chdir(project_dir)
+        cmd_bibles.main(['voices', '--dry-run'])
+        assert not os.path.exists(_ref(project_dir, bibles.VOICES_FILE))
+        cmd_bibles.main(['voices', '--no-commit'])
+        voices, problems = bibles.read_voices(project_dir)
+        assert not problems and 'kael-maren' in voices
+        before = _read(_ref(project_dir, bibles.VOICES_FILE))
+        cmd_bibles.main(['voices', '--no-commit'])   # a re-run adds nothing
+        assert _read(_ref(project_dir, bibles.VOICES_FILE)) == before
+        out = capsys.readouterr()
+        assert 'Voices: 0 line(s) added' in out.out + out.err
+
+
+class TestNoStageWritesVoices:
+    def test_the_prompts_ask_for_no_lines(self, project_dir, plugin_dir):
+        from storyforge import prompts_elaborate as pe
+        for prompt in (pe.build_spine_prompt(project_dir, plugin_dir, 'seed'),
+                       pe.build_architecture_prompt(project_dir, plugin_dir)):
+            assert '```character-voices-csv' not in prompt
+            assert "Don't write lines for the characters" in prompt
+
+
+class TestAnchorVoicesReview:
+    """#705's review (T-8, T-9, SF-L2)."""
+
+    def test_a_line_two_tags_claim_is_no_ones_and_said(self, project_dir):
+        _anchor(project_dir, 'both.md', '"I know it well enough by now," said Dorren.\n\n'
+                '"I know it well enough by now," said Kael.\n')
+        lines, notes = bibles.anchor_voices(project_dir)
+        assert not [v for v in lines if v.source.endswith('both.md')]
+        assert any('has tags naming dorren-hayle, kael-maren; left out' in n for n in notes)
+
+    def test_a_pov_that_names_no_one_is_said(self, project_dir):
+        _anchor(project_dir, 'mine.md', 'pov: somebody\n\n"Nothing here is mine at all," I said.\n')
+        lines, notes = bibles.anchor_voices(project_dir)
+        assert not [v for v in lines if v.source.endswith('mine.md')]
+        assert any("pov 'somebody' is no character" in n for n in notes)
+
+    def test_a_pov_by_alias_claims_i_said(self, project_dir):
+        _anchor(project_dir, 'tessa.md', 'pov: Tessa\n\n"Nothing here is mine at all," I said.\n')
+        lines, _ = bibles.anchor_voices(project_dir)
+        assert ('tessa-merrin', 'Nothing here is mine at all,') in \
+            {(v.character, v.line) for v in lines}
+
+    def test_a_long_speech_is_left_out_whole(self, project_dir):
+        long = ' '.join(['word'] * 80)
+        _anchor(project_dir, 'long.md', f'"{long}," said Dorren.\n')
+        lines, notes = bibles.anchor_voices(project_dir)
+        assert not [v for v in lines if v.source.endswith('long.md')]
+        assert any('cut short' in n for n in notes)

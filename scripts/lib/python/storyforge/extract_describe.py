@@ -2,7 +2,9 @@
 
 Phases 0-4 build the scene layer. Phase 5 writes what sits above it
 (spine, architecture, themes and motifs, story summary and architecture,
-the character, world and systems bibles, the voice (reference/voice/)) from
+the character, world and systems bibles as rows (#702: facts in the ledger,
+voice lines from the prose, notes; `_rows_gate`, `_write_rows`), the voice
+(reference/voice/)) from
 what those phases found, describing the book as written, and (5g, with
 no model) `timeline.md` and the chapter map. Plan: docs/plans/2026-10-30-extract-upper-layers.md.
 
@@ -1535,7 +1537,8 @@ def _sample_line(inner: str) -> str:
     return head.rstrip() + ' …'
 
 
-def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list[str]:
+def _speech(text: str, names: Sequence[str], others: Sequence[str] = (),
+            min_words: int = 4) -> list[str]:
     """Quoted speech in `text` attributed to one of `names`:
 
     - a speech tag against the quote: "said NAME" or "NAME said"
@@ -1552,9 +1555,11 @@ def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list
       turn back from war Achilles awed ...:" the last phrase has no speech
       verb, so Achilles, the one spoken to, gets nothing.
 
-    Names follow `_name_pattern` (never a possessive). Lines under four
-    words are left out; one over _MAX_LINE_CHARS is cut to its opening
-    (`_sample_line`)."""
+    Names follow `_name_pattern` (never a possessive). Lines under
+    `min_words` words (four: a voice sample wants a sentence) are left out;
+    one over _MAX_LINE_CHARS is cut to its opening (`_sample_line`).
+    `bibles_convert.quotations` passes 1: it checks who says a line, "Bah!"
+    included."""
     from .prose_analysis import dialogue_spans
     names = [n for n in names if n.strip()]
     others = [n for n in others if n.strip()]
@@ -1588,7 +1593,7 @@ def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list
     spans = dialogue_spans(text)
     out = []
     for i, (start, end, inner) in enumerate(spans):
-        if len(inner.split()) < 4:
+        if len(inner.split()) < min_words:
             continue
         prev_end = spans[i - 1][1] if i else 0
         before = text[max(start - _ATTRIBUTION_CHARS, prev_end):start]
@@ -1888,60 +1893,75 @@ def parse_characters(response: str, chars: list[CharacterEvidence]) -> dict:
     return data
 
 
-def render_character_bible(reply: dict, chars: list[CharacterEvidence], title: str,
-                           header: str) -> str:
-    """`character-bible.md` in the template's sections, described:
-    "Expansion Opportunities" is "What the text leaves open". Appearances,
-    established facts and sample lines are the evidence's, not the model's."""
-    ev = {c.id: c for c in chars}
+#: The character fields 5d's reply has that are facts about one person
+#: (#702): each a `trait` row whose category is the field. `voice` (a
+#: description of speech, never a row: a voice is lines, #657), `relational`
+#: (the relationships are rows of their own), the arc and `pov` (what the
+#: book does with them, interpretation) aren't rows
+_TRAIT_FIELDS = ('role', 'physical', 'want', 'need', 'wound', 'lie', 'flaw_as_strength')
+#: The most of a character's tagged lines 5d keeps as their voice lines
+VOICE_LINES = 3
+
+
+def _statement(text: str) -> str:
+    """A reply's field as a fact's statement: one line, no `|`."""
+    from .common import csv_safe
+    return csv_safe(' '.join((text or '').split())).strip()
+
+
+def _left_open(who: str, item: str) -> str:
+    """A note of what the text leaves open, never ending in `?`: in a
+    finished book it is the text's, not a gap in a plan, and `plan_gaps`
+    lists every notes line ending in `?` as one."""
+    text = _statement(item).rstrip('?').rstrip()
+    return f'{who}: left open in the text: {text}' if who else f'Left open in the text: {text}'
+
+
+def _voice_line(line: str) -> str:
+    """Why a sampled line can't be a voice line, or ''. A voice line is the
+    author's words as written (#702), so a speech the sampler cut short
+    (`_sample_line`'s ` …`) isn't one, nor a line with a `|`."""
+    if line.endswith(' \u2026'):
+        return 'longer than a sampled line, so cut short'
+    if '|' in line:
+        return 'has a `|`'
+    return ''
+
+
+def character_rows(reply: dict, chars: list[CharacterEvidence],
+                   ) -> tuple[list[dict], list[tuple[str, str]], list[str], list[str]]:
+    """5d's parsed reply as rows (#702): the facts (`bibles.add_facts`
+    items: a `trait` for each field of `_TRAIT_FIELDS` the text shows, a
+    `relationship` for each relationship, naming both people), the voice
+    lines ((character id, line): up to `VOICE_LINES` of the lines the
+    evidence found tagged with their name in the book's own prose, never
+    the model's; a line cut short or with a `|` is left out), notes (what
+    the text leaves open about each), and what was left out, for the
+    report."""
     name = {c.id: c.name for c in chars}
-
-    def appears(c: CharacterEvidence) -> str:
-        pov = f'POV in {c.pov_scenes} scene(s); ' if c.pov_scenes else ''
-        return f'{pov}on stage in {c.on_stage}, from `{c.first}` to `{c.last}`'
-
-    out = [header, f'# {title or "Untitled"} -- Character Bible', '', '---', '',
-           '## Primary Characters', '']
-    for tier in CHARACTER_TIERS:
-        if tier == 'secondary':
-            out += ['---', '', '## Secondary Characters', '']
-        for c in (x for x in reply['characters'] if x['tier'] == tier):
-            e = ev[c['id']]
-            out += ['---', '', f'### {e.name}', '', f'**Role:** {c["role"]}', '',
-                    f'**Appears:** {appears(e)}', '']
-            if tier == 'primary':
-                out += ['**Physical:**', f'- {_shown(c["physical"])}', '',
-                        '**Psychological:**',
-                        f'- **Want:** {_shown(c["want"])}', f'- **Need:** {_shown(c["need"])}',
-                        f'- **Wound:** {_shown(c["wound"])}', f'- **Lie:** {_shown(c["lie"])}',
-                        f'- **Flaw-as-Strength:** {_shown(c["flaw_as_strength"])}', '',
-                        '**Voice Fingerprint:**', f'- {_shown(c["voice"])}', '']
-                if e.lines:
-                    out += ['**Lines tagged with their name:**',
-                            *[f'- "{line}"' for line in e.lines[:3]], '']
-                out += ['**Relational:**', f'- {_shown(c["relational"])}', '']
-            else:
-                out += ['**Profile:**', f'- {_shown(c["physical"])}',
-                        f'- Voice: {_shown(c["voice"])}',
-                        f'- Relationships: {_shown(c["relational"])}', '']
-            if e.facts:
-                out += ['**Established facts:**', *[f'- {f}' for f in e.facts], '']
-            if tier == 'primary':
-                out += ['**Arc:**', f'1. {c["arc_start"]}', f'2. {_shown(c["arc_turns"])}',
-                        f'3. {c["arc_end"]}', '']
-            out += ['**What the text leaves open:**', _bullets(c['left_open']), '']
-    out += ['---', '', '## Relationship Map', '']
-    out += [f'- **{name[r["a"]]}** and **{name[r["b"]]}**: {r["nature"]}'
-            for r in reply['relationships']] or ['- (none described)']
-    out += ['', '---', '', '## Character Voice Notes', '']
-    out += [f'**{name[c["id"]]}:** {_shown(c["voice"])}' + '\n'
-            for c in reply['characters'] if c['tier'] == 'primary']
-    out += ['---', '', '## POV Decisions', '']
-    out += [f'- **{name[p["id"]]}:** {ev[p["id"]].pov_scenes} scene(s). {p["gives"]}'
-            for p in reply['pov']] or ['- No character has a point of view recorded in scenes.csv.']
-    if reply['pov_excluded']:
-        out += [f'- **No POV:** {reply["pov_excluded"]}']
-    return '\n'.join(out) + '\n'
+    ev = {c.id: c for c in chars}
+    facts, voices, notes, left = [], [], [], []
+    for c in reply['characters']:
+        for field_ in _TRAIT_FIELDS:
+            text = _statement(c[field_])
+            if text:
+                facts.append({'type': 'trait', 'subject': c['id'], 'statement': text,
+                              'category': field_})
+        kept = 0
+        for line in ev[c['id']].lines:
+            problem = _voice_line(line)
+            if problem:
+                left.append(f'{c["id"]}: a sampled line {line[:40]!r} {problem}; not a voice '
+                            f'line')
+            elif kept < VOICE_LINES:
+                voices.append((c['id'], line))
+                kept += 1
+        notes += [_left_open(name[c['id']], item) for item in c['left_open'] if item.strip()]
+    for r in reply['relationships']:
+        facts.append({'type': 'relationship', 'subject': r['a'], 'category': 'relationship',
+                      'statement': _statement(f'{name[r["a"]]} and {name[r["b"]]}: '
+                                              f'{r["nature"]}')})
+    return facts, voices, notes, left
 
 
 # --- 5e: world ----------------------------------------------------------------
@@ -2137,51 +2157,64 @@ def parse_world(response: str, ev: WorldEvidence) -> dict:
     return data
 
 
-def render_world_bible(reply: dict, ev: WorldEvidence, header: str) -> str:
-    """`world-bible.md` in the template's sections, described: "Open
-    Questions" is "What the text leaves open". Location scene counts are
-    code's."""
-    name = {loc.id: loc for loc in ev.locations}
-    out = [header, f'# {ev.title or "Untitled"} -- World Bible', '', '## Overview', '',
-           reply['overview'], '', '---', '', '## Geography & Setting', '', '### The Macro',
-           _shown(reply['macro']), '', '### Key Locations', '']
+#: The world bible's sections whose fields are a place's feel, not rules:
+#: notes (bible-notes.md), never rows (#702)
+_FEEL_SECTIONS = ('senses',)
+
+
+def world_rows(reply: dict, ev: WorldEvidence,
+               ) -> tuple[list[dict], list[dict], list[str]]:
+    """5e's parsed reply as rows (#702): the world facts (`world` rows: the
+    macro setting, each place's description and occupants with the place's
+    id as subject, each section field the text shows with the field as its
+    category, each institution), the system's facts (its name and what it
+    is, who can use it, how it works, each rule, its costs and its social
+    side; or one fact saying the book has none and why), and notes (the
+    overview, the senses, institutions' notes, how the system feels, what
+    the text leaves open).
+    The locations' `function` is what a place does for the story,
+    interpretation, so it isn't a row."""
+    world, system, notes = [], [], []
+
+    def fact(rows: list[dict], text: str, category: str, subject: str = '') -> None:
+        text = _statement(text)
+        if text:
+            rows.append({'type': 'world', 'subject': subject, 'statement': text,
+                         'category': category})
+    if _statement(reply['overview']):
+        notes.append(_statement(reply['overview']))
+    fact(world, reply['macro'], 'setting')
     for loc in reply['locations']:
-        e = name[loc['id']]
-        out += [f'**{e.name}** ({e.scenes} scene(s))',
-                f'- {loc["description"]}', f'- Function: {_shown(loc["function"])}',
-                f'- Occupants: {_shown(loc["occupants"])}', '']
-    if ev.facts:
-        out += ['### Established Facts', *[f'- {f}' for f in ev.facts], '']
-    for section, (heading, fields) in _SECTION_TITLES.items():
-        out += ['---', '', f'## {heading}', '']
-        for key, sub in fields.items():
-            out += [f'### {sub}', _shown(reply[section][key]), '']
-        if section == 'power' and reply['institutions']:
-            out += ['### Institutions', '']
-            out += [f'**{i["name"]}**\n- {_shown(i["function"])}\n- {_shown(i["notes"])}\n'
-                    for i in reply['institutions']]
-        if section == 'technology':
-            system = reply['system']
-            out += ['### Formal System',
-                    (f'{system["name"]}: see `systems-bible.md`.' if system['present'] == 'yes'
-                     else f'None. {system["what_it_is"]}'), '']
-    out += ['---', '', '## What the text leaves open', '', _bullets(reply['open_questions'])]
-    return '\n'.join(out) + '\n'
-
-
-def render_systems_bible(reply: dict, title: str, header: str) -> str:
-    """`systems-bible.md`: the system the book keeps, or a stub saying it
-    has none and why, so a reader sees "checked, not applicable"."""
+        fact(world, loc['description'], 'place', loc['id'])
+        fact(world, loc['occupants'], 'occupants', loc['id'])
+    for section, keys in _WORLD_SECTIONS.items():
+        for key in keys:
+            text = _statement(reply[section][key])
+            if not text:
+                continue
+            if section in _FEEL_SECTIONS:
+                notes.append(f'{key}: {text}')
+            else:
+                fact(world, text, key)
+    for inst in reply['institutions']:
+        fact(world, f'{inst["name"]}: {inst["function"]}' if inst['function'] else inst['name'],
+             'institution')
+        if _statement(inst['notes']):
+            notes.append(f'{_statement(inst["name"])}: {_statement(inst["notes"])}')
+    notes += [_left_open('', q) for q in reply['open_questions'] if q.strip()]
     s = reply['system']
-    out = [header, f'# {title or "Untitled"} -- Systems Bible', '']
-    if s['present'] != 'yes':
-        return '\n'.join(out + ['No formal system: ' + s['what_it_is'], '']) + '\n'
-    out += ['---', '', f'## System 1: {s["name"]}', '', '### What It Is', s['what_it_is'], '',
-            '### Who Can Use It', _shown(s['who']), '', '### How It Works', _shown(s['how']), '',
-            '### Rules', '', *[f'{i}. {r}' for i, r in enumerate(s['rules'], 1)], '',
-            '### Costs & Limits', _shown(s['costs']), '', '### How It Feels', _shown(s['feels']),
-            '', '### Social Dimension', _shown(s['social']), '']
-    return '\n'.join(out) + '\n'
+    if s['present'] == 'yes':
+        fact(system, f'{s["name"]}: {s["what_it_is"]}', 'system')
+        for key in ('who', 'how', 'costs', 'social'):
+            fact(system, f'{s["name"]}, {key}: {s[key]}' if s[key] else '', key)
+        for rule in s['rules']:
+            fact(system, f'{s["name"]}: {rule}' if rule.strip() else '', 'rule')
+        if _statement(s['feels']):
+            notes.append(f'{s["name"]} feels: {_statement(s["feels"])}')
+    else:
+        fact(system, f'The book has no formal system (magic, technology) with rules: '
+                     f'{s["what_it_is"]}', 'system')
+    return world, system, notes
 
 
 # --- 5f: voice --------------------------------------------------------------
@@ -3106,15 +3139,195 @@ def run_pitch(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutc
     return 'written'
 
 
+def _ours(rows: list[dict], name: str) -> list[dict]:
+    """The ledger rows extract phase 5 wrote in essay `name`'s place, any
+    status (an author may have rejected one)."""
+    from . import bibles
+    return [r for r in rows if (r.get('introduced_by') or '') == bibles.extract_writer(name)]
+
+
+def _rows_gate(run: Run, essays: list[str], step: str) -> bool:
+    """Whether a bibles step may write its rows (#702: a prose book's bibles
+    are rows, `storyforge.bibles`). Reports why not otherwise. For each of
+    `essays` (`bibles.ESSAYS` names):
+
+    - the essay in reference/ is the author's (or edited, unreadable, a
+      link, or the provenance can't tell): skipped, never written beside;
+      `bibles convert` turns it into rows;
+    - retired to the archive with no rows of phase 5's: the author's
+      conversion; skipped. (One phase 5 archived itself, under `--force`,
+      has its rows, and is treated as below);
+    - an earlier phase 5's essay, unchanged: `--force` writes rows and
+      moves it to the archive (`_retire_extracted`), as `--force`
+      regenerated it before; without, skipped;
+    - the ledger holds bible facts of its kind another writer made (an
+      import, a stage, the author): skipped even with `--force`, which
+      never replaces the author's;
+    - rows an earlier phase 5 made (`bibles.extract_writer`): `--force`
+      adds what the ledger doesn't already state; without, skipped.
+
+    A step writes all its essays' rows or none.
+    """
+    from . import bibles, ledger
+    try:
+        rows = ledger.load(run.project_dir)
+    except ledger.LedgerError as e:
+        run.reports.append(f'{step} skipped: the ledger can\'t be read ({e}), so its bible '
+                           f'rows can\'t be written')
+        return False
+    why = []
+    for name in essays:
+        rel = f'reference/{name}'
+        state = file_state(run.project_dir, rel, run.provenance)
+        ours = _ours(rows, name)
+        types = bibles.ESSAY_TYPES[name]
+        theirs = [r for r in rows if bibles.is_bible_fact(r) and r['type'] in types
+                  and not (r.get('introduced_by') or '').startswith(bibles.EXTRACT_WRITER + ':')]
+        if state == 'retired' and not ours:
+            why.append(f'{rel} is retired to {bibles.ARCHIVE_DIR}/: its rows are the '
+                       f'author\'s conversion')
+        elif state == 'extracted' and not run.force:
+            why.append(f'{rel} is an earlier extraction\'s essay; --force writes rows in its '
+                       f'place and moves it to {bibles.ARCHIVE_DIR}/')
+        elif state not in ('missing', 'empty', 'template', 'extracted', 'retired'):
+            why.append(f'{rel} is the author\'s essay ({state}); extraction writes no rows '
+                       f'beside it (`storyforge bibles convert {name}` turns it into rows)')
+        if theirs:
+            why.append(f'the ledger already has {len(theirs)} plan fact(s) of {name}\'s kind '
+                       f'that extraction didn\'t write; it adds none beside them')
+        elif ours and not run.force:
+            why.append(f'{len(ours)} row(s) of {name} were extracted earlier; --force adds '
+                       f'what they don\'t already state')
+    if why:
+        run.reports.extend(f'{step}: {w}' for w in why)
+        run.reports.append(f'{step} skipped')
+        return False
+    return True
+
+
+def _still_open(run: Run, essays: list[str], step: str) -> bool:
+    """`_rows_gate` again after the call: the author may have written an
+    essay or rows while it ran. False, with a report, when they did: the
+    step stops before writing, and so do the steps after it."""
+    if _rows_gate(run, essays, step):
+        return True
+    run.reports.append(f'{step} stopped part-way: a bible changed while it ran, so its '
+                       f'rows were not written; check it and run it again')
+    return False
+
+
+def _write_rows(run: Run, step: str, facts: dict[str, list[dict]],
+                voices: list[tuple[str, str]], notes: list[str]) -> int:
+    """Write a bibles step's rows: each essay's facts to the ledger as its
+    extraction (`bibles.extract_writer`), the voice lines to
+    character-voices.csv, the notes to bible-notes.md; then move an earlier
+    extraction's essay (unchanged since) to the archive. Returns how many
+    facts, lines and notes were added.
+
+    Every write is checked first (`dry_run`, the notes too), so an item that
+    can't be written writes nothing. A fact phase 5 wrote before that the
+    author has since rejected or superseded is never added again; one it
+    wrote before that this reply no longer states is reported (possibly
+    stale; it isn't removed). Every note `add_facts` and `add_voices` make
+    is reported.
+
+    Raises DescribeFailed when a write fails, naming what was written
+    before it: nothing is guessed."""
+    from . import bibles, ledger
+    from .common import ReferenceDocError
+    rows = ledger.load(run.project_dir)
+    todo = {}
+    for name, items in facts.items():
+        ours = _ours(rows, name)
+        refused = {ledger.fact_key(r) for r in ours
+                   if r.get('status') in ('rejected', 'superseded')}
+        keep = [i for i in items if ledger.fact_key(i) not in refused]
+        if len(keep) < len(items):
+            run.reports.append(f'{step}: {len(items) - len(keep)} {name} row(s) the author '
+                               f'rejected or superseded were not added again')
+        stated = {ledger.fact_key(i) for i in items}
+        stale = [r['id'] for r in ours if r.get('status') == 'binding'
+                 and ledger.fact_key(r) not in stated]
+        if stale:
+            run.reports.append(f'{step}: {len(stale)} {name} row(s) an earlier extraction '
+                               f'wrote that this one doesn\'t state (possibly stale; check '
+                               f'them): {_first(stale)}')
+        todo[name] = keep
+    note_text = '\n'.join(f'- {n}' for n in notes)
+    done: list[str] = []
+    try:
+        for name, items in todo.items():
+            bibles.add_facts(run.project_dir, items, command='extract',
+                             writer=bibles.extract_writer(name), dry_run=True)
+        if voices:
+            bibles.add_voices(run.project_dir, voices, dry_run=True)
+        if notes:
+            bibles.add_notes(run.project_dir, note_text, dry_run=True)
+        added = 0
+        for name, items in todo.items():
+            ids, fact_notes = bibles.add_facts(run.project_dir, items, command='extract',
+                                               writer=bibles.extract_writer(name))
+            added += len(ids)
+            done.append(f'{len(ids)} {name} fact(s)')
+            run.reports.extend(f'{step}: {n}' for n in fact_notes)
+            log(f'  {len(ids)} {name} fact(s) added to reference/commitments.csv')
+        if voices:
+            voiced, voice_notes = bibles.add_voices(run.project_dir, voices)
+            added += voiced
+            done.append(f'{voiced} voice line(s)')
+            run.reports.extend(f'{step}: {n}' for n in voice_notes)
+            if voiced:
+                log(f'  {voiced} voice line(s) from the prose added to '
+                    f'reference/{bibles.VOICES_FILE}')
+        if notes:
+            noted = bibles.add_notes(run.project_dir, note_text)
+            added += noted
+            if noted:
+                log(f'  {noted} note(s) added to reference/{bibles.NOTES_FILE}')
+    except (bibles.BiblesError, ledger.LedgerError, ReferenceDocError, OSError,
+            ValueError) as e:
+        wrote = ('; written before it: ' + ', '.join(done)) if done else '; nothing was written'
+        raise DescribeFailed(f'{step}: the rows could not be written ({e}){wrote}') from e
+    for name in facts:
+        _retire_extracted(run, name, step)
+    return added
+
+
+def _retire_extracted(run: Run, name: str, step: str) -> None:
+    """Move an earlier extraction's essay (unchanged since it was written) to
+    the archive: the rows stand in for it, and two copies of the bible
+    would both be read (#702). `retire`'s notes are reported, but for the
+    one every such move has (no `bibles import --essay` conversion: phase
+    5's rows are its own)."""
+    from . import bibles, ledger
+    if file_state(run.project_dir, f'reference/{name}', run.provenance) != 'extracted':
+        return
+    try:
+        dest, notes = bibles.retire(run.project_dir, name, force=True)
+    except (bibles.BiblesError, ledger.LedgerError, OSError, ValueError) as e:
+        moved = os.path.isfile(os.path.join(run.project_dir, bibles.ARCHIVE_DIR, name))
+        run.reports.append(
+            f'WARNING: {step}: reference/{name} (an earlier extraction\'s essay) '
+            + (f'was moved to {bibles.ARCHIVE_DIR}/, but its storyforge.yaml artifact wasn\'t '
+               f'updated ({e})' if moved else
+               f'was not moved to the archive ({e}): the rows and the essay are both read '
+               f'until it is (`storyforge bibles retire {name} --force`)'))
+        return
+    run.reports.append(f'{step}: reference/{name}, an earlier extraction\'s essay, moved to '
+                       f'{dest}: the rows stand in for it')
+    run.reports.extend(f'{step}: {n}' for n in notes if not n.startswith('retired with --force'))
+
+
 def run_characters(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
-    """Step 5d: character-bible.md, from the characters the scenes put on
-    stage, their established facts and lines tagged with their name."""
-    rel = 'reference/character-bible.md'
-    if not _gate(run, [rel], '5d (character bible)'):
+    """Step 5d: the character bible as rows (#702): the facts the
+    characters the scenes put on stage show, as trait and relationship
+    facts; their lines tagged with their name in the prose, as voice lines;
+    what the text leaves open, as notes (`character_rows`)."""
+    name = 'character-bible.md'
+    if not _rows_gate(run, [name], '5d (character bible)'):
         return 'skipped'
-    chars, notes, sources = character_evidence(run.project_dir, scenes, profile=profile)
-    title, title_notes = _book_title(run.project_dir)
-    run.reports.extend(f'5d: {n}' for n in notes + title_notes)
+    chars, notes, _ = character_evidence(run.project_dir, scenes, profile=profile)
+    run.reports.extend(f'5d: {n}' for n in notes)
     if not chars:
         run.reports.append('5d skipped: no scene names a character in characters.csv, so '
                            'there is no one to describe')
@@ -3123,31 +3336,41 @@ def run_characters(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Ste
                  lambda problems: build_characters_prompt(profile, chars, problems),
                  lambda text: parse_characters(text, chars),
                  CHARACTERS_SCHEMA, CHARACTERS_MAX_TOKENS)
-    header = provenance_header(run.version, '5d', ['profile', *sources])
-    doc = render_character_bible(reply, chars, title, header)
-    return 'written' if _write_all(run, [(rel, doc)], '5d', '5d') else 'partial'
+    if not _still_open(run, [name], '5d'):
+        return 'partial'
+    facts, voices, left_open, notes = character_rows(reply, chars)
+    run.reports.extend(f'5d: {n}' for n in notes)
+    if not _write_rows(run, '5d', {name: facts}, voices, left_open):
+        run.reports.append('5d: nothing new to add (every row is in the ledger already)')
+        return 'skipped'
+    return 'written'
 
 
 def run_world(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
-    """Step 5e: world-bible.md, and systems-bible.md (the book's formal
-    system, or a stub saying it has none and why). Skipped, and said, when
-    no scene's location is in locations.csv: a world bible with no places
-    would read as a book set nowhere."""
-    rels = ['reference/world-bible.md', 'reference/systems-bible.md']
-    if not _gate(run, rels, '5e (world and systems bibles)'):
+    """Step 5e: the world and systems bibles as rows (#702): `world` facts
+    of the places, the setting, its institutions and the book's formal
+    system (or one saying it has none and why), and notes for what resists
+    rows (`world_rows`). Skipped, and said, when no scene's location is in
+    locations.csv: a world with no places would read as a book set
+    nowhere."""
+    names = ['world-bible.md', 'systems-bible.md']
+    if not _rows_gate(run, names, '5e (world and systems bibles)'):
         return 'skipped'
-    title, title_notes = _book_title(run.project_dir)
+    title, _ = _book_title(run.project_dir)
     ev, notes = world_evidence(run.project_dir, scenes, title)
-    run.reports.extend(f'5e: {n}' for n in notes + title_notes)
+    run.reports.extend(f'5e: {n}' for n in notes)
     if not ev.locations:
         run.reports.append('5e skipped: no scene is set in a place locations.csv names')
         return 'skipped'
     reply = _ask(run, 'world', lambda problems: build_world_prompt(profile, scenes, ev, problems),
                  lambda text: parse_world(text, ev), WORLD_SCHEMA, WORLD_MAX_TOKENS)
-    header = provenance_header(run.version, '5e', ['profile', *ev.sources])
-    files = [(rels[0], render_world_bible(reply, ev, header)),
-             (rels[1], render_systems_bible(reply, title, header))]
-    return 'written' if _write_all(run, files, '5e', '5e') else 'partial'
+    if not _still_open(run, names, '5e'):
+        return 'partial'
+    world, system, feel = world_rows(reply, ev)
+    if not _write_rows(run, '5e', {names[0]: world, names[1]: system}, [], feel):
+        run.reports.append('5e: nothing new to add (every row is in the ledger already)')
+        return 'skipped'
+    return 'written'
 
 
 #: How many of 5f's samples become anchors: the author's own passages,
@@ -3245,8 +3468,12 @@ WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
                  'reference/scenes.csv', 'reference/scene-intent.csv',
                  'reference/scene-briefs.csv', 'reference/themes.csv',
                  'reference/motif-taxonomy.csv', 'reference/story-summary.md',
-                 'reference/story-architecture.md', 'reference/character-bible.md',
+                 'reference/story-architecture.md',
+                 # the bibles as rows (#702), and an earlier extraction's
+                 # essays moved to the archive in their place
+                 'reference/commitments.csv', 'reference/character-voices.csv',
+                 'reference/bible-notes.md', 'reference/character-bible.md',
                  'reference/world-bible.md', 'reference/systems-bible.md',
-                 'reference/voice/',
+                 'reference/archive/', 'reference/voice/',
                  'reference/timeline.md', 'reference/chapter-map.csv',
                  'storyforge.yaml', 'working/']

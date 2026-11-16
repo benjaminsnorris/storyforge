@@ -126,10 +126,12 @@ _REFERENCE_DOCS = [
 
 
 #: How a stage writes the bibles in a prose book (#657, plan D2): facts as
-#: rows, voices as lines, terse notes only for what resists rows. The
-#: writer (`cmd_elaborate._apply_bible_block`) adds them through
-#: `bibles.add_facts`, `add_voices` and `add_notes`; a graphic novel's
-#: stages still write the essays, whose Visual sections its script reads.
+#: rows, terse notes only for what resists rows. The writer
+#: (`cmd_elaborate._apply_bible_block`) adds them through `bibles.add_facts`
+#: and `add_notes`; a graphic novel's stages still write the essays, whose
+#: Visual sections its script reads. No stage writes voice lines (#702):
+#: character-voices.csv holds lines the author wrote or chose (the anchors,
+#: `bibles.anchor_voices`), never a model's.
 BIBLE_ROWS_FORMAT = """Facts as rows, never an essay: one fact a row, each a short plain statement.
 
 ```bible-facts-csv
@@ -144,12 +146,7 @@ type|subject|statement|known_by|category
 - `category`: one word for the kind (want, need, wound, lie, age, kinship, rule, secret, ...)
 - A question the plan hasn't answered yet is a row whose statement ends in `?`; it stays on the list of gaps until it is settled
 
-How a character sounds, as two or three lines of them speaking, never a description of their speech:
-
-```character-voices-csv
-character|line
-(character id|a line they say, in quotes)
-```
+Don't write lines for the characters to say, or describe how they speak: their voices are lines the author wrote or chose, which come from the voice anchors.
 
 Only what really resists rows (a culture's feel, a history's shape), as terse notes, one per line; leave the block out when there is none:
 

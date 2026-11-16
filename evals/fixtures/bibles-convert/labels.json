@@ -1,0 +1,98 @@
+{
+  "about": "Synthetic essays for an invented book (The Salt Ledger), written for #702's bibles-convert eval: no real book's prose. A label's `all` is a list of keyword groups, each 'a|b' alternatives, every group found (lowercase, as a substring) in one fact's statement; `without` keywords must not be in it. `subject` and `types` are what a correct row has (a null subject isn't scored: the world as a whole may be blank or the island; a list is either side of a relationship); `secret` wants a knowledge fact of category secret or reveal; `open` wants a statement ending in '?'. `traps` are the essay's interpretation: a fact matching one is a leak. `voices` are the lines the essay quotes; `not_voices` are its descriptions of speech, which are neither lines nor facts (#657: a voice is lines, never a description). `notes` are what resists rows, matched in the notes.",
+  "essays": {
+    "character-bible.md": {
+      "facts": [
+        {"id": "c01", "all": ["keeper|keeps the light|keeps kessin"], "subject": "mara-voss", "types": ["trait"]},
+        {"id": "c02", "all": ["34|thirty-four"], "subject": "mara-voss", "types": ["trait"]},
+        {"id": "c03", "all": ["scar"], "subject": "mara-voss", "types": ["trait"]},
+        {"id": "c04", "all": ["renew"], "subject": "mara-voss", "types": ["trait"], "without": ["sign"]},
+        {"id": "c05", "all": ["debt"], "subject": "mara-voss", "types": ["trait"], "without": ["forty", "40", "twice"]},
+        {"id": "c06", "all": ["asleep|went out|let the light|let the lamp"], "subject": "mara-voss", "types": ["trait"]},
+        {"id": "c07", "all": ["careless"], "subject": "mara-voss", "types": ["trait"]},
+        {"id": "c08", "all": ["harbormaster|harbourmaster|harbor master"], "subject": "teodor-brack", "types": ["trait"]},
+        {"id": "c09", "all": ["tax"], "subject": "teodor-brack", "types": ["trait"]},
+        {"id": "c10", "all": ["flats", "buy|own"], "subject": "teodor-brack", "types": ["trait"]},
+        {"id": "c11", "all": ["father"], "subject": "teodor-brack", "types": ["trait"]},
+        {"id": "c12", "all": ["insur|paid for the wreck|profit"], "subject": "teodor-brack", "types": ["knowledge"], "secret": true},
+        {"id": "c13", "all": ["27|twenty-seven"], "subject": "ivo-voss", "types": ["trait"]},
+        {"id": "c14", "all": ["cutter|cuts salt|cutting salt"], "subject": "ivo-voss", "types": ["trait"]},
+        {"id": "c15", "all": ["forty|40"], "subject": "ivo-voss", "types": ["knowledge"], "secret": true},
+        {"id": "c16", "all": ["boat"], "subject": "ivo-voss", "types": ["trait"], "without": ["smuggl", "dark"]},
+        {"id": "c17", "all": ["smuggl"], "subject": "lise-anker", "types": ["trait"], "without": ["board", "caught"]},
+        {"id": "c18", "all": ["lover"], "subject": ["lise-anker", "ivo-voss"], "types": ["relationship", "knowledge"]},
+        {"id": "c19", "all": ["month"], "subject": "lise-anker", "types": ["trait"]},
+        {"id": "c20", "all": ["train|teach|taught"], "subject": ["hallam-reed", "mara-voss"], "types": ["relationship"]},
+        {"id": "c21", "all": ["blind"], "subject": "hallam-reed", "types": ["trait"]},
+        {"id": "c22", "all": ["anchor"], "subject": "hallam-reed", "types": ["trait", "knowledge"], "open": true},
+        {"id": "c23", "all": ["sister|sibling|brother"], "subject": ["mara-voss", "ivo-voss"], "types": ["relationship"]},
+        {"id": "c24", "all": ["sign"], "subject": ["teodor-brack", "mara-voss"], "types": ["relationship"]},
+        {"id": "c25", "all": ["sunday"], "subject": ["mara-voss", "hallam-reed"], "types": ["relationship"]},
+        {"id": "c26", "all": ["twice"], "subject": ["mara-voss", "ivo-voss"], "types": ["relationship", "trait"]}
+      ],
+      "traps": [
+        {"id": "ct1", "any": ["emblem", "confession", "curdled"]},
+        {"id": "ct2", "any": ["mirror"]},
+        {"id": "ct3", "any": ["restless young", "prison", "represents"]},
+        {"id": "ct4", "any": ["keeping faith", "keeping watch is not"]},
+        {"id": "ct5", "any": ["as a weight"]}
+      ],
+      "voices": [
+        {"character": "mara-voss", "line": "Forty-one steps. I've counted them every night for fifteen years."},
+        {"character": "mara-voss", "line": "The light doesn't care who's sorry."},
+        {"character": "teodor-brack", "line": "A debt is the only honest thing on this island."},
+        {"character": "ivo-voss", "line": "Everyone owes Brack something. I just owe him more interestingly."}
+      ],
+      "not_voices": ["low and careful", "clipped, practical", "terms of his ledger", "talks fast", "jokes when", "counts things"],
+      "notes": []
+    },
+    "world-bible.md": {
+      "facts": [
+        {"id": "w01", "all": ["ferry"], "subject": null, "types": ["world"]},
+        {"id": "w02", "all": ["january"], "subject": null, "types": ["world"]},
+        {"id": "w03", "all": ["storm", "november|march"], "subject": null, "types": ["world"]},
+        {"id": "w04", "all": ["forty-one|41"], "subject": "kessin-light", "types": ["world"]},
+        {"id": "w05", "all": ["flood"], "subject": "salt-flats", "types": ["world"]},
+        {"id": "w06", "all": ["cut"], "subject": "salt-flats", "types": ["world"]},
+        {"id": "w07", "all": ["board", "year"], "subject": null, "types": ["world"]},
+        {"id": "w08", "all": ["crown"], "subject": null, "types": ["world"]},
+        {"id": "w09", "all": ["lost"], "subject": null, "types": ["world"]},
+        {"id": "w10", "all": ["smuggl", "boat"], "subject": null, "types": ["world"]},
+        {"id": "w11", "all": ["doctor"], "subject": null, "types": ["world"]},
+        {"id": "w12", "all": ["store|tab"], "subject": null, "types": ["world"]},
+        {"id": "w13", "all": ["board", "smuggl"], "subject": null, "types": ["world"], "open": true},
+        {"id": "w14", "all": ["sail|mainland"], "subject": null, "types": ["world"], "without": ["ferry", "doctor", "board", "recast"]},
+        {"id": "w15", "all": ["two hundred|200"], "subject": null, "types": ["world"]}
+      ],
+      "traps": [
+        {"id": "wt1", "any": ["erasure", "the tide takes"]}
+      ],
+      "voices": [],
+      "not_voices": [],
+      "notes": [
+        {"id": "wn1", "any": ["silence"]},
+        {"id": "wn2", "any": ["forgiven", "small debts"]}
+      ]
+    },
+    "systems-bible.md": {
+      "facts": [
+        {"id": "s01", "all": ["bell", "weather|storm"], "subject": null, "types": ["world"]},
+        {"id": "s02", "all": ["seven|7"], "subject": null, "types": ["world"]},
+        {"id": "s03", "all": ["flat", "day"], "subject": null, "types": ["world"]},
+        {"id": "s04", "all": ["fog"], "subject": null, "types": ["world"]},
+        {"id": "s05", "all": ["crack|recast"], "subject": null, "types": ["world"]},
+        {"id": "s06", "all": ["sleep|the next|following night"], "subject": null, "types": ["world"]},
+        {"id": "s07", "all": ["recogni"], "subject": null, "types": ["world"]},
+        {"id": "s08", "all": ["trust"], "subject": null, "types": ["world"]}
+      ],
+      "traps": [
+        {"id": "st1", "any": ["metaphor", "grief"]}
+      ],
+      "voices": [
+        {"character": "hallam-reed", "line": "A flat bell never lies, but it never tells you twice."}
+      ],
+      "not_voices": [],
+      "notes": []
+    }
+  }
+}

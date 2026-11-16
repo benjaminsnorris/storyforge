@@ -12,7 +12,7 @@ import argparse
 import json
 
 from storyforge.common import detect_project_root, get_medium
-from storyforge.status import CRAFT_ADVISORY_SOURCE, build_status
+from storyforge.status import CRAFT_ADVISORY_SOURCE, PlanGapsRecord, build_status
 
 _STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—', 'unreadable': '!',
                'given': '✓'}
@@ -90,7 +90,27 @@ def render_human(verdict: dict) -> str:
                      f"needn't fit a framework, so these never block:")
         for row in craft:
             lines.append(f"  {row['finding']}  [{row['command']}]")
+    lines.extend(_plan_gap_lines(verdict.get('plan_gaps')))
     return '\n'.join(lines)
+
+
+def _plan_gap_lines(record: 'PlanGapsRecord | None') -> list[str]:
+    """The two-writers test's gaps (#702), as `storyforge bibles` lists
+    them: advisory, since a plan may leave a question open on purpose."""
+    if not record:
+        return []
+    from storyforge.bibles import Gap
+    gaps = [Gap(**g) for g in record['gaps']]
+    lines = []
+    if gaps:
+        lines.append(f'PLAN GAPS: {len(gaps)} place(s) two writers drafting from the plan could '
+                     f'disagree (the two-writers test; advisory, settle them or leave them '
+                     f'open on purpose):')
+        lines += [f'  {g.message()}' for g in gaps]
+    else:
+        lines.append('PLAN GAPS: none the two-writers test can see')
+    lines += [f'  NOTE: {n}' for n in record['notes']]
+    return lines
 
 
 def main(argv=None):

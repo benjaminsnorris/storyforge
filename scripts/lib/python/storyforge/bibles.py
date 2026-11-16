@@ -9,7 +9,8 @@ the world is now rows:
   `relationship` or `world`, origin `plan`, status `binding`, a registry
   `introduced_by` (never a commitment writer): `essay_writer(name)` for an
   essay's conversion (`bibles import --essay NAME`), `WRITER` for any other
-  import, `STAGE_WRITER` for an elaborate stage's. A secret or a reveal is a
+  import, `STAGE_WRITER` for an elaborate stage's, `extract_writer(name)`
+  for extract phase 5's description of a finished book (#702). A secret or a reveal is a
   `knowledge` fact with `category` `secret` or `reveal`
   (`REVEAL_CATEGORIES`); `add_facts` refuses that category on any other
   type. A blank `scene_id` means true from before the first scene; a fact
@@ -59,6 +60,9 @@ from storyforge.common import log
 WRITER = 'bibles'
 #: `introduced_by` of facts an elaborate stage writes (`cmd_elaborate`)
 STAGE_WRITER = 'elaborate'
+#: The `introduced_by` prefix of facts extract phase 5 writes for a
+#: described book (#702, `extract_writer`)
+EXTRACT_WRITER = 'extract'
 #: The types a bible's standing facts take. Never `knowledge`: a secret in
 #: the standing context gives the reveal away in the first scene
 FACT_TYPES = ('trait', 'relationship', 'world')
@@ -125,6 +129,13 @@ class Gap:
     def slug(self) -> str:
         """`ref` as a check id's tail (no spaces or dots)."""
         return re.sub(r'[^A-Za-z0-9_-]+', '-', self.ref).strip('-')
+
+
+def extract_writer(name: str) -> str:
+    """The `introduced_by` of the facts extract phase 5 writes in essay
+    `name`'s place (`extract:character-bible`, #702): phase 5's own rows,
+    which a re-run with `--force` adds to and nothing else touches."""
+    return f'{EXTRACT_WRITER}:{os.path.splitext(name)[0]}'
 
 
 def essay_writer(name: str) -> str:
@@ -807,6 +818,91 @@ def add_voices(project_dir: str, lines: list[tuple[str, str]], *,
     return len(new), notes
 
 
+@dataclass(frozen=True)
+class VoiceLine:
+    """A line a character speaks in a passage the author wrote or chose
+    (#702): `character` an id, `line` the words as written, `source` the
+    file it was found in (relative to the project)."""
+    character: str
+    line: str
+    source: str
+
+
+def anchor_voices(project_dir: str) -> tuple[list[VoiceLine], list[str]]:
+    """The lines each character speaks in the voice anchors
+    (`reference/voice/anchors/*.md`, `voice_book.read_folder`): passages the
+    author wrote or chose (`voice sample` promotes a take only when they
+    pick it; extract phase 5 takes them from the book's own prose). Never a
+    model's words: a line is quoted speech copied from the anchor.
+
+    A line is a character's when a speech tag beside it names them
+    (`extract_describe._speech`: "said Mara", "Mara said,", a lead-in
+    ending in a colon; names from characters.csv: the name, aliases and
+    the name's own words); "I said" is the anchor's `pov:` character's (by id, name or alias).
+    Lines under four words are left out, and so is a speech the sampler
+    cut short (`_sample_line`'s ` …`) or one with a `|`: a voice line is the
+    words as written. Returns the lines anchor by anchor (within one, by
+    character) and the notes: no anchors, an anchor left out, a line two
+    characters' tags both claim (left out), a line cut short, a `pov:` that
+    names no character, an anchor with no line any tag attributes.
+
+    Raises:
+        common.ReferenceDocError: the anchors or characters.csv can't be read.
+    """
+    from storyforge.common import ReferenceDocError
+    from storyforge.elaborate import _read_csv
+    from storyforge.extract_describe import _speaker_names, _speech, _voice_line
+    from storyforge.voice_book import ANCHORS_DIR, read_folder
+    folder = read_folder(project_dir)
+    notes = list(folder.skipped)
+    if not folder.anchors:
+        return [], notes + [f'no anchor in {ANCHORS_DIR}/ to take lines from (find one with '
+                            f'`storyforge voice sample`, then save the take you pick as an '
+                            f'anchor)']
+    path = _ref(project_dir, 'characters.csv')
+    try:
+        characters = [r for r in _read_csv(path) if (r.get('id') or '').strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise ReferenceDocError(path, e) from e
+    if not characters:
+        return [], notes + ['reference/characters.csv has no characters, so no line can be '
+                            'attributed to one']
+    characters = [{**c, 'id': c['id'].strip()} for c in characters]
+    names = _speaker_names(characters)
+    out: list[VoiceLine] = []
+    for anchor in folder.anchors:
+        found: dict[str, list[str]] = {}
+        pov = anchor.pov.strip().lower()
+        if pov and not any(pov in {n.lower() for n in [c['id'], *names.get(c['id'], [])]}
+                           for c in characters) and pov != 'narrator':
+            notes.append(f'{anchor.path}: pov {anchor.pov.strip()!r} is no character in '
+                         f'characters.csv, so its "I said" lines are no one\'s')
+        for c in characters:
+            own = names.get(c['id'], [])
+            if pov and pov in {n.lower() for n in [c['id'], *own]}:
+                own = own + ['I']   # a first-person anchor's "I said"
+            others = [n for o, ns in names.items() if o != c['id'] for n in ns]
+            for line in _speech(anchor.text, own, others):
+                found.setdefault(line, []).append(c['id'])
+        shared = [line for line, who in found.items() if len(set(who)) > 1]
+        for line in shared:
+            notes.append(f'{anchor.path}: {line[:50]!r} has tags naming '
+                         f'{", ".join(sorted(set(found[line])))}; left out')
+        kept = []
+        for line, who in found.items():
+            problem = _voice_line(line)
+            if len(set(who)) > 1:
+                continue
+            if problem:
+                notes.append(f'{anchor.path}: {line[:50]!r} {problem}; left out')
+            else:
+                kept.append(VoiceLine(who[0], line, anchor.path))
+        if not kept and not shared:
+            notes.append(f'{anchor.path}: no line with a speech tag naming a character')
+        out += kept
+    return out, notes
+
+
 def add_notes(project_dir: str, text: str, *, dry_run: bool = False) -> int:
     """Append `text`'s lines to bible-notes.md, leaving out blank lines
     and any line the file already has, so a re-run adds nothing; a missing
@@ -900,7 +996,8 @@ def plan_gaps(ref_dir: str) -> tuple[list[Gap], list[str]]:
                     f'aren\'t rows, so its gaps can\'t be seen'
                     + (f'; drafting and the checker read it beside {kind} plan fact(s) of its '
                        f'kind, and a contradiction between the two isn\'t seen here' if kind else '')
-                    + f' (convert it: `storyforge bibles import FILE --essay {name}`, then '
+                    + f' (convert it: `storyforge bibles convert {name}` or by hand, '
+                    f'`storyforge bibles import FILE --essay {name}`, then '
                     f'`storyforge bibles retire {name}`)')
             elif state == 'retired' and not kind:
                 notes.append(f'reference/{name} is retired but the ledger has no plan fact of '
