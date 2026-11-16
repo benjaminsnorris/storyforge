@@ -1818,6 +1818,41 @@ def split_enum_descriptions(row: dict, filename: str) -> list[str]:
     return changed
 
 
+#: A prose book's bibles as a stage writes them (#657): facts, voices, notes
+_BIBLE_BLOCKS = ('bible-facts-csv', 'character-voices-csv', 'bible-notes')
+
+
+def _apply_bible_block(project_dir: str, label: str, content: str, written: list[str]) -> None:
+    """Write one of a stage reply's bible blocks (`_BIBLE_BLOCKS`) through
+    `storyforge.bibles`: facts to the ledger as plan facts, voice lines to
+    character-voices.csv, notes appended to bible-notes.md. What can't be
+    added is an ERROR naming it, and nothing of that block is written; the
+    stage goes on (its scene rows stand)."""
+    from storyforge import bibles
+    from storyforge.prompts_elaborate import csv_block_to_rows
+    try:
+        if label == 'bible-facts-csv':
+            added, notes = bibles.add_facts(project_dir, csv_block_to_rows(content),
+                                            command='elaborate')
+            for n in notes:
+                log(f'  NOTE: {n}')
+            if added:
+                written.append(f'commitments.csv ({len(added)} plan facts)')
+        elif label == 'character-voices-csv':
+            rows = csv_block_to_rows(content)
+            before = sum(map(len, bibles.read_voices(project_dir)[0].values()))
+            for n in bibles.add_voices(project_dir, [(r.get('character', ''), r.get('line', ''))
+                                                     for r in rows]):
+                log(f'  NOTE: {n}')
+            after = sum(map(len, bibles.read_voices(project_dir)[0].values()))
+            if after > before:
+                written.append(f'{bibles.VOICES_FILE} ({after - before} lines)')
+        elif bibles.add_notes(project_dir, content):
+            written.append(f'{bibles.NOTES_FILE} (notes added)')
+    except bibles.BiblesError as e:
+        log(f'ERROR: the reply\'s {label} block wasn\'t written: {e}')
+
+
 #: storyforge.yaml `artifacts:` entries a stage's written file fills
 _ARTIFACT_FOR_FILE = {
     'story-architecture.md': 'story_architecture',
@@ -2361,6 +2396,20 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                               encoding='utf-8', newline='') as f:
                         f.write('\n'.join(l.strip() for l in lines_) + '\n')
                     written.append(f'voice-profile.csv ({len(rows)} rows)')
+
+            elif label in _BIBLE_BLOCKS:
+                if medium == 'graphic-novel':
+                    log(f'  NOTE: left out the reply\'s {label} block: a graphic novel\'s '
+                        f'bibles are its essays')
+                else:
+                    _apply_bible_block(project_dir, label, content, written)
+
+            elif label in ('character-bible', 'world-bible') and medium != 'graphic-novel':
+                # a prose book's bibles are rows now (#657); an essay still on
+                # disk is read-only reference until it's converted
+                log(f'  NOTE: left out the reply\'s {label} block: a prose book\'s bibles '
+                    f'are rows (bible-facts-csv), never an essay; reference/{label}.md '
+                    f'is unchanged')
 
             elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
                 filename = label + '.md'

@@ -81,16 +81,33 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 (all scenes)
 ```
 
-If you need to deepen the character bible with supporting characters, output:
+New facts the architecture settles: the supporting characters, the relationships between the cast (who is related to whom, who owes whom), and the rules of the world the plot depends on. Only facts not already in the reference materials above.
 
-```character-bible
-(additional character entries in the same format as existing)
+Facts as rows, never an essay: one fact a row, each a short plain statement.
+
+```bible-facts-csv
+type|subject|statement|known_by|category
+(one row per fact)
 ```
 
-If the world needs a bible, output:
+- `type`: `trait` (about one person: identity, history, want, need, wound, lie), `relationship` (between people; the statement names both), `world` (a rule of the world: magic, law, technology, institutions; `subject` empty or a place's id), or `knowledge` (a secret: `known_by` is who knows it from the start, `category` `secret`)
+- `subject`: the character's id (lowercase, hyphens: `mara-voss`), a place's id, or empty for the world
+- `statement`: the fact in a few plain words. No interpretation, no quotable sentence
+- `known_by`: only for `knowledge`, `;`-separated character ids
+- `category`: one word for the kind (want, need, wound, lie, age, kinship, rule, secret, ...)
+- A question the plan hasn't answered yet is a row whose statement ends in `?`; it stays on the list of gaps until it is settled
 
-```world-bible
-(world bible markdown)
+How a character sounds, as two or three lines of them speaking, never a description of their speech:
+
+```character-voices-csv
+character|line
+(character id|a line they say, in quotes)
+```
+
+Only what really resists rows (a culture's feel, a history's shape), as terse notes, one per line; leave the block out when there is none:
+
+```bible-notes
+- (a note)
 ```
 
 ### Rules
