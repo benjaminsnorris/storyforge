@@ -107,7 +107,8 @@ def parse_args(argv):
                              'with --keep-going. Run it again to resume')
     parser.add_argument('--stop-after', type=int, default=None, metavar='N',
                         help='With --session: stop after N scenes, for a read (default: 3 '
-                             'when the book has no prose yet, else none; 0: none)')
+                             'when the book has no prose yet, else none; 0: none). The '
+                             'cost forecast and threshold check cover those N scenes')
     parser.add_argument('--keep-going', action='store_true',
                         help='Full coaching: a scene the gate still stops on only for the '
                              'check\'s findings is committed provisionally (its facts less '
@@ -236,14 +237,25 @@ def main(argv=None):
     scene_forecast = 0.0   # a scene's share of the forecast: reserved from the re-checks
     draft_forecast = 0.0   # its drafting part: charged for a draft the CLI writes
     # A dry run forecasts too (G-027): it is how the author learns what a
-    # draft will cost before spending anything
+    # draft will cost before spending anything. A session that stops for a
+    # read is forecast for the scenes it will draft, not the whole book (#708)
+    stop_after = 0
+    forecast_count = len(pending_ids)
     if write_mode == 'session':
-        forecast = _session_forecast(project_dir, pending_ids, metadata_csv)
+        stop_after = _stop_after(project_dir, args.stop_after)
+        if stop_after:
+            forecast_count = min(stop_after, len(pending_ids))
+        forecast = _session_forecast(project_dir, pending_ids, metadata_csv,
+                                     count=forecast_count)
     else:
         forecast = _forecast(project_dir, pending_ids, metadata_csv, write_mode, coaching,
                              prior_prose)
     gated = f', ~${forecast.gate:.2f} of it the gate' if forecast.gate else ''
-    log(f'Cost forecast: ~${forecast.total:.2f} for {len(pending_ids)} scenes '
+    scope = f'{forecast_count} scenes'
+    if forecast_count < len(pending_ids):
+        scope = (f'{forecast_count} of {len(pending_ids)} scenes, stopping after '
+                 f'{stop_after} for a read')
+    log(f'Cost forecast: ~${forecast.total:.2f} for {scope} '
         f'(mode {write_mode}{gated}; {forecast.basis})')
     if args.dry_run:
         if not check_threshold(forecast.total):
@@ -251,8 +263,8 @@ def main(argv=None):
                 f'would stop before drafting. Set STORYFORGE_COST_THRESHOLD higher, or '
                 f'write fewer scenes.')
     else:
-        draft_forecast = forecast.draft / len(pending_ids)
-        scene_forecast = forecast.total / len(pending_ids)
+        draft_forecast = forecast.draft / forecast_count
+        scene_forecast = forecast.total / forecast_count
         if not check_threshold(forecast.total):
             # Nothing was drafted: exit 1, so a script or chained command
             # doesn't read the stop as a finished run
@@ -336,7 +348,7 @@ def main(argv=None):
                 outcome = _run_session_mode(
                     pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
                     dry_run=args.dry_run, budget=RunBudget(meter),
-                    stop_after=_stop_after(project_dir, args.stop_after),
+                    stop_after=stop_after,
                     scene_forecast=scene_forecast)
         elif write_mode == 'batch' and not args.dry_run:
             outcome = _run_batch_mode(
@@ -1892,8 +1904,12 @@ def _session_model(dry_run: bool) -> str:
         return model
 
 
-def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: str):
-    """`costs.WriteForecast` for a writing session (`session.forecast`)."""
+def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: str,
+                      count: int | None = None):
+    """`costs.WriteForecast` for a writing session (`session.forecast`) over
+    the first `count` of `pending_ids` in reading order (all when None): the
+    scenes a session that stops for a read will draft (#708). The story so
+    far is sized as the session sizes it, for every pending scene."""
     from storyforge import ledger, session, voice_book
     from storyforge.common import ReferenceDocError
     from storyforge.costs import WriteForecast
@@ -1916,7 +1932,7 @@ def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: st
     except RuntimeError:
         review_model = model
     draft, gate_cost, basis = session.forecast(
-        project_dir, pending_ids, model, avg, len(story.split()), system_tokens, review,
+        project_dir, pending_ids[:count], model, avg, len(story.split()), system_tokens, review,
         review_model=review_model)
     return WriteForecast(draft, gate_cost, basis)
 
