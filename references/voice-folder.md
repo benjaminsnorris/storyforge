@@ -167,8 +167,8 @@ rounds, then run `storyforge revise --marks-from-pr N` (first with
 uncommitted under `scenes/` (the run checks all three). Even the dry run
 needs the book's voice.
 
-- A scene file holds a paragraph per line, so a line comment marks its
-  paragraph. Quote the words you mean (a `>` line, or "words in quotes"
+- A scene file holds a sentence per line (an older one, a paragraph per
+  line), so a line comment marks its sentence. Quote the words you mean (a `>` line, or "words in quotes"
   at the start or end of the comment) to mark just those; a comment over
   several lines marks them all. The reviser rewrites only what you marked
   (the quoted words' sentences, or the lines), and never a keep inside it,
