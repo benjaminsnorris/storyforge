@@ -32,7 +32,9 @@ prose is cut at `MAX_SCENE_PROSE_CHARS` a scene and `MAX_SOURCE_CHARS` a
 call, and `write`'s forecast adds `COST_PER_SCENE`.
 
 A departure the version rules (`source.rules`) or the map row's treatment
-or note authorize is not a contradiction. A project without a source, in
+or note authorize is not a contradiction, nor is staging (order inside the
+scene, a speech dramatised or partly reported) that changes no outcome,
+cause or what a character knows when: the drafting prompt allows it (#658). A project without a source, in
 `free` mode, or a scene not mapped (or invented) makes no call, and the
 check says why in a note. A call that fails is a note too, never a stop:
 the consistency check stands on its own.
@@ -187,7 +189,7 @@ def build_prompt(scene_id: str, prose: str, facts: list[dict[str, str]],
                           for sid, text in earlier_sources.items()) or '(none)'
     return f"""Scene {scene_id} of a faithful adaptation is checked against its source. Rule on two lists.
 
-1. Facts: each was read from the scene's prose and will bind later scenes. Does the source contradict it? `contradicts` only when the source says otherwise (a different person, count, place, order, cause or outcome), not when the source is silent or the fact adds detail (`not-in-source`). A departure the version rules or the map's treatment or note allow is not a contradiction.
+1. Facts: each was read from the scene's prose and will bind later scenes. Does the source contradict it? `contradicts` only when the source says otherwise (a different person, count, place, order, cause or outcome), not when the source is silent or the fact adds detail (`not-in-source`). A departure the version rules or the map's treatment or note allow is not a contradiction, nor is staging: order inside the scene, or a speech dramatised or partly reported, that changes no outcome, no cause and nothing a character knows when.
 2. Contradictions: each is between this scene and an earlier scene of the adaptation. Which side does the source back? `this` when the source tells it this scene's way, `earlier` when the earlier scene's, `neither` when the source backs neither or is silent.
 
 Give each `why` in one sentence, quoting the source.
