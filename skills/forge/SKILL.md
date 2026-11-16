@@ -58,6 +58,13 @@ Before doing anything else, orient yourself:
      structure first) and `pov_gaps` (POVs of the map `book.md` says nothing
      of; `[]` when the check after the map ran clean, `null` when it didn't
      run). Show it between L2 and L3 (after L6 when `later`).
+   - `plan_gaps` — the two-writers test (#657, #702): `gaps`, each `kind`
+     (`unsettled-reveal`, `ambiguous-relationship`, `open-world-rule`,
+     `open-question`), `ref` (the fact id or `bible-notes.md line N`),
+     `subject` and `detail`; and `notes`, what it couldn't check (an essay
+     still unconverted, a file it couldn't read). Advisory: never a blocker,
+     never routed on. Mention them at a stage review as places two writers
+     could disagree; the author may leave one open on purpose.
    - In an adaptation (a `source:` block, #658) the upper rungs the author
      hasn't written, logline through architecture, read `given` once the
      source is imported and the decisions are recorded: the source and the
