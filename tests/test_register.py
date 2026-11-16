@@ -657,3 +657,13 @@ def test_complete_cycle_refuses_the_free_modes(adapted, monkeypatch):
         with pytest.raises(SystemExit) as e:
             cmd_score.main(['--complete-cycle', mode])
         assert e.value.code == 1
+
+
+def test_the_source_wins_on_what_happens_and_the_staging_is_the_writers(adapted):
+    # #658's fidelity (Ben, 2026-11-15): the prompt pushed speeches to be
+    # re-performed ("the substance of every speech")
+    from storyforge.prompts_source import drafting_section
+    text = drafting_section(adapted, 'athena-at-the-door')
+    assert 'substance of every speech' not in text and 'their order' not in text
+    assert 'what each speech does in the story' in text
+    assert 'as long as every event happens' in text

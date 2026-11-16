@@ -535,9 +535,12 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
     parts.append('Draft it while looking at the source passage below. The brief is still '
                  'the contract: where the brief, its treatment or the version rules depart '
                  'from the source, they win. Everywhere else the source wins over memory '
-                 'and over any earlier scene\'s retelling: its events, their order, who '
-                 'does what, and the substance of every speech. Never copy the '
-                 'translation\'s wording; write it in this novel\'s voice.'
+                 'and over any earlier scene\'s retelling on what happens: its events, '
+                 'who does what, and what each speech does in the story. How it is staged '
+                 'is yours: a speech can be dramatised, broken into exchange or partly '
+                 'reported rather than performed whole, and beats inside the scene can '
+                 'move, as long as every event happens and each speech\'s point lands. '
+                 'Never copy the translation\'s wording; write it in this novel\'s voice.'
                  + ' ' + REVOICE_RULE)
     cat = source.catalogue(project_dir, cfg)
     budget = DRAFT_SOURCE_MAX_WORDS
