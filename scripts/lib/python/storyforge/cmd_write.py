@@ -393,6 +393,9 @@ def main(argv=None):
         from storyforge.gate import advisory_summary
         for line in advisory_summary(project_dir, pending_ids):
             log(line)
+        bookkept = _commit_bookkeeping(project_dir, uncommitted)
+    else:
+        bookkept = True
 
     if failed:
         log(f'ERROR: {len(failed)} scene(s) not drafted:')
@@ -430,7 +433,7 @@ def main(argv=None):
             log(f'  {entry}')
         log('Fix the prose and run `storyforge check --pending`, or accept a verified '
             'contradiction with `storyforge check --accept <id>`.')
-    if failed or recheck_open or uncommitted or provisional:
+    if failed or recheck_open or uncommitted or provisional or not bookkept:
         sys.exit(1)
 
 
@@ -1507,6 +1510,39 @@ def _commit(project_dir: str, message: str, paths: list[str]) -> None:
     stays a WARNING (the commit is made) and goes in the closing summary."""
     from storyforge import git
     git.commit_or_raise(project_dir, message, paths)
+
+
+#: what a write run changes after (or besides) its scenes' commits: the cost
+#: ledger (every call), the review phase's pipeline row, review and
+#: recommendations, the drift check's cues, the logs, and the reference
+#: files the last commit's pre-commit sync left behind (scenes-review.md)
+BOOKKEEPING_PATHS = ['working/costs/', 'working/pipeline.csv', 'working/timeline-cues.csv',
+                     'working/reviews/', 'working/logs/', 'reference/']
+
+
+def _commit_bookkeeping(project_dir: str, uncommitted: list) -> bool:
+    """Commit the run's end-of-run bookkeeping (#699), on a finished run, a
+    stop for a read, and a failure alike, so the run leaves the work tree
+    as it found it. Not after a failed commit: these paths would sweep that
+    scene's files in under this message, and the closing summary already
+    says to commit them by hand. False when the bookkeeping is left
+    uncommitted: the run then exits 1."""
+    if uncommitted:
+        log('WARNING: the run\'s bookkeeping (cost ledger, pipeline row, reviews, logs) is '
+            'not committed either, since a commit failed: commit it with the rest.')
+        return False
+    working = os.path.join(project_dir, 'working')
+    recs = sorted(f'working/{f}' for f in (os.listdir(working) if os.path.isdir(working)
+                                           else [])
+                  if f.startswith('recommendations') and f.endswith('.md'))
+    try:
+        _commit(project_dir, 'Write: run bookkeeping (costs, pipeline, reviews)',
+                BOOKKEEPING_PATHS + recs)
+    except CommitError as e:
+        log(f'ERROR: the run\'s bookkeeping is not committed: {e}. Commit it by hand '
+            f'(`git status`), and push.')
+        return False
+    return True
 
 
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,

@@ -595,3 +595,98 @@ def test_a_session_dry_run_spends_nothing(project_dir, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert 'Cost forecast:' in out and "the writer's standing context is" in out
     assert '# Next: The Finest Cartographer (act1-sc01)' in out
+
+
+# --- end-of-run bookkeeping (#699) ---
+
+def _git(cwd, *args):
+    import subprocess
+    return subprocess.run(['git', *args], cwd=cwd, check=True, capture_output=True,
+                          text=True).stdout
+
+
+@pytest.mark.parametrize('outcome, code', [
+    ('stopped', 0),      # stopped after N scenes for a read
+    ('finished', 0),
+    ('failed', 1),       # a scene the gate stopped on
+])
+def test_a_session_leaves_its_bookkeeping_committed(project_dir, monkeypatch, outcome, code):
+    """A real `write --session` left the cost ledger, the pipeline row, the
+    timeline cues and scenes-review.md modified and uncommitted (#699): the
+    run commits them before it exits, whatever it ended with."""
+    from storyforge import cmd_write, costs
+    from storyforge.costs import WriteForecast
+    import shutil
+    # a book's own .gitignore, as init writes it (working/logs/ is ignored)
+    shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'gitignore'),
+                os.path.join(project_dir, '.gitignore'))
+    _git(project_dir, 'init', '-q', '-b', 'storyforge/write-test')
+    _git(project_dir, 'config', 'user.email', 't@example.com')
+    _git(project_dir, 'config', 'user.name', 'T')
+    _git(project_dir, 'add', '-A')
+    _git(project_dir, 'commit', '-q', '-m', 'start')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+    monkeypatch.setattr(cmd_write, 'create_branch', lambda *a, **k: None)
+    monkeypatch.setattr(cmd_write, 'ensure_branch_pushed', lambda *a, **k: None)
+    monkeypatch.setattr(cmd_write, 'create_draft_pr', lambda *a, **k: None)
+    monkeypatch.setattr(cmd_write, '_held_up_front', lambda *a, **k: {})
+    monkeypatch.setattr(cmd_write, '_session_forecast',
+                        lambda *a: WriteForecast(draft=1.0, gate=0.0, basis='test'))
+    monkeypatch.setattr(costs, 'check_threshold', lambda *a, **k: True)
+    monkeypatch.setattr(cmd_write, 'check_threshold', lambda *a, **k: True)
+
+    def append(rel, line):
+        path = os.path.join(project_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+
+    def session(*a, **k):
+        # what a session leaves behind past its scenes' own commits
+        append('working/costs/ledger.csv', 'a|draft|1.00')
+        append('reference/scenes-review.md', '- act1-sc01: drafted, 210 words')
+        failed = ['act1-sc02 (did not pass the gate)'] if outcome == 'failed' else []
+        return cmd_write.DraftOutcome(1, 210, failed)
+    monkeypatch.setattr(cmd_write, '_run_session_mode', session)
+
+    def drift(pd, ids):
+        append('working/timeline-cues.csv', 'act1-sc01|day 1')
+    monkeypatch.setattr('storyforge.timeline.drift_check', drift)
+
+    def review(kind, pd, pr=''):
+        append('working/pipeline.csv', '1|drafting|complete')
+        append('working/recommendations.md', '# Next steps')
+    monkeypatch.setattr(cmd_write, 'run_review_phase', review)
+    monkeypatch.setattr(cmd_write, 'print_summary', lambda *a, **k: None)
+
+    argv = ['--session', '--coaching', 'full', '--force', 'act1-sc01']
+    if outcome == 'stopped':
+        argv += ['--stop-after', '1']
+    try:
+        cmd_write.main(argv)
+        exited = 0
+    except SystemExit as e:
+        exited = e.code or 0
+    assert exited == code
+    assert _git(project_dir, 'status', '--porcelain') == ''
+    assert 'Write: run bookkeeping' in _git(project_dir, 'log', '-1', '--format=%s')
+
+
+def test_bookkeeping_is_not_committed_after_a_failed_commit(project_dir, monkeypatch, capsys):
+    """The bookkeeping paths would sweep the uncommitted scene's files in
+    under the wrong message: left for the author, said, and the run fails."""
+    from storyforge import cmd_write
+    monkeypatch.setattr(cmd_write, '_commit', lambda *a: pytest.fail('committed'))
+    assert cmd_write._commit_bookkeeping(project_dir, ['act1-sc01 (git failed)']) is False
+    assert 'bookkeeping' in capsys.readouterr().out
+
+
+def test_a_failed_bookkeeping_commit_is_an_error(project_dir, monkeypatch, capsys):
+    from storyforge import cmd_write
+
+    def boom(*a):
+        raise cmd_write.CommitError('the commit failed: index.lock')
+    monkeypatch.setattr(cmd_write, '_commit', boom)
+    assert cmd_write._commit_bookkeeping(project_dir, []) is False
+    assert "ERROR: the run's bookkeeping is not committed" in capsys.readouterr().out
