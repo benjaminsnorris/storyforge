@@ -921,6 +921,124 @@ class TestMigratePipelineCsv:
         migrate_pipeline_csv(str(tmp_path))
         assert not (tmp_path / 'working' / 'pipeline.csv').exists()
 
+    def test_old_evaluate_header_keeps_the_start_time(self, tmp_path):
+        """#709: a file `evaluate` created had `timestamp`, not `started`."""
+        working = tmp_path / 'working'
+        working.mkdir()
+        csv_path = working / 'pipeline.csv'
+        csv_path.write_text('cycle|status|evaluation|plan|revision|timestamp\n'
+                            '1|complete|eval-20260101-100000|||'
+                            '2026-01-01T10:00:00\n')
+        migrate_pipeline_csv(str(tmp_path))
+        rows = [l.split('|') for l in csv_path.read_text().splitlines()]
+        row = dict(zip(rows[0], rows[1]))
+        assert len(rows[1]) == 9
+        assert row['started'] == '2026-01-01T10:00:00'
+        assert row['status'] == 'complete'
+        assert row['evaluation'] == 'eval-20260101-100000'
+
+
+class TestPipelineOldEvaluateRows:
+    """#709: rows `evaluate` wrote positionally for its old six-column header
+    into the nine-column file. The exact shape is repaired and named; a row
+    that only looks like it is reported and left alone."""
+
+    TEEN = ('1|evaluating|revising|||2026-11-08T09:28:34|'
+            'pipeline-review-20261108-132610.md|recommendations-1.md\n')
+
+    def _project(self, tmp_path, rows, eval_dirs=()):
+        working = tmp_path / 'working'
+        working.mkdir()
+        for d in eval_dirs:
+            (working / 'evaluations' / d).mkdir(parents=True)
+        path = working / 'pipeline.csv'
+        path.write_text(PIPELINE_EXPECTED + '\n' + ''.join(rows))
+        return path
+
+    def _plan(self, tmp_path):
+        return cmd_cleanup.plan_pipeline_csv(
+            str(tmp_path), cmd_cleanup.DiskFacts(str(tmp_path)))
+
+    def _rows(self, path):
+        lines = path.read_text().splitlines()
+        header = lines[0].split('|')
+        return [dict(zip(header, l.split('|'))) | {'_n': len(l.split('|'))}
+                for l in lines[1:]]
+
+    def test_the_broken_row_is_repaired_under_its_columns(self, tmp_path):
+        path = self._project(tmp_path, [self.TEEN],
+                             eval_dirs=['eval-20261108-092834'])
+        plan = self._plan(tmp_path)
+        assert len(plan.changes) == 1
+        assert 'cycle(s) 1' in plan.summary.would
+        plan.apply()
+        assert path.read_text().splitlines()[1] == (
+            '1|2026-11-08T09:28:34|revising|eval-20261108-092834|||'
+            'pipeline-review-20261108-132610.md|recommendations-1.md|')
+        assert self._plan(tmp_path).changes == ()
+
+    def test_no_evaluation_directory_leaves_it_blank_and_says_so(self, tmp_path):
+        path = self._project(tmp_path, [self.TEEN])
+        plan = self._plan(tmp_path)
+        assert 'evaluation blank' in plan.changes[0].would
+        assert ('no working/evaluations/eval-20261108-092834/'
+                in plan.summary.did)
+        plan.apply()
+        (row,) = self._rows(path)
+        assert row['_n'] == 9
+        assert row['started'] == '2026-11-08T09:28:34'
+        assert row['evaluation'] == ''
+        assert row['plan'] == ''
+        assert row['review'] == 'pipeline-review-20261108-132610.md'
+
+    def test_a_row_still_holding_its_evaluation_keeps_it(self, tmp_path):
+        """`status` never written: the `eval-` name is still in its cell."""
+        path = self._project(
+            tmp_path, ['2|evaluating|eval-20261109-100000|||'
+                       '2026-11-09T10:00:05\n'])
+        self._plan(tmp_path).apply()
+        (row,) = self._rows(path)
+        assert row['status'] == 'evaluating'
+        assert row['evaluation'] == 'eval-20261109-100000'
+        assert row['started'] == '2026-11-09T10:00:05'
+        assert row['_n'] == 9
+
+    def test_good_rows_are_untouched(self, tmp_path):
+        good = ('1|2026-11-08T16:05:05|complete|eval-20261108-160505|||'
+                'pipeline-review-20261115-192146.md|recommendations-1.md|\n')
+        path = self._project(tmp_path, [good])
+        before = path.read_text()
+        plan = self._plan(tmp_path)
+        assert plan.changes == () and plan.summary is None
+        plan.apply()
+        assert path.read_text() == before
+
+    def test_a_near_miss_is_reported_and_left_alone(self, tmp_path):
+        odd = '3|evaluating|revising|||not-a-time|x.md\n'
+        path = self._project(tmp_path, [odd])
+        before = path.read_text()
+        plan = self._plan(tmp_path)
+        assert plan.changes == ()
+        assert 'cycle(s) 3' in plan.summary.would
+        assert 'left as they are' in plan.summary.would
+        plan.apply()
+        assert path.read_text() == before
+
+    def test_the_summary_prints_in_a_real_run(self, tmp_path, monkeypatch,
+                                              capsys):
+        """A real run prints changes only with --verbose; the repair of the
+        author's data is said either way."""
+        self._project(tmp_path, [self.TEEN])
+        monkeypatch.setattr(cmd_cleanup, 'detect_project_root',
+                            lambda: str(tmp_path))
+        monkeypatch.setattr(cmd_cleanup, 'ensure_on_branch',
+                            lambda *a, **k: None)
+        monkeypatch.setattr(cmd_cleanup, '_commit_cleanup', lambda *a: True)
+        cmd_cleanup.main([])
+        out = capsys.readouterr().out
+        assert 'their cells were moved under their columns' in out
+        assert 'fill it in by hand' in out
+
 
 # ============================================================================
 # report_csv_schema
