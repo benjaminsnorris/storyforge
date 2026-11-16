@@ -359,22 +359,63 @@ def test_an_extracted_anchor_keeps_paragraphs_and_stops_at_a_paragraph():
 # --- where the voice stage sits, and the check after the map (#656) ---
 
 @pytest.mark.parametrize('text, want', [
-    (None, ('first', '')),                              # no key-decisions.md
-    ('# Decisions\n\nnarrator_pov: off\n', ('first', '')),
-    ('voice_stage: later\n', ('later', '')),
-    ('- **`voice_stage`:** `first`\n', ('first', '')),
-    ('<!-- voice_stage: later -->\nvoice_stage: first\n', ('first', '')),
+    (None, 'first'),                                     # no key-decisions.md
+    ('# Decisions\n\nnarrator_pov: off\n', 'first'),
+    ('voice_stage: later\n', 'later'),
+    ('- **`voice_stage`:** `first`\n', 'first'),
+    # CR-3/SF-1: the forms real key-decisions files use
+    ('**voice_stage**: later\n', 'later'),
+    ('- **voice_stage:** later\n', 'later'),
+    ('voice_stage: "later"\n', 'later'),
+    ("voice_stage: 'later'\n", 'later'),
+    ('Voice_Stage: Later\n', 'later'),
+    ('* voice_stage: later (structure first, Ben 2026-11-15)\n', 'later'),
+    ('- voice_stage: later — structure first\n', 'later'),
+    # SF-7: a comment, one line or several, isn't read
+    ('<!-- voice_stage: later -->\nvoice_stage: first\n', 'first'),
+    ('<!--\nvoice_stage: later\n-->\n', 'first'),
 ])
 def test_the_voice_stage_setting(tmp_path, text, want):
     if text is not None:
         _write(str(tmp_path / 'reference' / 'key-decisions.md'), text)
-    assert vb.stage_setting(str(tmp_path)) == want
+    assert vb.stage_setting(str(tmp_path)) == (want, '')
 
 
-def test_a_voice_stage_setting_it_cant_take_is_first_and_said(tmp_path):
-    _write(str(tmp_path / 'reference' / 'key-decisions.md'), 'voice_stage: whenever\n')
+@pytest.mark.parametrize('line', [
+    'voice_stage: whenever', 'voice_stage:', 'voice stage: later', 'voice_stage later',
+    '- **voice_stage**: maybe later'])
+def test_a_line_naming_the_key_it_cant_read_is_said(tmp_path, line):
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'), f'{line}\n')
     when, problem = vb.stage_setting(str(tmp_path))
-    assert when == 'first' and "'whenever' is not one of first, later" in problem
+    assert when == 'first'
+    assert f"can't read {line!r}" in problem and 'The voice stage is first' in problem
+
+
+def test_an_unreadable_line_doesnt_undo_a_good_one(tmp_path):
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'),
+           'voice_stage: later\nvoice stage: soon\n')
+    when, problem = vb.stage_setting(str(tmp_path))
+    assert when == 'later' and "can't read 'voice stage: soon'" in problem
+
+
+def test_prose_about_the_voice_stage_is_not_a_setting(tmp_path):
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'),
+           'We found the voice stage useful.\n')
+    assert vb.stage_setting(str(tmp_path)) == ('first', '')
+
+
+def test_the_last_voice_stage_line_wins_and_a_change_is_said(tmp_path):
+    # SF-2: key-decisions.md is added to over time
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'),
+           'voice_stage: later\n\n## Later\n\nvoice_stage: first\n')
+    when, problem = vb.stage_setting(str(tmp_path))
+    assert when == 'first' and 'disagree' in problem and 'the last one, first' in problem
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'),
+           'voice_stage: later\nvoice_stage: later\n')
+    assert vb.stage_setting(str(tmp_path)) == ('later', '')
+
+
+def test_an_unreadable_key_decisions_file_is_first_and_said(tmp_path):
     _write(str(tmp_path / 'reference' / 'key-decisions.md'), b'voice_stage: \xff\n')
     when, problem = vb.stage_setting(str(tmp_path))
     assert when == 'first' and "can't be read" in problem
@@ -383,7 +424,7 @@ def test_a_voice_stage_setting_it_cant_take_is_first_and_said(tmp_path):
 def _map(pd, povs, statuses=None):
     _write(os.path.join(pd, 'reference', 'characters.csv'),
            'id|name|aliases\nlady-ann|Lady Ann Vale|the Widow\nbo-tan|Bo Tan|\n'
-           'cy|Cy|\n')
+           'cy|Cy|\nwill-hart|Will Hart|\nana-reyes|Captain Ana Reyes|\n')
     statuses = statuses or ['mapped'] * len(povs)
     rows = ''.join(f's{i}|{len(povs) - i}|{p}|{st}\n'
                    for i, (p, st) in enumerate(zip(povs, statuses)))
@@ -395,12 +436,41 @@ def test_pov_gaps_lists_the_povs_book_md_doesnt_name_in_reading_order(tmp_path):
     _map(pd, ['lady-ann', 'Bo Tan', 'Cy', 'Omniscient narrator', 'Bo Tan', ''])
     # reading order is by seq (reversed here); each POV once
     assert vb.pov_gaps(pd, '') == ['Bo Tan', 'Omniscient narrator', 'Cy', 'lady-ann']
-    # an alias, a hyphenated id with spaces, the narrator: named
-    assert vb.pov_gaps(pd, 'The widow keeps her counsel. Bo. The narrator is far.') == ['Cy']
-    assert vb.pov_gaps(pd, 'lady ann; Bo Tan; Cy; narrator') == []
-    # the first word of a name counts, a title's doesn't, nor part of a word
-    assert 'lady-ann' in vb.pov_gaps(pd, 'Lady Macbeth.')
-    assert 'Cy' in vb.pov_gaps(pd, 'Cyril spoke.')
+    # an alias, a hyphenated id with spaces in any case, the narrator: named
+    assert vb.pov_gaps(pd, 'the Widow keeps her counsel. Bo Tan. The narrator is far.') \
+        == ['Cy']
+    assert vb.pov_gaps(pd, 'Lady ann; bo tan; Cy; narrator') == []
+
+
+@pytest.mark.parametrize('notes, pov', [
+    # CR-4/SF-6/T-1: a first name alone, or a common word, doesn't name
+    ('Will she ever learn?', 'Will Hart'),
+    ('The captain gives orders.', 'Captain Ana Reyes'),
+    ('Ana watches.', 'Captain Ana Reyes'),
+    ('Lady Macbeth.', 'lady-ann'),
+    ('Cyril spoke.', 'Cy'),
+    # names and aliases are as written: case counts (an id with spaces, any case)
+    ('the widow', 'lady-ann'),
+    # a narrator only where book.md doesn't say there's none
+    ('There is no narrator: every scene is close.', 'narrator'),
+    ('Not a narrator in sight.', 'narrator'),
+])
+def test_pov_gaps_doesnt_count_a_near_miss_as_named(tmp_path, notes, pov):
+    pd = str(tmp_path)
+    _map(pd, [pov])
+    assert vb.pov_gaps(pd, notes) == [pov]
+
+
+@pytest.mark.parametrize('notes, pov', [
+    ('Will Hart is close.', 'Will Hart'),
+    ('Captain Ana Reyes, at a distance.', 'Captain Ana Reyes'),
+    ('will-hart: close', 'Will Hart'),
+    ('No scene is without a narrator; the narrator is the bard.', 'narrator'),
+])
+def test_pov_gaps_counts_a_full_name_id_or_narrator(tmp_path, notes, pov):
+    pd = str(tmp_path)
+    _map(pd, [pov])
+    assert vb.pov_gaps(pd, notes) == []
 
 
 def test_pov_gaps_skips_cut_and_merged_scenes_and_reads_book_md(tmp_path):
@@ -417,3 +487,13 @@ def test_pov_gaps_skips_cut_and_merged_scenes_and_reads_book_md(tmp_path):
 
 def test_pov_gaps_without_a_map_is_empty(tmp_path):
     assert vb.pov_gaps(str(tmp_path), 'anything') == []
+
+
+@pytest.mark.parametrize('name', ['characters.csv', 'scenes.csv'])
+def test_pov_gaps_on_a_file_it_cant_read_is_a_reference_doc_error(tmp_path, name):
+    # SF-5: a bad byte was a traceback
+    pd = str(tmp_path)
+    _map(pd, ['Cy'])
+    _write(os.path.join(pd, 'reference', name), b'id|name\n\xff|x\n')
+    with pytest.raises(ReferenceDocError, match=name):
+        vb.pov_gaps(pd, 'Cy')

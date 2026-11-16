@@ -8,7 +8,7 @@ No LLM, no writes. Pure over project files.
 """
 
 import os
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from storyforge.scoring_levels import (
     LEVEL_NAMES, blocking_failed, counts_against_rung, is_advisory_failure, score_all_levels,
@@ -20,6 +20,9 @@ from storyforge.common import (
     parse_story_summary, read_yaml_field,
 )
 from storyforge.elaborate import _read_csv
+
+if TYPE_CHECKING:
+    from storyforge import voice_book
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
 PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
@@ -42,7 +45,8 @@ ELABORATE_STAGE = {
 # The voice rung (#596, moved up by #656): a prose book's voice
 # (`voice_book.resolve`: reference/voice/book.md and an anchor, or an author
 # voice repo). Not a floor-checked ladder level; the verdict's `voice` record,
-# shown between L2 and L3. Where it sits (`voice_book.stage_setting`):
+# shown between L2 and L3 by default, after L6 with `voice_stage: later`.
+# Where it sits (`voice_book.stage_setting`):
 #
 # - `first` (the default, plan decision 12): once the prose tier is solid
 #   and before drafting, a book without its voice gets `voice` as the phase
@@ -50,19 +54,47 @@ ELABORATE_STAGE = {
 #   from how far, decides which scenes exist and whose eyes they're in. A
 #   soft default: `voice_stage: later` in key-decisions.md does structure
 #   first.
-# - `later`: the voice waits for drafting, as before #656.
+# - `later`: the voice waits for drafting, as before #656, and the check
+#   after the map is only ever a NOTE.
 # - Either way, drafting without it is a `voice` blocker (the phase and
 #   `next` before drafting, or `then` while scenes wait on the gate; once
 #   every scene is drafted, the blocker alone).
 # - The short second check after the map: with the voice found and the map
 #   solid, a POV of the map's that book.md says nothing of
-#   (`voice_book.pov_gaps`) makes `voice` the phase and `next` before the
-#   briefs are solid, and a NOTE after.
+#   (`voice_book.pov_gaps`) makes `voice` the phase and `next` before any
+#   brief is written or scene drafted (CR-2: not merely while the briefs
+#   rung is thin), and a NOTE otherwise.
 #
 # A graphic novel's script has its own voice files, so it has no voice rung.
 
 #: the structural rungs the voice comes before by default (#656)
 _BEFORE_VOICE_FIRST = ('spine', 'architecture', 'scene-map', 'briefs')
+
+#: the voice record's states: a rung's, and 'unreadable' (a file or the
+#: `voice:` block can't be read)
+VoiceState = Literal['solid', 'thin', 'not_started', 'unreadable']
+
+
+class VoiceRecord(TypedDict):
+    """The verdict's `voice` (#656). `pov_gaps`: the POVs of the map book.md
+    says nothing of, `[]` when the check after the map ran clean, None when
+    it didn't run (no voice, no solid map, or a file it couldn't read)."""
+    name: str
+    state: VoiceState
+    detail: str
+    when: 'voice_book.VoiceStage'
+    pov_gaps: list[str] | None
+
+
+def _book_text(project_dir: str) -> str:
+    """book.md's text ('' when missing, empty, the template or unreadable:
+    an unreadable one is said by `resolve`)."""
+    from storyforge import voice_book
+    from storyforge.common import ReferenceDocError
+    try:
+        return voice_book.read_folder(project_dir).notes
+    except ReferenceDocError:
+        return ''
 
 #: what status recommends for drafting (Storyforge's unattended drafting
 #: passes --keep-going, Ben 2026-11-04)
@@ -412,7 +444,7 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     # #656: by default the voice comes first, once the prose tier is solid,
     # with a short check after the map (the comment at _BEFORE_VOICE_FIRST).
     voice_blocker = None
-    voice_record = None
+    voice_record: VoiceRecord | None = None
     voice_next: dict | None = None
     notes: list[str] = []
     if medium != MEDIUM_GRAPHIC_NOVEL:
@@ -429,27 +461,39 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         if problem:
             notes.append(problem)
         found = voice.kind == 'ok'
-        map_solid = any(r['name'] == 'scene-map' and r['state'] == 'solid' for r in ladder)
-        gaps: list[str] = []
-        if found and map_solid:
+        rung = {r['name']: r['state'] for r in ladder}
+        # None: the check after the map didn't run (no voice, no map yet,
+        # or it couldn't read a file, said in a note); [] ran and is clean
+        gaps: list[str] | None = None
+        if found and rung.get('scene-map') == 'solid':
             try:
                 gaps = voice_book.pov_gaps(project_dir)
             except ReferenceDocError as e:
                 notes.append(f'the voice check after the map could not run: {e}')
+        if found and not _book_text(project_dir):
+            # the author repo is the voice; book.md has no text of the book's
+            notes.append(f'the voice comes from the author repo, but {voice_book.BOOK_FILE} has '
+                         f'no text yet: the book\'s narrator stance, people and tense belong '
+                         f'there (the architecture and map prompts follow the stance only '
+                         f'from book.md, and the check after the map reads it)')
         voice_record = {
             'name': VOICE_STAGE,
-            'state': ('solid' if found else
-                      'not_started' if voice.kind == 'missing' else 'thin'),
+            'state': ('solid' if found else 'not_started' if voice.kind == 'missing'
+                      else 'unreadable' if voice.kind == 'unreadable' else 'thin'),
             'detail': '' if found else voice.detail,
             'when': when,
             'pov_gaps': gaps,
         }
-        if phase in _BEFORE_VOICE_FIRST:
-            if not found and when == voice_book.STAGE_FIRST:
-                voice_next = voice_step('first', voice.detail)
-            elif found and phase == 'briefs' and gaps:
-                voice_next = voice_step('check', gaps=gaps)
-        elif phase in ('draft', 'evaluate') and gaps:
+        # CR-2: before the briefs means no brief written and no scene
+        # drafted, not a briefs rung that's thin in a book already drafting
+        _stage, drafted, _total = draft_stage(project_dir)
+        pre_briefs = (phase == 'briefs' and rung.get('briefs') == 'not_started'
+                      and not drafted)
+        if phase in _BEFORE_VOICE_FIRST and not found and when == voice_book.STAGE_FIRST:
+            voice_next = voice_step('first', voice.detail)
+        elif gaps and pre_briefs and when == voice_book.STAGE_FIRST:
+            voice_next = voice_step('check', gaps=gaps)
+        elif gaps:
             notes.append(f'{voice_book.BOOK_FILE} says nothing of {len(gaps)} POV(s) of the '
                          f'map: {", ".join(gaps)}. Say how each one\'s scenes are told '
                          f'(the voice check after the map)')
@@ -554,8 +598,8 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'phase_declared': declared,
         'phase_matches_yaml': matches,
         'ladder': ladder,
-        # #656: the voice, between the prose tier and the spine: `{name,
-        # state, detail, when, pov_gaps}` (`when` 'first' or 'later'); None
+        # #656: the voice (`VoiceRecord`), between the prose tier and the
+        # spine by default, after the briefs with `voice_stage: later`; None
         # for a graphic novel
         'voice': voice_record,
         'next': nxt,

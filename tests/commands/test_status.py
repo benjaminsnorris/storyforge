@@ -104,7 +104,7 @@ def test_build_status_prose_solid_points_to_the_voice_then_spine(tmp_path):
     assert v['then']['command'] == 'storyforge elaborate --stage spine'
     assert v['voice'] == {'name': 'voice', 'state': 'not_started',
                           'detail': 'reference/voice/ has no voice yet', 'when': 'first',
-                          'pov_gaps': []}
+                          'pov_gaps': None}
     # soft: no blocker before drafting
     assert not any(b['source'] == 'voice' for b in v['blockers'])
     text = cmd_status.render_human(v)
@@ -149,7 +149,7 @@ def test_a_voice_stage_value_it_doesnt_take_is_said_and_stays_first(tmp_path):
     _write(os.path.join(pd, 'reference', 'key-decisions.md'), 'voice_stage: never\n')
     v = status.build_status(pd)
     assert v['next']['stage'] == 'voice'
-    assert any("voice_stage 'never' is not one of first, later" in n for n in v['notes'])
+    assert any("can't read 'voice_stage: never'" in n for n in v['notes'])
 
 
 def test_a_commented_voice_stage_line_is_not_read(tmp_path):
@@ -208,7 +208,7 @@ def test_the_check_after_the_map_names_the_pov_book_md_is_silent_on(tmp_path, mo
 def test_the_check_after_the_map_passes_when_every_pov_is_named(tmp_path, monkeypatch):
     pd = str(tmp_path)
     _mapped(pd, ('ann-lee', 'Bo Tan', 'narrator'))
-    _voice_guide(pd, '# The voice\n\nAnn sees it all. Bo, rarely. The narrator stands far '
+    _voice_guide(pd, '# The voice\n\nAnnie sees it all. Bo Tan, rarely. The narrator stands far '
                      'back.\n')
     _ladder_up_to(monkeypatch, 6)
     v = status.build_status(pd)
@@ -223,7 +223,7 @@ def test_the_check_after_the_map_waits_for_the_map(tmp_path, monkeypatch):
     _ladder_up_to(monkeypatch, 5)   # the map not solid yet
     v = status.build_status(pd)
     assert v['next']['stage'] == 'scene-map'
-    assert v['voice']['pov_gaps'] == []
+    assert v['voice']['pov_gaps'] is None   # not run: the map isn't solid
 
 
 def test_the_check_after_the_map_is_a_note_once_briefs_are_done(tmp_path, monkeypatch):
@@ -252,7 +252,97 @@ def test_voice_notes_survive_scenes_waiting_on_the_gate(tmp_path, monkeypatch):
     monkeypatch.setattr(status, 'free_to_draft', lambda pd_: (1, 1, []))
     v = status.build_status(pd)
     assert v['next']['stage'] == 'draft'
+    assert v['then']['stage'] == 'check'   # the gate branch that rebound notes ran
     assert any('voice_stage' in n for n in v['notes'])
+
+
+def test_what_status_couldnt_read_of_the_scenes_left_is_a_gate_blocker(tmp_path, monkeypatch):
+    # the renamed `unread`: free_to_draft's notes are blockers, not notes
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    _ladder_up_to(monkeypatch, 7)
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
+        {'scene_id': 's1', 'command': 'write', 'reason': 'contradiction'}])
+    monkeypatch.setattr(status, 'free_to_draft',
+                        lambda pd_: (0, 0, ['could not tell which scenes write can draft']))
+    v = status.build_status(pd)
+    assert {'source': 'gate', 'level': -1,
+            'detail': 'could not tell which scenes write can draft'} in v['blockers']
+    assert not any('could not tell' in n for n in v['notes'])
+    assert '; see the blockers)' in v['next']['reason']
+
+
+def test_a_thin_briefs_rung_in_a_drafting_book_makes_the_check_a_note(tmp_path, monkeypatch):
+    # CR-2: on iliad-adult with one brief blanked, the check came first
+    pd = str(tmp_path)
+    _mapped(pd)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           'id|seq|pov|status\ns1|1|Ann Lee|drafted\ns2|2|Bo Tan|briefed\n')
+    _voice_guide(pd)
+    ladder = [{'level': lvl, 'name': name,
+               'state': 'solid' if lvl < 6 else 'thin', 'detail': ''}
+              for lvl, name in status.LEVEL_NAMES.items()]
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: ladder)
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'briefs'
+    assert v['voice']['pov_gaps'] == ['Ann Lee', 'Bo Tan']
+    assert any('says nothing of 2 POV(s)' in n for n in v['notes'])
+
+
+def test_a_briefs_rung_with_a_brief_written_makes_the_check_a_note(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd)
+    _voice_guide(pd)
+    ladder = [{'level': lvl, 'name': name,
+               'state': 'solid' if lvl < 6 else 'thin', 'detail': ''}
+              for lvl, name in status.LEVEL_NAMES.items()]
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: ladder)
+    assert status.build_status(pd)['next']['stage'] == 'briefs'
+
+
+def test_voice_stage_later_defers_the_check_after_the_map_too(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd)
+    _voice_guide(pd)
+    _write(os.path.join(pd, 'reference', 'key-decisions.md'), 'voice_stage: later\n')
+    _ladder_up_to(monkeypatch, 6)
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'briefs'
+    assert v['voice']['pov_gaps'] == ['Ann Lee', 'Bo Tan']
+    assert any('says nothing of 2 POV(s)' in n for n in v['notes'])
+
+
+def test_an_unreadable_voice_shows_as_unreadable(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    os.makedirs(os.path.join(pd, 'reference', 'voice', 'book.md'))   # a folder, not a file
+    v = status.build_status(pd)
+    assert v['voice']['state'] == 'unreadable'
+    assert '  V  voice         ! unreadable' in cmd_status.render_human(v)
+
+
+def test_an_author_repo_voice_with_no_book_md_text_is_said(tmp_path, monkeypatch):
+    from storyforge import voice_book
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    monkeypatch.setattr(voice_book, 'resolve', lambda p: voice_book.DocState(
+        'ok', 'reference/voice', 'reference/voice', 'THE AUTHOR VOICE', ()))
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'spine'
+    assert any('comes from the author repo' in n for n in v['notes'])
+
+
+def test_a_clean_check_after_the_map_is_said_in_the_ladder(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd)
+    _voice_guide(pd, '# The voice\n\nAnn Lee and Bo Tan, both close.\n')
+    _ladder_up_to(monkeypatch, 6)
+    v = status.build_status(pd)
+    assert v['voice']['pov_gaps'] == []
+    assert 'book.md names every POV of the map' in cmd_status.render_human(v)
 
 
 def test_a_graphic_novel_has_no_voice_record(tmp_path):

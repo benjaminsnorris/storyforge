@@ -14,7 +14,7 @@ import json
 from storyforge.common import detect_project_root, get_medium
 from storyforge.status import CRAFT_ADVISORY_SOURCE, build_status
 
-_STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—'}
+_STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—', 'unreadable': '!'}
 
 
 def parse_args(argv):
@@ -36,6 +36,8 @@ def _voice_line(voice: dict) -> str:
         parts.append(f"later (key-decisions.md: voice_stage: {voice['when']})")
     if voice['pov_gaps']:
         parts.append(f"book.md says nothing of POV(s): {', '.join(voice['pov_gaps'])}")
+    elif voice['pov_gaps'] == []:   # None: the check after the map didn't run
+        parts.append('book.md names every POV of the map')
     detail = f" — {'; '.join(parts)}" if parts else ''
     return f"  V  {voice['name']:<13} {_STATE_MARK[voice['state']]} {voice['state']}{detail}"
 
