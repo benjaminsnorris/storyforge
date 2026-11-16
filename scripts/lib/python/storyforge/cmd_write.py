@@ -266,7 +266,11 @@ def main(argv=None):
     session_start_iso = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     # Branch + PR setup
+    changed_before = None
     if not args.dry_run:
+        # what was already changed: the run's closing commit leaves it alone
+        from storyforge.git import changed_files
+        changed_before = changed_files(project_dir)
         create_branch('write', project_dir)
 
         # Advance project phase
@@ -323,35 +327,44 @@ def main(argv=None):
     # Main drafting
     from storyforge import git as _gitmod
     pushes_failed_before = len(_gitmod.unpushed)
-    if write_mode == 'session':
-        from storyforge import api
-        from storyforge.costs import RunBudget
-        with api.metered() as meter:
-            outcome = _run_session_mode(
+    try:
+        if write_mode == 'session':
+            from storyforge import api
+            from storyforge.costs import RunBudget
+            with api.metered() as meter:
+                outcome = _run_session_mode(
+                    pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
+                    dry_run=args.dry_run, budget=RunBudget(meter),
+                    stop_after=_stop_after(project_dir, args.stop_after),
+                    scene_forecast=scene_forecast)
+        elif write_mode == 'batch' and not args.dry_run:
+            outcome = _run_batch_mode(
                 pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-                dry_run=args.dry_run, budget=RunBudget(meter),
-                stop_after=_stop_after(project_dir, args.stop_after),
-                scene_forecast=scene_forecast)
-    elif write_mode == 'batch' and not args.dry_run:
-        outcome = _run_batch_mode(
-            pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-            coaching, use_briefs, args.force, filter_mode,
-        )
-    else:
-        # The threshold is one budget for the run: the re-checks get what
-        # drafting actually spent (metered) and the scenes still to draft
-        # leave (`costs.RunBudget`)
-        from storyforge import api
-        from storyforge.costs import RunBudget
-        with api.metered() as meter:
-            outcome = _run_direct_mode(
-                pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-                coaching, use_briefs, args.force, filter_mode, write_mode,
-                args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
-                scene_forecast=scene_forecast, draft_forecast=draft_forecast,
-                keep_going=args.keep_going, held=held,
+                coaching, use_briefs, args.force, filter_mode,
             )
-
+        else:
+            # The threshold is one budget for the run: the re-checks get what
+            # drafting actually spent (metered) and the scenes still to draft
+            # leave (`costs.RunBudget`)
+            from storyforge import api
+            from storyforge.costs import RunBudget
+            with api.metered() as meter:
+                outcome = _run_direct_mode(
+                    pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
+                    coaching, use_briefs, args.force, filter_mode, write_mode,
+                    args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
+                    scene_forecast=scene_forecast, draft_forecast=draft_forecast,
+                    keep_going=args.keep_going, held=held,
+                )
+    except SystemExit:
+        # a mode stopped part-way (a prompt it couldn't build, a batch it
+        # couldn't submit): what it spent and wrote is still committed. Not
+        # on an interrupt, which can land between a scene's files and its
+        # commit
+        from storyforge import common
+        if not args.dry_run and not common._shutting_down:
+            _commit_bookkeeping(project_dir, changed_before)
+        raise
     drafted_count, total_words = outcome.drafted, outcome.words
     failed, recheck_open, uncommitted = outcome.failed, outcome.recheck_open, outcome.uncommitted
     provisional = outcome.provisional
@@ -393,9 +406,17 @@ def main(argv=None):
         from storyforge.gate import advisory_summary
         for line in advisory_summary(project_dir, pending_ids):
             log(line)
-        bookkept = _commit_bookkeeping(project_dir, uncommitted)
+    bookkept = True
+    if args.dry_run:
+        pass
+    elif uncommitted:
+        # the bookkeeping paths would sweep the uncommitted files in under
+        # the wrong message: they're committed by hand with the rest
+        log('WARNING: the run\'s bookkeeping (at least the cost ledger) is not committed '
+            'either: commit it with the files named below.')
+        bookkept = False
     else:
-        bookkept = True
+        bookkept = _commit_bookkeeping(project_dir, changed_before)
 
     if failed:
         log(f'ERROR: {len(failed)} scene(s) not drafted:')
@@ -1512,36 +1533,72 @@ def _commit(project_dir: str, message: str, paths: list[str]) -> None:
     git.commit_or_raise(project_dir, message, paths)
 
 
-#: what a write run changes after (or besides) its scenes' commits: the cost
-#: ledger (every call), the review phase's pipeline row, review and
-#: recommendations, the drift check's cues, the logs, and the reference
-#: files the last commit's pre-commit sync left behind (scenes-review.md)
-BOOKKEEPING_PATHS = ['working/costs/', 'working/pipeline.csv', 'working/timeline-cues.csv',
-                     'working/reviews/', 'working/logs/', 'reference/']
+#: where a write run leaves files after (or besides) its scenes' commits,
+#: committed at its end (#699): the cost ledger (every call, including those
+#: after the last commit), the pipeline row the review phase updates after
+#: its own commits (and its review and recommendations, if those commits
+#: failed), the drift check's cues, and `reference/` (as a scene commit takes
+#: it), for what the last commit's pre-commit sync regenerated after staging,
+#: such as scenes-review.md. `working/logs/` is ignored in a book
+#: (`templates/gitignore`); it is listed for a repo that tracks it. Only what
+#: the run changed is committed (`_commit_bookkeeping`).
+BOOKKEEPING_PATHS = ('working/costs/', 'working/pipeline.csv', 'working/timeline-cues.csv',
+                     'working/reviews/', 'working/logs/', 'reference/')
 
 
-def _commit_bookkeeping(project_dir: str, uncommitted: list) -> bool:
-    """Commit the run's end-of-run bookkeeping (#699), on a finished run, a
-    stop for a read, and a failure alike, so the run leaves the work tree
-    as it found it. Not after a failed commit: these paths would sweep that
-    scene's files in under this message, and the closing summary already
-    says to commit them by hand. False when the bookkeeping is left
-    uncommitted: the run then exits 1."""
-    if uncommitted:
-        log('WARNING: the run\'s bookkeeping (cost ledger, pipeline row, reviews, logs) is '
-            'not committed either, since a commit failed: commit it with the rest.')
-        return False
-    working = os.path.join(project_dir, 'working')
-    recs = sorted(f'working/{f}' for f in (os.listdir(working) if os.path.isdir(working)
-                                           else [])
-                  if f.startswith('recommendations') and f.endswith('.md'))
+def _is_bookkeeping(rel: str) -> bool:
+    """`rel` (relative to the project, `/`-separated) is under
+    `BOOKKEEPING_PATHS`, or is a `working/recommendations*.md`."""
+    if any(rel == p or (p.endswith('/') and rel.startswith(p)) for p in BOOKKEEPING_PATHS):
+        return True
+    return (rel.startswith('working/recommendations') and rel.endswith('.md')
+            and '/' not in rel[len('working/'):])
+
+
+def _commit_bookkeeping(project_dir: str, before: dict[str, str] | None) -> bool:
+    """Commit what the run left under `BOOKKEEPING_PATHS` (#699), on any
+    run that gets this far: one that finished, stopped for a read, had
+    scenes fail, or stopped part-way through its mode (`main` calls it on
+    that `SystemExit` too). Not called after a failed commit (`main`).
+
+    `before` is `git.changed_files` as the run started. Only files the run
+    changed are committed: one already changed before it, and changed
+    again, is the author's to commit (named, WARNING), so the commit never
+    takes edits that aren't the run's. After the commit, anything the run
+    changed that is still uncommitted, anywhere in the project, is named
+    (WARNING). False, with an ERROR, when the commit fails or git can't
+    say what changed: the run then exits 1. A failed push is a WARNING and
+    in the closing summary, as for every commit `write` makes."""
+    from storyforge import git
     try:
-        _commit(project_dir, 'Write: run bookkeeping (costs, pipeline, reviews)',
-                BOOKKEEPING_PATHS + recs)
-    except CommitError as e:
+        now = git.changed_files(project_dir)
+        if before is None or now is None:
+            log('ERROR: the run\'s bookkeeping (cost ledger, pipeline row, reviews) is not '
+                'committed: git could not say what the run changed. Commit it by hand '
+                '(`git status`), and push.')
+            return False
+        # git names them relative to the project, `/`-separated
+        ours = sorted(p for p in now if _is_bookkeeping(p) and p not in before)
+        theirs = sorted(p for p in now if _is_bookkeeping(p) and p in before
+                        and now[p] != before[p])
+        if theirs:
+            log(f'WARNING: {len(theirs)} file(s) the run wrote to were already changed before '
+                f'it, so they are not committed with its bookkeeping (your edits would go in '
+                f'too): {", ".join(theirs[:8])}' + (' ...' if len(theirs) > 8 else '')
+                + '. Commit them yourself.')
+        if ours:
+            _commit(project_dir, 'Write: run bookkeeping (costs, pipeline, reviews)', ours)
+        after = git.changed_files(project_dir) or {}
+    except (CommitError, OSError) as e:
         log(f'ERROR: the run\'s bookkeeping is not committed: {e}. Commit it by hand '
             f'(`git status`), and push.')
         return False
+    left = sorted(p for p in after if p not in theirs
+                  and (p not in before or after[p] != before[p]))
+    if left:
+        log(f'WARNING: the run left {len(left)} file(s) uncommitted: '
+            f'{", ".join(left[:8])}' + (' ...' if len(left) > 8 else '')
+            + '. Check them (`git status`) and commit them by hand.')
     return True
 
 

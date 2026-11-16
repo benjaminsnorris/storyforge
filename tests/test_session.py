@@ -74,11 +74,13 @@ def test_a_stage_note_that_cant_be_used_is_said(stage, problem):
     assert d.prose == 'She sat.\n' and problem in d.stage_problem and d.stage == []
 
 
-def test_a_blank_hand_is_not_read_as_empty_and_the_note_says_why():
+@pytest.mark.parametrize('value', ['', None])
+def test_a_blank_hand_is_not_read_as_empty_and_the_note_says_why(value):
     """The writer wrote '' for an empty hand (#700): blank can also mean "not
     known", so it isn't guessed to be empty. The note isn't used, the
-    problem names the marker to write, and the writer's instructions name it."""
-    blank = {'who': 'D', 'field': 'hand_left', 'item': '', 'value': '', 'quote': ''}
+    problem names the marker to write, and the writer's instructions name it.
+    A null gets the same hint (SF-8)."""
+    blank = {'who': 'D', 'field': 'hand_left', 'item': '', 'value': value, 'quote': ''}
     d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
                             + json.dumps([blank]) + '\n</stage>', SCENE)
     assert d.stage == []
@@ -91,7 +93,17 @@ def test_an_empty_hand_written_as_empty_is_carried():
     d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
                             + json.dumps([empty]) + '\n</stage>', SCENE)
     assert d.stage_problem == '' and d.stage[0]['value'] == 'empty'
-    assert 'empty' in session.carried_text(d.stage)
+    assert session.carried_text(d.stage) == '- D: left hand: empty'
+
+
+def test_the_writer_is_told_the_word_the_reader_takes_for_an_empty_hand():
+    """TD-4: the instructions and the reader can't drift apart."""
+    from storyforge import stage_sheet
+    assert f'the word "{stage_sheet.EMPTY}" for an empty hand' in session.INSTRUCTIONS
+    assert stage_sheet._hand_value(stage_sheet.EMPTY) == stage_sheet.EMPTY
+    assert all(stage_sheet._hand_value(w) == stage_sheet.EMPTY
+               for w in stage_sheet.EMPTY_HAND_WORDS)
+    assert stage_sheet._hand_value('  ') == ''
 
 
 def test_a_half_good_stage_note_is_not_used_at_all():
@@ -625,19 +637,23 @@ def _git(cwd, *args):
                           text=True).stdout
 
 
-@pytest.mark.parametrize('outcome, code', [
-    ('stopped', 0),      # stopped after N scenes for a read
-    ('finished', 0),
-    ('failed', 1),       # a scene the gate stopped on
-])
-def test_a_session_leaves_its_bookkeeping_committed(project_dir, monkeypatch, outcome, code):
-    """A real `write --session` left the cost ledger, the pipeline row, the
-    timeline cues and scenes-review.md modified and uncommitted (#699): the
-    run commits them before it exits, whatever it ended with."""
-    from storyforge import cmd_write, costs
-    from storyforge.costs import WriteForecast
+def _append(project_dir, rel, line):
+    path = os.path.join(project_dir, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+
+
+@pytest.fixture
+def book(project_dir, monkeypatch):
+    """`project_dir` as a git repo with the book's own .gitignore (as init
+    writes it: working/logs/ ignored, so the closing summary's log lines,
+    written after the commit, don't dirty the tree), and `write`'s branch,
+    PR, forecast and closing steps stubbed. `book.mode(fake)` replaces the
+    drafting mode; `book.run(argv)` runs `main` and returns its exit code."""
     import shutil
-    # a book's own .gitignore, as init writes it (working/logs/ is ignored)
+    from storyforge import cmd_write
+    from storyforge.costs import WriteForecast
     shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'gitignore'),
                 os.path.join(project_dir, '.gitignore'))
     _git(project_dir, 'init', '-q', '-b', 'storyforge/write-test')
@@ -646,67 +662,208 @@ def test_a_session_leaves_its_bookkeeping_committed(project_dir, monkeypatch, ou
     _git(project_dir, 'add', '-A')
     _git(project_dir, 'commit', '-q', '-m', 'start')
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    # --coaching sets STORYFORGE_COACHING for the process: undone after
+    monkeypatch.setenv('STORYFORGE_COACHING', 'full')
     monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
     monkeypatch.setattr(cmd_write, 'create_branch', lambda *a, **k: None)
     monkeypatch.setattr(cmd_write, 'ensure_branch_pushed', lambda *a, **k: None)
     monkeypatch.setattr(cmd_write, 'create_draft_pr', lambda *a, **k: None)
     monkeypatch.setattr(cmd_write, '_held_up_front', lambda *a, **k: {})
-    monkeypatch.setattr(cmd_write, '_session_forecast',
-                        lambda *a: WriteForecast(draft=1.0, gate=0.0, basis='test'))
-    monkeypatch.setattr(costs, 'check_threshold', lambda *a, **k: True)
+    forecast = lambda *a, **k: WriteForecast(draft=1.0, gate=0.0, basis='test')
+    monkeypatch.setattr(cmd_write, '_session_forecast', forecast)
+    monkeypatch.setattr(cmd_write, '_forecast', forecast)
     monkeypatch.setattr(cmd_write, 'check_threshold', lambda *a, **k: True)
-
-    def append(rel, line):
-        path = os.path.join(project_dir, rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'a', encoding='utf-8') as f:
-            f.write(line + '\n')
-
-    def session(*a, **k):
-        # what a session leaves behind past its scenes' own commits
-        append('working/costs/ledger.csv', 'a|draft|1.00')
-        append('reference/scenes-review.md', '- act1-sc01: drafted, 210 words')
-        failed = ['act1-sc02 (did not pass the gate)'] if outcome == 'failed' else []
-        return cmd_write.DraftOutcome(1, 210, failed)
-    monkeypatch.setattr(cmd_write, '_run_session_mode', session)
-
-    def drift(pd, ids):
-        append('working/timeline-cues.csv', 'act1-sc01|day 1')
-    monkeypatch.setattr('storyforge.timeline.drift_check', drift)
+    monkeypatch.setattr(cmd_write, 'print_summary', lambda *a, **k: None)
+    monkeypatch.setattr('storyforge.timeline.drift_check',
+                        lambda pd, ids: _append(pd, 'working/timeline-cues.csv',
+                                                'act1-sc01|day 1'))
 
     def review(kind, pd, pr=''):
-        append('working/pipeline.csv', '1|drafting|complete')
-        append('working/recommendations.md', '# Next steps')
+        _append(pd, 'working/pipeline.csv', '3|2026-11-15|complete||||||')
+        _append(pd, 'working/recommendations.md', '# Next steps')
     monkeypatch.setattr(cmd_write, 'run_review_phase', review)
-    monkeypatch.setattr(cmd_write, 'print_summary', lambda *a, **k: None)
 
-    argv = ['--session', '--coaching', 'full', '--force', 'act1-sc01']
-    if outcome == 'stopped':
-        argv += ['--stop-after', '1']
-    try:
-        cmd_write.main(argv)
-        exited = 0
-    except SystemExit as e:
-        exited = e.code or 0
-    assert exited == code
-    assert _git(project_dir, 'status', '--porcelain') == ''
-    assert 'Write: run bookkeeping' in _git(project_dir, 'log', '-1', '--format=%s')
+    class Book:
+        dir = project_dir
+
+        def mode(self, name, fake):
+            monkeypatch.setattr(cmd_write, name, fake)
+
+        def run(self, argv):
+            try:
+                cmd_write.main(argv)
+            except SystemExit as e:
+                return e.code or 0
+            return 0
+
+        def status(self):
+            return _git(project_dir, 'status', '--porcelain', '-uall')
+
+        def dirty(self):
+            return {line[3:] for line in self.status().splitlines()}
+
+        def last(self):
+            return _git(project_dir, 'log', '-1', '--format=%s').strip()
+    return Book()
 
 
-def test_bookkeeping_is_not_committed_after_a_failed_commit(project_dir, monkeypatch, capsys):
-    """The bookkeeping paths would sweep the uncommitted scene's files in
-    under the wrong message: left for the author, said, and the run fails."""
+def _leaves_files(failed=(), drafted=1, seen=None):
+    """A drafting mode that leaves what a real one leaves past its scenes'
+    commits: a ledger row and a regenerated scenes-review.md."""
+    from storyforge import cmd_write
+
+    def mode(*a, **k):
+        if seen is not None:
+            seen.update(k)
+        _append(a[1], 'working/costs/ledger.csv', 'x|draft|1.00')
+        _append(a[1], 'reference/scenes-review.md', '- act1-sc01: drafted, 210 words')
+        return cmd_write.DraftOutcome(drafted=drafted, words=210 * drafted,
+                                      failed=list(failed))
+    return mode
+
+
+SESSION = ['--session', '--coaching', 'full', '--force', 'act1-sc01']
+
+
+def test_a_stopped_session_leaves_its_bookkeeping_committed(book):
+    """The real bug (#699): a session stopped for a read left the ledger,
+    the pipeline row, the cues and scenes-review.md uncommitted."""
+    seen = {}
+    book.mode('_run_session_mode', _leaves_files(seen=seen))
+    assert book.run(SESSION + ['--stop-after', '1']) == 0
+    assert seen['stop_after'] == 1
+    assert book.status() == ''
+    assert book.last() == 'Write: run bookkeeping (costs, pipeline, reviews)'
+    committed = _git(book.dir, 'show', '--name-only', '--format=', 'HEAD').split()
+    assert set(committed) == {'working/costs/ledger.csv', 'reference/scenes-review.md',
+                              'working/timeline-cues.csv', 'working/pipeline.csv',
+                              'working/recommendations.md'}
+
+
+@pytest.mark.parametrize('mode, argv', [
+    ('_run_session_mode', SESSION),
+    ('_run_direct_mode', ['--coaching', 'full', '--force', 'act1-sc01']),
+    ('_run_batch_mode', ['--coaching', 'coach', '--batch', '--force', 'act1-sc01']),
+])
+def test_every_mode_commits_its_bookkeeping(book, mode, argv):
+    book.mode(mode, _leaves_files())
+    assert book.run(argv) == 0
+    assert book.status() == '' and book.last().startswith('Write: run bookkeeping')
+
+
+def test_a_run_with_failed_scenes_or_none_drafted_still_commits_it(book):
+    """A failed scene's API call is in the ledger with no scene commit to
+    take it (T-3)."""
+    book.mode('_run_session_mode', _leaves_files(failed=['act1-sc01 (bad reply)'], drafted=0))
+    assert book.run(SESSION) == 1
+    assert book.status() == '' and book.last().startswith('Write: run bookkeeping')
+
+
+def test_a_mode_that_stops_part_way_still_commits_it(book):
+    """A prompt direct mode can't build is a sys.exit mid-run (SF-5)."""
+    def mode(*a, **k):
+        _append(a[1], 'working/costs/ledger.csv', 'x|draft|1.00')
+        raise SystemExit(1)
+    book.mode('_run_direct_mode', mode)
+    assert book.run(['--coaching', 'full', '--force', 'act1-sc01']) == 1
+    assert book.status() == '' and book.last().startswith('Write: run bookkeeping')
+
+
+def test_an_interrupt_does_not_commit_it(book, monkeypatch):
+    from storyforge import common
+
+    def mode(*a, **k):
+        _append(a[1], 'working/costs/ledger.csv', 'x|draft|1.00')
+        monkeypatch.setattr(common, '_shutting_down', True)
+        raise SystemExit(130)
+    book.mode('_run_direct_mode', mode)
+    assert book.run(['--coaching', 'full', '--force', 'act1-sc01']) == 130
+    assert book.last() == 'start' and 'working/costs/ledger.csv' in book.dirty()
+
+
+def test_the_authors_own_changes_stay_out_and_are_named(book, capsys):
+    """Edits made before the run are the author's (CR-1, SF-1): a file the
+    run didn't touch is left as it was, one it also wrote to is named."""
+    _append(book.dir, 'reference/scene-briefs.csv', 'my edit')
+    _append(book.dir, 'reference/scenes-review.md', 'my note')
+    book.mode('_run_session_mode', _leaves_files())
+    assert book.run(SESSION) == 0
+    committed = _git(book.dir, 'show', '--name-only', '--format=', 'HEAD').split()
+    assert 'reference/scene-briefs.csv' not in committed
+    assert 'reference/scenes-review.md' not in committed
+    assert 'working/costs/ledger.csv' in committed
+    out = capsys.readouterr().out
+    assert 'were already changed before it' in out and 'reference/scenes-review.md' in out
+    assert 'reference/scene-briefs.csv' not in out.split('already changed')[1].split('\n')[0]
+    assert book.dirty() == {'reference/scene-briefs.csv', 'reference/scenes-review.md'}
+
+
+def test_what_the_run_leaves_outside_the_bookkeeping_is_named(book, capsys):
+    def mode(*a, **k):
+        _append(a[1], 'notes.md', 'stray')
+        return _leaves_files()(*a, **k)
+    book.mode('_run_session_mode', mode)
+    assert book.run(SESSION) == 0
+    assert 'WARNING: the run left 1 file(s) uncommitted: notes.md' in capsys.readouterr().out
+
+
+def test_a_failed_bookkeeping_commit_fails_the_run(book, monkeypatch, capsys):
+    """T-1: an otherwise clean run exits 1, and says so."""
+    from storyforge import cmd_write
+    real = cmd_write._commit
+
+    def commit(pd, msg, paths):
+        if msg.startswith('Write: run bookkeeping'):
+            raise cmd_write.CommitError('the commit failed: index.lock')
+        return real(pd, msg, paths)
+    monkeypatch.setattr(cmd_write, '_commit', commit)
+    book.mode('_run_session_mode', _leaves_files())
+    assert book.run(SESSION) == 1
+    assert "ERROR: the run's bookkeeping is not committed" in capsys.readouterr().out
+    assert 'working/costs/ledger.csv' in book.dirty()
+
+
+def test_no_bookkeeping_commit_after_a_failed_commit(book, monkeypatch, capsys):
+    """Its paths would sweep the uncommitted scene's files in under the
+    wrong message: left for the hand commit, said, and the run fails."""
+    from storyforge import cmd_write
+
+    def mode(*a, **k):
+        _leaves_files()(*a, **k)
+        return cmd_write.DraftOutcome(drafted=0, words=0, failed=[],
+                                      uncommitted=['act1-sc01 (git failed)'])
+    book.mode('_run_session_mode', mode)
+    monkeypatch.setattr(cmd_write, '_commit_bookkeeping',
+                        lambda *a: pytest.fail('committed'))
+    assert book.run(SESSION) == 1
+    assert 'bookkeeping (at least the cost ledger) is not committed' in capsys.readouterr().out
+
+
+def test_the_real_review_phase_leaves_nothing_behind(book, monkeypatch):
+    """T-2: the review phase writes the pipeline row after its own commits,
+    and its calls add ledger rows after them too."""
+    from storyforge import api, cmd_write, git
+    monkeypatch.setattr(cmd_write, 'run_review_phase', git.run_review_phase)
+    monkeypatch.setattr(api, 'invoke_api', lambda *a, **k: '# Review\n\nFine.')
+    monkeypatch.setattr(git, '_push', lambda pd: True)
+    book.mode('_run_session_mode', _leaves_files())
+    assert book.run(SESSION) == 0
+    assert book.status() == ''
+
+
+def test_a_dry_run_commits_nothing(book, monkeypatch):
     from storyforge import cmd_write
     monkeypatch.setattr(cmd_write, '_commit', lambda *a: pytest.fail('committed'))
-    assert cmd_write._commit_bookkeeping(project_dir, ['act1-sc01 (git failed)']) is False
-    assert 'bookkeeping' in capsys.readouterr().out
+    book.mode('_run_session_mode', _leaves_files())
+    assert book.run(SESSION + ['--dry-run']) == 0
+    assert book.last() == 'start'
 
 
-def test_a_failed_bookkeeping_commit_is_an_error(project_dir, monkeypatch, capsys):
-    from storyforge import cmd_write
-
-    def boom(*a):
-        raise cmd_write.CommitError('the commit failed: index.lock')
-    monkeypatch.setattr(cmd_write, '_commit', boom)
-    assert cmd_write._commit_bookkeeping(project_dir, []) is False
-    assert "ERROR: the run's bookkeeping is not committed" in capsys.readouterr().out
+def test_is_bookkeeping():
+    from storyforge.cmd_write import _is_bookkeeping
+    assert _is_bookkeeping('working/costs/ledger.csv')
+    assert _is_bookkeeping('working/recommendations-3.md')
+    assert _is_bookkeeping('reference/scenes-review.md')
+    assert not _is_bookkeeping('working/recommendations/x.md')
+    assert not _is_bookkeeping('working/pipeline.csv.bak')
+    assert not _is_bookkeeping('scenes/act1-sc01.md')
