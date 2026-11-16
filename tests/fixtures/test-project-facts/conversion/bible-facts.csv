@@ -1,0 +1,14 @@
+type|subject|statement|known_by|scene_id|category|id
+trait|dorren-hayle|Is 42|||age|dorren-age
+trait|dorren-hayle|Chief Surveyor of the Pressure Cartography Office|||role|dorren-chief-surveyor
+trait|dorren-hayle|Wants the maps kept whole, and the office's order with them|||want|dorren-want
+trait|dorren-hayle|Her mentor vanished fifteen years ago investigating an anomaly like this one; she chose the office over the search|||backstory|dorren-mentor-vanished
+trait|dorren-hayle|Believes the maps are objective|||lie|dorren-lie
+trait|tessa-merrin|Is 28|||age|tessa-age
+trait|tessa-merrin|Field surveyor, recently promoted|||role|tessa-field-surveyor
+trait|tessa-merrin|Grew up in a border village redistricted out of existence on paper; her family lost their land rights|||backstory|tessa-border-village
+relationship|tessa-merrin|Dorren Hayle promoted Tessa, reluctantly|||work|tessa-promoted-by-dorren
+relationship|kael-maren|Kael may have known Dorren's mentor|||history|kael-knew-mentor
+knowledge|kael-maren|Kael erased the eastern village's records on the council's order|kael-maren||secret|kael-erased-records
+world||The Pressure Cartography Office answers to the council|||institution|office-answers-to-council
+world||Can a pressure reading be faked at the instrument?|||rule|readings-faked-at-instrument

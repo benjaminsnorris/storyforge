@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from fixture_helpers import FIXTURE_DIR, FIXTURE_DIR_GN, make_project
+from fixture_helpers import FIXTURE_DIR, FIXTURE_DIR_GN, make_facts_project, make_project
 
 # Add the Python library to the path
 TESTS_DIR = Path(__file__).parent
@@ -170,6 +170,15 @@ def project_dir(tmp_path):
     outside a git work tree, everything (fixture_helpers.make_project).
     """
     return make_project(FIXTURE_DIR, tmp_path / 'test-project')
+
+
+@pytest.fixture
+def facts_project_dir(tmp_path):
+    """test-project with its character bible converted to rows (#657):
+    plan facts in commitments.csv, character-voices.csv, bible-notes.md, and
+    character-bible.md retired to reference/archive/
+    (`fixture_helpers.make_facts_project`)."""
+    return make_facts_project(tmp_path / 'test-project-facts')
 
 
 @pytest.fixture

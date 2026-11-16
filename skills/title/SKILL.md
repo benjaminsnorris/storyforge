@@ -22,9 +22,9 @@ Before doing anything else, orient yourself:
 1. **Read `storyforge.yaml`** — title, genre, subgenre, logline, phase, coaching level.
 2. **Read key reference documents** (if they exist):
    - `reference/story-architecture.md` — themes, central conflict, structure
-   - `reference/character-bible.md` — protagonist names, epithets, roles
+   - `reference/character-bible.md` (or, once converted, the character rows: `./storyforge bibles`; #657) — protagonist names, epithets, roles
    - `reference/voice/book.md` and `reference/voice/anchors/` — tone, mood, register (a graphic novel's is `reference/voice-guide.md`)
-   - `reference/world-bible.md` — setting, atmosphere
+   - `reference/world-bible.md` (or its rows once converted) — setting, atmosphere
 3. **Read the key decisions file** — check for any existing title decision. If a title decision is already recorded, acknowledge it and ask whether the author wants to revisit it or move on.
 4. **Scan for content** — check if scenes exist in `scenes/`, if evaluations exist in `working/evaluations/`. More content means more material to draw from.
 

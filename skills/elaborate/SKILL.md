@@ -24,7 +24,7 @@ Read the following files to understand where the project stands:
 3. `reference/scene-intent.csv` — check column depth (function only = spine; `reference/architecture.csv` has rows, or value_shift is filled = architecture: value_shift is a craft-framework column and may be empty on purpose, #643; has characters = mapped)
 4. `reference/scene-briefs.csv` — check if it exists and has non-empty rows
 5. `reference/story-architecture.md` — does it exist?
-6. `reference/character-bible.md` — does it exist?
+6. The bibles (#657): run `./storyforge bibles` (no cost). It says whether each essay (`character-bible.md`, `world-bible.md`, `systems-bible.md`) is still an essay, retired to `reference/archive/`, an unfilled template, or none; how many trait, relationship and world facts the plan has, and its planned knowledge facts; the voices and notes; and the plan's gaps (the two-writers test). In a prose book, an essay still in `reference/` is read-only reference: Storyforge reads it (beside any rows of its kind: drafting, the checker, hone and scoring read both) but its stages no longer write to it. Offer to convert it (see **Bibles as Rows** below)
 
 ## Adaptations (a `source:` block)
 
@@ -118,8 +118,8 @@ Based on the author's request, determine the mode:
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
 - **"Develop the voice"** / **"Find the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). By default it comes right after the synopsis and act shape, before the spine, with a short check after the map.
 - **"Structure first"** / **"Skip the voice for now"** → put `voice_stage: later` on a line of `reference/key-decisions.md` and go on to the spine. The voice is then found before drafting (see "Where the voice stage sits").
-- **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the character bible entries. The spine creates seed entries; this mode enriches them with wound/lie/need structure, voice fingerprints, and relationship dynamics.
-- **"Build the world"** / **"World building"** → World bible development. During elaboration, world building supports the architecture and scene map stages.
+- **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the characters' facts (rows, **Bibles as Rows**). The spine seeds them; this mode adds wound/lie/need/want, lines of each character speaking, and the relationships.
+- **"Build the world"** / **"World building"** → The world's rules as rows (**Bibles as Rows**). During elaboration, world building supports the architecture and scene map stages.
 - **"Story architecture"** / **"Theme"** / **"Structure"** → Story architecture refinement. The spine creates the initial architecture; this mode deepens thematic throughlines, conflict structure, and arc planning.
 - **"Fix pacing"** / **"Pacing shape"** / **"Second half doesn't escalate"** → Pacing review (see Pacing Review below).
 - **"Fix outcomes"** / **"Scene function variety"** / **"Too many yes-but"** → Outcome review (see Outcome Review below).
@@ -247,7 +247,7 @@ voice or the author chooses structure first (`voice_stage: later`).
 4. Propose 5-10 spine events as a numbered list
 5. Once approved, write to:
    - `reference/story-architecture.md`
-   - `reference/character-bible.md`
+   - the protagonist's and antagonist's facts as rows (want, need, wound, lie, role, any fact the plot depends on), two or three lines of each speaking, and terse notes only if needed: see **Bibles as Rows** (a graphic novel still writes `reference/character-bible.md`)
    - `reference/scenes.csv` (id, seq, title, status=spine)
    - `reference/scene-intent.csv` (id, function)
    - `reference/spine.csv` (`id|seq|title|summary|function|act`): the same spine scenes, with a summary of at most 35 words and the act. The status ladder and `score --level 3` read it
@@ -259,8 +259,8 @@ voice or the author chooses structure first (`voice_stage: later`).
 2. Expand to 15-25 scenes: add supporting scenes, transitions, subplot introductions
 3. Assign acts and POV. The POVs follow the narrator stance in `reference/voice/book.md` (`## Decided`) and `narrator_pov` in key-decisions.md: whether a narrator holds scenes, how many POV characters, how close. Scene type (action/sequel), value shift and turning point are notes where they fit (#643, #644): leave one empty for a scene that doesn't turn or shift, and don't vary them to satisfy a rule
    - **Use canonical IDs from registries** for pov, characters, locations, value_at_stake. Add new registry entries for any new characters/locations/values introduced at this stage.
-4. Deepen character bible with supporting characters
-5. Create world bible if needed
+4. Add the supporting characters' facts, the relationships between the cast, and the world's rules as rows (**Bibles as Rows**; a graphic novel deepens its essays)
+5. Check the gaps: `./storyforge validate` lists them as `plan-gaps` (advisory). Settle the ones the plan owes before the map
 6. Write updates to all CSV files and reference docs, including `reference/architecture.csv` (`id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point`, one row per architecture scene, `spine_event` naming the spine scene it serves) and each of those scenes' `architecture_scene` in scenes.csv (its own id). The status ladder and `score --level 4` read it
 7. Run validation — fix any issues before committing
 8. Commit: `git add -A -- . && git commit -m "Elaborate: architecture" && git push`
@@ -395,7 +395,7 @@ Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artif
 
 **Running sample rounds.** At full coaching, `storyforge voice sample` runs them as PRs (`references/voice-folder.md`, "Finding anchors", has the flags):
 
-1. Read what the book has: the character bible, story architecture, key decisions, any existing `reference/voice/` files, and anything the author points to as a model (their own earlier prose, a writer they admire). Settle with the author which writers to blend (`--influences`) and what the versions should vary (`--vary`; default narrator stance, distance, tense).
+1. Read what the book has: the characters' facts and voices (`./storyforge bibles`, or the essay if not yet converted; before the spine there may be none yet), story architecture, key decisions, any existing `reference/voice/` files, and anything the author points to as a model (their own earlier prose, a writer they admire). Settle with the author which writers to blend (`--influences`) and what the versions should vary (`--vary`; default narrator stance, distance, tense).
 2. Pick one scene that matters and that the author will know well; it must be in `scenes.csv`. Before the map there is none: give a moment instead, in a sentence or two (`--moment "..."`; the round gets those words and the synopsis, and later rounds carry the moment as they carry a scene). Run `storyforge voice sample --scene <id>` (or `--moment "..."`; `--dry-run` first; its cost line is a rough guess, not a forecast). It writes the samples unlabelled and shuffled, one sentence per line, in `working/voice-samples/round-<n>.md`, checks each one before the author sees it (the blocking read for physical slips, the voice review when `checks.md` has checks, a reviser fixing only the flagged lines), and commits it on a new branch with its own PR (off `main`, or off the last round's branch); the PR's description says what the checks found, fixed and left out. A reply short of the versions asked for is an error: run it again. The key (which sample tried what) stays outside the repo, under `~/.storyforge/voice-sample-keys/`, and no command shows it: the author marks blind, so don't guess at it for them.
 3. Ask the author to mark sentences in the PR's Files changed: keep, cut, "more like this", a reason, a `suggestion` with their own wording (an empty one cuts the line), a comment on a sample's heading for the whole sample, and general reactions. Only the PR author's comments count, and they must **submit the review**: comments in an unsubmitted review can't be read.
 4. Run `storyforge voice sample --from-pr <N>` for the next round, written toward the keeps, not away from the cuts; the scene, influences and vary list carry over unless given. If the author edited the round file on GitHub (or committed a suggestion), pull the branch first: it refuses a local copy that differs from the PR's head. A PR with none of the author's marks is refused unless `--allow-unmarked`; the NOTEs say which comments were left out (others', earlier ones, ones on lines since changed, replies in a thread without a suggestion). After the second round, a take teaches more than five blends: `--from-pr <N> --take <label> --versions "present tense;past tense"` (or two points of view); each version is headed by its name, so a later `--take` or `--promote --sample "present tense"` names it.
@@ -488,7 +488,7 @@ For each character:
 5. **Voice fingerprint** — how they speak, what they notice, their sentence rhythm.
 6. **Relationships** — dynamic with every other major character. What each relationship tests.
 
-Update `reference/character-bible.md` and commit after each character.
+Write what's settled as rows (**Bibles as Rows**): wound, lie, need and want as `trait` facts, each relationship as a `relationship` fact naming both people, the voice as two or three lines of them speaking (never a description of how they talk). Commit after each character. (A graphic novel updates `reference/character-bible.md`, whose Visual sections its script reads.)
 
 ### World Building (Interactive)
 
@@ -496,7 +496,19 @@ World building supports the architecture and scene map stages. Build what the st
 
 Focus on: what creates pressure on characters? What constrains their choices? What makes the setting specific rather than generic?
 
-Update `reference/world-bible.md` (and `reference/systems-bible.md` if the world has a formal system like magic or technology).
+Write each rule as a `world` fact (**Bibles as Rows**); keep `reference/bible-notes.md` for what really resists rows (a culture's feel, a history's shape), as terse lines. A rule not decided yet is a row ending in `?`: it stays on the gap list until it's answered. (A graphic novel updates `reference/world-bible.md` and `reference/systems-bible.md`.)
+
+### Bibles as Rows (#657)
+
+What's true about the people and the world is facts, not essays: the essays' phrasing leaked into drafts. In a prose book:
+
+- **Facts** go in the ledger as plan facts. Write them to a pipe-delimited file (`type|subject|statement|known_by|category`, optional `scene_id`, `id`) and run `./storyforge bibles import FILE` (no cost; it commits; every file is checked before anything is written, so a row with a stray `|` or an unknown column writes nothing). `type` is `trait` (one person), `relationship` (names both people), `world` (a rule; subject empty or a place id) or `knowledge` (a secret: `known_by` who knows it from the start, `category` `secret` or `reveal`; only a knowledge fact can be a secret, and drafting doesn't see it before the scene that reveals it: the one whose brief's `knowledge_out` names it, or its `scene_id`). Statements are a few plain words, no interpretation. Leave `scene_id` empty for what's true from the start; name the scene for what becomes true there. Never edit `commitments.csv` by hand for this.
+- **Voices**: two or three lines each in a `character|line` file, `./storyforge bibles import --voices FILE`.
+- **Notes**: only what resists rows, `./storyforge bibles import --notes FILE` (appends the lines `reference/bible-notes.md` doesn't already have, so a re-run adds nothing).
+
+**Converting an existing essay.** Read the essay with the author and turn each settled fact into a row, each voice description into lines of the character speaking (ask the author, or draft a few and let them choose), and what's left into terse notes. Don't carry over interpretation. Show the rows before importing, and import them with `--essay character-bible.md` (or `world-bible.md`, `systems-bible.md`): that marks them as this essay's conversion. Then `./storyforge bibles retire character-bible.md` moves the essay to `reference/archive/`, where Storyforge stops reading it and the author keeps it, and sets its `storyforge.yaml` artifact to `exists: false`. It's refused until the essay has a conversion (facts an elaborate stage wrote don't count) and, for the character bible, until every character one of its `##` headings names has at least one fact; it prints the facts per character and the headings it couldn't match. `--force` overrides, and the two-writers test then notes a retired essay with nothing standing in for it. Convert and retire one essay at a time; an unconverted essay keeps working as before.
+
+**The two-writers test.** Could two writers draft from the plan and agree on every plot point? `./storyforge bibles` and `./storyforge validate` list the gaps code can see: a reveal no scene delivers (a secret no brief's `knowledge_out` names), a relationship hedged or naming only one side, a world rule that's still a question, a question in the notes. Take them to the author at each stage review; they're advisory, and the author may leave one open on purpose.
 
 ### Pacing Review (Interactive)
 

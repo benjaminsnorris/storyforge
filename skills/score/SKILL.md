@@ -383,7 +383,8 @@ leaves out a turn passes.
 ### Bible-consistency (LLM, cached)
 
 - `--bible-consistency` — for every drafted scene, check the prose against
-  `reference/character-bible.md`, `reference/world-bible.md`, and
+  `reference/character-bible.md`, `reference/world-bible.md` (each the
+  essay, its rows once converted, or both; #657), and
   `reference/voice/book.md`. The bibles are sent as cached system blocks, so
   the per-scene incremental cost is small (~$20-25 total for a full run).
 

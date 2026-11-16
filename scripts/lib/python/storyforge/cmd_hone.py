@@ -238,9 +238,10 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
 
     from storyforge.hone import reconcile_domain
     context = ''
-    if domain == 'characters' and os.path.isfile(char_bible):
-        with open(char_bible) as f:
-            context = f.read()
+    if domain == 'characters':
+        # the essay, or its rows once converted (#657)
+        from storyforge.bibles import bible_text
+        context = bible_text(project_dir, os.path.basename(char_bible))
 
     result = reconcile_domain(domain, ref_dir, model, log_dir, context=context)
     entries = result.get('registry_entries', 0)

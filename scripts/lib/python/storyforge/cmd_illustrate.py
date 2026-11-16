@@ -3994,14 +3994,19 @@ def _story_context(project_dir: str) -> str:
 
 def _canon_context(project_dir: str) -> str:
     """Assemble the canon context handed to the art-direction pass."""
+    # Each bible's essay, or its rows once converted, or both (#657,
+    # `bibles.bible_text`): a retired essay leaves its facts in the ledger
+    from storyforge.bibles import bible_text
     parts = []
-    for rel, label, limit in (
-        (os.path.join('reference', 'character-bible.md'), 'Characters', 6000),
-        (os.path.join('reference', 'world-bible.md'), 'World', 6000),
+    for name, label, limit in (
+        ('character-bible.md', 'Characters', 6000),
+        ('world-bible.md', 'World', 6000),
     ):
-        text = _read_capped(os.path.join(project_dir, rel), limit)
+        text = bible_text(project_dir, name)[:limit]
         if text:
             parts.append(f'### {label}\n\n{text}')
+    if not parts:
+        log('NOTE: no character or world bible, essay or rows: the art direction has no canon')
     return '\n\n'.join(parts) or '(no bibles found)'
 
 

@@ -82,6 +82,8 @@ Every artifact entry shares the same three-field structure:
 | `chapter_map` | Maps scenes to chapters for manuscript assembly as a pipe-delimited CSV. Includes chapter numbers, titles, heading format, and semicolon-separated scene IDs. Production settings (author, copyright, scene break style, genre preset), cover generation settings, and web book settings are stored in `storyforge.yaml` under the `production` key. Created by the `produce` skill or manually. | `reference/chapter-map.csv` |
 | `manuscript` | The assembled manuscript output directory. Contains individual chapter files, front/back matter, assets (CSS, cover), and generated output (epub, PDF, HTML, web). Created by `./storyforge assemble`. Output formats: `epub` (default), `pdf`, `html` (single-file), `web` (multi-page hostable site), `markdown`, `all`. | `manuscript/` |
 
+In a prose book the three bibles become facts as rows (#657): plan facts in `reference/commitments.csv`, lines in `reference/character-voices.csv`, terse notes in `reference/bible-notes.md` (`storyforge bibles`). An essay converted and retired (`storyforge bibles retire`) moves to `reference/archive/` and its entry's `exists` is set to `false`; a graphic novel keeps its essays.
+
 The voice has no artifact entry. A prose book's voice is always the folder `reference/voice/` (`references/voice-folder.md`). An older project's `voice_guide` entry is left alone but nothing reads it.
 
 ---

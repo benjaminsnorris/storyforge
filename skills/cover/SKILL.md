@@ -25,8 +25,8 @@ Before doing anything else, orient yourself:
 2. **Read `storyforge.yaml`** production settings — check `production.cover_image`, `production.cover.subtitle`, `production.cover.palette`, `production.author`.
 3. **Read key reference documents** for visual inspiration (all that exist):
    - `reference/story-architecture.md` — themes, central conflict, premise, structure
-   - `reference/character-bible.md` — protagonist details, imagery, defining traits
-   - `reference/world-bible.md` — setting, atmosphere, visual world, sensory details
+   - `reference/character-bible.md` (or, once converted, the character rows: `./storyforge bibles`; #657) — protagonist details, imagery, defining traits
+   - `reference/world-bible.md` (or its rows once converted) — setting, atmosphere, visual world, sensory details
    - `reference/voice/book.md` and `reference/voice/anchors/` — tone, mood, register (a graphic novel's is `reference/voice-guide.md`)
 4. **Read the key decisions file** — check for any existing cover-related decisions.
 5. **Check for existing covers** in `manuscript/assets/` — `cover.png`, `cover.svg`, `cover-illustration.png`.
