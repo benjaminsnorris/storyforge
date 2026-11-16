@@ -20,6 +20,25 @@ def test_sentence_spans_cover_each_sentence():
     assert texts[-1] == 'The fig tree, she said.'
 
 
+def test_sentence_spans_keep_closing_quotes():
+    prose = '"I\'ll tell you." His eyes go past him. \u201cSwear it!\u201d (He waits.) Then'
+    texts = [prose[a:b] for a, b in vr.sentence_spans(prose)]
+    assert texts == ['"I\'ll tell you."', 'His eyes go past him.', '\u201cSwear it!\u201d',
+                     '(He waits.)', 'Then']
+
+
+def test_sentence_spans_carry_on_after_a_question_in_dialogue():
+    prose = '"Who is it?" she asks. "Me!" he says.  Nobody.'
+    texts = [prose[a:b] for a, b in vr.sentence_spans(prose)]
+    assert texts == ['"Who is it?" she asks.', '"Me!" he says.', 'Nobody.']
+
+
+def test_sentence_spans_go_on_past_titles_and_initials_but_not_no():
+    prose = 'Mr. Darcy met J. R. Smith. "No." Dr. Who left.'
+    texts = [prose[a:b] for a, b in vr.sentence_spans(prose)]
+    assert texts == ['Mr. Darcy met J. R. Smith.', '"No."', 'Dr. Who left.']
+
+
 def test_flag_spans_finds_the_sentence_even_with_curly_quotes_or_case():
     assert vr.flag_spans(PROSE, 'which frightened him') != []
     assert vr.flag_spans(PROSE, 'WHICH FRIGHTENED HIM') != []
@@ -169,3 +188,19 @@ def test_refused_edits_are_recorded_against_their_flag(project_dir):
     with open(os.path.join(project_dir, rel)) as f:
         text = f.read()
     assert 'Edit refused: its edit reaches outside' in text
+
+
+def test_an_edit_across_a_sentence_line_break():
+    """T-3: a scene a sentence per line; the reviser's find has a space."""
+    prose = 'He waits by the door.\nShe comes slowly in.\nThen he goes.\n'
+    flag = vr.Flag('He waits by the door. She comes', '1', 'x')
+    assert vr.flag_spans(prose, flag.quote) == [(0, prose.index('in.') + 3)]
+    r = vr.apply_revision(prose, [flag], {'edits': [
+        {'flag': 1, 'find': 'door. She comes', 'replace': 'door. Nobody. She comes'}]})
+    assert r.prose == 'He waits by the door.\nNobody.\nShe comes slowly in.\nThen he goes.\n'
+    assert not r.outcomes[0].refused
+    # loosened, it still may not reach past the flagged sentences
+    r = vr.apply_revision(prose, [vr.Flag('She comes slowly in.', '1', 'x')], {'edits': [
+        {'flag': 1, 'find': 'in. Then he', 'replace': 'in. He'}]})
+    assert r.prose == prose and 'outside the flagged sentence' in r.outcomes[0].refused[0]
+

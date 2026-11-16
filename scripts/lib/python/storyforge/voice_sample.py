@@ -83,7 +83,7 @@ class SampleError(RuntimeError):
 
 def one_per_line(text: str) -> str:
     """`text` with each sentence on its own line, paragraphs apart."""
-    from storyforge.voice_review import sentence_spans
+    from storyforge.scene_layout import sentence_spans
     paras = [p.strip() for p in re.split(r'\n\s*\n', text.strip()) if p.strip()]
     out = []
     for p in paras:
@@ -609,7 +609,8 @@ def check_samples(project_dir: str, scene_id: str, texts: dict[str, str], *, mod
             continue
         try:
             revision = voice_review.revise(project_dir, scene_id, text, placed, model=model,
-                                           log_file=os.path.join(log_dir, f'{label}-revise.json'))
+                                           log_file=os.path.join(log_dir, f'{label}-revise.json'),
+                                           layout=False)
             out[label] = revision.prose
             notes.append(f'Sample {label}: flagged before you saw it ({", ".join(found)}); '
                          f'{revision.summary()}'

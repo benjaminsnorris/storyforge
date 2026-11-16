@@ -2435,7 +2435,10 @@ class TestFirstFixNeverWorse(_FixRounds):
         out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again, partial],
                                  [(self.FIXED, self.EDITS)])
         assert out.result is partial and out.fixed and out.discarded == 0
-        assert out.prose == self.PROSE.replace(' for two days', '')
+        # the edited paragraph is laid out a sentence per line, the rest keep their bytes
+        from storyforge.scene_layout import sentence_lines
+        assert out.prose == sentence_lines(self.PROSE.replace(' for two days', ''),
+                                           old=self.PROSE)
         assert [r.edits for r in out.rounds] == [[self.EDITS[0]]]
         assert 'kept its 1 edit(s) that did not' in out.notes[0]
         assert 'took the case in her left hand' in out.notes[0]
@@ -4093,6 +4096,12 @@ class TestVerbatimIn:
         assert gate._verbatim_in('Left hand on the case, right hand free.',
                                  '\u201cLeft hand on the case,\u201d he said. '
                                  '\u201cRight hand free.\u201d')
+
+    def test_a_quotation_over_sentence_lines(self):
+        """A scene is a sentence per line (scene_layout): a quotation runs
+        across the lines of its paragraph."""
+        prose = '"Left hand on the case.\nRight hand free," he said.\nShe nodded.'
+        assert gate._verbatim_in('Left hand on the case. Right hand free.', prose)
 
     def test_quotations_in_different_paragraphs_are_not_joined(self):
         assert not gate._verbatim_in('Left hand on the case, right hand free.',

@@ -179,6 +179,12 @@ def test_single_curly_speech_with_a_contraction_is_speech():
     assert r.past == 0
 
 
+def test_speech_runs_across_sentence_lines():
+    """A scene is a sentence per line (scene_layout): a quote spans lines."""
+    r = vb.read_tense(PRESENT + '\n"I was there.\nI saw it.\nI knew."\nHe says it.')
+    assert r.past == 0
+
+
 def test_share_takes_only_a_tense():
     with pytest.raises(ValueError):
         vb.TenseReading(1, 1).share('Present')
@@ -497,3 +503,12 @@ def test_pov_gaps_on_a_file_it_cant_read_is_a_reference_doc_error(tmp_path, name
     _write(os.path.join(pd, 'reference', name), b'id|name\n\xff|x\n')
     with pytest.raises(ReferenceDocError, match=name):
         vb.pov_gaps(pd, 'Cy')
+
+
+def test_an_unclosed_straight_quote_stops_at_the_blank_line():
+    """T-11: a quote left open at a paragraph's end isn't joined to the next."""
+    r = vb.read_tense('"I was there.\nI saw it.\n\nHe was there. "Go," she said.')
+    # "I was", "I saw", "He was", "said": the open quote didn't swallow the
+    # next paragraph (which would leave only "said")
+    assert r.past == 4
+

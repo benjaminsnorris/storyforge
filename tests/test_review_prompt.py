@@ -150,10 +150,10 @@ class TestReviewGuidance:
         assert 'uneven scene length' in prompt
         assert 'not a defect' in prompt
 
-    def test_one_paragraph_per_line_is_not_a_stub(self, nested_repo, monkeypatch):
+    def test_line_count_is_not_length(self, nested_repo, monkeypatch):
         prompt = _capture_prompt(nested_repo, monkeypatch).lower()
-        assert 'one paragraph per line' in prompt
-        assert 'stub' in prompt
+        assert 'a sentence per line' in prompt
+        assert 'line count is not its length' in prompt
 
     def test_extraction_has_its_own_criteria(self, nested_repo, monkeypatch):
         prompt = _capture_prompt(nested_repo, monkeypatch)

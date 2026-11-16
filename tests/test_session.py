@@ -106,6 +106,12 @@ def test_the_writer_is_told_the_word_the_reader_takes_for_an_empty_hand():
     assert stage_sheet._hand_value('  ') == ''
 
 
+def test_the_writers_scene_is_laid_out_a_sentence_per_line():
+    """T-6: the review, the writer's sheet and the file hold the same prose."""
+    d = session.parse_reply('<scene>\nShe sat. He stood.\n\n"Who?" she asks.\n</scene>\n', SCENE)
+    assert d.prose == 'She sat.\nHe stood.\n\n"Who?" she asks.\n'
+
+
 def test_a_half_good_stage_note_is_not_used_at_all():
     good = {'who': 'D', 'field': 'posture', 'item': '', 'value': 'sitting', 'quote': ''}
     bad = {'who': 'D', 'field': 'wings', 'item': '', 'value': 'up', 'quote': ''}

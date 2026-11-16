@@ -944,7 +944,7 @@ Long files are excerpted: the start and end are shown and the middle is marked a
 ## How to read these files
 
 - Judge files by the contents shown. A file named above but not shown, or the omitted middle of an excerpt, has not been read: draw no conclusions about it from its size or line count.
-- Scene files (`scenes/*.md`) hold one paragraph per line, so a scene with few lines is not a stub. Use the word counts.
+- Scene files (`scenes/*.md`) hold a sentence per line (older ones a paragraph per line), paragraphs a blank line apart, so a scene's line count is not its length. Use the word counts.
 - Uneven scene length is a deliberate choice in this project, not a defect. Do not flag scenes for being shorter or longer than others, and do not suggest splitting or merging scenes to even them out.
 
 ## Instructions

@@ -1790,15 +1790,22 @@ def report_unexpected_files(project_dir: str) -> list[str]:
 # Scene file cleanup
 # ============================================================================
 
-def _scene_files_to_clean(project_dir: str) -> list[tuple[str, str]]:
-    """(filename, cleaned text) for every scene file carrying artifacts.
+def _scene_files_to_clean(project_dir: str,
+                          notes: list[str] | None = None) -> list[tuple[str, str]]:
+    """(filename, cleaned text) for every scene file carrying artifacts, or
+    not yet laid out a sentence per line.
 
     Removes scene markers (=== SCENE: id ===), leading H1/H2 title headers,
-    and trailing Continuity Tracker Update blocks.
+    and trailing Continuity Tracker Update blocks; then lays the prose out a
+    sentence per line (`scene_layout.sentence_lines`, a novel's scenes only:
+    a graphic novel's are panel scripts), saying in `notes` any paragraph
+    left alone for its own line breaks.
     """
+    from storyforge.scene_layout import sentence_lines
     scenes_dir = os.path.join(project_dir, 'scenes')
     if not os.path.isdir(scenes_dir):
         return []
+    prose = get_medium(project_dir) != 'graphic-novel'
 
     dirty: list[tuple[str, str]] = []
     for filename in sorted(os.listdir(scenes_dir)):
@@ -1824,6 +1831,11 @@ def _scene_files_to_clean(project_dir: str) -> list[tuple[str, str]]:
         if extracted is not None:
             cleaned = extracted
         cleaned = clean_scene_content(cleaned)
+        if prose:
+            held: list[str] = []
+            cleaned = sentence_lines(cleaned, notes=held)
+            if notes is not None:
+                notes.extend(f'scenes/{filename}: {n}' for n in held)
 
         if cleaned != original:
             dirty.append((filename, cleaned))
@@ -1831,14 +1843,18 @@ def _scene_files_to_clean(project_dir: str) -> list[tuple[str, str]]:
 
 
 def plan_scene_files(project_dir: str) -> StepPlan:
-    """Plan the writing-agent artifacts to strip from scene files.
+    """Plan the writing-agent artifacts to strip from scene files, and the
+    scenes to lay out a sentence per line (once, for a book drafted before
+    `scene_layout`: drafting and revision lay out only what they change).
 
     The one step that reports a clean result out loud, hence the `summary`:
     it runs only under `--scenes`, so an author who asked for it is owed an
     answer either way.
     """
-    dirty = _scene_files_to_clean(project_dir)
-    changes = tuple(_change('clean', name) for name, _ in dirty)
+    held: list[str] = []
+    dirty = _scene_files_to_clean(project_dir, held)
+    changes = tuple(_change('clean', name) for name, _ in dirty) + tuple(
+        _note(n) for n in held)
 
     def apply() -> tuple[PlannedChange, ...]:
         for filename, cleaned in dirty:
@@ -1885,7 +1901,8 @@ def parse_args(argv):
                         help='Detailed output for each step')
     parser.add_argument('--scenes', action='store_true',
                         help='Strip writing-agent artifacts (title headers, '
-                             'continuity blocks, scene markers) from scene files')
+                             'continuity blocks, scene markers) from scene files, '
+                             'and lay a novel\'s scenes out a sentence per line')
     parser.add_argument('--csv', action='store_true',
                         help='Run only the CSV integrity report (schema '
                              'validation, row checks, unexpected files)')
@@ -2152,9 +2169,12 @@ def _check_scene_artifacts(project_dir: str) -> list[dict]:
     if not os.path.isdir(scenes_dir):
         return []
 
+    from storyforge.scene_layout import sentence_lines
+    prose = get_medium(project_dir) != 'graphic-novel'
     findings: list[dict] = []
     unreadable: list[str] = []
     dirty_count = 0
+    unlaid = 0
     for filename in sorted(os.listdir(scenes_dir)):
         if not filename.endswith('.md'):
             continue
@@ -2178,6 +2198,8 @@ def _check_scene_artifacts(project_dir: str) -> list[dict]:
 
         if cleaned != original:
             dirty_count += 1
+        if prose and sentence_lines(cleaned) != cleaned:
+            unlaid += 1
 
     if dirty_count > 0:
         findings.append({
@@ -2188,6 +2210,17 @@ def _check_scene_artifacts(project_dir: str) -> list[dict]:
             'action': 'Strip artifacts from scene files',
             'command': 'storyforge cleanup --scenes',
             'severity': 'warning',
+        })
+    if unlaid:
+        findings.append({
+            'type': 'scene_layout', 'file': 'scenes/',
+            'category': 'scenes',
+            'detail': f'{unlaid} scene file(s) not laid out a sentence per line, so a '
+                      f'PR line comment marks a paragraph (drafting and revision lay '
+                      f'out only what they change)',
+            'action': 'Lay the scenes out a sentence per line, in a commit of its own',
+            'command': 'storyforge cleanup --scenes',
+            'severity': 'info',
         })
     if unreadable:
         findings.append({
