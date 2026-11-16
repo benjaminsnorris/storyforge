@@ -14,9 +14,12 @@ writer for a whole stretch:
 - **Each scene** is one turn: a lean plan (`scene_plan`: POV, tense, when
   and where, the closest anchor, the events, the outcome, the knowledge and
   physical state out, the source passage for an adaptation, the stage as
-  the last scene left it). No motifs, no scripted dialogue, no subtext; the
-  author's notes only when `drafting.brief_notes` isn't `exclude` (briefs
-  written before #644 hold model-written notes: set `exclude` for those).
+  the last scene left it). The author's `must:` beats are marked required,
+  and `must:` dialogue lines are always listed ("Must be said"): the gate
+  stops a scene without them. Motifs, subtext and the other dialogue lines
+  are the author's notes, not requirements, shown only when
+  `drafting.brief_notes` isn't `exclude` (briefs written before #644 hold
+  model-written notes: set `exclude` for those).
 - **The writer replies** with the scene, then the stage at its end
   (`STAGE_OPEN`): a list of stage-sheet entries (`stage_sheet.Entry`),
   kept apart from the prose and saved as the writer sheet of its draft. A
@@ -278,7 +281,7 @@ def closest_anchor(anchors, scene: dict[str, str]) -> str:
 
 def brief_notes_wanted(project_dir: str) -> bool:
     """Whether the plan shows the author's note columns (goal, conflict,
-    key_dialogue, ...): `drafting.brief_notes` in storyforge.yaml, `include`
+    key_dialogue without its `must:` lines, which are always shown, ...): `drafting.brief_notes` in storyforge.yaml, `include`
     (the default) or `exclude` (briefs written before #644, whose notes a
     model wrote)."""
     from storyforge.common import read_yaml_field
@@ -330,9 +333,26 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
         .strip().isdigit() else '')
     anchor = closest_anchor(anchors, scene)
     add('Closest anchor', anchor)
-    events = [e.strip() for e in (scene.get('key_actions') or '').split(';') if e.strip()]
+    from storyforge.must import items as must_cells, misplaced, unmarked
+    events = [(f'{i.text} (must happen; its quoted words word for word)' if '"' in i.text
+               or '“' in i.text else f'{i.text} (must happen)') if i.beat else i.text
+              for i in must_cells(scene.get('key_actions') or '') if i.text]
     if events:
         lines += ['', '## What happens'] + [f'{n}. {e}' for n, e in enumerate(events, 1)]
+    # the author's `must:` lines are required (the gate stops a scene without
+    # one), so the plan carries them whatever drafting.brief_notes says
+    said_lines = [i.text for i in must_cells(scene.get('key_dialogue') or '') if i.beat]
+    if said_lines:
+        lines += ['', '## Must be said (its quoted words word for word; a line with no quotes, '
+                  'whole and word for word, its speaker label left out)']
+        lines += [f'- {t}' for t in said_lines]
+    # a marker that marks nothing (after other words, or in a note column)
+    # isn't a requirement: said, so the author knows before the draft
+    for col in ('key_actions', *AUTHOR_NOTE_COLUMNS):
+        for item in misplaced(scene.get(col) or '', col):
+            said.append(f'{col}: "{item[:80]}" has a must: marker that marks nothing (only '
+                        f'an item of key_actions or key_dialogue that starts with must: '
+                        f'is required)')
     outcome = (scene.get('outcome') or '').strip()
     # an older brief's outcome is a craft label (yes-but, no-and): a scene
     # needn't fit a framework (#643), and it says nothing of the ending
@@ -348,14 +368,16 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
     if state:
         lines += ['', '## True by the end'] + [f'- {k}' for k in state]
     if notes:
-        kept = [(c, scene.get(c, '').strip()) for c in AUTHOR_NOTE_COLUMNS
-                if (scene.get(c) or '').strip()]
+        cells = {c: (unmarked(scene.get(c) or '') if c == 'key_dialogue' else
+                     (scene.get(c) or '')).strip() for c in AUTHOR_NOTE_COLUMNS}
+        kept = [(c, v) for c, v in cells.items() if v]
         if kept:
             lines += ['', '## The author\'s notes (notes, not requirements)']
             lines += [f'- {c}: {v}' for c, v in kept]
     from storyforge.speaker_labels import LABEL_READING, has_label
-    shown = ['key_actions', 'outcome'] + (list(AUTHOR_NOTE_COLUMNS) if notes else [])
-    if any(has_label(scene.get(c, '')) for c in shown):
+    shown = [scene.get(c, '') for c in ('key_actions', 'outcome')]
+    shown += ([scene.get(c, '') for c in AUTHOR_NOTE_COLUMNS] if notes else said_lines)
+    if any(has_label(text) for text in shown):
         lines += ['', LABEL_READING]   # what a speaker label means (#513)
     source = drafting_section(project_dir, scene_id)
     if source:
