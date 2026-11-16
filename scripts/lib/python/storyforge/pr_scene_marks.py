@@ -8,9 +8,9 @@ comments (`pr_marks.fetch`) into the same `marks.SceneMarks` a marks file
 gives (`marks.parse_marks`), plus the suggestions to apply and what was
 left out and why.
 
-A scene file holds about a paragraph per line (the drafter writes
-paragraphs; `parsing.clean_scene_content` doesn't reflow them), so a line
-comment marks a paragraph:
+A scene file holds a sentence per line (`scene_layout`; a scene drafted
+before that holds a paragraph per line), so a line comment marks its line,
+a sentence. Below, "the paragraph" is the commented line:
 
 - **The scene:** a comment on `scenes/<id>.md` belongs to scene `<id>`; a
   comment on any other file is left out and named.
