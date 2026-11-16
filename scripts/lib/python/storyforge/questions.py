@@ -86,6 +86,9 @@ ASKINGS = yes_no.ASKINGS
 #: in the notes; a dispute past it is unruled). The brief's promises are
 #: their own call with their own cap
 MAX_QUESTIONS = 30
+#: The asking that breaks a split (the first `ASKINGS` disagree): only the
+#: split questions, one more call
+TIE_ASKING = ASKINGS + 1
 
 SCHEMA = {
     'type': 'object',
@@ -104,7 +107,9 @@ SCHEMA = {
 
 PROMPT = """You check one scene of a novel against facts the book has already established. Each question gives one fact, where the book established it, and asks whether this scene contradicts it.
 
-Answer `yes` only when the scene itself shows or says something that cannot be true if the fact holds, and put in `quote` the scene's words that do, copied exactly: the shortest clause that shows it. Answer `no` when the scene agrees with the fact, says nothing about it, or only seems to differ: a character's mistake, lie, joke or figure of speech, something remembered, dreamed or imagined, or a change the scene itself shows happening. When in doubt, `no`, with `quote` empty. Give a one-sentence reason in `why`.
+Answer `yes` when any clause of the scene shows or says something that cannot be true if the fact holds, and put in `quote` that clause, copied exactly: the shortest clause that shows it. Check every clause: words elsewhere in the scene that agree with the fact don't cancel one that contradicts it, since the error may be in one sentence only. Dialogue and a character's memory count as the book's word: a character who gives a wrong name, a wrong kinship, a wrong place or a wrong past is a contradiction, unless the scene itself shows that it is wrong (another character corrects it, the narration says it's a lie, a joke or a slip). A description counts as what it says, not as a mere look.
+
+Answer `no` when the scene agrees with the fact or says nothing about it, when the words are plainly a figure of speech, or are a dream, a vision or something imagined, or when the scene itself shows the fact changing. Give a one-sentence reason in `why`; with `no`, `quote` is empty.
 
 ## Scene: {scene_id}
 
@@ -203,8 +208,11 @@ class QuestionResult:
     notes: list[str] = field(default_factory=list)
     #: fact and dispute questions asked (each `ASKINGS` times)
     asked: int = 0
-    #: questions with split answers (a note)
+    #: questions the first two askings split on (a note), each asked a
+    #: third time (`TIE_ASKING`)
     split: int = 0
+    #: of those, the ones the third asking found: two yeses of three
+    tie_found: int = 0
     #: questions answered yes twice with no quote in the scene (a note)
     misquoted: int = 0
     #: disputes both askings said the scene doesn't contradict
@@ -451,12 +459,12 @@ def max_tokens(count: int) -> int:
     return 600 + 160 * count
 
 
-def _finding(q: Question, quote: str, why: str) -> Finding:
+def _finding(q: Question, quote: str, why: str, asked: str = '') -> Finding:
     return Finding(kind='contradiction', code=q.code, scene_quote=quote,
                    established_scene=q.established_scene,
                    established_quote=q.established_quote, fact_id=q.fact_id,
-                   explanation=f'(question, asked {ASKINGS} times) The book has: '
-                               f'"{q.statement}". {why}')
+                   explanation=f'(question, {asked or f"asked {ASKINGS} times"}) The book '
+                               f'has: "{q.statement}". {why}')
 
 
 def _verified(answers: list[dict], n: int, prose: str) -> tuple[str, str]:
@@ -470,11 +478,14 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
                   log_file: str = '') -> QuestionResult:
     """Ask `questions` (at most `MAX_QUESTIONS`; the rest are named in a
     note, a dispute among them unruled) twice each about `prose`. A finding
-    needs two yeses and a quote in the scene (the first asking's when it is
-    in the scene, else the second's, with that asking's reason). A
+    needs two yeses and a quote in the scene, from an asking that said yes
+    (the first such whose quote is in the scene, with its reason). A
+    question the two askings split on is asked a third time, alone with the
+    other split ones (`TIE_ASKING`): a yes there is the second yes. A
     dispute's question (`Question.dispute`) is ruled every time: two yeses
-    with a verified quote are a finding, two noes clear it, anything else
-    (split, misquoted, past the cap) leaves it unruled.
+    with a verified quote are a finding, two noes from the first two
+    askings clear it, anything else (split then no, misquoted, past the
+    cap) leaves it unruled.
 
     Raises:
         QuestionError: a refusal, an API failure, or a reply cut off or off
@@ -496,14 +507,36 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
     result.asked = count
     yes, split = yes_no.agreed(answers, count, 'yes')
     no, _ = yes_no.agreed(answers, count, 'no')
+    # the askings that said yes, per question found (`_verified` reads them)
+    said_yes = {n: [{n: a[n]} for a in answers] for n in yes}
+    tied = [n for n in range(1, count + 1) if n not in yes and n not in no]
+    asked = {n: '' for n in yes}
+    if tied:
+        # a split is broken by a third asking of just those questions: two
+        # yeses of three are a finding. A dispute is still cleared only by
+        # the first two both saying no: a third no leaves it unruled
+        sub = [questions[n - 1] for n in tied]
+        third = yes_no.structured_call(
+            build_prompt(scene_id, prose, sub, TIE_ASKING), model,
+            yes_no.asking_log(log_file, TIE_ASKING), max_tokens(len(sub)), SCHEMA,
+            f'questions {scene_id} (tie)',
+            lambda t: yes_no.parse_answers(t, len(sub), ('quote', 'why')),
+            f'{scene_id}: the split questions', QuestionError)
+        for i, n in enumerate(tied, start=1):
+            if third[i]['answer'] == 'yes':
+                yes.append(n)
+                said_yes[n] = [{n: a[n]} for a in answers if a[n]['answer'] == 'yes'] \
+                    + [{n: third[i]}]
+                asked[n] = f'asked {TIE_ASKING} times, split, then yes'
+                result.tie_found += 1
     misquoted = 0
-    for n in yes:
+    for n in sorted(yes):
         q = questions[n - 1]
-        quote, why = _verified(answers, n, prose)
+        quote, why = _verified(said_yes[n], n, prose)
         if not quote:
             misquoted += 1
             continue
-        result.findings.append(_finding(q, quote, why))
+        result.findings.append(_finding(q, quote, why, asked[n]))
     found = {f.fact_id for f in result.findings}
     for n, q in enumerate(questions, start=1):
         if not q.dispute or q.fact_id in found:
@@ -511,7 +544,8 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
         (result.cleared if n in no else result.unruled).append(q.dispute)
     result.split, result.misquoted = split, misquoted
     if split:
-        result.notes.append(f'{split} question(s) got split answers: not findings')
+        result.notes.append(f'{split} question(s) got split answers and were asked a third '
+                            f'time: {result.tie_found} found (two yeses of three)')
     if misquoted:
         result.notes.append(f'{misquoted} question(s) answered yes twice with no quote in '
                             f'the scene: not findings')

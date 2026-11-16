@@ -51,7 +51,7 @@ def _answering(answers, asked=None):
         prompt = body['messages'][0]['content']
         asked.append(prompt)
         n = prompt.count('   Question: ')
-        asking = 2 if 'independent asking 2' in prompt else 1
+        asking = next((k for k in (3, 2) if f'independent asking {k}' in prompt), 1)
         return _text({'answers': answers(asking, n)})
     return fake
 
@@ -319,11 +319,34 @@ class TestAskQuestions:
         assert '(question, asked 2 times)' in f.explanation and 'She is rough.' in f.explanation
         assert r.notes == []
 
-    def test_one_yes_is_split_not_a_finding(self):
-        r, _ = self._ask([Q('gentle')], lambda a, n: [
+    def test_a_split_and_then_no_is_not_a_finding(self):
+        r, asked = self._ask([Q('gentle')], lambda a, n: [
             ans(1, 'yes' if a == 1 else 'no', 'slammed the door')])
-        assert r.findings == []
-        assert r.notes == ['1 question(s) got split answers: not findings']
+        assert r.findings == [] and len(asked) == 3
+        assert r.notes == ['1 question(s) got split answers and were asked a third time: '
+                           '0 found (two yeses of three)']
+
+    def test_a_split_and_then_yes_is_a_finding(self):
+        """A split lost the layer three of its 17 catches on the question
+        set: the third asking breaks it, two yeses of three."""
+        r, asked = self._ask([Q('gentle'), Q('kin', 'relationship')], lambda a, n: [
+            ans(k, 'yes' if a != 2 else 'no', 'slammed the door' if a != 2 else '')
+            for k in range(1, n + 1)])
+        assert len(asked) == 3 and asked[2].count('   Question: ') == 2
+        assert 'independent asking 3' in asked[2]
+        assert [f.fact_id for f in r.findings] == ['gentle', 'kin'] and r.tie_found == 2
+        assert '(question, asked 3 times, split, then yes)' in r.findings[0].explanation
+
+    def test_only_the_split_questions_are_asked_again(self):
+        r, asked = self._ask([Q('gentle'), Q('kin', 'relationship')], lambda a, n: (
+            [ans(1, 'no'), ans(2, 'yes' if a == 1 else 'no', 'Oren laughed')] if n == 2
+            else [ans(1, 'no')]))
+        assert len(asked) == 3 and asked[2].count('   Question: ') == 1
+        assert 'kin' not in [f.fact_id for f in r.findings]
+
+    def test_no_split_no_third_asking(self):
+        _, asked = self._ask([Q('gentle')], lambda a, n: [ans(1, 'no')])
+        assert len(asked) == 2
 
     def test_two_yeses_with_no_quote_in_the_scene_are_noted(self):
         r, _ = self._ask([Q('gentle')], lambda a, n: [ans(1, 'yes', 'she struck him')])
@@ -393,7 +416,7 @@ class TestDisputes:
         # SF-4: an empty claim used to make the dispute vanish
         d = Dispute('reg-fact', 'Mara is gentle', '')
         r = self._ask(lambda a, n: [ans(1, 'yes' if a == 1 else 'no', 'Mara slammed')], d)
-        assert r.unruled == [d]
+        assert r.unruled == [d]   # split, then no on the third asking
         r = self._ask(lambda a, n: [ans(1, 'no')], d)
         assert r.cleared == [d]
 
@@ -406,7 +429,12 @@ class TestDisputes:
         r = self._ask(lambda a, n: [ans(1, 'no')])
         assert r.cleared == [self.D] and r.unruled == [] and r.findings == []
 
+    def test_a_split_then_yes_rules_it_a_contradiction(self):
+        r = self._ask(lambda a, n: [ans(1, 'no' if a == 2 else 'yes', 'Mara slammed the door')])
+        assert [f.fact_id for f in r.findings] == ['reg-fact'] and r.unruled == []
+
     @pytest.mark.parametrize('answers', [
+        # split, and the third asking says no: a third no never clears one
         lambda a, n: [ans(1, 'yes' if a == 1 else 'no', 'Mara slammed the door')],
         lambda a, n: [ans(1, 'yes', 'not in the scene')]])
     def test_anything_else_leaves_it_unruled(self, answers):
