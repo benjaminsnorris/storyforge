@@ -1711,6 +1711,13 @@
           "threshold": 3
         },
         {
+          "actual": 1,
+          "name": "tie_found",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
           "actual": 0,
           "name": "misquoted",
           "op": "==",
@@ -1744,6 +1751,7 @@
         "recall_selected": 0.7647,
         "selection_lost": 1,
         "split": 3,
+        "tie_found": 1,
         "variants": 38,
         "yes_questions": 17
       },
@@ -1757,7 +1765,7 @@
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-16T21:30:40+00:00",
+      "started_at": "2026-11-16T21:48:34+00:00",
       "status": "pass",
       "suite": "question-set"
     },

@@ -75,7 +75,7 @@ class TestLandsOn:
         ('', 'his uncle Bob', False),
     ])
     def test_three_words_in_a_row(self, quote, where, lands):
-        assert _module()['lands_on'](quote, where) is lands
+        assert _module()['lands_on'](quote, where, changed=frozenset()) is lands
 
     @pytest.mark.parametrize('quote,changed,lands', [
         # qs-013: the finding quoted only the wrong name, the injection's one change
@@ -84,10 +84,33 @@ class TestLandsOn:
         ('Bob', {'uncle', 'bob'}, False),     # not every changed word
         ('Scrooge', {'frank'}, False),        # in the quote, but not the change
         ('Frank', set(), False),              # nothing known changed: three words
+        ('Frank Scrooge', {'frank'}, False),  # not in a row in the injected quote (T-8)
     ])
     def test_a_short_quote_lands_on_the_whole_change(self, quote, changed, lands):
         where = {'Bob': 'his uncle Bob'}.get(quote, '"Frank!" said Scrooge')
-        assert _module()['lands_on'](quote, where, frozenset(changed)) is lands
+        assert _module()['lands_on'](quote, where, changed=frozenset(changed)) is lands
+
+    def test_a_short_catch_is_caught_when_scored(self):
+        """#714's review T-1: `score` passes what the injection changed."""
+        data = {'facts': {'a': {'type': 'trait'}}, 'scenes': {'s': ['a']},
+                'variants': [{'id': 'v', 'kind': 'error', 'scene': 's', 'injection': 'i',
+                              'yes': ['a']}]}
+        inj = {'i': {'contradicted': [{'quote': '"Frank!" said Scrooge'}],
+                     'injection': {'find': '"Fred!" said Scrooge.',
+                                   'replace': '"Frank!" said Scrooge.'}}}
+        got = _module()['score'](data, {'v': {'findings': {'a': 'Frank'}, 'split': 0,
+                                              'misquoted': 0}}, inj)
+        assert got['metrics']['recall'] == 1.0 and got['missed'] == []
+
+    def test_an_error_whose_injection_changes_no_word_is_refused(self):
+        """#714's review SF-4."""
+        m = _module()
+        data = m['load_cases']()
+        v = next(v for v in data['variants'] if v['kind'] == 'error')
+        inj = {k: dict(c) for k, c in INJECTIONS.items()}
+        case = inj[v['injection']]
+        case['injection'] = {**case['injection'], 'replace': case['injection']['find']}
+        assert any('changes no word' in p for p in m['validate'](data, BOOK, inj))
 
     def test_changed_words(self):
         inj = {'injection': {'find': '"Fred!" said Scrooge.', 'replace': '"Frank!" said Scrooge.'}}
