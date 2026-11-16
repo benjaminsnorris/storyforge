@@ -4094,6 +4094,12 @@ class TestVerbatimIn:
                                  '\u201cLeft hand on the case,\u201d he said. '
                                  '\u201cRight hand free.\u201d')
 
+    def test_a_quotation_over_sentence_lines(self):
+        """A scene is a sentence per line (scene_layout): a quotation runs
+        across the lines of its paragraph."""
+        prose = '"Left hand on the case.\nRight hand free," he said.\nShe nodded.'
+        assert gate._verbatim_in('Left hand on the case. Right hand free.', prose)
+
     def test_quotations_in_different_paragraphs_are_not_joined(self):
         assert not gate._verbatim_in('Left hand on the case, right hand free.',
                                      '"Left hand on the case," he said.\n\n"Right hand free."')

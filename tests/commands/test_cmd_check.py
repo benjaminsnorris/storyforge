@@ -519,6 +519,19 @@ class TestFix:
         assert gate.apply_edits('a b c', [{'find': 'b', 'replace': 'B'},
                                           {'find': 'c', 'replace': 'C'}]) == 'a B C'
 
+    def test_apply_edits_lays_out_a_sentence_per_line(self):
+        """A `find` with a space where the scene has a line break still
+        applies; the result is a sentence per line (scene_layout)."""
+        prose = 'He waits.\nShe comes.\n\nThey go.\nOut.\n'
+        out = gate.apply_edits(prose, [{'find': 'He waits. She',
+                                        'replace': 'He waits. Nothing. Then she'}])
+        assert out == 'He waits.\nNothing.\nThen she comes.\n\nThey go.\nOut.\n'
+        with pytest.raises(gate.GateError):   # never across a blank line
+            gate.apply_edits(prose, [{'find': 'comes. They', 'replace': 'x'}])
+        assert gate.apply_edits(prose, []) == prose   # no edits: untouched
+        # text not laid out (a voice sample) keeps its layout
+        assert gate.apply_edits('One. Two. Three.', [{'find': 'Two.', 'replace': 'Too.'}]) == 'One. Too. Three.'
+
     @pytest.mark.parametrize('edits, why', [
         ([{'find': 'x', 'replace': 'y'}], 'occurs 0 times'),
         ([{'find': 'a', 'replace': 'y'}], 'occurs 2 times'),

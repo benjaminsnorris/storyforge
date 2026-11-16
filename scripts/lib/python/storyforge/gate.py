@@ -1153,8 +1153,9 @@ SET_UP_HERE = ('the ledger sets up {id} in this scene, and later scenes are read
 #: parts of a `must` line (`_verbatim_in`: `"Sing," he said, "goddess"`)
 _TAG_GAP = 6
 
-#: A quotation in the prose: straight or curly double quotes, within a line
-_QUOTATION = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
+#: A quotation in the prose: straight or curly double quotes, within a
+#: paragraph (its sentences are on lines of their own, `scene_layout`)
+_QUOTATION = re.compile(r'"((?:[^"\n]|\n(?![ \t]*\n))+)"|“((?:[^”\n]|\n(?![ \t]*\n))+)”')
 
 
 def _verbatim_in(line: str, prose: str) -> bool:
@@ -2790,31 +2791,53 @@ def build_fix_prompt(scene_id: str, prose: str, problems: list[str],
 {prose}"""
 
 
+def _find_span(prose: str, find: str) -> tuple[int, int] | None:
+    """Where `find` occurs exactly once in `prose`, else None. A scene has a
+    sentence per line (`scene_layout`), so a `find` that runs across a
+    sentence's end may have a space where the scene has a line break (or the
+    other way): when the exact text isn't there, a run of whitespace in it
+    matches any run of whitespace within a paragraph (never a blank line)."""
+    count = prose.count(find)
+    if count == 1:
+        start = prose.index(find)
+        return start, start + len(find)
+    if count or not find.strip() or find.strip() != find:
+        return None
+    gap = r'(?:[ \t]*\r?\n[ \t]*|[ \t]+)'   # spaces, or one line break
+    hits = list(re.finditer(gap.join(re.escape(w) for w in find.split()), prose))
+    return (hits[0].start(), hits[0].end()) if len(hits) == 1 else None
+
+
 def apply_edits(prose: str, edits: list[dict]) -> str:
     """`prose` with each edit's `find` (exactly once in `prose`) replaced.
+    Prose laid out a sentence per line (`scene_layout.sentence_lines`, as a
+    scene is by the time it's gated) stays so; other text (a voice sample)
+    keeps its own layout.
 
     Raises:
         GateError: a `find` is missing, occurs more than once, or overlaps
             another edit's; nothing is applied then.
     """
+    from storyforge.scene_layout import sentence_lines
+    laid_out = sentence_lines(prose) == prose
     spans = []
     for e in edits:
         find = (e.get('find') or '').replace('\r\n', '\n')
         if '\r\n' in prose:
             find = find.replace('\n', '\r\n')
-        count = prose.count(find) if find else 0
-        if count != 1:
+        span = _find_span(prose, find) if find else None
+        if span is None:
+            count = prose.count(find) if find else 0
             raise GateError(f'a fix edit\'s text occurs {count} times in the scene: '
                             f'{find[:80]!r}')
-        start = prose.index(find)
-        spans.append((start, start + len(find), e.get('replace') or ''))
+        spans.append((*span, e.get('replace') or ''))
     spans.sort()
     for (_, end, _), (start, _, _) in zip(spans, spans[1:]):
         if start < end:
             raise GateError('two fix edits overlap')
     for start, end, replace in reversed(spans):
         prose = prose[:start] + replace + prose[end:]
-    return prose
+    return sentence_lines(prose) if laid_out and edits else prose
 
 
 class Fixer(Protocol):
@@ -2950,10 +2973,14 @@ def _blocking_count(result: GateResult) -> int:
 def _undone_edit(earlier: list[FixRound] | tuple, before: str, after: str) -> str | None:
     """The `find` of an earlier fix's edit that a later fix put back: words the
     earlier edit removed, absent from `before`, present again in `after`."""
+    def flat(text: str) -> str:   # a sentence per line: compare across line breaks
+        return ' '.join(text.split())
+    before, after = flat(before), flat(after)
     for r in earlier:
         for e in r.edits:
             find, replace = e.get('find') or '', e.get('replace') or ''
-            if find and find not in replace and find not in before and find in after:
+            f = flat(find)
+            if f and f not in flat(replace) and f not in before and f in after:
                 return find
     return None
 

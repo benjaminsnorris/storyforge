@@ -82,6 +82,15 @@ def test_write_redraft_keeps_the_markers(illustrated, tmp_path, capsys):
     assert 'restored 1 illustration marker(s) the redraft dropped: lf-01' in capsys.readouterr().out
 
 
+def test_a_drafted_scene_is_a_sentence_per_line(tmp_path):
+    """Drafted prose is saved a sentence per line (scene_layout)."""
+    from storyforge.cmd_write import _extract_scene_from_response
+    out = os.path.join(str(tmp_path), 'scenes', 's1.md')
+    reply = ' '.join(['word'] * 120) + '. "Who is it?" she asks. Nobody.\n'
+    assert _extract_scene_from_response(_reply(str(tmp_path), reply), out) == ''
+    assert open(out).read().splitlines()[-2:] == ['"Who is it?" she asks.', 'Nobody.']
+
+
 def test_write_word_floor_counts_prose(tmp_path):
     """C-5: the floor on a reply counts prose words, as the skip rule does."""
     from storyforge.cmd_write import _extract_scene_from_response
@@ -128,7 +137,9 @@ def test_gate_fix_keeps_the_markers(illustrated, monkeypatch):
     path = os.path.join(illustrated, 'scenes', f'{SID}.md')
     assert cmd_write._gate_drafted_scene(illustrated, SID, path, 'draft', str(illustrated)) \
         == (True, '')
-    assert seen == [ORIGINAL]
+    # the gate sees, and records, the scene laid out a sentence per line
+    from storyforge.scene_layout import sentence_lines
+    assert seen == [sentence_lines(ORIGINAL)] and seen[0] != ORIGINAL
     assert MARKER in _scene(illustrated) and 'waited a while' in _scene(illustrated)
 
 

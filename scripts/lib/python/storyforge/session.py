@@ -418,7 +418,9 @@ class Draft:
 
 
 def parse_reply(text: str, scene_id: str) -> Draft:
-    """The scene and the stage note from a reply.
+    """The scene, laid out a sentence per line (`scene_layout`, so the
+    review, the writer's sheet and the file hold the same prose), and the
+    stage note from a reply.
 
     Raises:
         SessionError: no scene in the reply.
@@ -427,7 +429,8 @@ def parse_reply(text: str, scene_id: str) -> Draft:
     if not m or not m.group(1).strip():
         raise SessionError(f'{scene_id}: the writer\'s reply has no {SCENE_OPEN} ... '
                            f'{SCENE_CLOSE} block')
-    draft = Draft(m.group(1).strip() + '\n')
+    from storyforge.scene_layout import sentence_lines
+    draft = Draft(sentence_lines(m.group(1).strip() + '\n'))
     s = re.search(re.escape(STAGE_OPEN) + r'\s*(.*?)\s*' + re.escape(STAGE_CLOSE), text, re.S)
     if not s:
         draft.stage_problem = 'the reply has no stage note'

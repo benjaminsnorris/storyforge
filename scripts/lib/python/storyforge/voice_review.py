@@ -168,6 +168,11 @@ class Revision:
 _SENTENCE_END = re.compile(
     r'(?<=[.!?…])(?P<close>["”’\')\]]*)\s+(?![\sa-z])|\n\s*\n|\n')
 
+#: a title or an initial, whose full stop doesn't end the sentence
+_ABBREVIATION = re.compile(
+    r'(?:^|(?<=[\s(\["“‘\']))(?:Mr|Mrs|Ms|Mx|Dr|St|Mt|Jr|Sr|Prof|Capt|Col|Gen|Lt|Sgt|'
+    r'Rev|Fr|Hon|Gov|Sen|Rep|vs|[A-Z])\.$')
+
 
 def sentence_spans(prose: str) -> list[tuple[int, int]]:
     """(start, end) of each sentence (or line) in `prose`, in order. A
@@ -175,6 +180,8 @@ def sentence_spans(prose: str) -> list[tuple[int, int]]:
     spans, start = [], 0
     for m in _SENTENCE_END.finditer(prose):
         end = m.start() + len(m.group('close') or '')
+        if m.group('close') == '' and _ABBREVIATION.search(prose, max(0, m.start() - 6), m.start()):
+            continue   # `Mr. Darcy`, `J. Smith`: the sentence goes on
         if prose[start:end].strip():
             spans.append((start, end))
         start = m.end()
@@ -325,7 +332,7 @@ def apply_revision(prose: str, flags: list[Flag], reply: dict,
     sentence and never touching a `protected` line (the author's keeps);
     one `Outcome` per flag. A flag both edited and kept counts as edited
     (the keep is noted in `dropped`)."""
-    from storyforge.gate import GateError, apply_edits
+    from storyforge.gate import GateError, _find_span, apply_edits
     out = Revision(prose, [Outcome() for _ in flags])
     keep_spans = [span for k in protected for span in flag_spans(prose, k)]
     ok: list[tuple[int, dict, tuple[int, int]]] = []
@@ -335,12 +342,11 @@ def apply_revision(prose: str, flags: list[Flag], reply: dict,
             out.dropped.append(f'an edit names flag {n!r}, which there isn\'t')
             continue
         refused = out.outcomes[n - 1].refused
-        count = prose.count(find) if find else 0
-        if count != 1:
+        span = _find_span(prose, find) if find else None
+        if span is None:
+            count = prose.count(find) if find else 0
             refused.append(f'its edit\'s words occur {count} times in the scene: {find[:80]!r}')
             continue
-        start = prose.index(find)
-        span = (start, start + len(find))
         allowed = flag_spans(prose, flags[n - 1].quote)
         if not any(a <= span[0] and span[1] <= b for a, b in allowed):
             refused.append(f'its edit reaches outside the flagged sentence: {find[:80]!r}')

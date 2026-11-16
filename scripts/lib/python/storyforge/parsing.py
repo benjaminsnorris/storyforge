@@ -190,6 +190,8 @@ def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[
         from storyforge.illustrations import keep_markers
         content = keep_markers(os.path.dirname(os.path.abspath(scene_dir)), scene_id,
                                old_text, content, 'the revision', _log)
+    from storyforge.scene_layout import sentence_lines
+    content = sentence_lines(content)
 
     with open(path, 'w') as f:
         f.write(content)

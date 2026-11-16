@@ -389,9 +389,11 @@ _PRESENT = {p for p, _ in _VERBS}
 _PAST = {p for _, p in _VERBS}
 #: speech, which is as people speak: straight, curly and single-curly
 #: quotes. A single-curly quote is closed by a ’ not followed by a letter,
-#: so "‘I don’t know’" is one quote; a quote left open at a paragraph's end
-#: (common in fiction) stops at the line's end
-_SPEECH = re.compile(r'"[^"\n]*"|“[^”]*”|‘(?:[^’\n]|’(?=\w))*’')
+#: so "‘I don’t know’" is one quote. A quote runs across the lines of a
+#: paragraph (a scene has a sentence per line, `scene_layout`); one left
+#: open at a paragraph's end (common in fiction) stops at the blank line.
+_SPEECH = re.compile(r'"(?:[^"\n]|\n(?![ \t]*\n))*"|“[^”]*”'
+                     r'|‘(?:[^’\n]|’(?=\w)|\n(?![ \t]*\n))*’')
 _WORD = re.compile(r"[A-Za-z]+")
 #: how many verb forms a scene needs before its tense is judged
 MIN_TENSE_SIGNALS = 12

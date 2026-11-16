@@ -33,6 +33,12 @@ def test_sentence_spans_carry_on_after_a_question_in_dialogue():
     assert texts == ['"Who is it?" she asks.', '"Me!" he says.', 'Nobody.']
 
 
+def test_sentence_spans_go_on_past_titles_and_initials_but_not_no():
+    prose = 'Mr. Darcy met J. R. Smith. "No." Dr. Who left.'
+    texts = [prose[a:b] for a, b in vr.sentence_spans(prose)]
+    assert texts == ['Mr. Darcy met J. R. Smith.', '"No."', 'Dr. Who left.']
+
+
 def test_flag_spans_finds_the_sentence_even_with_curly_quotes_or_case():
     assert vr.flag_spans(PROSE, 'which frightened him') != []
     assert vr.flag_spans(PROSE, 'WHICH FRIGHTENED HIM') != []

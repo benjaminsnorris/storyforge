@@ -179,6 +179,12 @@ def test_single_curly_speech_with_a_contraction_is_speech():
     assert r.past == 0
 
 
+def test_speech_runs_across_sentence_lines():
+    """A scene is a sentence per line (scene_layout): a quote spans lines."""
+    r = vb.read_tense(PRESENT + '\n"I was there.\nI saw it.\nI knew."\nHe says it.')
+    assert r.past == 0
+
+
 def test_share_takes_only_a_tense():
     with pytest.raises(ValueError):
         vb.TenseReading(1, 1).share('Present')

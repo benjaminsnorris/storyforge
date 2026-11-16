@@ -60,6 +60,7 @@ from storyforge.costs import (
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
 from storyforge.illustrations import count_prose_words, read_scene_prose, read_scene_raw
+from storyforge.scene_layout import sentence_lines
 
 
 def parse_args(argv):
@@ -967,6 +968,10 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     from storyforge import gate
     with open(scene_file, encoding='utf-8') as f:
         prose = f.read()
+    if sentence_lines(prose) != prose:   # a sentence per line, before the gate records it
+        prose = sentence_lines(prose)
+        with open(scene_file, 'w', encoding='utf-8') as f:
+            f.write(prose)
     # a revision pass often leaves the facts alone; a redraft rarely does
     stale = {'redraft': ' Its earlier version\'s facts are still in the ledger and no '
                         'longer match the prose.',
@@ -1173,11 +1178,12 @@ def _interactive_problem(scene_file: str, before: str) -> str:
 
 def _keep_cli_markers(project_dir: str, scene_id: str, scene_file: str, before: str) -> None:
     """Put back the illustration markers `before` (the scene the CLI
-    rewrote) carried and the CLI's prose dropped (#610's review, SF-W)."""
+    rewrote) carried and the CLI's prose dropped (#610's review, SF-W), and
+    lay the prose out a sentence per line (`scene_layout`)."""
     from storyforge.illustrations import keep_markers
     with open(scene_file, encoding='utf-8') as f:
         written = f.read()
-    kept = keep_markers(project_dir, scene_id, before, written, 'the CLI', log)
+    kept = sentence_lines(keep_markers(project_dir, scene_id, before, written, 'the CLI', log))
     if kept != written:
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(kept)
@@ -1453,6 +1459,7 @@ def _extract_scene_from_response(log_file: str, out_file: str,
             content = keep_markers(os.path.dirname(os.path.dirname(os.path.abspath(out_file))),
                                    os.path.basename(out_file)[:-len('.md')],
                                    old_text, content, 'the redraft', log)
+        content = sentence_lines(content)
     else:
         content = text
 
@@ -1994,8 +2001,8 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
         raw = read_scene_raw(project_dir, sid)
         with open(scene_file, 'w', encoding='utf-8') as f:
             # a redraft keeps the scene's illustration markers
-            f.write(keep_markers(project_dir, sid, raw, prose, 'the session', log)
-                    if raw else prose)
+            f.write(sentence_lines(keep_markers(project_dir, sid, raw, prose, 'the session', log)
+                                   if raw else prose))
         command = 'redraft' if raw and raw.strip() else 'draft'
         passed, why = _gate_drafted_scene(project_dir, sid, scene_file, command, log_dir,
                                           before=before, keep_going=True, fixer=sess.fixer)
