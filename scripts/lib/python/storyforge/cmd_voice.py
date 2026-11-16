@@ -125,8 +125,9 @@ def parse_args(argv):
     acc.add_argument('--force', action='store_true',
                      help='With --auto-pick, replace picks already in the shortlist')
     samp = sub.add_parser('sample', help='In a book: a round of blind voice samples of one '
-                                          'scene, as a PR to mark; a take on a marked sample; '
-                                          'or a winner saved as an anchor (#654)')
+                                          'scene (or, before the scene map, a moment), as a '
+                                          'PR to mark; a take on a marked sample; or a '
+                                          'winner saved as an anchor (#654, #656)')
     samp.add_argument('--scene', help='The scene to write several ways')
     samp.add_argument('--moment', metavar='TEXT',
                       help='Before the scene map (#656): a moment of the book, in a sentence '
@@ -548,7 +549,7 @@ def _sample(args) -> int:
             return 1
         prev_key = None
         marked = ''
-        scene = args.scene
+        scene = args.scene or ''
         moment = (args.moment or '').strip()
         notes: list[str] = []
         if scene and args.moment is not None:

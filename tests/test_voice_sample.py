@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 from storyforge import pr_marks, voice_sample as vs
+from storyforge.blocking import check_blocking as REAL_CHECK_BLOCKING
 
 SCENE = 'act1-sc01'
 RF = 'working/voice-samples/round-1.md'
@@ -164,6 +165,7 @@ def calls(monkeypatch, tmp_path):
         reply = None
 
     seen = Seen()
+    seen.blocking = []
 
     def fake(prompt, model, tokens, **k):
         seen.append(prompt)
@@ -178,6 +180,9 @@ def calls(monkeypatch, tmp_path):
                          [f'try {i}' for i in range(n)])
                 text = {'variants': [{'tried': t, 'text': f'Version {i} ran. It stopped.'}
                                      for i, t in enumerate(tried[:n])]}
+        elif 'findings' in props:   # the blocking read, when it isn't stubbed
+            seen.blocking.append(prompt)
+            text = {'findings': []}
         elif 'flags' in props:
             text = {'flags': []}
         else:
@@ -541,3 +546,89 @@ def test_from_pr_carries_the_moment(project_dir, monkeypatch, cli):
     assert cli('--from-pr', '7', '--variants', '2') == 0
     assert MOMENT in cli.calls[0]
     assert vs.load_key(project_dir, 2).moment == MOMENT
+
+
+# --- the #656 review ---
+
+def _summary(project_dir, synopsis):
+    with open(os.path.join(project_dir, 'reference', 'story-summary.md'), 'w',
+              encoding='utf-8') as f:
+        f.write(f'## Logline\nA mapmaker.\n\n## Synopsis\n{synopsis}\n')
+
+
+def test_a_moment_round_never_sends_the_template_synopsis(project_dir, calls, tmp_path):
+    # SF-4: init's template text isn't the book
+    from storyforge.common import get_plugin_dir, parse_story_summary
+    template = parse_story_summary(os.path.join(get_plugin_dir(), 'templates'))['synopsis']
+    assert 'Opens with a hook' in template
+    _summary(project_dir, template)
+    rnd = vs.write_round(project_dir, '', variants=2, vary=['tense'], influences='',
+                         model='m', log_dir=str(tmp_path), moment=MOMENT)
+    assert 'Opens with a hook' not in calls[0]
+    assert any("synopsis is still init's template: the round had only the moment's words"
+               in n for n in rnd.notes)
+
+
+def test_a_moment_round_without_a_synopsis_says_so(project_dir, calls, tmp_path):
+    path = os.path.join(project_dir, 'reference', 'story-summary.md')
+    if os.path.exists(path):
+        os.remove(path)
+    rnd = vs.write_round(project_dir, '', variants=2, vary=['tense'], influences='',
+                         model='m', log_dir=str(tmp_path), moment=MOMENT)
+    assert any('story-summary.md is missing: the round had only' in n for n in rnd.notes)
+    _summary(project_dir, '')
+    rnd = vs.write_round(project_dir, '', variants=2, vary=['tense'], influences='',
+                         model='m', log_dir=str(tmp_path), moment=MOMENT)
+    assert any('has no synopsis' in n for n in rnd.notes)
+
+
+def test_a_story_summary_it_cant_read_is_an_error_not_a_traceback(project_dir, cli, capsys):
+    # SF-L
+    with open(os.path.join(project_dir, 'reference', 'story-summary.md'), 'wb') as f:
+        f.write(b'## Synopsis\n\xff\n')
+    assert cli('--moment', MOMENT, '--variants', '2') == 1
+    assert "ERROR: reference/story-summary.md can't be read" in capsys.readouterr().out
+
+
+def test_a_moment_round_runs_the_real_physical_check_with_no_pov(project_dir, calls, tmp_path,
+                                                                 monkeypatch):
+    # T-2: the blocking read on a moment, which has no scenes.csv row
+    from storyforge import blocking
+    monkeypatch.setattr(blocking, 'check_blocking', REAL_CHECK_BLOCKING)
+    os.remove(os.path.join(project_dir, 'reference', 'scenes.csv'))   # no map yet
+    rnd = vs.write_round(project_dir, '', variants=2, vary=['tense'], influences='',
+                         model='m', log_dir=str(tmp_path), moment=MOMENT)
+    assert len(calls.blocking) == 2                                # one reading a sample
+    assert all('voice-moment' in p for p in calls.blocking)
+    assert vs.MOMENT_CHECK_NOTE in rnd.notes
+    assert not any("physical check didn't finish" in n for n in rnd.notes)
+
+
+@pytest.mark.parametrize('kwargs, why', [
+    ({'scene': 's', 'moment': 'm'}, 'not both'),
+    ({'scene': ''}, 'has neither'),
+    ({'scene': '', 'moment': '  '}, 'has neither'),
+])
+def test_a_round_key_names_a_scene_or_a_moment(kwargs, why):
+    # TD-2
+    with pytest.raises(ValueError, match=why):
+        vs.RoundKey(1, **kwargs)
+    with pytest.raises(vs.SampleError, match=why):
+        vs.RoundKey.from_json({'round': 1, 'tried': {}, **kwargs}, 'k')
+
+
+def test_a_key_saved_with_a_null_scene_loads_as_its_moment():
+    key = vs.RoundKey.from_json({'round': 1, 'scene': None, 'moment': MOMENT}, 'k')
+    assert (key.scene, key.moment) == ('', MOMENT)
+
+
+@pytest.mark.parametrize('argv, said', [
+    (['--scene', 'act1-sc02'], '--scene act1-sc02 is not what round 1 marked (act1-sc01)'),
+    (['--moment', MOMENT], '--moment is not what round 1 marked (act1-sc01)'),
+])
+def test_from_pr_says_when_the_round_asked_for_isnt_the_one_marked(project_dir, monkeypatch,
+                                                                   cli, capsys, argv, said):
+    # T-3
+    _from_pr(project_dir, monkeypatch, cli, [_c(_at('He saw her.'), 'keep')])
+    assert cli('--from-pr', '7', '--variants', '2', *argv) == 0
+    assert f'NOTE: {said}' in capsys.readouterr().out
