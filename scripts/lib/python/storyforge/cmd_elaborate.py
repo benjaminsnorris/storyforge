@@ -1952,7 +1952,7 @@ def _note_adaptation_entry(project_dir: str, stage: str) -> None:
     the map stage says which interpretation decisions it is built without."""
     from storyforge import adaptation
     found = adaptation.entry(project_dir)
-    if found is None or not found.higher:
+    if found is None or not found.enters_at_map:
         return
     if stage in ('spine', 'architecture'):
         log(f'NOTE: this adaptation\'s source gives its spine and architecture (it enters '

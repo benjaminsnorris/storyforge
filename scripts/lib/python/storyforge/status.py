@@ -8,6 +8,7 @@ No LLM, no writes. Pure over project files.
 """
 
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypedDict
 
 from storyforge.scoring_levels import (
@@ -37,7 +38,7 @@ Stage = Literal['logline', 'synopsis', 'act-shape', 'spine', 'architecture',
 
 #: A rung that holds the next one up: built and solid, or (#658) given by an
 #: adaptation's source and its interpretation decisions
-DONE_STATES = ('solid', 'given')
+DONE_STATES: tuple[RungState, ...] = ('solid', 'given')
 
 # Rung name -> `elaborate --stage` argument (only rungs with a command stage).
 ELABORATE_STAGE = {
@@ -324,13 +325,10 @@ def _recommend(stage: Stage, medium: str = 'novel') -> tuple[dict, dict | None]:
                  'command': write_command(medium), 'reason': ''})
     if stage == 'interpretation':
         # #658: an adaptation entering at the scene map, before its source
-        # gives the upper rungs (`AdaptationRoute.phase` adds what's missing)
-        return ({'stage': 'interpretation',
-                 'action': 'Record the interpretation decisions',
-                 'command': INTERPRETATION_COMMAND,
-                 'reason': INTERPRETATION_REASON},
-                {'stage': VOICE_STAGE, 'action': 'Find the voice',
-                 'command': VOICE_STAGE_COMMAND, 'reason': ''})
+        # gives the upper rungs. A fallback: `build_status` takes the step
+        # `AdaptationRoute.verdict` builds (the same helper, with what's
+        # missing) and the step after it from the voice
+        return interpretation_step(), _recommend('scene-map', medium)[0]
     if stage == 'draft':
         return ({'stage': 'draft', 'action': 'Draft scenes',
                  'command': write_command(medium),
@@ -437,96 +435,135 @@ def free_to_draft(project_dir: str) -> tuple[int, int, list[str]]:
 
 
 #: #658: what shows an adaptation's interpretation decisions and what's
-#: missing (`source status`); `source import` while a source isn't imported
+#: missing, or why its `source:` block can't be used (`source status`);
+#: `source import` while a source isn't imported
 INTERPRETATION_COMMAND = 'storyforge source status'
 IMPORT_COMMAND = 'storyforge source import'
 INTERPRETATION_REASON = (
-    "An adaptation's logline, synopsis, spine and architecture come from its source "
-    "and the author's interpretation decisions in reference/key-decisions.md (what "
-    "this version is about, whose eyes, what's cut, what's invented, where it ends, "
-    "the mode); record them (elaborate skill)")
-#: the coverage checks between rungs a source gives (act-shape to spine,
-#: spine to architecture, architecture to scenes): nothing to cover
+    "An adaptation's logline, synopsis, act shape, spine and architecture come from "
+    "its source and the author's interpretation decisions in reference/key-decisions.md "
+    "(what this version is about, whose eyes, what's cut, what's invented, where it "
+    "ends, the mode); record them (elaborate skill)")
+#: the coverage checks from a given rung down (act-shape to spine, spine to
+#: architecture, architecture to scene map), not asked of a book entering
+#: at the map: the rungs above the map are the source's
 _GIVEN_COVERAGE_LEVELS = (2, 3, 4)
+#: the `source` of the blockers an adaptation adds to `--json`: what keeps
+#: its upper rungs from being given (level -1), and source coverage once
+#: the scene map exists (level 5)
+INTERPRETATION_BLOCKER = 'interpretation'
+SOURCE_BLOCKER = 'source'
+
+
+def interpretation_step(entry=None) -> dict:
+    """#658: the `interpretation` stage's step. With `entry`
+    (`adaptation.Entry`): fix an unusable `source:` block (`source status`
+    shows why; `source import` would fail the same way), import the source,
+    or record the decisions, with what's missing in the reason."""
+    action, command = 'Record the interpretation decisions', INTERPRETATION_COMMAND
+    reason = INTERPRETATION_REASON
+    if entry is not None:
+        if entry.config_error:
+            action = "Fix storyforge.yaml's source: block"
+        elif not entry.imported:
+            action, command = 'Import the source', IMPORT_COMMAND
+        if entry.problems:
+            reason = f'{reason}. Missing: {"; ".join(entry.problems)}'
+    return {'stage': 'interpretation', 'action': action, 'command': command,
+            'reason': reason}
+
+
+@dataclass(frozen=True)
+class AdaptationVerdict:
+    """#658: what an adaptation changes in the verdict, from
+    `AdaptationRoute.verdict`: the `phase` (the ladder's, or
+    'interpretation'), `next` (the interpretation step, else None:
+    `_recommend`'s; the step after it comes from the voice, in
+    `build_status`), `notes`, and `blockers(found)`."""
+    phase: str
+    next: dict | None
+    notes: tuple[str, ...]
+    #: the `interpretation` blockers (what keeps the rungs from being given)
+    extra: tuple[dict, ...]
+    #: the `source` blockers (source coverage once the map exists)
+    coverage: tuple[dict, ...]
+    enters_at_map: bool
+
+    def blockers(self, found: list[dict]) -> list[dict]:
+        """`found` (`collect_blockers`) without the coverage from a given
+        rung down, for a book entering at the map, plus the adaptation's."""
+        out = found
+        if self.enters_at_map:
+            out = [b for b in found if not (b['source'] == 'coverage'
+                                            and b['level'] in _GIVEN_COVERAGE_LEVELS)]
+        return [*self.extra, *out, *self.coverage]
 
 
 class AdaptationRoute:
     """#658 (plan D8): how a `source:` book moves up the ladder. Made by
     `adaptation_route`, which marks the given rungs in the ladder; then
-    `phase(computed)` turns the ladder's phase into the adaptation's and
-    sets `next`/`then` when it routes differently (None: `_recommend`'s),
-    and `blockers(found)` drops coverage between given rungs and adds the
-    adaptation's own (what's missing for the rungs to be given, source
-    coverage). The voice before the map is #656's voice step, which sees
-    the given rungs as done."""
+    `verdict(computed)` gives the adaptation's part of the verdict, once,
+    as a frozen `AdaptationVerdict`. The voice before the map is #656's
+    voice step, which sees the given rungs as done."""
 
-    def __init__(self, project_dir: str, entry, medium: str):
+    def __init__(self, project_dir: str, entry):
         self.project_dir = project_dir
         self.entry = entry
-        self.medium = medium
-        self.next: dict | None = None
-        self.then: dict | None = None
-        self.notes: list[str] = []
-        self._extra: list[dict] = []
 
-    def phase(self, computed: str) -> str:
+    def verdict(self, computed: str) -> AdaptationVerdict:
         entry = self.entry
-        if not entry.higher:
-            self.notes.append('this adaptation has a spine or architecture of its own, so it '
-                              'builds its upper rungs as an original does (the full ladder)')
-            return computed
+        notes: list[str] = list(entry.decisions.notes) if entry.decisions else []
+        coverage, said = self._source_coverage()
+        notes += said
+        if not entry.enters_at_map:
+            notes.insert(0, 'this adaptation has a spine or architecture of its own, so it '
+                            'builds its upper rungs as an original does (the full ladder)')
+            return AdaptationVerdict(computed, None, tuple(notes), (), coverage, False)
+        extra = tuple({'source': INTERPRETATION_BLOCKER, 'level': -1, 'detail': p}
+                      for p in entry.problems)
         given = {LEVEL_NAMES[lvl] for lvl in GIVEN_LEVELS}
-        if not entry.ready:
-            for problem in entry.problems:
-                self._extra.append({'source': 'interpretation', 'level': -1,
-                                    'detail': problem})
-            if computed not in given:
-                return computed
-            self.next = {'stage': 'interpretation',
-                         'action': ('Import the source' if not entry.imported
-                                    else 'Record the interpretation decisions'),
-                         'command': (IMPORT_COMMAND if not entry.imported
-                                     else INTERPRETATION_COMMAND),
-                         'reason': (f'{INTERPRETATION_REASON}. Missing: '
-                                    f'{"; ".join(entry.problems)}')}
-            self.then = {'stage': VOICE_STAGE, 'action': 'Find the voice',
-                         'command': VOICE_STAGE_COMMAND, 'reason': ''}
-            return 'interpretation'
+        if not entry.ready and computed in given:
+            return AdaptationVerdict('interpretation', interpretation_step(entry),
+                                     tuple(notes), extra, coverage, True)
         # Ready: the given rungs count as done, so the phase is the scene map
         # (or briefs), and #656's voice step puts the voice before it (by
         # default; `voice_stage: later` builds the map first), with the check
         # after the map before the briefs. Nothing of the adaptation's own.
-        return computed
+        return AdaptationVerdict(computed, None, tuple(notes), extra, coverage, True)
 
-    def blockers(self, found: list[dict]) -> list[dict]:
-        out = found
-        if self.entry.higher:
-            out = [b for b in found if not (b['source'] == 'coverage'
-                                            and b['level'] in _GIVEN_COVERAGE_LEVELS)]
-        return self._extra + out + self._source_coverage()
-
-    def _source_coverage(self) -> list[dict]:
-        """Validate's source coverage, its blocking findings, once the scene
-        map exists: a source event dropped without a recorded decision, a
-        scene with no map row."""
+    def _source_coverage(self) -> tuple[tuple[dict, ...], list[str]]:
+        """Validate's source coverage once the scene map exists: its blocking
+        findings as `source` blockers (in faithful mode a source scene left
+        out or cut with no reason; in either mode a scene with no map row,
+        a malformed row), a blocker when coverage couldn't be checked, and a
+        note counting the advisory findings (`storyforge validate` lists
+        them)."""
         if not artifact_present(self.project_dir, 5):
-            return []
+            return (), []
         from storyforge import source
+
+        def blocker(detail: str) -> dict:
+            return {'source': SOURCE_BLOCKER, 'level': 5, 'detail': detail}
         try:
             cfg = source.read_config(self.project_dir)
             result = source.check_coverage(self.project_dir, cfg) if cfg else None
         except Exception as e:   # status never fails on what it can't read
-            return [{'source': 'source', 'level': 5,
-                     'detail': f'source coverage not checked: {e or type(e).__name__}'}]
+            return (blocker(f'source coverage not checked: {str(e) or type(e).__name__}'),), []
         if result is None:
-            return []
-        return [{'source': 'source', 'level': 5,
-                 'detail': (f"{f['scene_id']}: " if f.get('scene_id') else '') + f['message']}
-                for f in result['findings'] if f.get('severity') == 'blocking']
+            return (), []
+        found = [blocker((f"{f['scene_id']}: " if f.get('scene_id') else '') + f['message'])
+                 for f in result['findings'] if f.get('severity') == 'blocking']
+        advisory = [f for f in result['findings'] if f.get('severity') != 'blocking']
+        if not result.get('checked'):
+            why = '; '.join(f['message'] for f in advisory) or 'see storyforge validate'
+            found.append(blocker(f'source coverage not checked: {why}'))
+            return tuple(found), []
+        notes = ([f'{len(advisory)} advisory source-coverage finding(s), not blocking '
+                  f'(`storyforge validate` lists them)'] if advisory else [])
+        return tuple(found), notes
 
 
-def adaptation_route(project_dir: str, ladder: list[dict],
-                     medium: str = 'novel') -> AdaptationRoute | None:
+def adaptation_route(project_dir: str, ladder: list[dict]) -> AdaptationRoute | None:
     """#658: None without a `source:` block. Otherwise the book's route;
     when it enters at the scene map with its source imported and its
     interpretation decisions recorded, each upper rung (`GIVEN_LEVELS`)
@@ -536,16 +573,18 @@ def adaptation_route(project_dir: str, ladder: list[dict],
     entry = adaptation.entry(project_dir)
     if entry is None:
         return None
-    if entry.higher:
+    if entry.enters_at_map:
         for rung in ladder:
             if rung['level'] in GIVEN_LEVELS and rung['state'] == 'not_started':
                 if entry.ready:
                     rung['state'] = 'given'
                     rung['detail'] = 'from the source and the interpretation decisions'
+                elif entry.config_error:
+                    rung['detail'] = "the source gives it once storyforge.yaml's source: block can be used"
                 else:
                     rung['detail'] = ('the source gives it once the interpretation '
                                       'decisions are recorded')
-    return AdaptationRoute(project_dir, entry, medium)
+    return AdaptationRoute(project_dir, entry)
 
 
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
@@ -557,7 +596,7 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     # scene draft-state.
     # #658: an adaptation's upper rungs are given by its source (marks
     # them `given` in `ladder`)
-    adapted = adaptation_route(project_dir, ladder, medium)
+    route = adaptation_route(project_dir, ladder)
     phase = None
     for rung in ladder:
         if rung['state'] not in DONE_STATES:
@@ -565,8 +604,9 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
             break
     if phase is None:
         phase, _drafted, _total = draft_stage(project_dir)
+    adapted = route.verdict(phase) if route is not None else None
     if adapted is not None:
-        phase = adapted.phase(phase)
+        phase = adapted.phase
 
     # #596: briefs to drafting with no voice. Before drafting the voice
     # stage is the phase (next, or then while scenes wait on the gate); once
@@ -682,7 +722,13 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
 
     nxt, then = _recommend(phase, medium)
     if adapted is not None and adapted.next is not None:
-        nxt, then = adapted.next, adapted.then
+        # the step after it: the voice when #656's voice step would come
+        # before the map (no voice yet, `voice_stage` not later), else the map
+        nxt = adapted.next
+        then = (voice_step('first', voice_record['detail'])
+                if voice_record is not None and voice_record['state'] != 'solid'
+                and voice_record['when'] == 'first'
+                else _recommend('scene-map', medium)[0])
     if voice_next:
         # the voice before the rung it would build (#656)
         phase, nxt, then = VOICE_STAGE, voice_next, nxt

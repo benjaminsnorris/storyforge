@@ -157,7 +157,7 @@ def _status(project_dir: str, cfg) -> int:
     # #658: where the book enters the ladder, and its interpretation decisions
     from storyforge import adaptation
     found = adaptation.entry(project_dir)
-    if found is not None and found.higher:
+    if found is not None and found.enters_at_map:
         log('Ladder: enters at the scene map (the source and the interpretation decisions '
             'give the logline, synopsis, spine and architecture)')
     elif found is not None:
@@ -165,7 +165,7 @@ def _status(project_dir: str, cfg) -> int:
     if found is not None and found.decisions is not None:
         dec = found.decisions
         log(f'{dec.summary()} (reference/key-decisions.md)' if dec.ok
-            else f'WARNING: {dec.summary()}' if found.higher else dec.summary())
+            else f'WARNING: {dec.summary()}' if found.enters_at_map else dec.summary())
         for key, label in adaptation.DECISIONS:
             if key in dec.found:
                 log(f'  {label}: {dec.found[key]}')

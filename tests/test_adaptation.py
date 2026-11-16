@@ -28,6 +28,18 @@ def _decide(proj, text=DECISIONS):
     _write(proj, {'reference/key-decisions.md': old + text})
 
 
+def _map(proj, cuts):
+    """A one-scene map adapting minerva-visits, plus `cuts` rows."""
+    _write(proj, {
+        'reference/scenes.csv': ('id|seq|title|summary|status|pov|location|timeline_day|'
+                                 'time_of_day|duration\n'
+                                 'athena-at-the-door|1|Door|Athena comes|mapped|telemachus|'
+                                 'ithaca-hall|1|morning|1 hour\n'),
+        'reference/source-map.csv': ('scene_id|source_scenes|treatment|note\n'
+                                     'athena-at-the-door|minerva-visits|dramatize|\n' + cuts),
+    })
+
+
 def _voice(proj):
     _write(proj, {'reference/voice/book.md': '# The voice\n\nShort, plain sentences.\n',
                   'reference/voice/anchors/a.md': 'He ran.\n'})
@@ -42,39 +54,98 @@ def adapted(tmp_path):
 # The decisions
 # ----------------------------------------------------------------------------
 
+def _parse(body, heading='## Interpretation decisions'):
+    return adaptation.parse_decisions(f'{heading}\n\n{body}\n')
+
+
 class TestParseDecisions:
     def test_labelled_lines(self):
-        has, found = adaptation.parse_decisions(DECISIONS)
-        assert has and set(found) == {k for k, _ in adaptation.DECISIONS}
-        assert found['eyes'] == 'Telemachus, close third, throughout.'
-        assert found['mode'].startswith('faithful')
+        p = adaptation.parse_decisions(DECISIONS)
+        assert p.has_section and set(p.found) == {k for k, _ in adaptation.DECISIONS}
+        assert p.found['eyes'] == 'Telemachus, close third, throughout.'
+        assert p.found['mode'].startswith('faithful')
 
     def test_sub_headings_and_continued_lines(self):
         text = ('## Interpretation Decisions\n\n### What this version is about\n\nA boy.\n'
                 'He grows up.\n\n### Whose eyes\n\nHis.\n\n## Settings\n\n- Cut: nothing\n')
-        has, found = adaptation.parse_decisions(text)
-        assert has
-        assert found == {'about': 'A boy. He grows up.', 'eyes': 'His.'}   # Settings ends it
+        p = adaptation.parse_decisions(text)
+        assert p.has_section
+        assert p.found == {'about': 'A boy. He grows up.', 'eyes': 'His.'}   # Settings ends it
 
-    @pytest.mark.parametrize('value', ['', '<who tells it>', 'TBD', '...', '**'])
+    @pytest.mark.parametrize('value', ['', '<who tells it>', 'TBD', '...', '**', '[TBD]',
+                                       'N/A', '?', 'TBD: decide after import',
+                                       '<pick> later', 'todo'])
     def test_an_empty_or_placeholder_value_is_not_recorded(self, value):
-        _has, found = adaptation.parse_decisions(
-            f'## Interpretation decisions\n\n- **Whose eyes:** {value}\n')
-        assert 'eyes' not in found
+        """SF-2/CR-3: placeholders were read as decisions."""
+        p = _parse(f'- **Whose eyes:** {value}')
+        assert 'eyes' not in p.found
+        if value.strip('*'):
+            assert p.placeholders['eyes'] == value
+
+    @pytest.mark.parametrize('body', [
+        '- **Whose eyes:**\n  <!-- one line:\n       who holds the camera -->',
+        '### Whose eyes\n\n<!-- who holds\nthe camera -->',
+        '- **Whose eyes:** <!-- Hector? -->',
+    ])
+    def test_a_comment_is_not_a_decision(self, body):
+        """SF-2/CR-3: a value that was only an HTML comment counted."""
+        assert 'eyes' not in _parse(body).found
 
     def test_short_labels_and_plain_lines(self):
-        text = ('## Interpretation decisions\n\nAbout: grief\nPOV: Achilles\nCuts: the '
-                'catalogue\n* Inventions: none\n**Ending**: the funeral\nmode: free\n'
-                'Note: an aside under the mode\n')
-        _has, found = adaptation.parse_decisions(text)
+        text = ('About: grief\nPOV: Achilles\nCuts: the catalogue\n* Inventions: none\n'
+                '**Ending**: the funeral\nmode: free\nNote: an aside under the mode\n')
+        found = _parse(text).found
         assert found['about'] == 'grief' and found['eyes'] == 'Achilles'
         assert found['cut'] == 'the catalogue' and found['invented'] == 'none'
         assert found['ending'] == 'the funeral'
         assert found['mode'] == 'free Note: an aside under the mode'
 
+    @pytest.mark.parametrize('line, key, value', [
+        ('1. **Whose eyes:** Patroclus', 'eyes', 'Patroclus'),
+        ('2) Whose eyes: Patroclus', 'eyes', 'Patroclus'),
+        ('### What this book is about\n\nWrath.', 'about', 'Wrath.'),
+        ('- **What this book is:** Wrath.', 'about', 'Wrath.'),
+        ('- **Mode (faithful/free):** faithful', 'mode', 'faithful'),
+        ('- **Whose eyes** — Patroclus', 'eyes', 'Patroclus'),
+        ('- Whose eyes – Patroclus', 'eyes', 'Patroclus'),
+        ('*Whose eyes:* Patroclus', 'eyes', 'Patroclus'),
+        ('_Mode_: faithful', 'mode', 'faithful'),
+        ('| Decision | Choice |\n|---|---|\n| Whose eyes | Patroclus |', 'eyes', 'Patroclus'),
+    ])
+    def test_the_forms_an_author_writes(self, line, key, value):
+        """CR-2/SF-10: these read as missing."""
+        assert _parse(line).found.get(key) == value
+
+    def test_an_h1_section(self):
+        p = _parse('- Whose eyes: Hector\n\n## Settings\n\n- Cut: x', heading='# Interpretation decisions')
+        assert p.has_section and p.found == {'eyes': 'Hector'}
+
+    def test_a_heading_in_a_code_fence_is_not_the_section(self):
+        p = adaptation.parse_decisions('```\n## Interpretation decisions\n- Mode: free\n```\n')
+        assert not p.has_section
+
+    def test_a_label_naming_no_decision_is_kept_to_say(self):
+        p = _parse('- **Theme:** grief\n- **Whose eyes:** Hector')
+        assert p.unread == ('Theme',) and p.found == {'eyes': 'Hector'}
+
+    def test_a_decision_given_twice_keeps_the_last(self):
+        """SF-3: the first won, silently; an empty first entry hid a later one."""
+        p = _parse('- **Whose eyes:** Achilles\n- **Mode:** free\n- **Whose eyes:** Hector')
+        assert p.found['eyes'] == 'Hector' and p.repeated == {'eyes': 2}
+        assert _parse('- **Whose eyes:**\n- **Whose eyes:** Hector').found['eyes'] == 'Hector'
+
+    def test_an_indented_label_is_part_of_the_decision_above(self):
+        """SF-4: a nested `Ending:` took over the ending."""
+        p = _parse("- **What's invented:**\n  - A scene where\n  - Ending: Priam's dream\n"
+                   "- **Where it ends:** Hector's funeral")
+        assert p.found['ending'] == "Hector's funeral"
+        assert "Priam's dream" in p.found['invented']
+        q = _parse('### What this version is about\n\nWrath.\n  Cut: nothing else matters')
+        assert 'cut' not in q.found and 'Cut: nothing' in q.found['about']
+
     def test_no_section(self):
-        assert adaptation.parse_decisions('# Key decisions\n\n## Version rules\n\nx\n') == \
-            (False, {})
+        assert not adaptation.parse_decisions('# Key decisions\n\n## Version rules\n\nx\n'
+                                              ).has_section
 
 
 class TestReadDecisions:
@@ -113,7 +184,7 @@ class TestEntry:
 
     def test_not_imported(self, adapted):
         e = adaptation.entry(adapted)
-        assert e.higher and not e.ready and not e.imported
+        assert e.enters_at_map and not e.ready and not e.imported
         assert any('not imported' in p for p in e.problems)
 
     def test_ready_once_imported_and_decided(self, adapted):
@@ -121,7 +192,7 @@ class TestEntry:
         assert not adaptation.entry(adapted).ready
         _decide(adapted)
         e = adaptation.entry(adapted)
-        assert e.higher and e.ready and e.problems == ()
+        assert e.enters_at_map and e.ready and e.problems == ()
 
     @pytest.mark.parametrize('name, text', [
         ('spine.csv', 'id|seq|title\ne1|1|The suitors\n'),
@@ -130,11 +201,11 @@ class TestEntry:
     def test_an_own_spine_or_architecture_is_the_full_ladder(self, adapted, name, text):
         import_source(adapted)
         _write(adapted, {f'reference/{name}': text})
-        assert not adaptation.entry(adapted).higher
+        assert not adaptation.entry(adapted).enters_at_map
 
     def test_a_header_only_spine_is_not_its_own(self, adapted):
         _write(adapted, {'reference/spine.csv': 'id|seq|title\n'})
-        assert adaptation.entry(adapted).higher
+        assert adaptation.entry(adapted).enters_at_map
 
     def test_an_unusable_block_is_a_problem_not_a_crash(self, adapted):
         _write(adapted, {'storyforge.yaml': YAML.format(extra='  mode: loose')})
@@ -239,29 +310,132 @@ class TestStatus:
         v = status.build_status(str(tmp_path))
         assert v['phase'] == 'logline' and v['notes'] == []
 
-    def test_source_coverage_is_a_blocker_once_the_map_exists(self, adapted):
+    @pytest.mark.parametrize('own_spine', [False, True])
+    def test_source_coverage_is_a_blocker_once_the_map_exists(self, adapted, own_spine):
+        """For a book entering at the map, and for a full-ladder one (decision 5)."""
         import_source(adapted)
         _decide(adapted)
         _voice(adapted)
-        _write(adapted, {
-            'reference/scenes.csv': ('id|seq|title|status|pov|location|timeline_day|'
-                                     'time_of_day|duration\n'
-                                     'athena-at-the-door|1|Door|mapped|telemachus|ithaca-hall|'
-                                     '1|morning|1 hour\n'),
-            'reference/source-map.csv': ('scene_id|source_scenes|treatment|note\n'
-                                         'athena-at-the-door|minerva-visits|dramatize|\n'
-                                         '|gods-debate|cut|told in a line\n'
-                                         '|assembly-called|cut|\n'),
-        })
+        _map(adapted, '|gods-debate|cut|told in a line\n|assembly-called|cut|\n')
+        if own_spine:
+            _write(adapted, {'reference/spine.csv': 'id|seq|title\ne1|1|The suitors\n'})
         v = status.build_status(adapted)
         details = [b['detail'] for b in v['blockers'] if b['source'] == 'source']
         assert any('assembly-called is cut with no reason' in d for d in details)
         assert any('ship-sails is not in the source map' in d for d in details)
+        assert (_states(v)['spine'] == 'given') is not own_spine
+
+    def test_free_mode_gaps_are_a_note_not_a_blocker(self, adapted):
+        """C-2: a dropped source scene blocks only in faithful mode."""
+        _write(adapted, {'storyforge.yaml': YAML.format(extra='  mode: free')})
+        import_source(adapted)
+        _decide(adapted, DECISIONS.replace('faithful:', 'free:'))
+        _voice(adapted)
+        _map(adapted, '')
+        v = status.build_status(adapted)
+        assert not [b for b in v['blockers'] if b['source'] == 'source']
+        assert any('advisory source-coverage finding' in n for n in v['notes'])
+
+    def test_coverage_not_checked_is_said(self, adapted, monkeypatch):
+        """SF-5/SF-9/T: the path that can't check says so, never blank."""
+        import_source(adapted)
+        _decide(adapted)
+        _voice(adapted)
+        _map(adapted, '|gods-debate|cut|x\n|assembly-called|cut|x\n|ship-sails|cut|x\n')
+
+        def boom(*a, **k):
+            raise RuntimeError('')
+        monkeypatch.setattr('storyforge.source.check_coverage', boom)
+        details = [b['detail'] for b in status.build_status(adapted)['blockers']
+                   if b['source'] == 'source']
+        assert details == ['source coverage not checked: RuntimeError']
+
+    def test_a_map_without_a_source_map_is_not_checked_and_says_so(self, adapted):
+        import_source(adapted)
+        _decide(adapted)
+        _voice(adapted)
+        _map(adapted, '')
+        os.remove(os.path.join(adapted, 'reference', 'source-map.csv'))
+        details = [b['detail'] for b in status.build_status(adapted)['blockers']
+                   if b['source'] == 'source']
+        assert len(details) == 1 and details[0].startswith('source coverage not checked: ')
+        assert 'source-map.csv' in details[0]
+
+    def test_a_full_ladder_book_keeps_its_coverage_blockers(self, adapted):
+        """T: coverage between rungs is dropped only for a book entering at the map."""
+        import_source(adapted)
+        _decide(adapted)
+        _write(adapted, {
+            'reference/story-summary.md': ('## Logline\nA boy sails.\n\n## Act-shape\n'
+                                           '### Act 1\nHe sails.\n### Act 2\nHe returns.\n'),
+            'reference/spine.csv': 'id|seq|title|act\ne1|1|The suitors|1\n',
+        })
+        v = status.build_status(adapted)
+        assert [b for b in v['blockers'] if b['source'] == 'coverage' and b['level'] in (2, 3)]
+
+    def test_a_broken_source_block_routes_to_fixing_it(self, adapted):
+        """SF-8: it routed to `source import`, which fails on the same block."""
+        _write(adapted, {'storyforge.yaml': YAML.format(extra='  mode: loose')})
+        v = status.build_status(adapted)
+        assert v['phase'] == 'interpretation'
+        assert v['next']['command'] == 'storyforge source status'
+        assert v['next']['action'] == "Fix storyforge.yaml's source: block"
+        blockers = [b for b in v['blockers'] if b['source'] == 'interpretation']
+        assert len(blockers) == 1 and "source: block can't be used" in blockers[0]['detail']
+
+    def test_a_mode_mismatch_holds_the_rungs(self, adapted):
+        """T: the source imported, the decisions there, the Mode the other one."""
+        import_source(adapted)
+        _decide(adapted, DECISIONS.replace('faithful:', 'free:'))
+        v = status.build_status(adapted)
+        assert v['phase'] == 'interpretation'
+        assert v['next']['command'] == 'storyforge source status'
+        assert _states(v)['spine'] == 'not_started'
+        assert any('source.mode is faithful' in b['detail'] for b in v['blockers'])
+
+    @pytest.mark.parametrize('setup, then_stage', [
+        (lambda p: None, 'voice'),
+        (_voice, 'scene-map'),
+        (lambda p: _decide(p, '\n## Settings\n\n- voice_stage: later\n'), 'scene-map'),
+    ])
+    def test_the_step_after_the_decisions_follows_the_voice(self, adapted, setup, then_stage):
+        """CR-1: it was always "Find the voice"."""
+        import_source(adapted)
+        setup(adapted)
+        v = status.build_status(adapted)
+        assert v['next']['stage'] == 'interpretation'
+        assert v['then']['stage'] == then_stage
+
+    def test_decision_notes_reach_status(self, adapted):
+        """SF-3/SF-7: a decision given twice, a Mode that can't be compared."""
+        import_source(adapted)
+        _decide(adapted, DECISIONS.replace('faithful: every', 'mostly faithful: every')
+                + '- **Whose eyes:** Telemachus, first person.\n')
+        v = status.build_status(adapted)
+        assert any('Whose eyes is given 2 times' in n for n in v['notes'])
+        assert any("doesn't open with faithful or free" in n for n in v['notes'])
         assert _states(v)['spine'] == 'given'
+
+    def test_a_placeholder_is_named_in_status(self, adapted):
+        import_source(adapted)
+        _decide(adapted, DECISIONS.replace('Telemachus, close third, throughout.', '[TBD]'))
+        v = status.build_status(adapted)
+        assert v['phase'] == 'interpretation'
+        assert any("Whose eyes is a placeholder ('[TBD]')" in b['detail'] for b in v['blockers'])
+
+    def test_a_graphic_novel_adaptation_gets_the_given_rungs(self, adapted):
+        import_source(adapted)
+        _decide(adapted)
+        v = status.build_status(adapted, 'graphic-novel')
+        assert [_states(v)[r] for r in ('logline', 'synopsis', 'act-shape', 'spine',
+                                        'architecture')] == ['given'] * 5
+        assert v['phase'] == 'scene-map'
+        assert not [b for b in v['blockers'] if b['source'] == 'interpretation']
 
     def test_interpretation_is_a_recommendable_stage(self):
         nxt, then = status._recommend('interpretation')
-        assert nxt['command'] == 'storyforge source status' and then['stage'] == 'voice'
+        assert nxt == status.interpretation_step()
+        assert nxt['command'] == 'storyforge source status' and then['stage'] == 'scene-map'
 
 
 # ----------------------------------------------------------------------------

@@ -285,7 +285,7 @@ def entry_section(project_dir: str) -> str:
     decisions. '' for any other book, so its map prompt is unchanged."""
     from storyforge import adaptation
     found = adaptation.entry(project_dir)
-    if found is None or not found.higher:
+    if found is None or not found.enters_at_map:
         return ''
     labels = ', '.join(label.lower() for _, label in adaptation.DECISIONS)
     return f"""### Entering at the scene map
