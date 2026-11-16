@@ -111,13 +111,14 @@ def test_write_interactive_floor_counts_prose(tmp_path):
 
 
 def test_write_interactive_keeps_the_markers(illustrated, capsys):
-    from storyforge.cmd_write import _keep_cli_markers
+    from storyforge.cmd_write import _finish_cli_scene
     path = os.path.join(illustrated, 'scenes', f'{SID}.md')
     with open(path, 'w', encoding='utf-8') as f:
         f.write(REWRITE)   # what the CLI wrote
-    _keep_cli_markers(illustrated, SID, path, ORIGINAL)
+    _finish_cli_scene(illustrated, SID, path, ORIGINAL)
     assert MARKER in _scene(illustrated)
     assert 'the CLI dropped: lf-01' in capsys.readouterr().out
+    assert 'slow and cold.\nLine 1 of' in _scene(illustrated)   # what changed, laid out
 
 
 @pytest.mark.real_gate
@@ -137,9 +138,7 @@ def test_gate_fix_keeps_the_markers(illustrated, monkeypatch):
     path = os.path.join(illustrated, 'scenes', f'{SID}.md')
     assert cmd_write._gate_drafted_scene(illustrated, SID, path, 'draft', str(illustrated)) \
         == (True, '')
-    # the gate sees, and records, the scene laid out a sentence per line
-    from storyforge.scene_layout import sentence_lines
-    assert seen == [sentence_lines(ORIGINAL)] and seen[0] != ORIGINAL
+    assert seen == [ORIGINAL]   # the gate sees the file as written: no whole-scene reflow
     assert MARKER in _scene(illustrated) and 'waited a while' in _scene(illustrated)
 
 
@@ -190,6 +189,7 @@ def test_revise_redraft_keeps_the_markers(illustrated, monkeypatch):
     monkeypatch.setattr(cmd_revise, '_note_recheck', lambda *a, **k: None)
     cmd_revise._redraft_scenes(illustrated, [SID])
     assert MARKER in _scene(illustrated) and 'waited a while' in _scene(illustrated)
+    assert 'slow and cold.\nLine 1 of' in _scene(illustrated)   # what changed, laid out
 
 
 # ============================================================================
@@ -203,3 +203,57 @@ def test_cleanup_artifact_strip_keeps_the_markers(tmp_path):
     write_scene(str(tmp_path), 's1', f'# A Title\n\n{ORIGINAL}')
     [(name, cleaned)] = _scene_files_to_clean(str(tmp_path))
     assert name == 's1.md' and MARKER in cleaned and '# A Title' not in cleaned
+
+
+# ============================================================================
+# the layout (#704's review)
+# ============================================================================
+
+def test_a_revision_reply_that_changed_nothing_leaves_the_file_as_it_was(illustrated):
+    """SF-1 / H2: a book still a paragraph per line; a pass whose reply is
+    the scene word for word must not change the file (revise's "the pass
+    changed nothing" check compares bytes)."""
+    from storyforge.parsing import extract_scenes_from_response
+    before = _scene(illustrated)
+    reply = f'=== SCENE: {SID} ===\n{ORIGINAL}\n=== END SCENE: {SID} ===\n'
+    extract_scenes_from_response(reply, os.path.join(illustrated, 'scenes'))
+    assert _scene(illustrated) == before
+
+
+def test_interactive_revise_lays_out_only_what_it_changed(project_dir, monkeypatch):
+    """T-7: `_lay_out_scenes` after a CLI pass."""
+    from storyforge import cmd_revise
+    scenes = os.path.join(project_dir, 'scenes')
+    a, b = os.path.join(scenes, 'lay-a.md'), os.path.join(scenes, 'lay-b.md')
+    for path in (a, b):
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('Kept. As it was.\n\nOne. Two.\n')
+    before = {'lay-a': 'Kept. As it was.\n\nOne. Two.\n'}
+    with open(a, 'w', encoding='utf-8') as f:   # what the CLI wrote
+        f.write('Kept. As it was.\n\nOne. Three.\n\n![[illus:x]]\n')
+    cmd_revise._lay_out_scenes(project_dir, ['lay-a'], before)
+    with open(a, encoding='utf-8') as f:
+        assert f.read() == 'Kept. As it was.\n\nOne.\nThree.\n\n![[illus:x]]\n'
+    with open(b, encoding='utf-8') as f:
+        assert f.read() == 'Kept. As it was.\n\nOne. Two.\n'   # not rewritten: untouched
+
+
+
+def test_cleanup_scenes_lays_out_a_novel_once_and_names_verse(tmp_path):
+    """I1: `cleanup --scenes` lays out a book drafted before scene_layout, in
+    a step of its own; verse is left and said; a graphic novel's panel
+    scripts are never touched."""
+    from storyforge.cmd_cleanup import _scene_files_to_clean, _check_scene_artifacts
+    verse = 'Sing, goddess, the wrath\nof Peleus son'
+    write_scene(str(tmp_path), 's1', f'One. Two.\n\n{verse}\n')
+    write_scene(str(tmp_path), 's2', 'Laid.\nOut.\n')
+    held = []
+    assert _scene_files_to_clean(str(tmp_path), held) == \
+        [('s1.md', f'One.\nTwo.\n\n{verse}\n')]
+    assert len(held) == 1 and held[0].startswith('scenes/s1.md: paragraph 2')
+    [finding] = [f for f in _check_scene_artifacts(str(tmp_path)) if f['type'] == 'scene_layout']
+    assert finding['detail'].startswith('1 scene file(s) not laid out')
+    with open(tmp_path / 'storyforge.yaml', 'w') as f:
+        f.write('project:\n  medium: graphic-novel\n')
+    assert _scene_files_to_clean(str(tmp_path)) == []
+    assert not [f for f in _check_scene_artifacts(str(tmp_path)) if f['type'] == 'scene_layout']

@@ -191,7 +191,10 @@ def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[
         content = keep_markers(os.path.dirname(os.path.abspath(scene_dir)), scene_id,
                                old_text, content, 'the revision', _log)
     from storyforge.scene_layout import sentence_lines
-    content = sentence_lines(content)
+    notes: list[str] = []
+    content = sentence_lines(content, old=old_text, notes=notes)   # what changed, laid out
+    for note in notes:   # stdout: what `revise` logs (`_extract_scenes`)
+        print(f'NOTE: {scene_id}: {note}')
 
     with open(path, 'w') as f:
         f.write(content)
@@ -276,7 +279,6 @@ def main():
     """CLI entry point. Usage:
 
     python3 -m storyforge.parsing extract-scenes <log_file> <scene_dir>
-    python3 -m storyforge.parsing extract-single <log_file> <scene_file>
     """
     if len(sys.argv) < 2:
         print('Usage: python3 -m storyforge.parsing <command> [args]', file=sys.stderr)
@@ -314,29 +316,6 @@ def main():
             print(f'Skipped: {sid} -- {reason}')
         print(f'Total: {len(written)} scene(s)')
 
-    elif command == 'extract-single':
-        if len(sys.argv) < 4:
-            print('Usage: extract-single <log_file> <scene_file>', file=sys.stderr)
-            sys.exit(1)
-        log_file = sys.argv[2]
-        scene_file = sys.argv[3]
-
-        response = extract_api_response(log_file)
-        if not response:
-            print('No response content found', file=sys.stderr)
-            sys.exit(1)
-
-        content = extract_single_scene(response)
-        if content is not None:
-            with open(scene_file, 'w') as f:
-                f.write(content)
-                f.write('\n')
-        else:
-            # No markers — write full response
-            with open(scene_file, 'w') as f:
-                f.write(response)
-                f.write('\n')
-        print(f'Wrote: {scene_file}')
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
