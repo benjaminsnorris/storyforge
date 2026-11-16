@@ -2302,6 +2302,14 @@ def _current_input_hashes(project_dir):
             continue
         with open(path, encoding='utf-8', errors='replace') as f:
             out[name] = _hash_text(f.read())
+    # A converted book's character facts and voices, which novel-level
+    # scoring reads in place of (or beside) the essay (#657, #697's review):
+    # an edit to them makes the cycle stale. A book without rows hashes as
+    # before
+    from storyforge.bibles import rows_text
+    rows = rows_text(project_dir, 'character-bible.md')
+    if rows:
+        out['character-bible.md'] = _hash_text(out['character-bible.md'] + rows)
     return out
 
 
