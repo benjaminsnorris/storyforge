@@ -295,11 +295,19 @@ class TestSuite:
 
     def test_unrecorded_is_unavailable_not_an_error(self, tmp_path, monkeypatch):
         from storyforge import api
-        if any(v is not None for v in _module()['FLOORS'].values()):
-            pytest.skip('recorded: replay is measured')
+        suite = _suite()   # discover loads the module afresh: patch this one
+        mod = suite.run.__globals__
+        monkeypatch.setitem(mod, 'FLOORS', dict.fromkeys(mod['FLOORS']))
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
-        result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
+        result = harness.run_suite(suite, 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'stale' and 'not recorded yet' in result['stale']
+
+    def test_the_recording_replays_and_passes(self, tmp_path, monkeypatch):
+        from storyforge import api
+        monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
+        result = harness.run_suite(_suite(), 'replay',
+                                   str(PLUGIN_DIR / 'evals' / 'fixtures' / 'cassettes'))
+        assert result['status'] == 'pass', result.get('error') or result['notes']
 
     def test_records_then_replays_free(self, tmp_path, monkeypatch):
         from storyforge import api
