@@ -1076,10 +1076,13 @@ def _must_beats(scene: dict[str, str]) -> dict[str, list]:
 
 def _misplaced_must(scene: dict[str, str]) -> list[str]:
     """`GateResult.misplaced_must` for the brief row `scene`: `field: item`
-    for each item whose `must:` marks nothing (`must.misplaced`)."""
+    for each item whose `must:` marks nothing (`must.misplaced`), the
+    author-note columns included (a `must:` there requires nothing; #695)."""
     from storyforge.checker import PROMISE_FIELDS, REGISTRY_PROMISE_FIELDS
+    from storyforge.elaborate import AUTHOR_NOTE_COLUMNS
     from storyforge.must import misplaced
-    return [f'{col}: {item}' for col in (*PROMISE_FIELDS, *REGISTRY_PROMISE_FIELDS)
+    cols = dict.fromkeys((*PROMISE_FIELDS, *REGISTRY_PROMISE_FIELDS, *AUTHOR_NOTE_COLUMNS))
+    return [f'{col}: {item}' for col in cols
             for item in misplaced(scene.get(col) or '', col)]
 
 
