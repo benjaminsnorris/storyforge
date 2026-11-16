@@ -43,9 +43,16 @@ Status section says what's built and how Ben starts the redraft).
   voice"). Its control, `voice-austen-control` (no voice), puts her sixth
   to last on the meter while the judge still names her every time: the
   exemplars move the drafts most of the way, and the judge can't see it.
+- **#656, the voice stage after the act shape:** `status` names the voice
+  as next once the prose tier is solid (before the spine; a soft default,
+  `voice_stage: later` in key-decisions.md skips it), and again after the
+  map when `book.md` says nothing of a POV the map uses. Rounds before the
+  map write a moment (`voice sample --moment`). The architecture and map
+  prompts follow the narrator stance in `book.md` when it has text
+  (`docs/history.md`, "The voice stage after the act shape").
 
 **Next:** Ben fills Wrath's `reference/voice/` and runs the Act 1 pilot.
-Marks on drafted scenes can be read from the session's PR (`revise --marks-from-pr`, #691). Then #656 and #659, then #657 and #658.
+Marks on drafted scenes can be read from the session's PR (`revise --marks-from-pr`, #691). Then #659, then #657 and #658.
 
 ## Latest: the gate-and-voiceprint plan, phases 1–5 merged (2026-11-09, v1.173.0)
 
