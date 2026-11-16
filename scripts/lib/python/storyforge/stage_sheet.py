@@ -272,6 +272,9 @@ class Entry:
         f = it.get('field')
         if f not in STATE_FIELDS:
             raise bad(f'has field {f!r}, not one of {", ".join(STATE_FIELDS)}')
+        if f in HANDS and it.get('value', '') is None:
+            # null for an empty hand: refused as a blank is, with its hint (#700)
+            it = {**it, 'value': ''}
         if not all(isinstance(it.get(k, ''), str) for k in ('who', 'item', 'value', 'quote')):
             raise bad('has a who, item, value or quote that is not text')
         who, item, raw = it.get('who', '').strip(), it.get('item', '').strip(), it.get('value', '')
@@ -421,10 +424,19 @@ def _posture_fits(said: str, held: str) -> bool:
     return False
 
 
+#: what a sheet may write for an empty hand; `EMPTY` is the one the writer's
+#: instructions name (`session.INSTRUCTIONS`)
+EMPTY_HAND_WORDS = (EMPTY, 'nothing', 'free', 'none', 'bare')
+
+
 def _hand_value(value: str) -> str:
+    """`EMPTY` for any of `EMPTY_HAND_WORDS`; '' for a blank, which means
+    "not known" and is never guessed to be empty (#700); else the thing held."""
     v = _obj(value)
-    if v in ('', 'empty', 'nothing', 'free', 'none', 'bare'):
-        return EMPTY if v else ''
+    if v in EMPTY_HAND_WORDS:
+        return EMPTY
+    if not v:
+        return ''
     return value.strip()
 
 
