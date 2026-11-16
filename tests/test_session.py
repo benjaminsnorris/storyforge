@@ -865,6 +865,97 @@ def test_a_dry_run_commits_nothing(book, monkeypatch):
     assert book.last() == 'start'
 
 
+# --- the forecast covers the scenes a stopping session drafts (#708) ---
+
+@pytest.fixture
+def priced(book, monkeypatch):
+    """`book` with the session forecast at $10 a scene and a $35 threshold:
+    the whole fixture book is over it, three scenes are under it."""
+    from storyforge import cmd_write
+    from storyforge.costs import WriteForecast
+    seen = {}
+
+    def forecast(pd, ids, csv, count=None):
+        n = len(ids) if count is None else count
+        seen.update(pending=len(ids), count=n)
+        return WriteForecast(draft=10.0 * n, gate=0.0, basis='test')
+    monkeypatch.setattr(cmd_write, '_session_forecast', forecast)
+    monkeypatch.setattr(cmd_write, 'check_threshold', lambda total: total <= 35)
+    monkeypatch.setattr(cmd_write, 'cost_threshold', lambda: 35.0)
+    book.seen = seen
+    return book
+
+
+ALL = ['--session', '--coaching', 'full', '--force']
+
+
+def test_a_session_that_stops_after_3_is_forecast_for_3(priced, capsys):
+    """The real bug (#708): --stop-after 3 refused to start because the
+    whole book was over the threshold."""
+    run = {}
+    priced.mode('_run_session_mode', _leaves_files(seen=run))
+    assert priced.run(ALL + ['--stop-after', '3']) == 0
+    pending = priced.seen['pending']
+    assert pending > 3 and priced.seen['count'] == 3
+    out = capsys.readouterr().out
+    assert (f'Cost forecast: ~$30.00 for 3 of {pending} scenes, stopping after 3 for a read'
+            in out)
+    assert run['stop_after'] == 3
+    assert run['scene_forecast'] == pytest.approx(10.0)   # per scene, not per book
+
+
+def test_a_stopping_dry_run_has_no_over_threshold_note(priced, capsys):
+    priced.mode('_run_session_mode', _leaves_files())
+    assert priced.run(ALL + ['--stop-after', '3', '--dry-run']) == 0
+    out = capsys.readouterr().out
+    assert 'for 3 of' in out and 'over the cost threshold' not in out
+
+
+def test_a_session_with_no_stop_still_checks_the_whole_book(priced, capsys):
+    priced.mode('_run_session_mode', lambda *a, **k: pytest.fail('drafted'))
+    assert priced.run(ALL + ['--stop-after', '0']) == 1
+    pending = priced.seen['pending']
+    assert priced.seen['count'] == pending
+    out = capsys.readouterr().out
+    assert f'for {pending} scenes (mode session' in out and 'nothing written' in out
+
+
+def test_the_default_stop_on_a_book_with_no_prose_forecasts_three(priced, capsys):
+    import glob
+    for path in glob.glob(os.path.join(priced.dir, 'scenes', '*.md')):
+        open(path, 'w').close()
+    run = {}
+    priced.mode('_run_session_mode', _leaves_files(seen=run))
+    assert priced.run(ALL) == 0
+    assert priced.seen['count'] == 3 and run['stop_after'] == 3
+    assert 'stopping after 3 for a read' in capsys.readouterr().out
+
+
+def test_a_stop_past_the_pending_scenes_forecasts_them_all(priced, capsys):
+    priced.mode('_run_session_mode', _leaves_files())
+    priced.run(ALL + ['--stop-after', '50', '--dry-run'])
+    pending = priced.seen['pending']
+    assert priced.seen['count'] == pending
+    assert f'for {pending} scenes (mode session' in capsys.readouterr().out
+
+
+def test_the_session_forecast_prices_the_first_scenes_in_reading_order(project_dir,
+                                                                       monkeypatch):
+    from storyforge import cmd_write, ledger
+    seen = {}
+    monkeypatch.setattr(cmd_write, 'select_model', lambda t: 'claude-opus-5-5')
+    monkeypatch.setattr(session, 'forecast',
+                        lambda pd, ids, *a, **k: seen.setdefault('ids', ids) and (1.0, 0.0, ''))
+    order = ledger.scene_order(project_dir)
+    ids = sorted(order, key=order.get)
+    csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    cmd_write._session_forecast(project_dir, list(reversed(ids)), csv, count=2)
+    assert seen['ids'] == ids[:2]
+    seen.clear()
+    cmd_write._session_forecast(project_dir, ids, csv)
+    assert seen['ids'] == ids
+
+
 def test_is_bookkeeping():
     from storyforge.cmd_write import _is_bookkeeping
     assert _is_bookkeeping('working/costs/ledger.csv')
