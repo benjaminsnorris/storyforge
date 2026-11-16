@@ -17,6 +17,35 @@ reference/voice/
 missing file (never over one that's there), commits, and says what the voice
 still needs.
 
+## When the voice is found
+
+Voice is structural: who tells the story, and from what distance, decides
+which scenes exist and whose eyes they're in. So the voice comes right after
+the synopsis and act shape, before the spine and architecture deepen. Once
+the prose tier is solid, `storyforge status` names the voice as the next
+step while the book has none, with the spine after it. There are no scenes
+yet, so sample rounds write a moment (`voice sample --moment`, below).
+
+The narrator stance the samples settle goes in `book.md` (`## Decided`: who
+tells it, whether a narrator holds scenes, how many POV characters, how
+close, the tense) and, for the narrator, on a `narrator_pov:` line of
+`reference/key-decisions.md`. The architecture and map assign POVs that
+follow it.
+
+After the map, a short second check: when `book.md` says nothing of a POV
+the map uses, `status` names the voice as next again, before any brief is
+written or scene drafted, and `storyforge elaborate --stage voice` lists
+those POVs (or says they're all named). A POV is named by its full name, id
+or a `characters.csv` alias, as written (case counts); a first name alone
+counts only as an alias. A narrator POV is named by "narrator", not "no
+narrator". Say how each one's scenes are told. After that point, and always
+with `voice_stage: later`, it is a NOTE.
+
+This order is a default you can skip: put `voice_stage: later` on a line of
+`reference/key-decisions.md` to build the structure first (`voice_stage:
+first`, or no line, is the default; bold, code marks and quotes around it are
+fine, and the last such line wins). The voice then comes before drafting.
+
 ## When the voice is ready
 
 Drafting needs `book.md` with your text in it (not init's template) and at
@@ -213,19 +242,24 @@ voice repo (`references/storyforge-yaml-schema.md`,
 `references/voiceprints/README.md`). The repo's description, exemplars and
 fiction anchor come first in the writing prompt, then this folder. With a
 repo, `book.md` and the anchors are optional, but the book's POV rules,
-people and tense still belong in `book.md`.
+people and tense still belong in `book.md`, and so does the narrator stance that
+feeds the map (the voice check after the map reads `book.md` alone).
 
 ## Finding anchors
 
 `storyforge voice sample` runs blind sample rounds, in the book, as PRs. One
 scene is written several ways, you mark sentences, the next round writes
 toward what you kept, and the winner becomes an anchor. The scene must be in
-`scenes.csv`; its plan comes from the briefs, as in a writing session. The
+`scenes.csv`; its plan comes from the briefs, as in a writing session.
+Before the scene map there is no scene: `--moment "Hector says goodbye to
+Andromache at the gate"` writes a moment in your words instead, with the
+synopsis from `story-summary.md`; later rounds and takes carry the moment as
+they carry a scene. Give `--scene` or `--moment`, not both. The
 book needs no voice yet: round 1 is how it is found. It works for a book in
 a subfolder of its repo. At coach or strict coaching Claude writes no
 samples; running the command is your choice.
 
-1. **Round 1:** `storyforge voice sample --scene <id>`. One call writes
+1. **Round 1:** `storyforge voice sample --scene <id>` (or `--moment "..."`). One call writes
    `--variants` versions (default 5, 2 to 8) that vary `--vary` (default
    narrator stance, distance, tense), optionally blending `--influences
    "Pressfield, Renault"`. A reply without exactly that many versions, each

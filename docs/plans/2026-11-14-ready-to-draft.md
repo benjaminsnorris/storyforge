@@ -227,6 +227,12 @@ blind read of the old draft against the session pilot).
   author's line comments and suggestions on a session's scenes from its
   PR, applies suggestions as written, and revises the rest as `--marks`
   does, on the PR's branch.
+- **#656, the voice stage after the act shape: built.** `status` names the
+  voice as next once the prose tier is solid, before the spine (`voice_stage:
+  later` in key-decisions.md skips it), and after the map when `book.md`
+  says nothing of a POV the map uses (a NOTE once drafting starts, so
+  Wrath's redraft isn't stopped by it; its POV pass stays Ben's call).
+  `voice sample --moment "..."` runs rounds before there are scenes.
 - **Not built yet:**
   - Sessions at coach or strict coaching (flags to the author, nothing
     rewritten): `--session` takes full coaching only.

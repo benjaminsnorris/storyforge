@@ -1932,8 +1932,44 @@ def _run_voice_stage(project_dir: str, dry_run: bool) -> int:
         return 1
     if voice.kind == 'ok':
         log(f'The voice is ready: {voice.path}')
-        return 0
+        try:
+            notes = voice_book.read_folder(project_dir).notes
+        except ReferenceDocError:
+            notes = ''   # resolve said it's fine: the author repo carries it
+        if not notes:
+            log(f'NOTE: the voice comes from the author repo, but {voice_book.BOOK_FILE} has no '
+                f'text yet: the book\'s narrator stance, people and tense belong there (the '
+                f'architecture and map prompts follow the stance only from book.md).')
+        return _voice_check_after_the_map(project_dir)
     log(f'The voice isn\'t ready: {voice.detail}. Next: {voice_book.REMEDY}.')
+    return 0
+
+
+def _voice_check_after_the_map(project_dir: str) -> int:
+    """#656: the short second check, once the map has fixed the POVs: said
+    when the map isn't done yet, when it's clean, and the POVs book.md says
+    nothing of otherwise. A file it can't read is exit 1."""
+    from storyforge import voice_book
+    from storyforge.common import ReferenceDocError
+    from storyforge.status import ladder_states
+    medium = get_medium(project_dir) or 'novel'
+    rung = {r['name']: r['state'] for r in ladder_states(project_dir, medium)}
+    if rung.get('scene-map') != 'solid':
+        log('The voice check after the map runs once the map is done '
+            f'(the scene map is {rung.get("scene-map", "not_started").replace("_", " ")}).')
+        return 0
+    try:
+        gaps = voice_book.pov_gaps(project_dir)
+    except ReferenceDocError as e:
+        log(f'ERROR: {e}: the voice check after the map can\'t run.')
+        return 1
+    if gaps:
+        log(f'The voice check after the map: {voice_book.BOOK_FILE} says nothing of '
+            f'{len(gaps)} POV(s): {", ".join(gaps)}. Say how each one\'s scenes are told '
+            f'(who, how close, the tense), so the voice holds across the POV mix.')
+    else:
+        log(f'The voice check after the map: {voice_book.BOOK_FILE} names every POV of the '
+            f'map.')
     return 0
 
 
