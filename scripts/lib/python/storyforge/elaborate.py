@@ -1469,7 +1469,7 @@ def _validate_plan_gaps(ref_dir: str, checks: list[dict]) -> None:
     from .common import ReferenceDocError
     gaps, notes = bibles.plan_gaps(ref_dir)
     for g in gaps:
-        checks.append(_check('plan-gaps', f'plan-gap-{g.kind}-{g.ref}', False,
+        checks.append(_check('plan-gaps', f'plan-gap-{g.kind}-{g.slug()}', False,
                              f'Two-writers test: {g.message()}', severity='advisory'))
     for n, note in enumerate(notes, start=1):
         checks.append(_check('plan-gaps', f'plan-gaps-unchecked-{n}', False,

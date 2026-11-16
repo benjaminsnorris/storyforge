@@ -105,7 +105,7 @@ _REFERENCE_DOCS = [
 
 #: How a stage writes the bibles in a prose book (#657, plan D2): facts as
 #: rows, voices as lines, terse notes only for what resists rows. The
-#: writer (`cmd_elaborate._apply_bible_blocks`) adds them through
+#: writer (`cmd_elaborate._apply_bible_block`) adds them through
 #: `bibles.add_facts`, `add_voices` and `add_notes`; a graphic novel's
 #: stages still write the essays, whose Visual sections its script reads.
 BIBLE_ROWS_FORMAT = """Facts as rows, never an essay: one fact a row, each a short plain statement.
@@ -521,7 +521,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 - time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), frame (narration from after the story, looking back), vision (events a character is shown that the story doesn't treat as fixed, such as a future that may be; never the story's present), or memory, dream or ghost (the scene sits on its day, but what it shows isn't the present's action: a past relived, a dream, the dead visiting). A dead character may appear only in a frame, vision, memory, dream or ghost scene, or a flashback (an earlier timeline_day, which needs no mode)
 - told_by: for an embedded tale (a story, song or report a character gives inside another scene), the id of the scene that tells it; its pov is the teller, its timeline_day the day its events happened. Empty for a scene lived on the page
 - Say how each scene sits in time in its summary when it isn't simply the same day as the scene before: "the next morning", "three weeks later", "flashback to 1917". The timeline check reads this, and drafting carries it into the prose
-- Every character referenced must exist in the character bible
+- Every character referenced must exist in characters.csv (or, until it is converted, the character bible)
 - An enum cell holds only its value (`turning_point` is action or revelation, never "action: she strikes"; what turns the scene goes in `function`)
 - MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment

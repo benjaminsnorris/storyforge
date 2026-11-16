@@ -1822,35 +1822,41 @@ def split_enum_descriptions(row: dict, filename: str) -> list[str]:
 _BIBLE_BLOCKS = ('bible-facts-csv', 'character-voices-csv', 'bible-notes')
 
 
-def _apply_bible_block(project_dir: str, label: str, content: str, written: list[str]) -> None:
+def _apply_bible_block(project_dir: str, label: str, content: str, written: list[str]) -> str:
     """Write one of a stage reply's bible blocks (`_BIBLE_BLOCKS`) through
-    `storyforge.bibles`: facts to the ledger as plan facts, voice lines to
-    character-voices.csv, notes appended to bible-notes.md. What can't be
-    added is an ERROR naming it, and nothing of that block is written; the
-    stage goes on (its scene rows stand)."""
-    from storyforge import bibles
-    from storyforge.prompts_elaborate import csv_block_to_rows
+    `storyforge.bibles`: facts to the ledger as plan facts
+    (`bibles.STAGE_WRITER`), voice lines to character-voices.csv, notes
+    appended to bible-notes.md. Returns '' when it was written, else why
+    not: a row whose cells don't fit the header, an item `add_facts` or
+    `add_voices` refuses, an unreadable ledger, registry or voices file.
+    None of that block is written then, and the caller holds the phase
+    (#697's review SF-5)."""
+    from storyforge import bibles, ledger
+    from storyforge.common import ReferenceDocError
     try:
         if label == 'bible-facts-csv':
-            added, notes = bibles.add_facts(project_dir, csv_block_to_rows(content),
-                                            command='elaborate')
+            rows = bibles.block_rows(label, content, bibles.IMPORT_COLUMNS[:3],
+                                     bibles.IMPORT_COLUMNS)
+            added, notes = bibles.add_facts(project_dir, rows, command='elaborate',
+                                            writer=bibles.STAGE_WRITER)
             for n in notes:
                 log(f'  NOTE: {n}')
             if added:
                 written.append(f'commitments.csv ({len(added)} plan facts)')
         elif label == 'character-voices-csv':
-            rows = csv_block_to_rows(content)
-            before = sum(map(len, bibles.read_voices(project_dir)[0].values()))
-            for n in bibles.add_voices(project_dir, [(r.get('character', ''), r.get('line', ''))
-                                                     for r in rows]):
+            cols = tuple(bibles.VOICES_COLUMNS)
+            rows = bibles.block_rows(label, content, cols, cols)
+            n_added, notes = bibles.add_voices(project_dir, [(r.get('character', ''),
+                                                              r.get('line', '')) for r in rows])
+            for n in notes:
                 log(f'  NOTE: {n}')
-            after = sum(map(len, bibles.read_voices(project_dir)[0].values()))
-            if after > before:
-                written.append(f'{bibles.VOICES_FILE} ({after - before} lines)')
+            if n_added:
+                written.append(f'{bibles.VOICES_FILE} ({n_added} lines)')
         elif bibles.add_notes(project_dir, content):
             written.append(f'{bibles.NOTES_FILE} (notes added)')
-    except bibles.BiblesError as e:
-        log(f'ERROR: the reply\'s {label} block wasn\'t written: {e}')
+    except (bibles.BiblesError, ledger.LedgerError, ReferenceDocError) as e:
+        return f'the reply\'s {label} block wasn\'t written: {e}'
+    return ''
 
 
 #: storyforge.yaml `artifacts:` entries a stage's written file fills
@@ -2054,6 +2060,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         log(f'ERROR: {e}')
         sys.exit(1)
     source_map_problem = ''
+    bible_problems: list[str] = []   # a bible block not written holds the phase
 
     # Build shared context once for all stage API calls (prompt caching)
     stage_model = select_model('drafting')  # Opus for creative work
@@ -2402,7 +2409,12 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     log(f'  NOTE: left out the reply\'s {label} block: a graphic novel\'s '
                         f'bibles are its essays')
                 else:
-                    _apply_bible_block(project_dir, label, content, written)
+                    problem = _apply_bible_block(project_dir, label, content, written)
+                    if problem:
+                        problem += (f' (the reply is in {stage_log}; fix the rows and add them '
+                                    f'with `storyforge bibles import`)')
+                        log(f'ERROR: {problem}')
+                        bible_problems.append(problem)
 
             elif label in ('character-bible', 'world-bible') and medium != 'graphic-novel':
                 # a prose book's bibles are rows now (#657); an essay still on
@@ -2415,7 +2427,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 filename = label + '.md'
                 path = os.path.join(ref_dir, filename)
                 from storyforge.common import is_unfilled_template
-                # Only the spine writes the character bible whole; later
+                # A graphic novel's spine writes the character bible whole; later
                 # stages are asked for additional entries, which replacing
                 # the file would turn into the whole bible (G-016)
                 append = (label == 'character-bible' and stage != 'spine'
@@ -2502,6 +2514,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                                        'message': source_map_problem})
         if any(f.get('severity', 'blocking') == 'blocking' for f in report['failures']):
             report['passed'] = False
+    for problem in bible_problems:
+        # the stage's facts are lost from the plan: blocking, so the phase holds
+        report['failures'].append({'severity': 'blocking', 'scene_id': '', 'message': problem})
+        report['passed'] = False
     validate_passed = report['passed']
     validate_failures = _failure_counts(report['failures'])
 
