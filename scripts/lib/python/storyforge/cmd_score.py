@@ -2880,6 +2880,10 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
     # Character bible and story architecture
     character_bible = _read_reference(project_dir, ['reference/character-bible.md',
                                                      'references/character-bible.md'])
+    if not character_bible:
+        # a converted book's character facts and voices (#657)
+        from storyforge.bibles import bible_text
+        character_bible = bible_text(project_dir, 'character-bible.md')
     story_architecture = _read_reference(project_dir, ['reference/story-architecture.md',
                                                         'references/story-architecture.md'])
 

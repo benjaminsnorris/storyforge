@@ -1379,6 +1379,13 @@ def build_shared_context(project_dir: str, model: str = '',
             tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
             tier2_chars += len(content) + len(label) + 10
 
+    # The bibles as rows (#657): the plan's facts true from the start, the
+    # characters' lines and the terse notes; none for a book without them
+    from storyforge.bibles import drafting_sections
+    for label, content in drafting_sections(project_dir):
+        tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+        tier2_chars += len(content) + len(label) + 10
+
     # The voice (`voice_book.resolve`: book.md, the anchors, an author repo;
     # never checks.md); an unreadable one raises, naming the file
     from storyforge import voice_book

@@ -327,6 +327,23 @@ class TestReference:
             established_scene='character-bible.md', established_quote='Role')])])
         assert result.findings == [] and 'not given to the checker' in result.unverified[0].problem
 
+    def test_a_book_with_rows_sends_them_not_the_retired_essay(self, facts_project_dir):
+        """#657: a converted book's facts are the reference, with their ids,
+        and a finding against one verifies by the rows' text."""
+        _, bodies = _run(facts_project_dir, [_answer()])
+        system = bodies[0]['system'][0]['text']
+        assert '<reference file="commitments.csv">' in system
+        assert '- [dorren-mentor-vanished] Her mentor vanished' in system
+        assert '<reference file="bible-notes.md">' in system
+        assert 'character-bible.md' not in system
+        result, _ = _run(facts_project_dir, [_answer([_finding(
+            established_scene='commitments.csv',
+            established_quote='Believes the maps are objective')])])
+        assert len(result.findings) == 1
+        result, _ = _run(facts_project_dir, [_answer([_finding(
+            established_scene='commitments.csv', established_quote='a sister named Marie')])])
+        assert result.findings == [] and 'not in commitments.csv' in result.unverified[0].problem
+
     def test_reference_docs_skips_missing_and_blank(self, project_dir):
         import os
         with open(os.path.join(project_dir, 'reference', 'world-bible.md'), 'w') as f:

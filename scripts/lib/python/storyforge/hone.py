@@ -1972,7 +1972,9 @@ def hone_briefs(
     # The voice's notes (book.md) and the character bible for prompt building
     voice_guide = voice_excerpt(project_dir)
 
-    char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
+    # the essay, or its rows once converted (#657)
+    from storyforge.bibles import bible_text
+    char_bible = bible_text(os.path.dirname(os.path.abspath(ref_dir)), 'character-bible.md')
 
     # The cast and how to keep speaker labels (#513); none for a graphic novel
     from storyforge.speaker_labels import keep_section

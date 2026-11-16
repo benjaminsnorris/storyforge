@@ -135,12 +135,14 @@ def cast_block(project_dir: str) -> str:
 
 def system_blocks(project_dir: str) -> list[dict]:
     """The writer's standing context, one cached prefix: the instructions,
-    the voice, the key decisions, the canon, and the cast and places.
+    the voice, the key decisions, the canon, the cast and places, and the
+    bibles as rows (`bibles.drafting_text`, #657).
 
     Raises:
         SessionError: the book has no voice to write toward.
         common.ReferenceDocError: a voice or reference file can't be read.
         series.SeriesError: the canon can't be read.
+        ledger.LedgerError: the ledger can't be read.
     """
     from storyforge.common import read_yaml_field
     from storyforge.prompts import key_decisions_block
@@ -162,6 +164,11 @@ def system_blocks(project_dir: str) -> list[dict]:
     cast = cast_block(project_dir)
     if cast:
         parts.append(cast)
+    # the bibles as rows (#657): settled facts, the characters' lines, notes
+    from storyforge.bibles import drafting_text
+    rows_text = drafting_text(project_dir)
+    if rows_text:
+        parts.append(rows_text)
     blocks = [{'type': 'text', 'text': p} for p in parts]
     blocks[-1]['cache_control'] = {'type': 'ephemeral'}
     return blocks
