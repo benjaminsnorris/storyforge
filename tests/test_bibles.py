@@ -828,3 +828,33 @@ class TestNoStageWritesVoices:
                        pe.build_architecture_prompt(project_dir, plugin_dir)):
             assert '```character-voices-csv' not in prompt
             assert "Don't write lines for the characters" in prompt
+
+
+class TestAnchorVoicesReview:
+    """#705's review (T-8, T-9, SF-L2)."""
+
+    def test_a_line_two_tags_claim_is_no_ones_and_said(self, project_dir):
+        _anchor(project_dir, 'both.md', '"I know it well enough by now," said Dorren.\n\n'
+                '"I know it well enough by now," said Kael.\n')
+        lines, notes = bibles.anchor_voices(project_dir)
+        assert not [v for v in lines if v.source.endswith('both.md')]
+        assert any('has tags naming dorren-hayle, kael-maren; left out' in n for n in notes)
+
+    def test_a_pov_that_names_no_one_is_said(self, project_dir):
+        _anchor(project_dir, 'mine.md', 'pov: somebody\n\n"Nothing here is mine at all," I said.\n')
+        lines, notes = bibles.anchor_voices(project_dir)
+        assert not [v for v in lines if v.source.endswith('mine.md')]
+        assert any("pov 'somebody' is no character" in n for n in notes)
+
+    def test_a_pov_by_alias_claims_i_said(self, project_dir):
+        _anchor(project_dir, 'tessa.md', 'pov: Tessa\n\n"Nothing here is mine at all," I said.\n')
+        lines, _ = bibles.anchor_voices(project_dir)
+        assert ('tessa-merrin', 'Nothing here is mine at all,') in \
+            {(v.character, v.line) for v in lines}
+
+    def test_a_long_speech_is_left_out_whole(self, project_dir):
+        long = ' '.join(['word'] * 80)
+        _anchor(project_dir, 'long.md', f'"{long}," said Dorren.\n')
+        lines, notes = bibles.anchor_voices(project_dir)
+        assert not [v for v in lines if v.source.endswith('long.md')]
+        assert any('cut short' in n for n in notes)

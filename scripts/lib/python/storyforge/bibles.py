@@ -839,16 +839,19 @@ def anchor_voices(project_dir: str) -> tuple[list[VoiceLine], list[str]]:
     (`extract_describe._speech`: "said Mara", "Mara said,", a lead-in
     ending in a colon; names from characters.csv: the name, aliases and
     the name's own words); "I said" is the anchor's `pov:` character's (by id, name or alias).
-    Lines under four words are left out. Returns the lines in anchor order
-    and the notes: no anchors, an anchor left out, a line two characters'
-    tags both claim (left out), an anchor with no line any tag attributes.
+    Lines under four words are left out, and so is a speech the sampler
+    cut short (`_sample_line`'s ` …`) or one with a `|`: a voice line is the
+    words as written. Returns the lines anchor by anchor (within one, by
+    character) and the notes: no anchors, an anchor left out, a line two
+    characters' tags both claim (left out), a line cut short, a `pov:` that
+    names no character, an anchor with no line any tag attributes.
 
     Raises:
         common.ReferenceDocError: the anchors or characters.csv can't be read.
     """
     from storyforge.common import ReferenceDocError
     from storyforge.elaborate import _read_csv
-    from storyforge.extract_describe import _speaker_names, _speech
+    from storyforge.extract_describe import _speaker_names, _speech, _voice_line
     from storyforge.voice_book import ANCHORS_DIR, read_folder
     folder = read_folder(project_dir)
     notes = list(folder.skipped)
@@ -869,9 +872,13 @@ def anchor_voices(project_dir: str) -> tuple[list[VoiceLine], list[str]]:
     out: list[VoiceLine] = []
     for anchor in folder.anchors:
         found: dict[str, list[str]] = {}
+        pov = anchor.pov.strip().lower()
+        if pov and not any(pov in {n.lower() for n in [c['id'], *names.get(c['id'], [])]}
+                           for c in characters) and pov != 'narrator':
+            notes.append(f'{anchor.path}: pov {anchor.pov.strip()!r} is no character in '
+                         f'characters.csv, so its "I said" lines are no one\'s')
         for c in characters:
             own = names.get(c['id'], [])
-            pov = anchor.pov.strip().lower()
             if pov and pov in {n.lower() for n in [c['id'], *own]}:
                 own = own + ['I']   # a first-person anchor's "I said"
             others = [n for o, ns in names.items() if o != c['id'] for n in ns]
@@ -881,8 +888,15 @@ def anchor_voices(project_dir: str) -> tuple[list[VoiceLine], list[str]]:
         for line in shared:
             notes.append(f'{anchor.path}: {line[:50]!r} has tags naming '
                          f'{", ".join(sorted(set(found[line])))}; left out')
-        kept = [VoiceLine(who[0], line, anchor.path) for line, who in found.items()
-                if len(set(who)) == 1]
+        kept = []
+        for line, who in found.items():
+            problem = _voice_line(line)
+            if len(set(who)) > 1:
+                continue
+            if problem:
+                notes.append(f'{anchor.path}: {line[:50]!r} {problem}; left out')
+            else:
+                kept.append(VoiceLine(who[0], line, anchor.path))
         if not kept and not shared:
             notes.append(f'{anchor.path}: no line with a speech tag naming a character')
         out += kept
@@ -982,7 +996,8 @@ def plan_gaps(ref_dir: str) -> tuple[list[Gap], list[str]]:
                     f'aren\'t rows, so its gaps can\'t be seen'
                     + (f'; drafting and the checker read it beside {kind} plan fact(s) of its '
                        f'kind, and a contradiction between the two isn\'t seen here' if kind else '')
-                    + f' (convert it: `storyforge bibles import FILE --essay {name}`, then '
+                    + f' (convert it: `storyforge bibles convert {name}` or by hand, '
+                    f'`storyforge bibles import FILE --essay {name}`, then '
                     f'`storyforge bibles retire {name}`)')
             elif state == 'retired' and not kind:
                 notes.append(f'reference/{name} is retired but the ledger has no plan fact of '

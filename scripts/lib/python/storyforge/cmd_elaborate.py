@@ -2465,6 +2465,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                         f.write('\n'.join(l.strip() for l in lines_) + '\n')
                     written.append(f'voice-profile.csv ({len(rows)} rows)')
 
+            elif label == 'character-voices-csv' and medium == 'graphic-novel':
+                log(f'  NOTE: left out the reply\'s {label} block: a graphic novel\'s '
+                    f'bibles are its essays')
+
             elif label == 'character-voices-csv':
                 # #702: voice lines are the author's (the anchors, `storyforge
                 # bibles voices`), never a model's, so a stage writes none

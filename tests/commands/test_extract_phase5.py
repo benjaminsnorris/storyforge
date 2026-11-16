@@ -1337,7 +1337,7 @@ class TestCharacters:
         reply['characters'][0]['voice'] = ''
         reply['characters'][0]['wound'] = ''
         data = parse_characters(json.dumps(reply), chars)
-        facts, voices, _ = character_rows(data, chars)
+        facts, voices, _, _ = character_rows(data, chars)
         # what the text doesn't show is no row, and no voice line is made up
         mine = {f['category'] for f in facts if f['subject'] == chars[0].id}
         assert 'wound' not in mine and 'voice' not in mine
@@ -2518,7 +2518,8 @@ class TestBiblesAsRows:
         _run(book, force=True)
         assert self._bible_calls(mock_api, calls)
         assert _bible_rows(book) == first   # the same reply states nothing new
-        assert 'the ledger already states were not added again' in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert '5d: nothing new to add' in out and 'the ledger already states this fact' in out
 
     def test_an_earlier_extractions_essay_is_archived_under_force(self, book, mock_api,
                                                                   mock_git, mock_costs, capsys):
@@ -2561,3 +2562,135 @@ class TestBiblesAsRows:
         with pytest.raises(SystemExit):
             _run(book)
         assert '5d: the rows could not be written (item 1: refused)' in capsys.readouterr().out
+
+
+class TestRowsReviewFixes:
+    """#705's review: the rows gate and writer."""
+
+    def test_force_works_again_after_it_archived_an_essay(self, book, mock_api, mock_git,
+                                                          mock_costs, capsys):
+        """CR-H2: once phase 5 archived its own essay, every later --force
+        read the archive as the author's conversion."""
+        from storyforge.extract_describe import read_provenance, write_described
+        assert write_described(book, 'reference/character-bible.md', '# Old\n', step='5d',
+                               version='1.0', force=True, provenance=read_provenance(book)).write
+        mock_api.set_response_fn(_answer(book))
+        _run(book, force=True)
+        calls = len(mock_api.calls)
+        _run(book, force=True)
+        out = capsys.readouterr().out
+        assert "its rows are the author's conversion" not in out
+        assert any('## Its characters' in c['prompt'] for c in mock_api.calls[calls:])
+
+    def test_force_never_brings_back_a_rejected_row(self, book, mock_api, mock_git,
+                                                    mock_costs, capsys):
+        """CR-H3."""
+        from storyforge import ledger
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        rows = ledger.load(book)
+        target = next(r for r in rows if r['introduced_by'] == 'extract:character-bible')
+        target['status'] = 'rejected'
+        ledger.save(book, rows, command='test')
+        _run(book, force=True)
+        same = [r for r in ledger.load(book)
+                if ledger.fact_key(r) == ledger.fact_key(target)]
+        assert [r['status'] for r in same] == ['rejected']
+        assert 'rejected or superseded were not added again' in capsys.readouterr().out
+
+    def test_a_row_the_new_reply_doesnt_state_is_reported(self, book, mock_api, mock_git,
+                                                          mock_costs, capsys):
+        """SF-M3: --force adds only, so a row an earlier run wrote that the
+        new one doesn't state is said, never silently kept."""
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        answer = _answer(book)
+        mock_api.set_response_fn(
+            lambda p: _characters_reply(book, relationships=[])
+            if '## Its characters, as the scenes show them' in p else answer(p))
+        _run(book, force=True)
+        assert "row(s) an earlier extraction wrote that this one doesn't state" in \
+            capsys.readouterr().out
+
+    def test_notes_that_cant_be_written_write_nothing(self, book, mock_api, mock_git,
+                                                      mock_costs, capsys):
+        """SF-H2 / CR-I1: the notes weren't checked first, so the facts were
+        written and the error said nothing was."""
+        with open(os.path.join(book, 'reference', 'bible-notes.md'), 'wb') as f:
+            f.write(b'\xff\xfe bad')
+        mock_api.set_response_fn(_answer(book))
+        with pytest.raises(SystemExit):
+            _run(book)
+        assert not _bible_rows(book)
+        assert 'nothing was written' in capsys.readouterr().out
+
+    def test_left_open_is_never_a_plan_gap(self, book, mock_api, mock_git, mock_costs):
+        """CR-I3: a left-open item ending in `?` became an open-question gap."""
+        from storyforge import bibles
+        answer = _answer(book)
+        reply = json.loads(_characters_reply(book))
+        reply['characters'][0]['left_open'] = ['Does she forgive him?']
+        mock_api.set_response_fn(lambda p: json.dumps(reply)
+                                 if '## Its characters, as the scenes show them' in p
+                                 else answer(p))
+        _run(book)
+        assert 'left open in the text: Does she forgive him' in bibles.notes_text(book)
+        gaps, _ = bibles.plan_gaps(os.path.join(book, 'reference'))
+        assert not [g for g in gaps if 'forgive' in g.detail]
+
+    def test_a_cut_line_is_no_voice_line(self, book):
+        """TD-2 / SF-M4: a speech the sampler cut short isn't the words as
+        written."""
+        import dataclasses
+        from storyforge.extract_describe import character_rows, parse_characters
+        _, chars, _, _ = _evidence(book)
+        chars[0] = dataclasses.replace(chars[0], lines=['A long speech cut here …',
+                                                        'A | pipe in it',
+                                                        'Whole and short enough.'])
+        data = parse_characters(_characters_reply(book), chars)
+        _, voices, _, left = character_rows(data, chars)
+        assert [v for v in voices if v[0] == chars[0].id] == [
+            (chars[0].id, 'Whole and short enough.')]
+        assert len([x for x in left if x.startswith(chars[0].id)]) == 2
+
+    def test_a_system_and_its_edges(self, book):
+        """T-10: blank rules write nothing; costs and social are rows; how it
+        feels and an institution's notes are notes; a place's function isn't
+        a row."""
+        from storyforge.extract_describe import parse_world, world_rows
+        _, _, ev, _ = _evidence(book)
+        reply = json.loads(_world_reply(book))
+        reply['system'].update(rules=['Ink remembers.', ' '], costs='Sight.', social='Feared.',
+                               feels='Cold.')
+        reply['institutions'] = [{'name': 'The Guild', 'function': '', 'notes': 'Old.'}]
+        world, system, notes = world_rows(parse_world(json.dumps(reply), ev), ev)
+        cats = [r['category'] for r in system]
+        assert cats.count('rule') == 1 and 'costs' in cats and 'social' in cats
+        assert 'Pressure cartography feels: Cold.' in notes and 'The Guild: Old.' in notes
+        assert [r['statement'] for r in world if r['category'] == 'institution'] == ['The Guild']
+        assert not any(r['statement'] == 'Work.' for r in world)
+
+    @pytest.mark.parametrize('state', ['edited', 'symlink'])
+    def test_an_authors_essay_in_any_form_is_left_alone(self, book, mock_api, mock_git,
+                                                        mock_costs, capsys, tmp_path, state):
+        """T-3: an extracted essay the author edited, or a link, is theirs."""
+        from storyforge.extract_describe import read_provenance, write_described
+        path = os.path.join(book, 'reference', 'character-bible.md')
+        if state == 'edited':
+            assert write_described(book, 'reference/character-bible.md', '# Old\n', step='5d',
+                                   version='1.0', force=True,
+                                   provenance=read_provenance(book)).write
+            with open(path, 'a') as f:
+                f.write('Mine.\n')
+        else:
+            os.remove(path)
+            target = tmp_path / 'elsewhere.md'
+            target.write_text('# Elsewhere\n')
+            os.symlink(target, path)
+        mock_api.set_response_fn(_answer(book))
+        _run(book, force=True)
+        assert f"is the author's essay ({state})" in capsys.readouterr().out
+        assert not _bible_rows(book, 'extract:character-bible')
+        assert os.path.lexists(path)
+        assert not os.path.exists(os.path.join(book, 'reference', 'archive',
+                                               'character-bible.md'))
