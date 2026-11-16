@@ -484,3 +484,24 @@ def test_since_reaches_the_run(project_dir, monkeypatch):
         cmd_revise._main(['--marks-from-pr', '12', '--since', '2026-11-15T09:00:00-07:00',
                           '--dry-run'])
     assert got == [(12, '2026-11-15T16:00:00Z', True)]
+
+
+def test_a_reply_in_a_thread_is_not_a_mark(monkeypatch):
+    # iliad-adult PR #18: "Applied in 22e7a6d" replies, posted with the author's login,
+    # became marks; the one under a comment asking for a change became a second change
+    reply = dict(_c(10, 3, 'Rewritten in 22e7a6d.', P2), in_reply_to_id=2)
+    m = _mapped(monkeypatch, [COMMENTS[1], reply])
+    assert [x.note for x in m.scenes[0].changes] == ['too neat']
+    file_reply = {'id': 11, 'user': ME, 'path': PATH, 'subject_type': 'file',
+                  'body': 'Applied in 22e7a6d.', 'in_reply_to_id': 3}
+    _fake_gh(monkeypatch, _pages([COMMENTS[1], reply, file_reply]))
+    prs = pr_marks.fetch(12, '.')
+    assert prs.general == ['Better than the last draft.']   # not "On ... as a whole"
+    assert any(f'2 repl(ies) in comment threads, left out' in n and f'{PATH}:3' in n
+               for n in prs.notes)
+
+
+def test_a_reply_with_a_suggestion_is_a_mark(monkeypatch):
+    reply = dict(_c(10, 7, '```suggestion\nThe dogs slept.\n```', P3), in_reply_to_id=3)
+    m = _mapped(monkeypatch, [reply])
+    assert [s.text for s in m.suggestions] == ['The dogs slept.']

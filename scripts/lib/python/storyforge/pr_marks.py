@@ -23,7 +23,9 @@ line comments.
 - `notes`: what was left out and why.
 
 Only the PR author's comments count, never a bot's or anyone else's (the
-review agents post on PRs too). `since` (an ISO time: the round's commit)
+review agents post on PRs too). Only a thread's first comment is a mark:
+a reply ("Applied in <commit>", often posted with the author's own login)
+is left out and named in `notes`, unless it holds a suggestion (#691). `since` (an ISO time: the round's commit)
 leaves out general comments made before it, so an earlier round's
 reactions aren't read again. Comments in a review not yet submitted can't
 be read: GitHub doesn't show them.
@@ -106,7 +108,8 @@ def _line_text(hunk: str) -> str:
 
 def parse_comment(item: dict) -> Comment | None:
     """A line comment from the API's shape; None for one on a whole file
-    or on the old side of the diff (a deleted line)."""
+    or on the old side of the diff (a deleted line). A thread's replies are
+    the caller's to drop (`fetch` does)."""
     if item.get('subject_type') == 'file' or item.get('side') == 'LEFT':
         return None
     line = item.get('line')
@@ -172,6 +175,7 @@ def fetch(pr: int, repo_dir: str, since: str = '', author: str = '') -> PrMarks:
     who = author or pr_info(pr, repo_dir)['author']
     others: dict[str, int] = {}
     earlier = left_side = 0
+    replies: list[str] = []
     general: list[tuple[str, str]] = []
 
     def theirs(item) -> bool:
@@ -184,6 +188,10 @@ def fetch(pr: int, repo_dir: str, since: str = '', author: str = '') -> PrMarks:
 
     for item in _gh_api(repo_dir, f'repos/{{owner}}/{{repo}}/pulls/{pr}/comments'):
         if not theirs(item):
+            continue
+        if item.get('in_reply_to_id') and not _SUGGESTION.search(item.get('body') or ''):
+            # an answer in a thread ("Applied in ..."), not a mark
+            replies.append(f'{item.get("path")}:{item.get("line") or item.get("original_line")}')
             continue
         c = parse_comment(item)
         if c is None:
@@ -215,4 +223,8 @@ def fetch(pr: int, repo_dir: str, since: str = '', author: str = '') -> PrMarks:
         out.notes.append(f'{earlier} general comment(s) from before this round, left out')
     if left_side:
         out.notes.append(f'{left_side} comment(s) on deleted lines, left out')
+    if replies:
+        out.notes.append(f'{len(replies)} repl(ies) in comment threads, left out (only a '
+                         f'thread\'s first comment, or a reply with a suggestion, is a mark; '
+                         f'put a new note in its own comment): {", ".join(replies)}')
     return out
