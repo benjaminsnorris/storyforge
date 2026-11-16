@@ -23,7 +23,8 @@ paid action: one call turns an essay into facts, the lines it quotes and
 notes, written to working/bibles/<essay>/ for the author to read before
 `import ... --essay NAME`, or imported at once with `--import`. Each takes
 --dry-run (no call, for convert: the forecast) and --no-commit, and commits
-and pushes what it writes otherwise.
+and pushes what it writes otherwise (convert only with --import: its
+review files are in working/, which isn't committed).
 """
 
 from __future__ import annotations
@@ -40,7 +41,8 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='storyforge bibles',
         description='The character, world and systems bibles as rows: status and the '
-                    "plan's gaps (the two-writers test), import facts, retire an essay.")
+                    "plan's gaps (the two-writers test), import facts, retire an essay, "
+                    'voice lines from the anchors, convert an essay (paid).')
     sub = parser.add_subparsers(dest='action')
     sub.add_parser('status', help="Where the bibles stand, and the plan's gaps (the default)")
     imp = sub.add_parser('import', help='Add facts (and voices, notes) from files')
@@ -64,6 +66,9 @@ def parse_args(argv):
     con.add_argument('--import', dest='do_import', action='store_true',
                      help='Import the rows at once as the essay\'s conversion')
     con.add_argument('--model', default='', help='The model (default: the evaluation tier)')
+    con.add_argument('--overwrite', action='store_true',
+                     help='Replace the review files an earlier convert left (and any edits '
+                          'made to them)')
     for p in (imp, ret, voi, con):
         p.add_argument('--dry-run', action='store_true', help='Say what would change; write nothing')
         p.add_argument('--no-commit', action='store_true', help='Write, but don\'t commit')
@@ -256,6 +261,11 @@ def _convert(project_dir: str, args) -> int:
     except (bc.ConvertError, ReferenceDocError) as e:
         log(f'ERROR: {e}')
         return 1
+    earlier = bc.existing_review(project_dir, args.name)
+    if earlier and not args.overwrite:
+        log(f'ERROR: an earlier conversion is still in {os.path.relpath(os.path.dirname(earlier[0]), project_dir)}/ '
+            f'(edited, maybe): import it, move it, or pass --overwrite; no call made')
+        return 1
     cost = bc.forecast(model, prompt)
     log(f'Converting reference/{args.name} with {model}: one call, about ${cost:.2f}')
     if args.dry_run:
@@ -268,6 +278,8 @@ def _convert(project_dir: str, args) -> int:
     log_file = os.path.join(project_dir, 'working', 'logs',
                             f'bibles-convert-{os.path.splitext(args.name)[0]}.json')
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    if os.path.exists(log_file):
+        os.remove(log_file)   # an older reply must never be named as this one's
     try:
         conv, response = bc.convert(project_dir, args.name, model, log_file)
     except (bc.ConvertError, ReferenceDocError) as e:
@@ -281,7 +293,15 @@ def _convert(project_dir: str, args) -> int:
         log(f'ERROR: the call failed ({e}); nothing written')
         return 1
     spent = api.log_reply(project_dir, response, 'bibles-convert', args.name, model)
-    written = bc.write_review(project_dir, conv)
+    try:
+        written, removed = bc.write_review(project_dir, conv)
+    except OSError as e:
+        log(f'ERROR: the review files could not be written ({e}); the reply is in '
+            f'{os.path.relpath(log_file, project_dir)}')
+        return 1
+    for path in removed:
+        log(f'  removed {os.path.relpath(path, project_dir)} (the earlier conversion\'s; this '
+            f'one has none of that kind)')
     log(f'{len(conv.facts)} fact(s), {len(conv.voices)} voice line(s), {len(conv.notes)} '
         f'note(s) (${spent:.2f})')
     for item in conv.left_out:

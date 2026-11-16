@@ -103,7 +103,7 @@ class TestParse:
         """#702: a line the essay doesn't quote would be the model's."""
         conv = self._parse(project_dir)
         assert conv.voices == []
-        assert any('not in the essay as written' in x for x in conv.left_out)
+        assert any(bc.NOT_QUOTED in x for x in conv.left_out)
         assert any("'nobody' is no character" in x for x in conv.left_out)
 
     def test_a_quoted_line_is_kept(self, project_dir):
@@ -186,8 +186,9 @@ class TestCommand:
         monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '0')
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         monkeypatch.chdir(project_dir)
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as e:
             cmd_bibles.main(['convert', 'character-bible.md'])
+        assert e.value.code == 1
 
     def test_a_cut_off_reply_writes_nothing(self, project_dir, monkeypatch, fake_api):
         from storyforge import cmd_bibles
@@ -204,8 +205,9 @@ class TestCommand:
         open(paths['voices'], 'w').write('character|line\nx|old\n')
         conv.facts = [{'type': 'world', 'subject': '', 'statement': 'Rain', 'known_by': '',
                        'category': 'rule'}]
-        written = bc.write_review(project_dir, conv)
+        written, removed = bc.write_review(project_dir, conv)
         assert set(written) == {'facts'} and not os.path.exists(paths['voices'])
+        assert removed == [paths['voices']]   # said, never silent
 
 
 # ---------------------------------------------------------------------------
@@ -270,8 +272,7 @@ class TestSuite:
              'known_by': '', 'category': 'x'})
         convs['character-bible.md'].voices.append(
             ('lise-anker', 'Her speech is low and careful, all questions.'))
-        convs['character-bible.md'].left_out.append('voice 9 (x): not in the essay as written, '
-                                                    'so not the author\'s line')
+        convs['character-bible.md'].left_out.append(f'voice 9 (x): {bc.NOT_QUOTED}')
         convs['character-bible.md'].notes.append('Brack is a mirror of Mara')
         convs['character-bible.md'].facts.append(
             {'type': 'trait', 'subject': 'ivo-voss', 'statement': 'Talks fast when cornered',
@@ -332,3 +333,121 @@ class TestSuite:
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         replayed = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
         assert replayed['metrics'] == result['metrics']
+
+
+# ---------------------------------------------------------------------------
+# #705's review
+# ---------------------------------------------------------------------------
+
+ESSAY_EXTRA = ('\nDorren walks the office at dawn and counts the drawers twice.\n'
+               'He says: "Bah!" and later, “The map isn’t wrong. The land is.”\n')
+
+
+class TestReviewFixes:
+    def _parse(self, project_dir, voices, facts=()):
+        with open(_ref(project_dir, 'character-bible.md'), 'a', encoding='utf-8') as f:
+            f.write(ESSAY_EXTRA)
+        essay = bc.essay_text(project_dir, 'character-bible.md')
+        return bc.parse_reply(json.dumps({'facts': list(facts), 'notes': [],
+                                          'voices': voices}),
+                              'character-bible.md', essay,
+                              bc._registry(project_dir, 'characters.csv'),
+                              bc._registry(project_dir, 'locations.csv'))
+
+    def test_narration_and_fragments_are_not_voice_lines(self, project_dir):
+        """CR-H1 / T-1: a phrase of the essay's narration, or one word of a
+        quotation, was kept as the character's line."""
+        conv = self._parse(project_dir, [
+            {'character': 'Dorren', 'line': 'counts the drawers twice'},
+            {'character': 'Dorren', 'line': 'the'},
+            {'character': 'Dorren', 'line': 'land is.'},
+            {'character': 'Dorren', 'line': 'Bah!'},
+            {'character': 'Dorren', 'line': "The map isn't wrong. The land is."}])
+        assert conv.voices == [('dorren-hayle', 'Bah!'),
+                               ('dorren-hayle', "The map isn't wrong. The land is.")]
+        assert sum(bc.NOT_QUOTED in x for x in conv.left_out) == 3
+
+    def test_every_dropped_item_is_said(self, project_dir):
+        """SF-M6 / C-2: a repeated voice line and a known_by on a fact that
+        isn't knowledge were dropped silently."""
+        conv = self._parse(project_dir,
+                           [{'character': 'Dorren', 'line': 'Bah!'}] * 2,
+                           [{'type': 'trait', 'subject': 'pell', 'statement': 'Pell lies',
+                             'known_by': 'dorren-hayle', 'category': 'lie'}])
+        assert conv.voices == [('dorren-hayle', 'Bah!')]
+        assert conv.facts[0]['known_by'] == ''
+        left = '\n'.join(conv.left_out)
+        assert 'given twice' in left and "known_by 'dorren-hayle' dropped" in left
+
+    def test_a_second_convert_keeps_the_authors_edits(self, project_dir, monkeypatch,
+                                                      fake_api, capsys):
+        """SF-H1 / CR-I2: a second convert overwrote the review files the
+        author was asked to edit."""
+        from storyforge import cmd_bibles
+        calls = fake_api(REPLY)
+        monkeypatch.chdir(project_dir)
+        cmd_bibles.main(['convert', 'character-bible.md'])
+        facts = bc.review_paths(project_dir, 'character-bible.md')['facts']
+        with open(facts, 'a', encoding='utf-8') as f:
+            f.write('trait|pell|An edit of the author\'s||x\n')
+        with pytest.raises(SystemExit) as e:
+            cmd_bibles.main(['convert', 'character-bible.md'])
+        assert e.value.code == 1 and len(calls) == 1
+        assert "An edit of the author's" in open(facts, encoding='utf-8').read()
+        assert '--overwrite' in capsys.readouterr().out
+        cmd_bibles.main(['convert', 'character-bible.md', '--overwrite'])
+        assert len(calls) == 2
+
+    @pytest.mark.parametrize('stop,text', [('max_tokens', None), ('refusal', None),
+                                           ('end_turn', 'not json')])
+    def test_an_unusable_reply_logs_its_cost_once(self, project_dir, monkeypatch, stop,
+                                                  text, capsys):
+        """T-2: a paid reply that can't be used still has its cost logged."""
+        from storyforge import api, cmd_bibles
+        reply = _reply(REPLY, stop)
+        if text:
+            reply['content'][0]['text'] = text
+        monkeypatch.setattr(api, '_live_request', lambda *a: reply)
+        logged = []
+        monkeypatch.setattr(api, 'log_reply', lambda *a, **k: logged.append(a) or 0.0)
+        monkeypatch.chdir(project_dir)
+        with pytest.raises(SystemExit) as e:
+            cmd_bibles.main(['convert', 'character-bible.md'])
+        assert e.value.code == 1 and len(logged) == 1
+        assert bc.existing_review(project_dir, 'character-bible.md') == []
+        assert 'bibles-convert-character-bible.json' in capsys.readouterr().out
+
+    def test_import_with_no_facts_doesnt_mark_the_essay_converted(self, project_dir,
+                                                                  monkeypatch, fake_api,
+                                                                  mock_git):
+        """T-5: voices and notes alone import, and the essay isn't converted."""
+        from storyforge import cmd_bibles
+        with open(_ref(project_dir, 'character-bible.md'), 'a', encoding='utf-8') as f:
+            f.write(ESSAY_EXTRA)
+        fake_api({'facts': [], 'voices': [{'character': 'Dorren', 'line': 'Bah!'}],
+                  'notes': ['Ink everywhere.']})
+        before = open(ledger.ledger_path(project_dir), encoding='utf-8').read()
+        monkeypatch.chdir(project_dir)
+        cmd_bibles.main(['convert', 'character-bible.md', '--import', '--no-commit'])
+        assert bibles.read_voices(project_dir)[0] == {'dorren-hayle': ['Bah!']}
+        assert 'Ink everywhere.' in bibles.notes_text(project_dir)
+        assert open(ledger.ledger_path(project_dir), encoding='utf-8').read() == before
+        assert bibles.essay_state(project_dir, 'character-bible.md') == 'essay'
+
+    def test_a_reply_with_nothing_kept_is_exit_1(self, project_dir, monkeypatch, fake_api,
+                                                 capsys):
+        """T-6."""
+        from storyforge import cmd_bibles
+        fake_api({'facts': [{'type': 'trait', 'subject': 'pell', 'statement': 'a | b',
+                             'known_by': '', 'category': 'x'}], 'voices': [], 'notes': []})
+        monkeypatch.chdir(project_dir)
+        with pytest.raises(SystemExit) as e:
+            cmd_bibles.main(['convert', 'character-bible.md', '--import'])
+        assert e.value.code == 1
+        assert 'gave nothing to import' in capsys.readouterr().out
+        paths = bc.review_paths(project_dir, 'character-bible.md')
+        assert os.path.exists(paths['left_out']) and not os.path.exists(paths['facts'])
+
+    def test_the_review_files_import(self):
+        """TD: the facts file's columns are ones `bibles import` takes."""
+        assert set(bc.FACT_COLUMNS) <= set(bibles.IMPORT_COLUMNS)

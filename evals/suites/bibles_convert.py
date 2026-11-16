@@ -140,7 +140,7 @@ def score(labels: dict, conversions: dict) -> dict:
     """`conversions`: essay name → `bibles_convert.Conversion`. Returns
     metrics, and the missed, wrong and leaked ids for the notes."""
     from storyforge.bibles import REVEAL_CATEGORIES
-    from storyforge.bibles_convert import _normal
+    from storyforge.bibles_convert import NOT_QUOTED, _normal
     found = typed = placed = scored = secrets = secrets_kept = opens = opens_kept = 0
     total = leaks = note_leaks = lines = lines_kept = described = invented = 0
     speech = notes = notes_found = 0
@@ -192,7 +192,7 @@ def score(labels: dict, conversions: dict) -> dict:
             lines_kept += (v['character'], _normal(v['line'])) in kept
         described += sum(any(d in line.lower() for d in essay['not_voices'])
                          for _, line in conv.voices)
-        invented += sum('not in the essay as written' in x for x in conv.left_out)
+        invented += sum(NOT_QUOTED in x for x in conv.left_out)
         for n in essay['notes']:
             notes += 1
             notes_found += any(any(k in note.lower() for k in n['any']) for note in conv.notes)

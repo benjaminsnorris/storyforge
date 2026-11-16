@@ -7,8 +7,9 @@ returns the facts it settles, the lines it quotes a character saying, and
 terse notes for what resists rows. Code then holds the reply to the same
 rules the import does, and to two of its own:
 
-- **A voice line is the essay's words.** A line the essay doesn't quote, as
-  written, is left out and said: a model's line in `character-voices.csv`
+- **A voice line is the essay's words.** A line that isn't one of the
+  essay's quotations (or a part of one at least `MIN_PART_WORDS` long) is
+  left out and said, so neither its narration nor a model's line gets in: a model's line in `character-voices.csv`
   would be read as the character's own voice (#702: voice lines are the
   author's, never a model's). A description of how someone speaks isn't a
   line, and the prompt says so.
@@ -43,6 +44,9 @@ FACT_COLUMNS = ('type', 'subject', 'statement', 'known_by', 'category')
 #: Categories that mark a description of how someone speaks: never a fact
 #: (#657: a voice is lines of them speaking), so such a row is left out
 SPEECH_CATEGORIES = ('voice', 'speech', 'dialogue', 'diction')
+#: Why a voice line the essay doesn't quote is left out; the eval suite
+#: counts invented lines by it (`invented_lines`)
+NOT_QUOTED = 'not quoted in the essay as written, so not the author\'s line'
 #: Forecast: tokens per character of prompt, and the reply's tokens
 _TOKENS_PER_CHAR = 0.3
 FORECAST_OUTPUT = 4_000
@@ -175,6 +179,31 @@ def _normal(text: str) -> str:
     return ' '.join(text.split()).strip().strip('"\'').strip()
 
 
+def quoted_spans(essay: str) -> list[str]:
+    """What the essay puts in double quotes (`prose_analysis.dialogue_spans`,
+    straight or curly), each `_normal`: a voice line must be inside one, so
+    a phrase of the essay's own narration ("counts the drawers twice") is
+    never taken for a character's line."""
+    from storyforge.prose_analysis import dialogue_spans
+    return [_normal(inner) for _, _, inner in dialogue_spans(essay)]
+
+
+#: The fewest words a voice line that is only part of a quotation may have:
+#: a fragment ("the") says nothing of a voice. A whole quotation may be
+#: shorter ("Bah!"), as the author wrote it
+MIN_PART_WORDS = 4
+
+
+def _quoted(line: str, quoted: list[str]) -> bool:
+    """Whether `line` is one of the essay's quotations, or a part of one at
+    least `MIN_PART_WORDS` words long."""
+    text = _normal(line)
+    if not text:
+        return False
+    return any(text == q or (text in q and len(text.split()) >= MIN_PART_WORDS)
+               for q in quoted)
+
+
 def _resolver(rows: list[dict]) -> dict[str, str]:
     """Lowercase id, name or alias → id."""
     out: dict[str, str] = {}
@@ -192,7 +221,8 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
     schema's JSON object; every item left out is in `left_out` with why: a
     fact with no statement, a `|`, a secret's category on a type that isn't
     knowledge, a repeat; a voice line the essay doesn't quote as written, or
-    whose speaker is no character; a fact of a speech category
+    whose speaker is no character, given twice; a `known_by` on a fact
+    that isn't knowledge (dropped, the fact kept); a fact of a speech category
     (`SPEECH_CATEGORIES`: a description of how someone speaks); an empty
     note. A subject or `known_by`
     given as a name is turned into its id."""
@@ -235,7 +265,9 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
         if row['type'] == 'knowledge':
             row['known_by'] = ';'.join(people.get(k.strip().lower(), k.strip())
                                        for k in row['known_by'].split(';') if k.strip())
-        else:
+        elif row['known_by']:
+            conv.left_out.append(f'{where}: known_by {row["known_by"]!r} dropped (only a '
+                                 f'knowledge fact has one; a secret is a knowledge fact)')
             row['known_by'] = ''
         key = (row['type'], row['subject'], row['statement'].lower().rstrip('.'))
         if key in seen:
@@ -243,7 +275,7 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
             continue
         seen.add(key)
         conv.facts.append(row)
-    plain = _normal(essay)
+    quoted = quoted_spans(essay)
     for n, v in enumerate(data['voices'], start=1):
         if not isinstance(v, dict):
             conv.left_out.append(f'voice {n}: not an object')
@@ -256,12 +288,13 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
         elif not cid:
             conv.left_out.append(f'voice {n} ({line[:50]!r}): {who!r} is no character in '
                                  f'characters.csv')
-        elif not _normal(line) or _normal(line) not in plain:
-            conv.left_out.append(f'voice {n} ({line[:50]!r}): not in the essay as written, so '
-                                 f'not the author\'s line')
+        elif not _quoted(line, quoted):
+            conv.left_out.append(f'voice {n} ({line[:50]!r}): {NOT_QUOTED}')
         elif '|' in line:
             conv.left_out.append(f'voice {n} ({line[:50]!r}): a `|` in the line')
-        elif (cid, line) not in conv.voices:
+        elif (cid, line) in conv.voices:
+            conv.left_out.append(f'voice {n} ({line[:50]!r}): given twice')
+        else:
             conv.voices.append((cid, line))
     for n, note in enumerate(data['notes'], start=1):
         text = ' '.join(str(note or '').split()).lstrip('-* ').strip()
@@ -311,6 +344,13 @@ def convert(project_dir: str, name: str, model: str, log_file: str = '',
     return conv, response
 
 
+def existing_review(project_dir: str, name: str) -> list[str]:
+    """The review files an earlier `convert` of `name` left (which the
+    author may have edited): a new conversion refuses to replace them
+    without `--overwrite`."""
+    return [p for p in review_paths(project_dir, name).values() if os.path.exists(p)]
+
+
 def review_paths(project_dir: str, name: str) -> dict[str, str]:
     """Where `write_review` puts each file, by kind."""
     base = os.path.join(project_dir, REVIEW_DIR, os.path.splitext(name)[0])
@@ -323,8 +363,9 @@ def review_paths(project_dir: str, name: str) -> dict[str, str]:
 def write_review(project_dir: str, conv: Conversion) -> dict[str, str]:
     """Write the conversion where `bibles import` reads it (LF, pipe CSV
     with headers; a file with nothing in it isn't written, and an older one
-    is removed so it can't be imported by mistake). Returns the paths
-    written, by kind."""
+    is removed so it can't be imported by mistake: the command asks for
+    `--overwrite` before any older file is replaced, `existing_review`).
+    Returns (the paths written, by kind; the older files removed)."""
     paths = review_paths(project_dir, conv.essay)
     os.makedirs(os.path.dirname(paths['facts']), exist_ok=True)
     bodies = {
@@ -338,7 +379,7 @@ def write_review(project_dir: str, conv: Conversion) -> dict[str, str]:
         'left_out': (f'# Left out of the conversion of {conv.essay}\n\n'
                      + ''.join(f'- {x}\n' for x in conv.left_out) if conv.left_out else ''),
     }
-    written = {}
+    written, removed = {}, []
     for kind, body in bodies.items():
         path = paths[kind]
         if body:
@@ -347,4 +388,5 @@ def write_review(project_dir: str, conv: Conversion) -> dict[str, str]:
             written[kind] = path
         elif os.path.exists(path):
             os.remove(path)
-    return written
+            removed.append(path)
+    return written, removed
