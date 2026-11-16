@@ -48,7 +48,7 @@ Before doing anything else, orient yourself:
      `storyforge score --level N` that lists every scene) (#643: a missing value shift or turning
      point, the action/sequel balance). They never keep a rung thin; mention them as
      observations, never as work to clear before advancing.
-   - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
+   - `ladder` — per-rung `solid`/`thin`/`not_started` (or `given`, an adaptation's upper rungs) for the status readout
      (L0–L6; the voice is not a ladder rung, it shows as the `voice`
      stage and blocker).
    - `voice` — the voice's own record (#656; `null` for a graphic novel):
@@ -58,10 +58,14 @@ Before doing anything else, orient yourself:
      structure first) and `pov_gaps` (POVs of the map `book.md` says nothing
      of; `[]` when the check after the map ran clean, `null` when it didn't
      run). Show it between L2 and L3 (after L6 when `later`).
-   - In an adaptation (a `source:` block, #658) the ladder's upper rungs,
-     logline through architecture, read `given`: the source and the
-     author's interpretation decisions supply them, so the voice step
-     comes before the scene map.
+   - In an adaptation (a `source:` block, #658) the upper rungs the author
+     hasn't written, logline through architecture, read `given` once the
+     source is imported and the decisions are recorded: the source and the
+     author's interpretation decisions supply them, so (while the book has
+     no voice, and `voice_stage` isn't later) the voice step comes before
+     the scene map. Its blockers add the sources `interpretation` (what
+     keeps the rungs from being given) and `source` (source coverage once
+     the map exists).
    - **`next.stage` is `interpretation`** (an adaptation entering at the
      scene map): the source isn't imported (`next.command` is `storyforge
      source import`) or the interpretation decisions in
