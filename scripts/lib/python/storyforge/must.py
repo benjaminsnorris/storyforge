@@ -82,7 +82,8 @@ def must_items(cell: str) -> list[Item]:
 
 def unmarked(cell: str) -> str:
     """The cell without its `must` items (the rest, `; `-joined): what a
-    rewrite wrote, once `keep_must` has put back the author's."""
+    rewrite wrote, once `keep_must` has put back the author's, or (the
+    session plan) the notes left once the required lines are listed."""
     return '; '.join(i.raw for i in items(cell) if not i.must)
 
 
