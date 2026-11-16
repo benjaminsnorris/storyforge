@@ -51,6 +51,12 @@ Before doing anything else, orient yourself:
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
      (L0–L6; the voice is not a ladder rung, it shows as the `voice`
      stage and blocker).
+   - `voice` — the voice's own record (#656; `null` for a graphic novel):
+     `state` (`solid`/`thin`/`not_started`), `detail`, `when` (`first`, the
+     default: it comes after the act shape, before the spine; `later`: the
+     author put `voice_stage: later` in key-decisions.md to build the
+     structure first) and `pov_gaps` (POVs of the map `book.md` says nothing
+     of). Show it between L2 and L3 (after L6 when `later`).
 
    Two stages route the same in every phase, elaboration or not:
    - **`next.stage` is `check`**: scenes wait on the gate. Have the author run
@@ -61,8 +67,19 @@ Before doing anything else, orient yourself:
      scenes that depend on one) and `then.stage` is `check`. When every
      scene left to draft depends on one of them, `check` is next again
      (`write` would draft nothing). Surface the `gate` blockers either way.
-   - **`next.stage` is `voice`** (or `then.stage` is, behind a `check`): the
-     structure is built, but the voice isn't: `reference/voice/book.md` is
+   - **`next.stage` is `voice` before the structure is done** (#656): the
+     voice comes right after the act shape by default, because who tells the
+     story decides which scenes exist and whose eyes they're in. `next.action`
+     says which step: "Find the voice" (the prose tier is solid, the book has
+     no voice yet; `then` is the rung after it) or
+     "Check the voice against the map" (the map is done and `book.md` says
+     nothing of a POV it uses; `then` is the briefs). Route to the `elaborate` skill's Voice Stage
+     ("Where the voice stage sits"); before the map, rounds write a moment
+     (`storyforge voice sample --moment "..."`). It's a soft default: an
+     author who wants structure first puts `voice_stage: later` in
+     `reference/key-decisions.md`, and `status` moves on to the spine.
+   - **`next.stage` is `voice`** (or `then.stage` is, behind a `check`) with
+     the structure built: the voice isn't: `reference/voice/book.md` is
      missing, init's template or empty, there's no anchor passage in
      `reference/voice/anchors/`, or a file can't be read, and the book has no
      author voice repo (the `voice` blocker says which;
@@ -372,7 +389,7 @@ The author wants to see where things stand. Lead with the deterministic
 verdict from `storyforge status --json` (already gathered in Step 1) — it is
 the source of truth for position and next step:
 
-- **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → voice → draft → evaluate (voice from the `voice` stage/blocker, not a rung).
+- **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → synopsis → act-shape → voice → spine → … → briefs → draft → evaluate (the voice from the verdict's `voice` record, not a rung; after the briefs when its `when` is `later`).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
 - **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
 - **Advisory:** list `advisory` (broken promises the gate didn't stop on, then the records whose `source` is `craft framework`) apart from the blockers: for a promise the author amends the brief, marks the beat `must:`, or leaves it; a craft-framework line is a diagnostic the author can use or ignore.
