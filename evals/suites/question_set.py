@@ -51,18 +51,21 @@ CASES_FILE = os.path.join(EVALS_DIR, 'fixtures', 'question-set', 'cases.json')
 #: the same commit; a loss is a decision). The plan's targets are notes:
 #: recall at least the open checker's on the frozen E4/E8, no false alarms
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-09 (haiku 5.5, $0.04 for the set). Sonnet 5.5 on the
-    # same set (fixtures/tier-comparison/claude-sonnet-5-5, $0.54): recall
-    # 0.5294 (one case more), no false alarms, no split answers
-    'recall': 0.4706,
-    'recall_any': 0.4706,
+    # recorded 2026-11-16 (haiku 5.5, about $0.05 for the set): the prompt
+    # counts dialogue and memory as the book's word and checks every
+    # clause, and a split is asked a third time (two yeses of three). A
+    # second recording gave the same: 0.7647, no false alarms. Was 0.4706
+    # (2026-11-09). fixtures/tier-comparison/ holds the 2026-11-09 prompt's
+    # sonnet and opus runs: stale until re-recorded
+    'recall': 0.7647,
+    'recall_any': 0.7647,
     'false_alarms': 0,
     'split': 3,
     # #673's review (T6, CR-2/SF-3): a prompt that breaks quoting shows here,
     # not only as a recall drop; and what the gate's selection costs recall
     'misquoted': 0,
     'selection_lost': 1,
-    'recall_selected': 0.4706,
+    'recall_selected': 0.7647,
 }
 
 
@@ -179,18 +182,35 @@ def selected(data: dict, book_dir: str, scene: str, prose: str) -> set[str]:
 SHARED_RUN = 3
 
 
-def lands_on(quote: str, where: str) -> bool:
-    """Whether a finding's quote is on the injected words: the two share a
-    run of `SHARED_RUN` words (all of the injected quote's, when it has
-    fewer), case and punctuation aside. A finding quoting more or less of the
-    sentence than the injection's quote still lands."""
+def _words(text: str) -> list[str]:
     import re
 
     from storyforge.quotes import normalize
-    a, b = (re.findall(r"[\w'-]+", normalize(t).lower()) for t in (quote, where))
+    return re.findall(r"[\w'-]+", normalize(text).lower())
+
+
+def changed_words(injection: dict) -> frozenset:
+    """The words an injection put in that weren't there before (its
+    `replace` less its `find`): "Frank" for "Fred!" -> "Frank!"."""
+    inj = injection.get('injection') or {}
+    return frozenset(_words(inj.get('replace', ''))) - frozenset(_words(inj.get('find', '')))
+
+
+def lands_on(quote: str, where: str, changed: frozenset = frozenset()) -> bool:
+    """Whether a finding's quote is on the injected words: the two share a
+    run of `SHARED_RUN` words (all of the injected quote's, when it has
+    fewer), case and punctuation aside. A finding quoting more or less of the
+    sentence than the injection's quote still lands. A quote shorter than
+    that lands when its words run inside the injected quote and hold every
+    word the injection `changed` ('"Frank!"' for Fred -> Frank; "Bob" alone
+    doesn't for "his uncle Bob", which changed "uncle" too)."""
+    a, b = _words(quote), _words(where)
     n = min(SHARED_RUN, len(b))
-    if not n or len(a) < n:
+    if not n or not a:
         return False
+    if len(a) < n:
+        inside = any(tuple(b[i:i + len(a)]) == tuple(a) for i in range(len(b) - len(a) + 1))
+        return bool(changed) and inside and changed <= set(a)
     runs = {tuple(b[i:i + n]) for i in range(len(b) - n + 1)}
     return any(tuple(a[i:i + n]) in runs for i in range(len(a) - n + 1))
 
@@ -221,7 +241,8 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
                     lost.append(f'{v["id"]}:{fid}')
                 if quote is not None:
                     caught_any += 1
-                    if any(lands_on(quote, w) for w in where):
+                    changed = changed_words(injections[v['injection']])
+                    if any(lands_on(quote, w, changed) for w in where):
                         caught += 1
                         caught_selected += picked
                         row['caught'] += 1

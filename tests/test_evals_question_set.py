@@ -77,6 +77,23 @@ class TestLandsOn:
     def test_three_words_in_a_row(self, quote, where, lands):
         assert _module()['lands_on'](quote, where) is lands
 
+    @pytest.mark.parametrize('quote,changed,lands', [
+        # qs-013: the finding quoted only the wrong name, the injection's one change
+        ('"Frank!"', {'frank'}, True),
+        ('Frank', {'frank'}, True),
+        ('Bob', {'uncle', 'bob'}, False),     # not every changed word
+        ('Scrooge', {'frank'}, False),        # in the quote, but not the change
+        ('Frank', set(), False),              # nothing known changed: three words
+    ])
+    def test_a_short_quote_lands_on_the_whole_change(self, quote, changed, lands):
+        where = {'Bob': 'his uncle Bob'}.get(quote, '"Frank!" said Scrooge')
+        assert _module()['lands_on'](quote, where, frozenset(changed)) is lands
+
+    def test_changed_words(self):
+        inj = {'injection': {'find': '"Fred!" said Scrooge.', 'replace': '"Frank!" said Scrooge.'}}
+        assert _module()['changed_words'](inj) == {'frank'}
+        assert _module()['changed_words']({}) == frozenset()
+
 
 class TestScore:
     DATA = {'facts': {'a': {'type': 'trait'}, 'b': {'type': 'world'}},
