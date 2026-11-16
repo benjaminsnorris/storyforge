@@ -366,6 +366,20 @@ def test_the_story_cap_without_a_key_is_the_fallback_window(monkeypatch, capsys)
     assert 'taken as 200,000 tokens' in capsys.readouterr().out
 
 
+def test_must_lines_are_required_in_the_plan_whatever_the_notes(project_dir):
+    # iliad-adult: a must: speech showed only among "notes, not requirements",
+    # and not at all with notes excluded, while the gate stops a scene without it
+    _brief(project_dir, key_actions='She finds the gap;must: She burns the map',
+           key_dialogue='must: Dorren: "Not one line of it.";Kell: "Why?"')
+    for notes in (False, True):
+        plan = session.scene_plan(project_dir, SCENE, notes=notes)
+        assert '2. She burns the map (must happen)' in plan and 'must:' not in plan
+        assert '## Must be said' in plan and '- Dorren: "Not one line of it."' in plan
+        assert plan.count('Not one line of it') == 1
+    assert 'Kell: "Why?"' not in session.scene_plan(project_dir, SCENE, notes=False)
+    assert '- key_dialogue: Kell: "Why?"' in session.scene_plan(project_dir, SCENE, notes=True)
+
+
 def test_a_craft_label_outcome_is_left_out_of_the_plan(project_dir):
     _brief(project_dir, outcome='yes-but')
     assert '## How it ends' not in session.scene_plan(project_dir, SCENE, notes=False)
