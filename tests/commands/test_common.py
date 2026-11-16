@@ -537,6 +537,18 @@ class TestPipelineManifest:
         update_cycle_field(str(tmp_path), 999, 'status', 'done')
         # No exception means success
 
+    def test_start_new_cycle_writes_one_cell_per_column(self, project_dir):
+        """#709's neighbour: this wrote ten cells under the nine-column header."""
+        from storyforge.common import PIPELINE_COLUMNS
+        new_id = start_new_cycle(project_dir)
+        with open(get_pipeline_file(project_dir)) as f:
+            lines = f.read().splitlines()
+        cells = lines[-1].split('|')
+        assert len(cells) == len(PIPELINE_COLUMNS) == 9
+        row = dict(zip(lines[0].split('|'), cells))
+        assert row['cycle'] == str(new_id)
+        assert row['status'] == 'pending'
+
     def test_multiple_cycles(self, project_dir):
         """Starting multiple cycles produces sequential IDs."""
         pf = get_pipeline_file(project_dir)

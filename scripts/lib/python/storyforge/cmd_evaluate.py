@@ -30,6 +30,7 @@ from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, get_plugin_dir, install_signal_handlers,
     get_coaching_level, build_shared_context, reference_text,
+    append_cycle, get_current_cycle,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.illustrations import read_scene_prose
@@ -789,29 +790,20 @@ def _log_usage(project_dir, log_file_or_response, operation, target, model,
 # Pipeline manifest helpers
 # ============================================================================
 
-def _ensure_pipeline_manifest(project_dir):
-    """Ensure pipeline.csv exists."""
-    manifest = os.path.join(project_dir, 'working', 'pipeline.csv')
-    if not os.path.isfile(manifest):
-        os.makedirs(os.path.dirname(manifest), exist_ok=True)
-        with open(manifest, 'w') as f:
-            f.write('cycle|status|evaluation|plan|revision|timestamp\n')
-
-
 def _start_cycle(project_dir, eval_timestamp):
-    """Start a new pipeline cycle. Returns cycle ID."""
-    manifest = os.path.join(project_dir, 'working', 'pipeline.csv')
-    _ensure_pipeline_manifest(project_dir)
+    """Start a new pipeline cycle. Returns cycle ID.
 
-    # Count existing cycles
-    with open(manifest) as f:
-        lines = f.readlines()
-    cycle_id = str(len(lines))  # 1-indexed (header is line 0)
-
-    ts = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-    with open(manifest, 'a') as f:
-        f.write(f'{cycle_id}|evaluating|eval-{eval_timestamp}|||{ts}\n')
-
+    The row is built by the file's header (`common.append_cycle`), as
+    `_update_cycle` reads it. #709: this wrote six positional cells for an old
+    header, so `started` held `evaluating` and the start time sat under `plan`.
+    """
+    cycle_id = str(get_current_cycle(project_dir) + 1)
+    append_cycle(project_dir, {
+        'cycle': cycle_id,
+        'started': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+        'status': 'evaluating',
+        'evaluation': f'eval-{eval_timestamp}',
+    })
     return cycle_id
 
 
@@ -1093,7 +1085,6 @@ def main(argv=None):
     # Pipeline manifest
     cycle_id = '0'
     if not args.evaluator:
-        _ensure_pipeline_manifest(project_dir)
         cycle_id = _start_cycle(project_dir, eval_timestamp)
 
     os.makedirs(eval_dir, exist_ok=True)
