@@ -33,12 +33,29 @@ def test_forge_routes_voice_and_check_in_every_phase():
     assert text.count('no `voice` blocker') >= 3
 
 
+def test_the_skills_route_the_voice_stage_before_the_spine():
+    """#656: the voice comes after the act shape (a soft default), found by
+    rounds of a moment before the map, with a check after the map. Both
+    status steps' actions are routed by forge and elaborate."""
+    from storyforge import status
+    first = status.voice_step('first', 'x')['action']
+    check = status.voice_step('check', gaps=['p'])['action']
+    for skill in ('forge', 'elaborate'):
+        text = (SKILLS_DIR / skill / 'SKILL.md').read_text(encoding='utf-8')
+        for needed in (first, check, 'voice_stage: later', 'voice sample --moment'):
+            assert needed in text, (skill, needed)
+    text = (SKILLS_DIR / 'elaborate' / 'SKILL.md').read_text(encoding='utf-8')
+    assert 'Typically happens once the map\'s POVs are set' not in text
+    assert text.index('**Where the voice stage sits (#656).**') < text.index(
+        '**Running sample rounds.**')
+
+
 def test_status_stages_named_in_docs():
     from typing import get_args
 
     from storyforge.status import Stage
     docs = (PLUGIN_DIR / 'docs' / 'agent-reference.md').read_text(encoding='utf-8')
-    assert 'Stages: spine / architecture / voice /' in docs
+    assert 'Stages: voice / spine / architecture /' in docs
     assert {'voice', 'check'} <= set(get_args(Stage))
 
 

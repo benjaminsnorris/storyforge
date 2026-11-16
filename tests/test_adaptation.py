@@ -177,13 +177,24 @@ class TestStatus:
                               'scene-map': 'not_started', 'briefs': 'not_started'}
         assert v['phase'] == 'voice'
         assert v['next']['command'] == 'storyforge elaborate --stage voice'
-        assert v['then'] == {'stage': 'scene-map', 'action': 'Develop the scene-map',
-                             'command': 'storyforge elaborate --stage map', 'reason': ''}
-        assert 'before the scene map' in v['blockers'][0]['detail']
+        # #656's voice step: the given rungs count as done, so the voice comes
+        # before the scene map (the rung it would build)
+        assert (v['then']['stage'], v['then']['command']) == (
+            'scene-map', 'storyforge elaborate --stage map')
+        assert 'voice sample --moment' in v['next']['reason']
+        assert v['blockers'] == []
         assert v['phase_matches_yaml'] is True       # phase: spine, given counts as done
         text = cmd_status.render_human(v)
         assert 'L3 spine         ✓ given — from the source and the interpretation decisions' \
             in text
+
+    def test_voice_stage_later_builds_the_map_first(self, adapted):
+        """The author's `voice_stage: later` (#656) holds for an adaptation too."""
+        import_source(adapted)
+        _decide(adapted, DECISIONS + '\n## Settings\n\n- voice_stage: later\n')
+        v = status.build_status(adapted)
+        assert v['phase'] == 'scene-map'
+        assert v['next']['command'] == 'storyforge elaborate --stage map'
 
     def test_with_a_voice_the_scene_map_is_next(self, adapted):
         import_source(adapted)

@@ -98,6 +98,13 @@ def test_source_import_to_the_scene_map_without_spine_or_architecture(
     v = status.build_status(proj)
     assert _states(v)['scene-map'] == 'solid', v['ladder']
     assert _states(v)['spine'] == _states(v)['architecture'] == 'given'
+    # #656's check after the map: book.md names neither POV yet
+    assert v['next']['action'] == 'Check the voice against the map'
+    assert v['then']['stage'] == 'briefs'
+    _write(proj, {'reference/voice/book.md': (
+        '# The voice\n\nShort, plain sentences. The narrator holds the gods\' council, '
+        'from far off; Telemachus\'s scenes are close third, past tense.\n')})
+    v = status.build_status(proj)
     assert v['phase'] == 'briefs'
     assert not [b for b in v['blockers'] if b['source'] in ('source', 'coverage',
                                                             'interpretation')]

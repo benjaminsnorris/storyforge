@@ -366,6 +366,47 @@ def test_the_story_cap_without_a_key_is_the_fallback_window(monkeypatch, capsys)
     assert 'taken as 200,000 tokens' in capsys.readouterr().out
 
 
+def test_must_lines_are_required_in_the_plan_whatever_the_notes(project_dir):
+    # iliad-adult: a must: speech showed only among "notes, not requirements",
+    # and not at all with notes excluded, while the gate stops a scene without it
+    _brief(project_dir, key_actions='She finds the gap;must: She burns the map',
+           key_dialogue='must: Dorren: "Not one line of it.";Kell: "Why?"')
+    for notes in (False, True):
+        plan = session.scene_plan(project_dir, SCENE, notes=notes)
+        assert '2. She burns the map (must happen)' in plan and 'must:' not in plan
+        assert '## Must be said' in plan and '- Dorren: "Not one line of it."' in plan
+        assert plan.count('Not one line of it') == 1
+    assert 'Kell: "Why?"' not in session.scene_plan(project_dir, SCENE, notes=False)
+    assert '- key_dialogue: Kell: "Why?"' in session.scene_plan(project_dir, SCENE, notes=True)
+
+
+def test_a_labelled_must_line_brings_the_label_reading(project_dir):
+    from storyforge.speaker_labels import LABEL_READING
+    _brief(project_dir, key_actions='She finds the gap', key_dialogue='must: Dorren: "No."')
+    assert LABEL_READING in session.scene_plan(project_dir, SCENE, notes=False)
+    # a label only on a line the plan leaves out brings no reading
+    _brief(project_dir, key_dialogue='must: She refuses;Kell: "Why?"')
+    assert LABEL_READING not in session.scene_plan(project_dir, SCENE, notes=False)
+
+
+def test_bare_variant_and_misplaced_must_markers(project_dir):
+    _brief(project_dir, key_actions='must:;MUST : She burns the map',
+           key_dialogue='must:;Dorren: must: "No."', decision='must: She refuses the crown')
+    said = []
+    plan = session.scene_plan(project_dir, SCENE, notes=False, said=said)
+    assert '1. She burns the map (must happen)' in plan and '2.' not in plan
+    assert '## Must be said' not in plan and '- \n' not in plan
+    assert 'must' not in plan.lower().replace('must happen', '')
+    assert any(s.startswith('key_dialogue: "Dorren: must:') for s in said)
+    assert any(s.startswith('decision: "must: She refuses') for s in said)
+
+
+def test_the_gate_names_a_must_marker_in_a_note_column():
+    from storyforge.gate import _misplaced_must
+    assert _misplaced_must({'decision': 'must: She refuses', 'goal': 'escape'}) == [
+        'decision: must: She refuses']
+
+
 def test_a_craft_label_outcome_is_left_out_of_the_plan(project_dir):
     _brief(project_dir, outcome='yes-but')
     assert '## How it ends' not in session.scene_plan(project_dir, SCENE, notes=False)

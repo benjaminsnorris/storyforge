@@ -2,7 +2,8 @@
 7 of the ready-to-draft plan's "What the voice rounds showed", from *Wrath
 Like Smoke*'s rounds).
 
-One scene is written several ways; the author marks sentences in a pull
+One scene (or, before the scene map, a moment in the author's words) is
+written several ways; the author marks sentences in a pull
 request; the next round writes toward what was kept; the winner, ideally
 finished by the author's hand, becomes an anchor (`reference/voice/anchors/`).
 How the rounds worked on Wrath, and so how this runs:
@@ -30,6 +31,11 @@ How the rounds worked on Wrath, and so how this runs:
   reading: physical slips) and, when the book has `checks.md`, the voice
   review; a separate reviser fixes only the flagged lines (`voice_review`).
   What was found, fixed and left out is in the PR's description.
+- **A moment, before the map** (#656). The voice stage comes right after
+  the synopsis and act shape, when there are no scenes yet: `--moment
+  "..."` writes the author's words for a moment, with the synopsis, in
+  place of a scene's plan (`_moment_context`); the key carries it to the
+  next round. The prompts are the same.
 - **The winner** (`--promote <round file> --sample X --name N`) is saved as
   an anchor, with optional `kind:`, `tense:` and `pov:` headers, from the
   round file as it is now (pull first: the author's edits made on GitHub).
@@ -182,10 +188,12 @@ def samples_digest(samples: dict[str, Sample]) -> str:
 
 @dataclass(frozen=True)
 class RoundKey:
-    """What a round tried, kept outside the repo: the round, its scene, what
-    it varied and blended (carried by the rounds after it, takes included),
-    what each sample tried, the round or sample it came from, and the hash
-    of its samples' text as written (`samples_digest`)."""
+    """What a round tried, kept outside the repo: the round, its scene (or,
+    before the scene map, the moment it wrote: `scene` '' and `moment` the
+    author's words, #656), what it varied and blended (carried by the rounds
+    after it, takes included), what each sample tried, the round or sample
+    it came from, and the hash of its samples' text as written
+    (`samples_digest`)."""
     round: int
     scene: str
     vary: tuple[str, ...] = DEFAULT_VARY
@@ -194,6 +202,18 @@ class RoundKey:
     take: str = ''
     from_round: int | None = None
     digest: str = ''
+    moment: str = ''
+
+    def __post_init__(self):
+        # TD-2: a round wrote a scene or a moment, never both or neither
+        if bool(self.scene) == bool(self.moment.strip()):
+            raise ValueError('a round key names a scene or a moment, '
+                             + ('not both' if self.scene else 'and has neither'))
+
+    @property
+    def subject(self) -> str:
+        """What the round wrote, for a message: the scene, or the moment."""
+        return self.scene or moment_title(self.moment)
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -205,10 +225,11 @@ class RoundKey:
         try:
             if not isinstance(d, dict) or not isinstance(d.get('tried', {}), dict):
                 raise TypeError('not a key object')
-            return cls(int(d['round']), str(d['scene']), tuple(d.get('vary') or DEFAULT_VARY),
+            return cls(int(d['round']), str(d['scene'] or ''), tuple(d.get('vary') or DEFAULT_VARY),
                        str(d.get('influences') or ''),
                        {str(k): str(v) for k, v in d.get('tried', {}).items()},
-                       str(d.get('take') or ''), d.get('from_round'), str(d.get('digest') or ''))
+                       str(d.get('take') or ''), d.get('from_round'), str(d.get('digest') or ''),
+                       moment=str(d.get('moment') or ''))
         except (KeyError, TypeError, ValueError) as e:
             raise SampleError(f'{where} isn\'t a round key ({e})') from e
 
@@ -418,6 +439,88 @@ def _scene_context(project_dir: str, scene_id: str) -> str:
         raise SampleError(str(e)) from e
 
 
+#: what the checks and the logs call a round of a moment (no scene id yet)
+MOMENT_LABEL = 'voice-moment'
+#: the longest a moment's words go into a round's title
+_MOMENT_TITLE = 60
+
+
+def moment_title(moment: str) -> str:
+    """A moment's words, for a title or a message: one line, cut short."""
+    text = ' '.join(moment.split())
+    if len(text) > _MOMENT_TITLE:
+        text = text[:_MOMENT_TITLE].rsplit(' ', 1)[0] + '…'
+    return f'a moment ({text})'
+
+
+#: what a moment round's notes say about the physical check (SF-L): a
+#: moment has no scenes.csv row, so no POV to read the blocking against
+MOMENT_CHECK_NOTE = ('A moment has no scene, so the physical check read each sample without '
+                     'a point of view.')
+
+
+def _synopsis(project_dir: str) -> tuple[str, str]:
+    """(story-summary.md's synopsis, or '' with why not). '' with a reason
+    when the file or the section is missing, empty, or still init's
+    template text (SF-4: the template's instructions aren't the book).
+
+    Raises:
+        SampleError: story-summary.md is there but can't be read.
+    """
+    from storyforge.common import STORY_SUMMARY_PATH, get_plugin_dir, parse_story_summary
+    try:
+        parsed = parse_story_summary(project_dir)
+    except (OSError, ValueError) as e:   # UnicodeDecodeError is a ValueError
+        raise SampleError(f'{STORY_SUMMARY_PATH} can\'t be read ({e})') from e
+    if parsed is None:
+        return '', f'{STORY_SUMMARY_PATH} is missing'
+    synopsis = (parsed.get('synopsis') or '').strip()
+    if not synopsis:
+        return '', f'{STORY_SUMMARY_PATH} has no synopsis'
+    try:
+        template = ((parse_story_summary(os.path.join(get_plugin_dir(), 'templates')) or {})
+                    .get('synopsis') or '').strip()
+    except (OSError, ValueError):
+        template = ''
+    if template and ' '.join(synopsis.split()) == ' '.join(template.split()):
+        return '', f'{STORY_SUMMARY_PATH}\'s synopsis is still init\'s template'
+    return synopsis, ''
+
+
+def _moment_context(project_dir: str, moment: str) -> tuple[str, list[str]]:
+    """The plan for a round of a moment (#656): the voice stage comes before
+    the scene map, so there's no scene to plan from. The author's words for
+    the moment, and the book's synopsis (who and what it's about) when
+    story-summary.md has one; and the round's notes: no synopsis (why), and
+    the physical check without a POV.
+
+    Raises:
+        SampleError: the moment is empty, or story-summary.md can't be read.
+    """
+    if not moment.strip():
+        raise SampleError('--moment is empty: say the moment to write, in a sentence or two')
+    lines = ['# A moment from the book (no scene map yet)', '', moment.strip()]
+    notes = [MOMENT_CHECK_NOTE]
+    synopsis, why = _synopsis(project_dir)
+    if synopsis:
+        lines += ['', '## What the book is about (the synopsis)', '', synopsis]
+    else:
+        notes.insert(0, f'{why}: the round had only the moment\'s words to go on.')
+    return '\n'.join(lines), notes
+
+
+def _plan(project_dir: str, scene_id: str, moment: str) -> tuple[str, str, list[str]]:
+    """(the plan, the label for the checks and logs, notes for the round): a
+    scene's plan, or a moment's when `moment` is given (then `scene_id` is
+    '')."""
+    if moment:
+        if scene_id:
+            raise SampleError('give a scene or a moment, not both')
+        plan, notes = _moment_context(project_dir, moment)
+        return plan, MOMENT_LABEL, notes
+    return _scene_context(project_dir, scene_id), scene_id, []
+
+
 def _ask_variants(prompt: str, model: str, log_file: str, project_dir: str,
                   scene_id: str) -> list[dict]:
     from storyforge.api import RefusalError, extract_text, invoke, is_truncated, log_reply
@@ -522,8 +625,9 @@ def check_samples(project_dir: str, scene_id: str, texts: dict[str, str], *, mod
 def write_round(project_dir: str, scene_id: str, *, variants: int, vary: list[str],
                 influences: str, model: str, log_dir: str, marked: str = '',
                 previous: RoundKey | None = None, words: str = '300 to 500',
-                rng: random.Random | None = None) -> Round:
-    """Round `next_round_number`: exactly `variants` versions of `scene_id`,
+                rng: random.Random | None = None, moment: str = '') -> Round:
+    """Round `next_round_number`: exactly `variants` versions of `scene_id`
+    (or, with `scene_id` '', of `moment`: before the scene map, #656),
     checked, shuffled and labelled A, B, C... `marked`: the last round as
     the author marked it (`describe_marks`), for a round after the first.
 
@@ -535,7 +639,8 @@ def write_round(project_dir: str, scene_id: str, *, variants: int, vary: list[st
     from storyforge.common import read_yaml_field
     if not 2 <= variants <= len(LABELS):
         raise SampleError(f'--variants takes 2 to {len(LABELS)}, not {variants}')
-    plan = _scene_context(project_dir, scene_id)
+    plan, label, plan_notes = _plan(project_dir, scene_id, moment)
+    subject = scene_id or moment_title(moment)
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
     n = next_round_number(project_dir)
     infl = f', blending these influences: {influences}' if influences else ''
@@ -544,33 +649,33 @@ def write_round(project_dir: str, scene_id: str, *, variants: int, vary: list[st
                                  influences=infl,
                                  direction=DIRECTION.format(marked=marked) if marked else '')
     log_file = os.path.join(log_dir, f'round-{n}.json')
-    got = _usable(_ask_variants(prompt, model, log_file, project_dir, scene_id), variants,
+    got = _usable(_ask_variants(prompt, model, log_file, project_dir, label), variants,
                   log_file)
     rng = rng or random.Random()
     rng.shuffle(got)
     labelled = {LABELS[i]: v for i, v in enumerate(got)}
-    texts, notes = check_samples(project_dir, scene_id,
+    texts, notes = check_samples(project_dir, label,
                                  {k: v['text'] for k, v in labelled.items()}, model=model,
                                  log_dir=os.path.join(log_dir, f'round-{n}-checks'))
-    what = (f'{len(texts)} versions of *{scene_id}*. The events are the same in each; only '
+    what = (f'{len(texts)} versions of *{subject}*. The events are the same in each; only '
             f'the voice changes: {", ".join(vary)}'
             + (f', and how they blend {influences}' if influences else '') + '.')
-    text = render_round(f'Voice samples, round {n}: {scene_id}',
+    text = render_round(f'Voice samples, round {n}: {subject}',
                         INTRO.format(what=what, blind=BLIND), list(texts.items()))
     key = RoundKey(n, scene_id, tuple(vary), influences,
                    {k: v['tried'] for k, v in labelled.items()}, '',
                    previous.round if previous else None,
-                   samples_digest(parse_round(text)))
-    return Round(n, text, key, notes)
+                   samples_digest(parse_round(text)), moment=moment)
+    return Round(n, text, key, plan_notes + notes)
 
 
 def write_take(project_dir: str, scene_id: str, *, sample: str, marked: str,
                versions: list[str], model: str, log_dir: str,
-               previous: RoundKey | None = None) -> Round:
+               previous: RoundKey | None = None, moment: str = '') -> Round:
     """A take: one marked sample revised toward its marks, in versions that
     differ only in `versions` (each heads its version; matched by what the
     reply says it tried). The influences and vary list are carried from
-    `previous`.
+    `previous`. With `scene_id` '' it takes on a round of `moment` (#656).
 
     Raises:
         SampleError: fewer than two or repeated versions, a reply that
@@ -581,7 +686,8 @@ def write_take(project_dir: str, scene_id: str, *, sample: str, marked: str,
         raise SampleError('--versions names at least two, separated by ";"')
     if len(set(v.lower() for v in versions)) != len(versions):
         raise SampleError('--versions names one of them twice')
-    plan = _scene_context(project_dir, scene_id)
+    plan, label, plan_notes = _plan(project_dir, scene_id, moment)
+    subject = scene_id or moment_title(moment)
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
     n = next_round_number(project_dir)
     prompt = TAKE_PROMPT.format(title=title, voice=_voice_text(project_dir), plan=plan,
@@ -589,7 +695,7 @@ def write_take(project_dir: str, scene_id: str, *, sample: str, marked: str,
                                 versions=' / '.join(versions),
                                 names='; '.join(versions))
     log_file = os.path.join(log_dir, f'round-{n}.json')
-    got = _usable(_ask_variants(prompt, model, log_file, project_dir, scene_id),
+    got = _usable(_ask_variants(prompt, model, log_file, project_dir, label),
                   len(versions), log_file)
     by_name = {v.lower(): v for v in versions}
     named: dict[str, str] = {}
@@ -600,16 +706,17 @@ def write_take(project_dir: str, scene_id: str, *, sample: str, marked: str,
                               f'{"; ".join(versions)} once each ({log_file}). Run it again')
         named[name] = v['text']
     named = {v: named[v] for v in versions}
-    texts, notes = check_samples(project_dir, scene_id, named, model=model,
+    texts, notes = check_samples(project_dir, label, named, model=model,
                                  log_dir=os.path.join(log_dir, f'round-{n}-checks'))
     what = (f'Sample {sample} of the last round, revised toward your marks, in '
             f'{len(texts)} versions: ' + '; '.join(texts) + '.')
-    text = render_round(f'Voice samples, round {n}: {scene_id}, take on sample {sample}',
+    text = render_round(f'Voice samples, round {n}: {subject}, take on sample {sample}',
                         INTRO.format(what=what, blind=''), list(texts.items()))
     key = RoundKey(n, scene_id, previous.vary if previous else DEFAULT_VARY,
                    previous.influences if previous else '', {k: k for k in texts}, sample,
-                   previous.round if previous else None, samples_digest(parse_round(text)))
-    return Round(n, text, key, notes)
+                   previous.round if previous else None, samples_digest(parse_round(text)),
+                   moment=moment)
+    return Round(n, text, key, plan_notes + notes)
 
 
 # ============================================================================
