@@ -160,7 +160,9 @@ structure:
 
 Read the reference document templates from the Storyforge plugin's `templates/reference/` directory and copy them into the project's `reference/` directory.
 
-Use the **Glob tool** to discover available templates, then use the **Read tool** and **Write tool** to copy each one into `{project-dir}/reference/`.
+Use the **Glob tool** to discover available templates, then use the **Read tool** and **Write tool** to copy each one into `{project-dir}/reference/`, except the graphic-novel-only ones below.
+
+**A prose book gets no bible essays.** Don't copy `character-bible.md`, `world-bible.md` or `systems-bible.md` into a prose (`novel`) project: its bibles are rows (#657, #702), facts in `reference/commitments.csv`, lines in `reference/character-voices.csv` and terse notes in `reference/bible-notes.md`, which the elaborate stages write (the spine and architecture stages) and `./storyforge bibles import` adds. An essay copied in would sit unfilled beside them. A graphic novel copies all three: its script reads their Visual sections (`storyforge init`, the CLI, does the same: `cmd_init.GN_ONLY`).
 
 The templates include the voice folder, `templates/reference/voice/` (`book.md`, `checks.md`, `anchors/.gitkeep`). Copy it with its layout, to `{project-dir}/reference/voice/`. It is where a prose book's voice lives (`references/voice-folder.md`); the author fills it later, in the `elaborate` skill's Voice Stage. There is no voice guide template.
 
@@ -168,7 +170,7 @@ If no templates are found in the plugin directory, note this to the author and l
 
 ### Graphic-novel projects: also copy the canon tree
 
-If the author chose `medium: graphic-novel`, also copy `templates/reference/visual-style.md` and the entire `templates/reference/canon/` tree into the project. The canon tree has the following layout:
+If the author chose `medium: graphic-novel`, also copy the three bible essays (`character-bible.md`, `world-bible.md`, `systems-bible.md`), `templates/reference/visual-style.md` and the entire `templates/reference/canon/` tree into the project. The canon tree has the following layout:
 
 ```
 reference/canon/
@@ -216,7 +218,7 @@ This project uses the Storyforge plugin for Claude Code. Key commands:
 ## Where to Find Things
 - `storyforge.yaml` — project configuration (title, genre, phase, coaching level)
 - `working/pipeline.csv` — pipeline history (evaluation/revision/scoring cycles)
-- `reference/` — scene metadata, character bible, world bible, and the voice (`reference/voice/`: `book.md`, `anchors/`, `checks.md`; `references/voice-folder.md`)
+- `reference/` — scene metadata, the bibles (a prose book's as rows: `commitments.csv`, `character-voices.csv`, `bible-notes.md`; a graphic novel's as `character-bible.md` and `world-bible.md`), and the voice (`reference/voice/`: `book.md`, `anchors/`, `checks.md`; `references/voice-folder.md`)
 - `scenes/` — scene prose files
 - `working/scores/latest/` — most recent scoring results
 - `working/evaluations/` — evaluation reports

@@ -405,10 +405,35 @@ def step8_add_bible_visual_notes(
 
     Always appends to existing files (even when some ### Visual sections already
     exist) so partial migrations don't leave characters without migration cues.
-    Returns list of modified file paths.
+    A prose book made since #702 has no essays (init no longer copies them:
+    its bibles are rows), so an essay neither in reference/ nor retired is
+    copied in from its template (the book's title filled in) first, with
+    systems-bible.md: a graphic novel's script reads the essays' Visual
+    sections. Returns list of modified file paths.
     """
     ref_dir = os.path.join(project_dir, 'reference')
     modified = []
+    from storyforge.bibles import ESSAYS
+    from storyforge.common import PROJECT_TITLE, read_yaml_field
+    title = (read_yaml_field('project.title', project_dir) or '').strip() or PROJECT_TITLE
+    templates = os.path.join(get_plugin_dir(), 'templates', 'reference')
+    for name in ESSAYS:
+        path = os.path.join(ref_dir, name)
+        if os.path.exists(path) or os.path.isfile(os.path.join(ref_dir, 'archive', name)):
+            continue
+        src = os.path.join(templates, name)
+        if not os.path.isfile(src):
+            log(f'  WARNING: plugin template not found at {src}; {name} not copied in, '
+                f'so the script has no {name} to read: write it by hand')
+            continue
+        if not dry_run:
+            with open(src, encoding='utf-8') as f:
+                text = f.read()
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text.replace(PROJECT_TITLE, title))
+        modified.append(path)
+        log(f'  {name}: copied in from its template (a graphic novel\'s bibles are essays; '
+            f'the prose book\'s rows stay in commitments.csv)')
 
     bibles = [
         (os.path.join(ref_dir, 'character-bible.md'), _BIBLE_VISUAL_NOTE),
@@ -416,7 +441,7 @@ def step8_add_bible_visual_notes(
     ]
 
     for path, note in bibles:
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) and not (dry_run and path in modified):
             archived = os.path.join(ref_dir, 'archive', os.path.basename(path))
             if os.path.isfile(archived):
                 # retired to rows (#657): a graphic novel's script needs the essay
@@ -432,7 +457,8 @@ def step8_add_bible_visual_notes(
         if not dry_run:
             with open(path, 'a', encoding='utf-8') as f:
                 f.write(note)
-        modified.append(path)
+        if path not in modified:
+            modified.append(path)
         log(f'  {os.path.basename(path)}: appended visual migration note')
 
     return modified

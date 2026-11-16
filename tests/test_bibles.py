@@ -755,6 +755,8 @@ class TestOtherReaders:
 
 def test_migrate_medium_says_a_retired_essay_got_no_note(facts_project_dir, capsys):
     from storyforge.cmd_migrate_medium import step8_add_bible_visual_notes
-    assert step8_add_bible_visual_notes(facts_project_dir, dry_run=True) == []
+    modified = step8_add_bible_visual_notes(facts_project_dir, dry_run=True)
+    # the retired essay isn't brought back; an essay the book never had is (#702)
+    assert 'character-bible.md' not in {os.path.basename(m) for m in modified}
     out = capsys.readouterr()
     assert 'character-bible.md is retired' in out.out + out.err

@@ -635,3 +635,26 @@ def test_migrate_preserves_readme_and_notes_in_scenes_dir(project_dir, monkeypat
     # the-opening.md should NOT be in scenes/ (archived)
     assert not os.path.isfile(os.path.join(scenes_dir, 'the-opening.md')), \
         'the-opening.md should have been archived'
+
+
+def test_step8_copies_in_essays_a_prose_book_never_had(project_dir):
+    """#702: init no longer gives a prose book the bible essays, so the move
+    to a graphic novel copies each in from its template (title filled in)
+    before appending the Visual note; a retired essay is still left alone."""
+    from storyforge.bibles import ESSAYS
+    ref = os.path.join(project_dir, 'reference')
+    for name in ESSAYS:
+        path = os.path.join(ref, name)
+        if os.path.exists(path):
+            os.remove(path)
+    assert step8_add_bible_visual_notes(project_dir, dry_run=True)
+    assert not any(os.path.exists(os.path.join(ref, n)) for n in ESSAYS)   # dry run
+    modified = step8_add_bible_visual_notes(project_dir, dry_run=False)
+    assert sorted(os.path.basename(m) for m in modified) == sorted(ESSAYS)
+    assert len(modified) == len(set(modified))
+    for name in ESSAYS:
+        with open(os.path.join(ref, name), encoding='utf-8') as f:
+            text = f.read()
+        assert 'PROJECT_TITLE' not in text
+    with open(os.path.join(ref, 'character-bible.md'), encoding='utf-8') as f:
+        assert 'Visual' in f.read()
