@@ -125,6 +125,89 @@ _REFERENCE_DOCS = [
 ]
 
 
+#: How a stage writes the bibles in a prose book (#657, plan D2): facts as
+#: rows, voices as lines, terse notes only for what resists rows. The
+#: writer (`cmd_elaborate._apply_bible_block`) adds them through
+#: `bibles.add_facts`, `add_voices` and `add_notes`; a graphic novel's
+#: stages still write the essays, whose Visual sections its script reads.
+BIBLE_ROWS_FORMAT = """Facts as rows, never an essay: one fact a row, each a short plain statement.
+
+```bible-facts-csv
+type|subject|statement|known_by|category
+(one row per fact)
+```
+
+- `type`: `trait` (about one person: identity, history, want, need, wound, lie), `relationship` (between people; the statement names both), `world` (a rule of the world: magic, law, technology, institutions; `subject` empty or a place's id), or `knowledge` (a secret: `known_by` is who knows it from the start, `category` `secret`)
+- `subject`: the character's id (lowercase, hyphens: `mara-voss`), a place's id, or empty for the world
+- `statement`: the fact in a few plain words. No interpretation, no quotable sentence
+- `known_by`: only for `knowledge`, `;`-separated character ids
+- `category`: one word for the kind (want, need, wound, lie, age, kinship, rule, secret, ...)
+- A question the plan hasn't answered yet is a row whose statement ends in `?`; it stays on the list of gaps until it is settled
+
+How a character sounds, as two or three lines of them speaking, never a description of their speech:
+
+```character-voices-csv
+character|line
+(character id|a line they say, in quotes)
+```
+
+Only what really resists rows (a culture's feel, a history's shape), as terse notes, one per line; leave the block out when there is none:
+
+```bible-notes
+- (a note)
+```"""
+
+
+def _bible_rows(project_dir: str) -> bool:
+    """Whether a stage writes the bibles as rows (a prose book) or as
+    essays (a graphic novel, #657)."""
+    from .common import get_medium
+    return get_medium(project_dir) != 'graphic-novel'
+
+
+SPINE_BIBLE_ESSAY = """### 2. Character Bible Seeds
+
+Write seed entries for the protagonist and antagonist force. Each character needs:
+- Name and role
+- Want (conscious, concrete goal)
+- Need (unconscious requirement, usually opposite of Want)
+- Wound (formative damage that shaped worldview)
+- Lie (false belief resulting from wound)
+- Flaw/strength duality
+
+Output in a fenced block labeled `character-bible`:
+
+```character-bible
+(your character bible markdown here)
+```
+"""
+
+SPINE_BIBLE_ROWS = """### 2. Who the Story Is About
+
+The protagonist and the antagonist force: for each, their role, want (the conscious, concrete goal), need (what they actually require, usually against the want), wound (the damage before the story), lie (the false belief the wound left), and any fact the plot depends on (age, kinship, a secret they keep).
+
+{format}
+"""
+
+ARCH_BIBLE_ESSAY = """If you need to deepen the character bible with supporting characters, output:
+
+```character-bible
+(additional character entries in the same format as existing)
+```
+
+If the world needs a bible, output:
+
+```world-bible
+(world bible markdown)
+```
+"""
+
+ARCH_BIBLE_ROWS = """New facts the architecture settles: the supporting characters, the relationships between the cast (who is related to whom, who owes whom), and the rules of the world the plot depends on. Only facts not already in the reference materials above.
+
+{format}
+"""
+
+
 def reference_doc(project_dir: str, name: str) -> str:
     """`reference/<name>`'s text for a prompt, stripped: '' when the file is
     missing, empty or still its template (F-130). `common.reference_text`
@@ -164,6 +247,11 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
 
     if shared:
         return '\n\n'.join(sections)
+
+    # The bibles as rows (#657); the shared context carries them otherwise
+    from .bibles import drafting_sections
+    for label, content in drafting_sections(project_dir):
+        sections.append(f"### {label}\n\n{content}")
 
     # An adaptation's source bibles (#477); none without a `source:` block
     from .prompts_source import bibles_text
@@ -206,6 +294,9 @@ def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '',
     src = spine_section(project_dir)
     refs_section += f'\n{src}\n' if src else ''
 
+    bible_section = (SPINE_BIBLE_ROWS if _bible_rows(project_dir) else SPINE_BIBLE_ESSAY).format(
+        format=BIBLE_ROWS_FORMAT)
+
     return f"""You are building the spine of a novel — the 5-10 irreducible story events that must happen.
 
 {context}
@@ -234,22 +325,7 @@ Output this in a fenced block labeled `story-architecture`:
 (your story architecture markdown here)
 ```
 
-### 2. Character Bible Seeds
-
-Write seed entries for the protagonist and antagonist force. Each character needs:
-- Name and role
-- Want (conscious, concrete goal)
-- Need (unconscious requirement, usually opposite of Want)
-- Wound (formative damage that shaped worldview)
-- Lie (false belief resulting from wound)
-- Flaw/strength duality
-
-Output in a fenced block labeled `character-bible`:
-
-```character-bible
-(your character bible markdown here)
-```
-
+{bible_section}
 ### 3. Spine Scenes
 
 Identify 5-10 irreducible story events. For each, provide a row in pipe-delimited CSV format.
@@ -306,6 +382,9 @@ def build_architecture_prompt(project_dir: str, plugin_dir: str,
     src = architecture_section(project_dir)
     registries_section += f'\n{src}\n' if src else ''
 
+    bible_section = ARCH_BIBLE_ROWS.format(format=BIBLE_ROWS_FORMAT) if _bible_rows(
+        project_dir) else ARCH_BIBLE_ESSAY
+
     return f"""You are building the architecture of a novel — expanding the spine into a full structural plan.
 
 {context}
@@ -355,18 +434,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 (all scenes)
 ```
 
-If you need to deepen the character bible with supporting characters, output:
-
-```character-bible
-(additional character entries in the same format as existing)
-```
-
-If the world needs a bible, output:
-
-```world-bible
-(world bible markdown)
-```
-
+{bible_section}
 ### Rules
 
 - {_CRAFT_NOTES}
@@ -475,7 +543,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 - time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), frame (narration from after the story, looking back), vision (events a character is shown that the story doesn't treat as fixed, such as a future that may be; never the story's present), or memory, dream or ghost (the scene sits on its day, but what it shows isn't the present's action: a past relived, a dream, the dead visiting). A dead character may appear only in a frame, vision, memory, dream or ghost scene, or a flashback (an earlier timeline_day, which needs no mode)
 - told_by: for an embedded tale (a story, song or report a character gives inside another scene), the id of the scene that tells it; its pov is the teller, its timeline_day the day its events happened. Empty for a scene lived on the page
 - Say how each scene sits in time in its summary when it isn't simply the same day as the scene before: "the next morning", "three weeks later", "flashback to 1917". The timeline check reads this, and drafting carries it into the prose
-- Every character referenced must exist in the character bible
+- Every character referenced must exist in characters.csv (or, until it is converted, the character bible)
 - An enum cell holds only its value (`turning_point` is action or revelation, never "action: she strikes"; what turns the scene goes in `function`)
 - MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment

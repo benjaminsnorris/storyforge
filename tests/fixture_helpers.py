@@ -27,6 +27,10 @@ from pathlib import Path
 TESTS_DIR = Path(__file__).parent
 FIXTURE_DIR = TESTS_DIR / 'fixtures' / 'test-project'
 FIXTURE_DIR_GN = TESTS_DIR / 'fixtures' / 'test-project-gn'
+#: test-project with its character bible converted to rows (#657): an overlay
+#: of the files the conversion changed (`reference/`), and in `conversion/`
+#: the files `storyforge bibles import` read to make it
+FIXTURE_DIR_FACTS = TESTS_DIR / 'fixtures' / 'test-project-facts'
 
 # The working/ subdirectories command modules expect.
 WORKING_DIRS = (
@@ -129,6 +133,26 @@ def make_project(src, dest, working_dirs=False):
     if working_dirs:
         for subdir in WORKING_DIRS:
             os.makedirs(os.path.join(dest, subdir), exist_ok=True)
+    return dest
+
+
+def make_facts_project(dest):
+    """test-project with its bibles converted to rows (#657): a copy of
+    test-project, the overlay's reference/ files over it, and the essay it
+    retired (now in reference/archive/) gone from reference/. Returns
+    `dest` as a str."""
+    dest = copy_fixture(FIXTURE_DIR, dest)
+    overlay = os.path.join(str(FIXTURE_DIR_FACTS), 'reference')
+    for root, _dirs, files in os.walk(overlay):
+        for name in files:
+            src = os.path.join(root, name)
+            target = os.path.join(dest, 'reference', os.path.relpath(src, overlay))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copyfile(src, target)
+            if os.path.relpath(root, overlay) == 'archive':
+                retired = os.path.join(dest, 'reference', name)
+                if os.path.exists(retired):
+                    os.remove(retired)
     return dest
 
 

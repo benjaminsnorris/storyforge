@@ -23,6 +23,10 @@ the book it sees.
   template bible is left out (F-130), and the prompt names what is. They
   are sent uncapped, as drafting's shared context sends them, with their
   own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
+  A book with bible rows (#657) also sends them: the plan's facts true
+  from the start, with their ids, as `commitments.csv`
+  (`bibles.checker_doc`), and its terse notes (`bible-notes.md`). An essay
+  stops being sent only once it is retired to reference/archive/.
   A series' shared canon (`series.canon`) goes with them, each file as
   `series-canon-<file name>`.
 - The earlier scenes follow them in the system prompt, whole: the story so
@@ -104,9 +108,11 @@ MAX_LEDGER_ROWS = 60
 PASSAGE_CHARS = 700
 SNIPPET_CHARS = 300
 MAX_TURNS = 24
-#: The reference docs the checker reads whole (the ones drafting's shared
-#: context sends, and E4's judge reads)
-REFERENCE_DOCS = ('character-bible.md', 'world-bible.md', 'systems-bible.md')
+#: The reference docs the checker reads whole: the bible essays a book
+#: hasn't retired yet (#657: a retired essay is in reference/archive/, so
+#: it isn't found), and the terse notes that resist rows. The rows
+#: themselves come as `bibles.FACTS_DOC` (`reference_docs`)
+REFERENCE_DOCS = ('character-bible.md', 'world-bible.md', 'systems-bible.md', 'bible-notes.md')
 
 #: The `established_scene` of a finding against the calendar (each scene's
 #: `timeline_day` and `time_of_day`)
@@ -340,7 +346,8 @@ class Book:
 
 def reference_docs(project_dir: str) -> dict[str, str]:
     """The bibles with the author's text, by file name, in `REFERENCE_DOCS`
-    order, then the series canon's files (`series.canon`) as
+    order, then the plan's facts as rows (`bibles.checker_doc`, as
+    `bibles.FACTS_DOC`, when there are any), then the series canon's files (`series.canon`) as
     `series-canon-<file name>`. A missing or blank bible, or one still
     identical to its template (`common.is_unfilled_template`), is left out:
     a template's guidance would read as the book's facts. A series canon
@@ -360,6 +367,17 @@ def reference_docs(project_dir: str) -> dict[str, str]:
                              f'the checker needs it') from e
         if text.strip() and not is_unfilled_template(path):
             docs[name] = text
+    # The bibles as rows (#657): the plan's facts true from the start, with
+    # their ids; none for a book without them, so its prompt is as before
+    from storyforge import bibles
+    from storyforge.common import ReferenceDocError
+    from storyforge.ledger import LedgerError
+    try:
+        facts = bibles.checker_doc(project_dir)
+    except (LedgerError, ReferenceDocError) as e:
+        raise CheckError(f'the plan\'s facts can\'t be read ({e}); the checker needs them') from e
+    if facts:
+        docs[bibles.FACTS_DOC] = facts
     # A series' shared canon, which every scene must agree with too; named by
     # a file name (a finding cites one) that no book bible has
     from storyforge.series import SeriesError, canon_docs

@@ -1328,6 +1328,14 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     if unknown:
         log(f'WARNING: {scene_id}: not in characters.csv or locations.csv, so '
             f'the prompt has no pronouns or ledger facts for them: {", ".join(unknown)}')
+    # A secret waits for the scene that reveals it (#697's review CR-1): a
+    # backstory knowledge fact is otherwise in force from the first scene
+    from .bibles import unrevealed_secrets
+    withheld = unrevealed_secrets(ref_dir, rows, scene_id, order)
+    if withheld:
+        log(f'NOTE: {scene_id}: {len(withheld)} secret(s) left out of the prompt until the '
+            f'scene that reveals them: {", ".join(sorted(withheld)[:10])}')
+        rows = [r for r in rows if r.get('id') not in withheld]
     found = ledger.drafting_slice(rows, scene_id, order, subjects + found_places)
     if found.unplaced:
         ids = [r['id'] for r in found.unplaced]
@@ -1919,6 +1927,11 @@ def build_scene_prompt_from_briefs(
         if text:
             char_block = f"## Character Bible (on-stage: {on_stage})\n\n{text}"
     if not system_context:
+        # the bibles as rows (#657), which the system context carries otherwise
+        from .bibles import drafting_text
+        rows_text = drafting_text(project_dir)
+        if rows_text:
+            char_block = f'{char_block}\n\n{rows_text}' if char_block else rows_text
         # a series' shared canon, which the system context carries otherwise
         from .series import canon_text
         canon = '\n\n'.join(f'## {label}\n\n{text}' for label, text in canon_text(project_dir))

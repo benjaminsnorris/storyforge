@@ -63,6 +63,7 @@ Provenance = dict[str, ProvenanceRow] | None
 
 FileState = Literal[
     'missing',        # not on disk
+    'retired',        # a bible essay converted to rows and moved to reference/archive/ (#657)
     'empty',          # whitespace only
     'header_only',    # a CSV with a header row and no data rows
     'template',       # still the template init copied in
@@ -80,6 +81,8 @@ Rule = Literal['free', 'force', 'never']
 #: reported when it isn't. A test holds this total over FileState.
 _POLICY: dict[FileState, tuple[Rule, str]] = {
     'missing': ('free', ''),
+    'retired': ('never', 'retired to reference/archive/ (#657): its facts are rows in '
+                         'commitments.csv; extraction doesn\'t write the essay again'),
     'empty': ('free', ''),
     'header_only': ('free', ''),
     'template': ('free', ''),
@@ -179,6 +182,11 @@ def file_state(project_dir: str, rel_path: str, provenance: Provenance) -> FileS
     if os.path.islink(path):
         return 'symlink'
     if not os.path.exists(path):
+        from storyforge.bibles import ARCHIVE_DIR, ESSAYS
+        head, name = os.path.split(os.path.normpath(rel_path))
+        if (name in ESSAYS and head == 'reference'
+                and os.path.isfile(os.path.join(project_dir, ARCHIVE_DIR, name))):
+            return 'retired'
         return 'missing'
     try:
         with open(path, encoding='utf-8-sig') as f:

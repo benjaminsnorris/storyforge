@@ -61,6 +61,7 @@ def _has_elaboration_score_flag(argv: list[str]) -> bool:
 COMMANDS = {
     'annotations': 'storyforge.cmd_annotations',
     'audit': 'storyforge.cmd_audit',
+    'bibles': 'storyforge.cmd_bibles',
     'check': 'storyforge.cmd_check',
     'validate': 'storyforge.cmd_validate',
     'hone': 'storyforge.cmd_hone',

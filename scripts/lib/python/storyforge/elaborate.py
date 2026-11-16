@@ -1445,6 +1445,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_cast_named(scenes_map, intent_map, ref_dir, checks)
     _validate_brief_names(ref_dir, checks)
     _validate_narrator(ref_dir, scenes_map, checks)
+    _validate_plan_gaps(ref_dir, checks)
 
     failures = [c for c in checks if not c['passed']]
     blocking_failures, _advisory = split_failures(failures)
@@ -1453,6 +1454,37 @@ def validate_structure(ref_dir: str) -> dict:
         'checks': checks,
         'failures': failures,
     }
+
+
+def _validate_plan_gaps(ref_dir: str, checks: list[dict]) -> None:
+    """The two-writers test (#657, plan D2), category `plan-gaps`, all
+    advisory: each gap `bibles.plan_gaps` sees in the plan's facts (an
+    unsettled reveal, an ambiguous relationship, a world rule with no
+    answer, an open question in bible-notes.md) is a failed check, and so is
+    each thing it couldn't check (an essay not converted to rows, a ledger
+    that can't be read), so a pass means checked and clean. Also
+    character-voices.csv's rows that can't be read. A gap never blocks:
+    the plan may leave it open on purpose, and drafting settles it."""
+    from . import bibles
+    from .common import ReferenceDocError
+    gaps, notes = bibles.plan_gaps(ref_dir)
+    for g in gaps:
+        checks.append(_check('plan-gaps', f'plan-gap-{g.kind}-{g.slug()}', False,
+                             f'Two-writers test: {g.message()}', severity='advisory'))
+    for n, note in enumerate(notes, start=1):
+        checks.append(_check('plan-gaps', f'plan-gaps-unchecked-{n}', False,
+                             f'Two-writers test: {note}', severity='advisory'))
+    if not gaps and not notes:
+        checks.append(_check('plan-gaps', 'plan-gaps', True,
+                             'Two-writers test: no gap in the plan\'s facts'))
+    project_dir = os.path.dirname(os.path.abspath(ref_dir))
+    try:
+        _voices, problems = bibles.read_voices(project_dir)
+    except ReferenceDocError as e:
+        problems = [str(e)]
+    for n, problem in enumerate(problems, start=1):
+        checks.append(_check('characters', f'character-voices-{n}', False, problem,
+                             severity='advisory'))
 
 
 def _validate_narrator(ref_dir: str, scenes_map: dict, checks: list[dict]) -> None:

@@ -417,6 +417,12 @@ def step8_add_bible_visual_notes(
 
     for path, note in bibles:
         if not os.path.isfile(path):
+            archived = os.path.join(ref_dir, 'archive', os.path.basename(path))
+            if os.path.isfile(archived):
+                # retired to rows (#657): a graphic novel's script needs the essay
+                log(f'  NOTE: {os.path.basename(path)} is retired to reference/archive/ '
+                    f'(its facts are rows); move it back to reference/ for the script\'s '
+                    f'Visual notes. No note was appended')
             continue
         # Always append the migration note, even when SOME ### Visual sections
         # already exist. A partial migration (e.g. one character already has a

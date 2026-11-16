@@ -32,13 +32,33 @@ BIBLES = (
 
 
 def _load_bibles(project_dir: str) -> dict[str, str]:
-    """Read each bible from disk. Returns {label: content} for bibles that
-    exist; a missing bible is skipped, and one still identical to its
+    """Read each bible. Returns {label: content} for bibles that exist; the
+    character and world bibles are their essays, their rows once converted
+    (labelled so), or both (`bibles.bible_text`); a missing bible is skipped, and one still identical to its
     template (F-130) or unreadable is skipped with a log line, so a
     partial-bibles project still gets a useful pass."""
     out: dict[str, str] = {}
+    from storyforge import bibles
+    from storyforge.common import ReferenceDocError
     for rel, label in BIBLES:
         path = os.path.join(project_dir, rel)
+        name = os.path.basename(rel)
+        if name in bibles.ESSAY_TYPES:
+            # The essay, its rows once converted, or both (#657, #697's
+            # review): a retired essay's facts are in the ledger
+            try:
+                content = bibles.bible_text(project_dir, name)
+            except ReferenceDocError as e:
+                log(f'WARNING: {e}; checking without {rel}')
+                continue
+            if content.strip():
+                out[label if os.path.isfile(path) else f'{label} (rows in commitments.csv)'] = content
+            elif bibles.essay_state(project_dir, name) == 'retired':
+                log(f'WARNING: {rel} is retired and the ledger has no facts of its kind: '
+                    f'checking without it')
+            elif os.path.isfile(path) and is_unfilled_template(path):
+                log(f'  {rel} is still its template; checking without it')
+            continue
         if not os.path.isfile(path):
             continue
         if is_unfilled_template(path):

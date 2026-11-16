@@ -1379,6 +1379,24 @@ def build_shared_context(project_dir: str, model: str = '',
             tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
             tier2_chars += len(content) + len(label) + 10
 
+    # The bibles as rows (#657): the plan's facts true from the start, the
+    # characters' lines and the terse notes; none for a book without them
+    # (#697's review CR-3) Every caller shares this context, and evaluate,
+    # scenes-setup and the rest ran before on a book whose ledger isn't
+    # migrated or can't be read: the rows are left out with a WARNING there,
+    # never a crash. The commands that need the facts (write, revise, check)
+    # stop on such a ledger up front (`ledger.exit_if_not_migrated`).
+    from storyforge.bibles import drafting_sections
+    from storyforge.ledger import LedgerError
+    try:
+        bible_sections = drafting_sections(project_dir)
+    except LedgerError as e:
+        log(f'WARNING: the bible rows are left out of the shared context: {e}')
+        bible_sections = []
+    for label, content in bible_sections:
+        tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+        tier2_chars += len(content) + len(label) + 10
+
     # The voice (`voice_book.resolve`: book.md, the anchors, an author repo;
     # never checks.md); an unreadable one raises, naming the file
     from storyforge import voice_book
