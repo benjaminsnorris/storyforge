@@ -354,3 +354,66 @@ def test_an_extracted_anchor_keeps_paragraphs_and_stops_at_a_paragraph():
     assert anchor_passage('---\nid: x\n---\n\nThe prose.') == 'The prose.'
     a = vb.parse_anchor('a.md', render_anchor('He ran.\n\nHe fell.', 'Hector'))
     assert (a.pov, a.text) == ('Hector', 'He ran.\n\nHe fell.')
+
+
+# --- where the voice stage sits, and the check after the map (#656) ---
+
+@pytest.mark.parametrize('text, want', [
+    (None, ('first', '')),                              # no key-decisions.md
+    ('# Decisions\n\nnarrator_pov: off\n', ('first', '')),
+    ('voice_stage: later\n', ('later', '')),
+    ('- **`voice_stage`:** `first`\n', ('first', '')),
+    ('<!-- voice_stage: later -->\nvoice_stage: first\n', ('first', '')),
+])
+def test_the_voice_stage_setting(tmp_path, text, want):
+    if text is not None:
+        _write(str(tmp_path / 'reference' / 'key-decisions.md'), text)
+    assert vb.stage_setting(str(tmp_path)) == want
+
+
+def test_a_voice_stage_setting_it_cant_take_is_first_and_said(tmp_path):
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'), 'voice_stage: whenever\n')
+    when, problem = vb.stage_setting(str(tmp_path))
+    assert when == 'first' and "'whenever' is not one of first, later" in problem
+    _write(str(tmp_path / 'reference' / 'key-decisions.md'), b'voice_stage: \xff\n')
+    when, problem = vb.stage_setting(str(tmp_path))
+    assert when == 'first' and "can't be read" in problem
+
+
+def _map(pd, povs, statuses=None):
+    _write(os.path.join(pd, 'reference', 'characters.csv'),
+           'id|name|aliases\nlady-ann|Lady Ann Vale|the Widow\nbo-tan|Bo Tan|\n'
+           'cy|Cy|\n')
+    statuses = statuses or ['mapped'] * len(povs)
+    rows = ''.join(f's{i}|{len(povs) - i}|{p}|{st}\n'
+                   for i, (p, st) in enumerate(zip(povs, statuses)))
+    _write(os.path.join(pd, 'reference', 'scenes.csv'), 'id|seq|pov|status\n' + rows)
+
+
+def test_pov_gaps_lists_the_povs_book_md_doesnt_name_in_reading_order(tmp_path):
+    pd = str(tmp_path)
+    _map(pd, ['lady-ann', 'Bo Tan', 'Cy', 'Omniscient narrator', 'Bo Tan', ''])
+    # reading order is by seq (reversed here); each POV once
+    assert vb.pov_gaps(pd, '') == ['Bo Tan', 'Omniscient narrator', 'Cy', 'lady-ann']
+    # an alias, a hyphenated id with spaces, the narrator: named
+    assert vb.pov_gaps(pd, 'The widow keeps her counsel. Bo. The narrator is far.') == ['Cy']
+    assert vb.pov_gaps(pd, 'lady ann; Bo Tan; Cy; narrator') == []
+    # the first word of a name counts, a title's doesn't, nor part of a word
+    assert 'lady-ann' in vb.pov_gaps(pd, 'Lady Macbeth.')
+    assert 'Cy' in vb.pov_gaps(pd, 'Cyril spoke.')
+
+
+def test_pov_gaps_skips_cut_and_merged_scenes_and_reads_book_md(tmp_path):
+    pd = str(tmp_path)
+    _map(pd, ['Bo Tan', 'Cy'], ['cut', 'mapped'])
+    assert vb.pov_gaps(pd, '') == ['Cy']
+    _write(os.path.join(pd, 'reference', 'voice', 'book.md'), '# Voice\n\nCy, close.\n')
+    assert vb.pov_gaps(pd) == []
+    # init's template is no text: every POV is a gap
+    shutil.rmtree(os.path.join(pd, 'reference', 'voice'))
+    vb.scaffold(pd)
+    assert vb.pov_gaps(pd) == ['Cy']
+
+
+def test_pov_gaps_without_a_map_is_empty(tmp_path):
+    assert vb.pov_gaps(str(tmp_path), 'anything') == []

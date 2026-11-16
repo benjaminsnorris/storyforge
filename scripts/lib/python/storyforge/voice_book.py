@@ -61,7 +61,8 @@ TENSES = ('present', 'past')
 #: what makes the voice, named wherever its absence is reported
 REMEDY = (f'put at least one passage you chose or finished by hand in {ANCHORS_DIR}/ '
           f'and say what it does in {BOOK_FILE} (references/voice-folder.md; '
-          f'`storyforge voice sample --scene <id>` runs blind sample rounds to find one)')
+          f'`storyforge voice sample --scene <id>`, or `--moment "..."` before the scene '
+          f'map, runs blind sample rounds to find one)')
 
 #: the pipeline's voice files, no longer written or read: (path, what it was)
 OLD_FILES = (
@@ -461,6 +462,136 @@ def check_tense(prose: str, declared: str) -> TenseCheck:
                           f'{reading.share(other):.0%} of the narration\'s common verb forms '
                           f'are {other} ({reading.present} present, {reading.past} past)')
     return TenseCheck(TENSE_OK)
+
+
+# ============================================================================
+# Where the voice stage sits (#656; plan D5 and decision 12)
+# ============================================================================
+
+#: the voice is found right after the synopsis and act shape, before the
+#: spine and architecture deepen: who tells the story, and from how far,
+#: decides which scenes exist and whose eyes they're in (the default)
+STAGE_FIRST = 'first'
+#: structure first; the voice is found before drafting (the old order)
+STAGE_LATER = 'later'
+STAGE_SETTINGS = (STAGE_FIRST, STAGE_LATER)
+#: the line in reference/key-decisions.md that says which (beside
+#: `narrator_pov:`); without it, `STAGE_FIRST`
+STAGE_KEY = 'voice_stage'
+KEY_DECISIONS = os.path.join('reference', 'key-decisions.md')
+
+_STAGE_LINE = re.compile(r'\bvoice_stage\s*`?\s*:\s*`?\s*([A-Za-z-]+)', re.I)
+
+
+def stage_setting(project_dir: str) -> tuple[str, str]:
+    """Where the author wants the voice stage: (`STAGE_FIRST` or
+    `STAGE_LATER`, a problem to say or ''). Read from a `voice_stage:` line
+    of reference/key-decisions.md (an HTML comment line is skipped); no file
+    or no line is `STAGE_FIRST`, the soft default. A value it doesn't take,
+    or a file it can't read, is `STAGE_FIRST` with the problem said:
+    never logged here, since `status --json`'s stdout is the verdict."""
+    path = os.path.join(project_dir, KEY_DECISIONS)
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            text = f.read()
+    except FileNotFoundError:
+        return STAGE_FIRST, ''
+    except (OSError, UnicodeDecodeError) as e:
+        return STAGE_FIRST, (f"{KEY_DECISIONS} can't be read ({e}), so its {STAGE_KEY} isn't "
+                             f"known: the voice stage stays first")
+    for line in text.splitlines():
+        if line.lstrip().startswith('<!--'):
+            continue
+        m = _STAGE_LINE.search(line)
+        if m:
+            value = m.group(1).lower()
+            if value in STAGE_SETTINGS:
+                return value, ''
+            return STAGE_FIRST, (f'{KEY_DECISIONS}: {STAGE_KEY} {m.group(1)!r} is not one of '
+                                 f'{", ".join(STAGE_SETTINGS)}: the voice stage stays first')
+    return STAGE_FIRST, ''
+
+
+#: words a name's first word can't stand for it as
+_NOT_A_NAME = frozenset({'the', 'a', 'an', 'old', 'young', 'lady', 'lord', 'sir', 'king',
+                         'queen', 'prince', 'princess', 'dr', 'mr', 'mrs', 'ms', 'miss'})
+
+
+def _terms(*values: str, name: str = '') -> set[str]:
+    """The words a POV may go by in book.md: each value, a hyphenated id
+    with spaces, and the first word of `name` (a full name of several words)
+    unless it's a title or an article."""
+    out = set()
+    for v in (*values, name):
+        v = (v or '').strip().lower()
+        if not v:
+            continue
+        out.add(v)
+        if '-' in v:
+            out.add(v.replace('-', ' '))
+    first = re.split(r'\s+', (name or '').strip().lower())[0]
+    if first and first != (name or '').strip().lower() and \
+            first.strip('.') not in _NOT_A_NAME and len(first) > 1:
+        out.add(first)
+    return out
+
+
+def pov_gaps(project_dir: str, notes: str | None = None) -> list[str]:
+    """The voice check after the map (#656): the POVs of scenes.csv's active
+    scenes (in reading order, as written) that book.md says nothing of. A POV
+    counts as covered when book.md names it: its value, or the
+    characters.csv id, name, an alias or the name's first word of the
+    character it is; a narrator POV (`narrator.is_narrator`) when book.md
+    says "narrator". `notes` is book.md's text when the caller has it
+    (default: read it; missing, empty or the template is '' and every POV
+    is a gap: with an author repo, the book's people still belong in
+    book.md).
+
+    Raises:
+        ReferenceDocError: book.md is there but can't be read.
+    """
+    from storyforge.elaborate import _read_csv
+    from storyforge.narrator import is_narrator
+    from storyforge.schema import INACTIVE_STATUSES
+    if notes is None:
+        notes = _read(project_dir, BOOK_FILE)
+    text = notes.lower()
+    ref = os.path.join(project_dir, 'reference')
+    rows = _read_csv(os.path.join(ref, 'scenes.csv'))
+
+    def seq(row):
+        try:
+            return float(row.get('seq') or 'inf')
+        except ValueError:
+            return float('inf')
+
+    povs: list[str] = []
+    for row in sorted(rows, key=seq):
+        pov = (row.get('pov') or '').strip()
+        if pov and (row.get('status') or '').strip() not in INACTIVE_STATUSES \
+                and pov not in povs:
+            povs.append(pov)
+    registry: dict[str, set[str]] = {}
+    for row in _read_csv(os.path.join(ref, 'characters.csv')):
+        aliases = [a for a in (row.get('aliases') or '').split(';') if a.strip()]
+        terms = _terms(row.get('id', ''), *aliases, name=row.get('name', ''))
+        for t in [row.get('id', ''), row.get('name', ''), *aliases]:
+            if t.strip():
+                registry[t.strip().lower()] = terms
+    names = set(registry)
+
+    def named(term: str) -> bool:
+        return re.search(r'(?<!\w)' + re.escape(term) + r'(?!\w)', text) is not None
+
+    gaps = []
+    for pov in povs:
+        if is_narrator(pov, names):
+            terms = {'narrator'}
+        else:
+            terms = registry.get(pov.lower(), set()) | _terms(pov)
+        if not any(named(t) for t in terms):
+            gaps.append(pov)
+    return gaps
 
 
 # ============================================================================

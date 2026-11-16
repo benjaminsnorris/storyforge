@@ -69,8 +69,7 @@ def test_build_status_empty_project_points_to_logline(tmp_path):
     assert v['blockers'] == []
 
 
-def test_build_status_prose_solid_points_to_spine(tmp_path):
-    pd = str(tmp_path)
+def _solid_prose_tier(pd):
     _write(os.path.join(pd, 'reference', 'story-summary.md'),
            "## Logline\n"
            "A cartographer who cannot draw a false line is ordered to forge "
@@ -85,14 +84,183 @@ def test_build_status_prose_solid_points_to_spine(tmp_path):
            "### Act 2\nShe uncovers the war it will trigger and is trapped.\n"
            "### Act 3\nShe draws the truth and pays for it.\n\n"
            "## Theme\nTruth has a cost; someone must pay it.\n")
+
+
+def test_build_status_prose_solid_points_to_the_voice_then_spine(tmp_path):
+    # #656: all three prose rungs solid and no voice → the voice comes
+    # first (the soft default), with the spine after it
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
     v = status.build_status(pd)
-    # All three prose rungs solid → phase advances to spine.
     prose = {r['name']: r['state'] for r in v['ladder'] if r['level'] < 3}
     assert prose == {'logline': 'solid', 'synopsis': 'solid',
                      'act-shape': 'solid'}
+    assert v['phase'] == 'voice'
+    assert v['next']['stage'] == 'voice'
+    assert v['next']['command'] == 'storyforge elaborate --stage voice'
+    assert 'voice_stage: later' in v['next']['reason']
+    assert '--moment' in v['next']['reason']
+    assert v['then']['stage'] == 'spine'
+    assert v['then']['command'] == 'storyforge elaborate --stage spine'
+    assert v['voice'] == {'name': 'voice', 'state': 'not_started',
+                          'detail': 'reference/voice/ has no voice yet', 'when': 'first',
+                          'pov_gaps': []}
+    # soft: no blocker before drafting
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+    text = cmd_status.render_human(v)
+    lines = text.splitlines()
+    v_line = next(i for i, ln in enumerate(lines) if ln.startswith('  V  voice'))
+    assert lines[v_line - 1].startswith('  L2 act-shape')
+    assert lines[v_line + 1].startswith('  L3 spine')
+
+
+def test_build_status_prose_solid_with_a_voice_points_to_spine(tmp_path):
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    _voice_guide(pd)
+    v = status.build_status(pd)
     assert v['phase'] == 'spine'
     assert v['next']['stage'] == 'spine'
     assert v['next']['command'] == 'storyforge elaborate --stage spine'
+    assert v['voice']['state'] == 'solid'
+
+
+@pytest.mark.parametrize('line', ['voice_stage: later', '- `voice_stage`: Later  (structure first)'])
+def test_voice_stage_later_builds_the_structure_first(tmp_path, line):
+    # the author skips the voice-first default: the old order
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    _write(os.path.join(pd, 'reference', 'key-decisions.md'), f'# Decisions\n\n{line}\n')
+    v = status.build_status(pd)
+    assert v['phase'] == 'spine'
+    assert v['next']['stage'] == 'spine'
+    assert v['voice']['when'] == 'later'
+    text = cmd_status.render_human(v)
+    assert 'later (key-decisions.md: voice_stage: later)' in text
+    # the voice line comes after the structure, before drafting
+    lines = text.splitlines()
+    assert lines.index(next(ln for ln in lines if ln.startswith('  V  voice'))) > \
+        lines.index(next(ln for ln in lines if ln.startswith('  L6')))
+
+
+def test_a_voice_stage_value_it_doesnt_take_is_said_and_stays_first(tmp_path):
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    _write(os.path.join(pd, 'reference', 'key-decisions.md'), 'voice_stage: never\n')
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'voice'
+    assert any("voice_stage 'never' is not one of first, later" in n for n in v['notes'])
+
+
+def test_a_commented_voice_stage_line_is_not_read(tmp_path):
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    _write(os.path.join(pd, 'reference', 'key-decisions.md'),
+           '<!-- voice_stage: later -->\n')
+    assert status.build_status(pd)['next']['stage'] == 'voice'
+
+
+@pytest.mark.parametrize('phase_level', [3, 4, 5, 6])
+def test_voice_first_holds_at_every_structural_rung(tmp_path, monkeypatch, phase_level):
+    # a book already part-built without its voice: the voice is next, the
+    # rung it was on is then
+    pd = str(tmp_path)
+    ladder = [{'level': lvl, 'name': name,
+               'state': 'solid' if lvl < phase_level else 'not_started', 'detail': ''}
+              for lvl, name in status.LEVEL_NAMES.items()]
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: ladder)
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'voice'
+    assert v['then']['stage'] == status.LEVEL_NAMES[phase_level]
+
+
+def _mapped(pd, povs=('Ann Lee', 'Bo Tan')):
+    _write(os.path.join(pd, 'reference', 'characters.csv'),
+           'id|name|aliases\nann-lee|Ann Lee|Annie\nbo-tan|Bo Tan|\n')
+    rows = ''.join(f's{i}|{i}|{p}|mapped\n' for i, p in enumerate(povs, 1))
+    _write(os.path.join(pd, 'reference', 'scenes.csv'), 'id|seq|pov|status\n' + rows)
+
+
+def _ladder_up_to(monkeypatch, solid_below):
+    ladder = [{'level': lvl, 'name': name,
+               'state': 'solid' if lvl < solid_below else 'not_started', 'detail': ''}
+              for lvl, name in status.LEVEL_NAMES.items()]
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel', floors=None: ladder)
+
+
+def test_the_check_after_the_map_names_the_pov_book_md_is_silent_on(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd)
+    _voice_guide(pd, '# The voice\n\n## People\n\n- **Annie** speaks in short bursts.\n')
+    _ladder_up_to(monkeypatch, 6)   # the map solid, briefs not
+    v = status.build_status(pd)
+    assert v['phase'] == 'voice'
+    assert v['next']['action'] == 'Check the voice against the map'
+    assert v['next']['command'] == 'storyforge elaborate --stage voice'
+    assert 'Bo Tan' in v['next']['reason'] and 'Ann Lee' not in v['next']['reason']
+    assert v['then']['stage'] == 'briefs'
+    assert v['voice']['pov_gaps'] == ['Bo Tan']
+    assert 'book.md says nothing of POV(s): Bo Tan' in cmd_status.render_human(v)
+
+
+def test_the_check_after_the_map_passes_when_every_pov_is_named(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd, ('ann-lee', 'Bo Tan', 'narrator'))
+    _voice_guide(pd, '# The voice\n\nAnn sees it all. Bo, rarely. The narrator stands far '
+                     'back.\n')
+    _ladder_up_to(monkeypatch, 6)
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'briefs'
+    assert v['voice']['pov_gaps'] == []
+
+
+def test_the_check_after_the_map_waits_for_the_map(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd)
+    _voice_guide(pd)
+    _ladder_up_to(monkeypatch, 5)   # the map not solid yet
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'scene-map'
+    assert v['voice']['pov_gaps'] == []
+
+
+def test_the_check_after_the_map_is_a_note_once_briefs_are_done(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _mapped(pd)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           'id|seq|pov|status\ns1|1|Ann Lee|briefed\ns2|2|Bo Tan|briefed\n')
+    _voice_guide(pd)
+    _ladder_up_to(monkeypatch, 7)
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft'
+    assert any('says nothing of 2 POV(s) of the map: Ann Lee, Bo Tan' in n
+               for n in v['notes'])
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+
+
+def test_voice_notes_survive_scenes_waiting_on_the_gate(tmp_path, monkeypatch):
+    # the gate branch used to rebind `notes`, dropping every note before it
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    _write(os.path.join(pd, 'reference', 'key-decisions.md'), 'voice_stage: sometime\n')
+    _ladder_up_to(monkeypatch, 7)
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
+        {'scene_id': 's1', 'command': 'write', 'reason': 'contradiction'}])
+    monkeypatch.setattr(status, 'free_to_draft', lambda pd_: (1, 1, []))
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft'
+    assert any('voice_stage' in n for n in v['notes'])
+
+
+def test_a_graphic_novel_has_no_voice_record(tmp_path):
+    pd = str(tmp_path)
+    _solid_prose_tier(pd)
+    v = status.build_status(pd, 'graphic-novel')
+    assert v['voice'] is None
+    assert v['next']['stage'] == 'spine'
 
 
 def test_fresh_project_no_spurious_phase_blocker(tmp_path):
@@ -204,7 +372,8 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     assert data['next']['stage'] == 'logline'
     # Full verdict contract forge/elaborate route on — lock the whole shape.
     assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
-                         'ladder', 'next', 'then', 'blockers', 'notes', 'advisory'}
+                         'ladder', 'next', 'then', 'blockers', 'notes', 'advisory', 'voice'}
+    assert set(data['voice']) == {'name', 'state', 'detail', 'when', 'pov_gaps'}
     assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
     assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
     assert isinstance(data['blockers'], list)
