@@ -1,0 +1,22 @@
+project:
+  title: "The Salt Ledger"
+  genre: "literary fiction"
+  medium: novel
+  target_words: 80000
+  logline: "A lighthouse keeper who once let the light go out finds the island's harbormaster profited from the wreck."
+
+artifacts:
+  world_bible:
+    exists: true
+    path: reference/world-bible.md
+    updated:
+
+  character_bible:
+    exists: true
+    path: reference/character-bible.md
+    updated:
+
+  systems_bible:
+    exists: true
+    path: reference/systems-bible.md
+    updated:

@@ -5,6 +5,7 @@ Usage:
     storyforge bibles import FACTS [--essay NAME] [--voices FILE] [--notes FILE]
     storyforge bibles retire NAME [--force]
     storyforge bibles voices              # lines from the voice anchors
+    storyforge bibles convert NAME [--import] [--model M]   # paid: an essay into rows
 
 `import` adds a pipe-delimited file of facts, with a header row (type,
 subject, statement required; known_by, scene_id, category, id optional), to
@@ -17,8 +18,12 @@ so a bad file writes nothing. `retire` moves a converted essay
 where nothing reads it. `voices` adds the lines each character speaks in
 the voice anchors (reference/voice/anchors/, passages the author wrote or
 chose) to character-voices.csv: a voice line is the author's, never a
-model's (#702). Each takes --dry-run and --no-commit, and commits and
-pushes otherwise. No API calls.
+model's (#702). `convert` (#702, `storyforge.bibles_convert`) is the one
+paid action: one call turns an essay into facts, the lines it quotes and
+notes, written to working/bibles/<essay>/ for the author to read before
+`import ... --essay NAME`, or imported at once with `--import`. Each takes
+--dry-run (no call, for convert: the forecast) and --no-commit, and commits
+and pushes what it writes otherwise.
 """
 
 from __future__ import annotations
@@ -53,7 +58,13 @@ def parse_args(argv):
                      help='Retire it even though it isn\'t converted')
     voi = sub.add_parser('voices', help="Add each character's lines from the voice anchors "
                                         'to character-voices.csv')
-    for p in (imp, ret, voi):
+    con = sub.add_parser('convert', help='Paid: turn an essay into rows with one model call '
+                                         '(written for review; --import to import them)')
+    con.add_argument('name', choices=ESSAYS, help='The essay to convert')
+    con.add_argument('--import', dest='do_import', action='store_true',
+                     help='Import the rows at once as the essay\'s conversion')
+    con.add_argument('--model', default='', help='The model (default: the evaluation tier)')
+    for p in (imp, ret, voi, con):
         p.add_argument('--dry-run', action='store_true', help='Say what would change; write nothing')
         p.add_argument('--no-commit', action='store_true', help='Write, but don\'t commit')
     return parser.parse_args(argv)
@@ -110,14 +121,20 @@ def _commit(project_dir: str, args, message: str, paths: list[str]) -> None:
 
 
 def _import(project_dir: str, args) -> int:
-    from storyforge import bibles, ledger
-    from storyforge.common import ReferenceDocError
     if not (args.facts or args.voices or args.notes):
         log('ERROR: nothing to import: give a facts file, --voices or --notes')
         return 1
     if args.essay and not args.facts:
         log('ERROR: --essay names the essay a facts file converts; give the facts file')
         return 1
+    return _import_files(project_dir, args)
+
+
+def _import_files(project_dir: str, args) -> int:
+    """Import `args.facts` / `args.voices` / `args.notes` (any may be ''),
+    the facts as `args.essay`'s conversion when it's set."""
+    from storyforge import bibles, ledger
+    from storyforge.common import ReferenceDocError
     writer = bibles.essay_writer(args.essay) if args.essay else bibles.WRITER
     # Read and check every input before writing any (#697's review CR-2): a
     # bad voices or notes file must not leave the facts written uncommitted
@@ -225,6 +242,71 @@ def _voices(project_dir: str, args) -> int:
     return 0
 
 
+def _convert(project_dir: str, args) -> int:
+    import argparse as _argparse
+    from storyforge import api, bibles_convert as bc
+    from storyforge.common import ReferenceDocError, select_model
+    from storyforge.costs import check_threshold, cost_threshold, exit_if_bad_threshold
+    exit_if_bad_threshold()
+    try:
+        essay = bc.essay_text(project_dir, args.name)
+        prompt = bc.build_prompt(args.name, essay, bc._registry(project_dir, 'characters.csv'),
+                                 bc._registry(project_dir, 'locations.csv'))
+        model = args.model or select_model(bc.MODEL_TASK)
+    except (bc.ConvertError, ReferenceDocError) as e:
+        log(f'ERROR: {e}')
+        return 1
+    cost = bc.forecast(model, prompt)
+    log(f'Converting reference/{args.name} with {model}: one call, about ${cost:.2f}')
+    if args.dry_run:
+        log('Dry run: no call made, nothing written.')
+        return 0
+    if not check_threshold(cost):
+        log(f'ERROR: the forecast ${cost:.2f} is over the cost threshold '
+            f'(${cost_threshold():.2f}); nothing sent')
+        return 1
+    log_file = os.path.join(project_dir, 'working', 'logs',
+                            f'bibles-convert-{os.path.splitext(args.name)[0]}.json')
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    try:
+        conv, response = bc.convert(project_dir, args.name, model, log_file)
+    except (bc.ConvertError, ReferenceDocError) as e:
+        if getattr(e, 'response', None):
+            api.log_reply(project_dir, e.response, 'bibles-convert', args.name, model)
+        log(f'ERROR: {e}; nothing written'
+            + (f' (the reply is in {os.path.relpath(log_file, project_dir)})'
+               if os.path.isfile(log_file) else ''))
+        return 1
+    except RuntimeError as e:
+        log(f'ERROR: the call failed ({e}); nothing written')
+        return 1
+    spent = api.log_reply(project_dir, response, 'bibles-convert', args.name, model)
+    written = bc.write_review(project_dir, conv)
+    log(f'{len(conv.facts)} fact(s), {len(conv.voices)} voice line(s), {len(conv.notes)} '
+        f'note(s) (${spent:.2f})')
+    for item in conv.left_out:
+        log(f'  left out: {item}')
+    for kind, path in written.items():
+        log(f'  {kind}: {os.path.relpath(path, project_dir)}')
+    if not (conv.facts or conv.voices or conv.notes):
+        log(f'WARNING: the reply gave nothing to import from reference/{args.name}')
+        return 1
+    paths = bc.review_paths(project_dir, args.name)
+    if not args.do_import:
+        rel = {k: os.path.relpath(v, project_dir) for k, v in paths.items()}
+        cmd = ['storyforge bibles import', rel['facts'] if 'facts' in written else '']
+        cmd += [f'--essay {args.name}'] if 'facts' in written else []
+        cmd += [f'--voices {rel["voices"]}'] if 'voices' in written else []
+        cmd += [f'--notes {rel["notes"]}'] if 'notes' in written else []
+        log('Read and edit them, then import: ' + ' '.join(c for c in cmd if c))
+        return 0
+    imp = _argparse.Namespace(facts=written.get('facts', ''), voices=written.get('voices', ''),
+                              notes=written.get('notes', ''),
+                              essay=args.name if 'facts' in written else '',
+                              dry_run=False, no_commit=args.no_commit)
+    return _import_files(project_dir, imp)
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     install_signal_handlers()
@@ -235,6 +317,7 @@ def main(argv=None):
     code = {'status': lambda: _status(project_dir),
             'import': lambda: _import(project_dir, args),
             'retire': lambda: _retire(project_dir, args),
-            'voices': lambda: _voices(project_dir, args)}[action]()
+            'voices': lambda: _voices(project_dir, args),
+            'convert': lambda: _convert(project_dir, args)}[action]()
     if code:
         sys.exit(code)
