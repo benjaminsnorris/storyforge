@@ -655,9 +655,10 @@ class TestNeighbours:
                 'scenes are not in the imported source') in capsys.readouterr().out
 
     def test_staging_follows_the_mode(self, adapted):
-        assert 'mode is `faithful`, so `staging` is allowed only when' in _plan(
+        # #658: faithful stages freely too; the authority names the mode
+        assert 'mode is `faithful`: every source event happens' in _plan(
             adapted, 'athena-at-the-door').prompt
-        assert 'start `authority` with `rule:` or `note`' in _plan(
+        assert 'name `mode: faithful` in `authority`' in _plan(
             adapted, 'athena-at-the-door').prompt
         _write(adapted, {'storyforge.yaml': YAML.format(extra='  mode: free')})
         assert 'mode is `free`, which allows connective invention' in _plan(
@@ -691,14 +692,45 @@ class TestNewTags:
         with pytest.raises(sf.SourceFidelityError, match=message):
             _parse(MOVED.replace('from: the-ship-sails', authority), rules)
 
-    def test_staging_in_faithful_mode_needs_a_rule_or_the_note(self):
-        text = MOVED.replace('rule: connective only', 'mode: free')
-        with pytest.raises(sf.SourceFidelityError, match='only a version rule or the note'):
-            _parse(text)
+    @pytest.mark.parametrize('authority', ['mode: faithful', '`mode: faithful`',
+                                           'Mode faithful'])
+    def test_staging_in_faithful_mode_needs_no_rule_or_note(self, authority):
+        """#658 (plan D8): fidelity means the events happen; a faithful scene
+        is staged by its mode (it needed a rule or the note)."""
+        text = MOVED.replace('rule: connective only', authority)
+        assert _parse(text).count('staging') == 1
+        assert _parse(text).count('drift') == 0
         free = sf.ReplyRules('free', neighbours=NEAR)
         assert _parse(text, free).count('staging') == 1
+
+    @pytest.mark.parametrize('authority', ['mode: free', 'connective invention',
+                                           'the scene needed it'])
+    def test_faithful_staging_by_another_authority_is_refused(self, authority):
+        """#696's SF-6: any authority was accepted, `mode: free` too, so a
+        dropped event tagged staging went unfixed in a faithful book."""
+        with pytest.raises(sf.SourceFidelityError, match='staging names `mode: faithful`'):
+            _parse(MOVED.replace('rule: connective only', authority))
+        free = sf.ReplyRules('free', neighbours=NEAR)
+        assert _parse(MOVED.replace('rule: connective only', authority), free).count(
+            'staging') == 1
         with pytest.raises(sf.SourceFidelityError, match='staging departure .* no authority'):
             _parse(MOVED.replace('rule: connective only', 'none'))
+
+    def test_faithful_prompt_allows_staging_and_speech_order(self, adapted):
+        """#658: the faithful prompt stops asking for the source's staging or
+        speech order: connective invention is staging, never drift."""
+        _write(adapted, FOUR_SCENES)
+        cfg = source.read_config(adapted)
+        assert cfg.mode == 'faithful'
+        rows = source.map_rows_by_scene(source.read_source_map(adapted))
+        plan = sf.plan_scene(adapted, 'athena-at-the-door', 'prose', PLUGIN, cfg, rows, '')
+        assert 'is allowed only when' not in plan.prompt
+        assert 'Otherwise connective invention is `drift`' not in plan.prompt
+        assert 'never drift: name `mode: faithful`' in plan.prompt
+        assert 'A source event dropped or changed is never staging in this mode' in plan.prompt
+        assert 'the order of speeches and beats inside the scene' in plan.prompt
+        assert 'a speech dramatised rather than performed' in plan.prompt
+        assert 'not its wording, its length or the order of the speeches' in plan.prompt
 
     @pytest.mark.parametrize('authority, rules, message', [
         ('note', sf.ReplyRules('faithful', neighbours=NEAR, has_rules=True),
@@ -739,16 +771,30 @@ class TestNewTags:
         # revise reads drift only
         assert sf.latest_drift(adapted) == {}
 
-    def test_faithful_staging_by_mode_is_asked_again_in_a_run(self, adapted, monkeypatch):
-        """A real run(): faithful staging authorized by `mode: free` is not read."""
+    def test_faithful_staging_by_mode_is_read_in_a_run(self, adapted, monkeypatch):
+        """A real run(): faithful staging authorized by `mode: faithful` is
+        read as staging, not asked again (#658; it was refused before)."""
         _write(adapted, FOUR_SCENES)
-        bad = MOVED.replace('rule: connective only', 'mode: free')
+        replies = [MOVED.replace('rule: connective only', 'mode: faithful')]
+        monkeypatch.setattr('storyforge.api.invoke_to_file',
+                            lambda *a, **k: _response(replies.pop(0)))
+        monkeypatch.setattr('storyforge.costs.log_operation', lambda *a, **k: None)
+        results, _skipped, failed = _run(adapted, 'prose', ['athena-at-the-door'])
+        assert failed == {} and replies == []
+        assert results[0].count('staging') == 1 and results[0].count('drift') == 0
+
+    def test_faithful_staging_naming_a_missing_note_is_asked_again(self, adapted, monkeypatch):
+        """A `note` authority on a scene whose map row has none is still not read."""
+        _write(adapted, FOUR_SCENES)
+        _write(adapted, {'reference/source-map.csv': open(
+            source.source_map_path(adapted)).read().replace('two days in one', '')})
+        bad = MOVED.replace('rule: connective only', 'note')
         replies = [bad, bad]
         monkeypatch.setattr('storyforge.api.invoke_to_file',
                             lambda *a, **k: _response(replies.pop(0)))
         monkeypatch.setattr('storyforge.costs.log_operation', lambda *a, **k: None)
         results, _skipped, failed = _run(adapted, 'prose', ['athena-at-the-door'])
-        assert results == [] and 'only a version rule or the note' in failed['athena-at-the-door']
+        assert results == [] and "map row has no note" in failed['athena-at-the-door']
 
     def test_every_tag_has_a_column(self):
         assert set(sf.TAGS) <= set(sf.SCORE_COLUMNS)

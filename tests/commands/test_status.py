@@ -577,7 +577,8 @@ def test_stage_and_rungstate_literals_are_complete():
     stages = set(get_args(status.Stage))
     assert set(status.LEVEL_NAMES.values()) <= stages
     assert {'story-power', 'voice', 'draft', 'evaluate'} <= stages
-    assert set(get_args(status.RungState)) == {'solid', 'thin', 'not_started'}
+    assert set(get_args(status.RungState)) == {'solid', 'thin', 'not_started', 'given'}
+    assert 'interpretation' in stages   # #658
 
 
 def test_collect_blockers_skips_accepted_and_gates_absent(tmp_path, monkeypatch):

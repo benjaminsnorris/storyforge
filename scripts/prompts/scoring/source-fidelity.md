@@ -8,6 +8,8 @@ This is not a quality judgment, and a departure is not a fault. An adaptation is
 
 Names differ from the source on purpose (the adaptation's name map); a renamed person or place is not a departure. Judge substance, not wording.
 
+Fidelity means the source's events happen: who does what, what is decided, refused, revealed or lost, and how the scene ends. It doesn't mean the source's staging is replayed. How a moment is staged (the business, the setting, who speaks first, the order of speeches and beats inside the scene, a speech given in full, broken up by action, reported or cut short) is the adaptation's to choose, in every mode.
+
 ## The source scene(s)
 
 {SOURCE_DATA}
@@ -40,8 +42,8 @@ For each element, compare the adaptation's {TARGET_KIND} with the source scenes'
 
 - **goal:** what the POV character is after
 - **outcome:** how the scene ends (who gets what, what is lost)
-- **key_actions:** the events that happen
-- **key_dialogue:** the substance of what is said (not the wording)
+- **key_actions:** the events that happen (their order inside the scene is staging, unless the order changes what happens or what a character knows when they act)
+- **key_dialogue:** what is said that settles something (a demand, a refusal, a threat, a promise, a revelation), not its wording, its length or the order of the speeches
 - **on_stage:** who is present
 - **knowledge_out:** what characters learn in the scene. Both sides show only the facts each scene adds (`knowledge_out (new in this scene)`); facts carried in from earlier scenes are left out, so a fact missing here is not a departure
 
@@ -51,7 +53,7 @@ List every departure: something the source has that the adaptation drops or chan
 
 - `deliberate`: the treatment or its note explains it, or a version rule calls for it. Name which in `authority` (e.g. `treatment: compress`, `note`, `rule: the YA version softens the killing`)
 - `moved`: the beat is not lost or invented, only moved between this scene and a neighbour. Either this scene tells something from a neighbour's source scene, or a beat of this scene's source is told in a neighbour instead (its map note or its source says so). Name the neighbour in `authority`: its book scene id, or the id of the source scene it adapts (e.g. `from: <neighbour id>`, `to: <neighbour id>`). Use `moved` only when a neighbour is shown above
-- `staging`: connective invention that changes no event, fact or outcome of the source: physical business, a character's interiority, a transition, a setting detail, an ending extended past the source's last beat without adding an event. Never on `outcome` or `knowledge_out`: a changed outcome or a new fact is not staging. {STAGING}
+- `staging`: connective invention that changes no event, fact or outcome of the source: physical business, a character's interiority, a transition, a setting detail, an ending extended past the source's last beat without adding an event, a speech dramatised rather than performed (reported, broken up by action, cut short, its points spread through the scene), speeches or beats inside the scene in another order. Never on `outcome` or `knowledge_out`: a changed outcome or a new fact is not staging. {STAGING}
 - `drift`: nothing above authorizes it. `authority` is `none`, and only a drift has `none`
 
 A departure belongs to one of those six elements. If it is only in the brief's `title`, `pov`, `conflict`, `crisis` or `decision`, name that field as its element: it is listed, not scored.

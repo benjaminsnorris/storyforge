@@ -86,6 +86,20 @@ source:
 """
 
 
+#: A complete `## Interpretation decisions` section for the faithful
+#: adaptation (#658), to append to its key-decisions.md
+INTERPRETATION_DECISIONS = """
+## Interpretation decisions
+
+- **What this version is about:** a boy finds he can act without his father.
+- **Whose eyes:** Telemachus, close third; the gods' council in the narrator's.
+- **What's cut:** the night sailing is told in a line.
+- **What's invented:** nothing.
+- **Where it ends:** the assembly breaks up.
+- **Mode:** faithful.
+"""
+
+
 def _write(base, files):
     for rel, text in files.items():
         path = os.path.join(base, rel)

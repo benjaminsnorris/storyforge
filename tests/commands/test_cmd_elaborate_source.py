@@ -9,7 +9,7 @@ import pytest
 from storyforge import source
 from storyforge.cmd_elaborate import main
 
-from source_helpers import YAML, _write, import_source, make_adaptation
+from source_helpers import INTERPRETATION_DECISIONS, YAML, _write, import_source, make_adaptation
 
 SCENES_BLOCK = (
     '```scenes-csv\n'
@@ -38,8 +38,13 @@ FULL_MAP = (
 def adapted(tmp_path, monkeypatch, mock_git, mock_costs):
     proj = make_adaptation(tmp_path)
     import_source(proj)
+    # #658: the map of a book entering at the map needs the interpretation
+    # decisions (the stage refuses without them, #696's SF-1)
+    with open(os.path.join(proj, 'reference', 'key-decisions.md'), encoding='utf-8') as f:
+        decisions = f.read() + INTERPRETATION_DECISIONS
     _write(proj, {'storyforge.yaml': YAML.format(extra='  mode: faithful') + 'phase: scene-map\n',
-                  'reference/scenes.csv': 'id|seq|title|status\n'})
+                  'reference/scenes.csv': 'id|seq|title|status\n',
+                  'reference/key-decisions.md': decisions})
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root', lambda: proj)
     return proj

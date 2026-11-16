@@ -9,9 +9,14 @@ under `source.rules`, authorizes it), `moved` (a beat moved to or from a
 neighbouring book scene: the prompt also shows the nearest mapped scene
 before and after this one, with their map rows and source scenes, and the
 authority names the neighbour), `staging` (connective invention that
-changes no event, fact or outcome; in `free` mode, or in `faithful` mode
-when a version rule or the scene's note, which must exist, allows it; never
-on `outcome` or `knowledge_out`) or `drift` (nothing does). The prompt asks
+changes no event, fact or outcome, a speech dramatised rather than
+performed, beats or speeches in another order inside the scene; in either
+mode (#658, plan D8: fidelity means the events happen, not that the
+source's staging or speech order is replayed); in `faithful` mode its
+authority is `mode: faithful`, or a version rule or the scene's note that
+exists (#696's SF-6: any other, `mode: free` among them, is asked again),
+and a dropped or changed event is drift, never staging; never on
+`outcome` or `knowledge_out`) or `drift` (nothing does). The prompt asks
 for elements scored 1-5 on drift only; the code doesn't check that the
 scores follow the drift. Drift is what revise reads (#617: the Telemachy
 pilot's 80 drift were 24 moved, 46 staging, 8 false alarms and 2 real
@@ -253,7 +258,7 @@ class ReplyRules:
     its map row names); `neighbours`, (name, book scene id) pairs a `moved`
     authority may name (each neighbour's book id and its source scenes'
     ids); and whether the scene's map row has a note and the project has
-    version rules, which a faithful `staging` authority must point at."""
+    version rules, which a faithful `staging` authority naming one must have."""
     mode: str
     aliases: frozenset = frozenset()
     neighbours: tuple = ()
@@ -377,10 +382,16 @@ def _neighbour_side(project_dir: str, scene_id: str, own: list[tuple[str, str]],
 _STAGING = {
     'free': ('This adaptation\'s mode is `free`, which allows connective invention: name '
              '`mode: free`, or the version rule that allows it, in `authority`.'),
-    'faithful': ('This adaptation\'s mode is `faithful`, so `staging` is allowed only when a '
-                 'version rule above or this scene\'s note allows connective invention: start '
-                 '`authority` with `rule:` or `note`. Otherwise connective invention is '
-                 '`drift`.'),
+    # #658 (plan D8): fidelity means the events happen, so a faithful
+    # adaptation stages its scenes as freely as a free one; it used to need
+    # a rule or the note, and the source's staging and speech order were
+    # drift (Wrath's re-performed speeches)
+    'faithful': ('This adaptation\'s mode is `faithful`: every source event happens, but how '
+                 'it is staged is the adaptation\'s to choose, so connective invention is '
+                 '`staging`, never drift: name `mode: faithful` in `authority` (or the '
+                 'version rule or the note that calls for it, starting `rule:` or `note`). '
+                 'A source event dropped or changed is never staging in this mode: it is '
+                 '`drift` unless the treatment, its note or a version rule allows it.'),
 }
 
 
@@ -472,6 +483,9 @@ def _authority_problem(tag: str, element: str, authority: str, rules: ReplyRules
         return (f'a staging departure on {element}: a changed outcome or a new fact is not '
                 f'staging')
     if tag == 'staging' and rules.mode == 'faithful':
+        # #658: the mode stages a faithful scene (`mode: faithful`), or a
+        # rule or the note that exists; anything else, `mode: free` among
+        # them, means the reply misread the prompt (#696's SF-6): asked again
         lead = authority.strip().lower()
         if re.match(r'(version )?rules?\b', lead):
             if not rules.has_rules:
@@ -481,10 +495,10 @@ def _authority_problem(tag: str, element: str, authority: str, rules: ReplyRules
             if not rules.has_note:
                 return (f'a staging departure on {element} authorized by {authority}: this '
                         f'scene\'s map row has no note')
-        else:
+        elif not re.match(r'mode\s*:?\s*faithful\b', lead):
             return (f'a staging departure on {element} authorized by {authority}: in faithful '
-                    f'mode only a version rule or the note allows connective invention '
-                    f'(start the authority with `rule:` or `note`)')
+                    f'mode staging names `mode: faithful`, a version rule (`rule:`) or the '
+                    f'note')
     return ''
 
 
@@ -500,8 +514,8 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str,
     departure names an unknown element or tag, says nothing, or its
     authority doesn't fit its tag (`_authority_problem`: `drift` has none;
     `moved` names a neighbour; `staging` is never on outcome or
-    knowledge_out, and in `faithful` mode names a rule the project has or
-    the note the scene has): a result with a misread tag would send the
+    knowledge_out, and in `faithful` mode, when it names a rule or the
+    note, one the project or scene has): a result with a misread tag would send the
     wrong scenes to revise. Rows naming one of `rules.aliases` (the one
     source scene the map row names) are read as `scene_id`'s, and the Result
     says so (`remapped`)."""
