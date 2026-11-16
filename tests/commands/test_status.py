@@ -1015,3 +1015,18 @@ def test_a_plan_gap_record_rebuilds_its_gap(project_dir):
     record = status.plan_gaps_record(project_dir)
     gaps = [Gap(**g) for g in record['gaps']]
     assert any(g.kind == 'open-world-rule' for g in gaps)
+
+
+@pytest.mark.parametrize('content', [b'\xff\xfe\x00bad', b'nope|x\n'])
+def test_a_ledger_that_cant_be_read_is_a_blocker_not_a_crash(project_dir, content):
+    """#702's review: status stopped (a traceback, or an ERROR and exit 1)
+    in its floor checks on a ledger it couldn't read, before its verdict."""
+    from storyforge import ledger
+    with open(ledger.ledger_path(project_dir), 'wb') as f:
+        f.write(content)
+    v = status.build_status(project_dir)
+    found = [b for b in v['blockers'] if b['source'] == 'ledger']
+    assert found and all("can't be read until these are fixed" in b['detail'] for b in found)
+    assert 'checks that read it were not run' in found[0]['detail']
+    assert any('can\'t be checked for gaps' in n for n in v['plan_gaps']['notes'])
+    assert 'ledger' in cmd_status.render_human(v)

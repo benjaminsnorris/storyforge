@@ -759,6 +759,24 @@ class TestFileProblems:
             ledger.exit_if_not_migrated(project_dir)
         assert open(path).read() == before
 
+    def test_a_ledger_that_isnt_utf8_is_a_problem_not_a_traceback(self, project_dir):
+        """#702's review: status died on a UnicodeDecodeError here."""
+        path = ledger.ledger_path(project_dir)
+        with open(path, 'wb') as f:
+            f.write(b'\xff\xfe\x00bad')
+        assert any('is not UTF-8 text' in p for p in ledger.file_problems(path))
+        with pytest.raises(ledger.LedgerError, match='save it as UTF-8'):
+            ledger.load(project_dir)
+
+    def test_a_ledger_that_cant_be_opened_is_a_problem(self, project_dir, monkeypatch):
+        path = ledger.ledger_path(project_dir)
+
+        def denied(*a, **k):
+            raise PermissionError(13, 'Permission denied')
+        monkeypatch.setattr(ledger, '_raw_lines', denied)
+        assert ledger.file_problems(path) == [
+            'commitments.csv could not be read (Permission denied): check its permissions']
+
     def test_the_fixture_has_none(self, project_dir):
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
 

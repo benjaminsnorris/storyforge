@@ -263,12 +263,22 @@ _PHASE_INDEX['evaluate'] = 7
 
 
 def collect_blockers(project_dir: str) -> list[dict]:
-    """Coverage + consistency failures for rungs whose artifact is present."""
+    """Coverage + consistency failures for rungs whose artifact is present.
+    A ledger that can't be read (`ledger.LedgerError`: not UTF-8, unreadable,
+    a bad header or rows, not migrated) stops the checks that read it; it is
+    a `ledger` blocker saying why, and status goes on (#702's review)."""
+    from storyforge import ledger
     blockers: list[dict] = []
-    for source, results in (
-        ('coverage', score_coverage_all_levels(project_dir)),
-        ('consistency', score_consistency_all_levels(project_dir)),
+    for source, scorer in (
+        ('coverage', score_coverage_all_levels),
+        ('consistency', score_consistency_all_levels),
     ):
+        try:
+            results = scorer(project_dir)
+        except ledger.LedgerError as e:
+            blockers.append({'source': 'ledger', 'level': -1,
+                             'detail': f'{e} (the {source} checks that read it were not run)'})
+            continue
         for r in results:
             level = r['level']
             if not artifact_present(project_dir, level):

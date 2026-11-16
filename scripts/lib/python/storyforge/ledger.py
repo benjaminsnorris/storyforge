@@ -91,11 +91,19 @@ def file_problems(path: str) -> list[str]:
     that isn't exactly COLUMNS, a row whose cell count differs from it, a
     blank id, an id on two rows. Missing file → []. Each would be silently
     "fixed" by reading and writing the file back (a column dropped, rows
-    merged), so the ledger is not read until the author fixes them.
+    merged), so the ledger is not read until the author fixes them. A file
+    that can't be opened or isn't UTF-8 is one problem, not a traceback.
     """
     if not os.path.isfile(path):
         return []
-    lines, _ = _raw_lines(path)
+    try:
+        lines, _ = _raw_lines(path)
+    except UnicodeDecodeError as e:
+        return [f'{os.path.basename(path)} is not UTF-8 text ({e.reason} at byte {e.start}): '
+                f'save it as UTF-8']
+    except OSError as e:
+        return [f'{os.path.basename(path)} could not be read '
+                f'({e.strerror or type(e).__name__}): check its permissions']
     return _line_problems(lines)
 
 
