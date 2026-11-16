@@ -12,9 +12,11 @@ authority names the neighbour), `staging` (connective invention that
 changes no event, fact or outcome, a speech dramatised rather than
 performed, beats or speeches in another order inside the scene; in either
 mode (#658, plan D8: fidelity means the events happen, not that the
-source's staging or speech order is replayed), and an authority naming a
-version rule or the scene's note needs one to exist; never on `outcome`
-or `knowledge_out`) or `drift` (nothing does). The prompt asks
+source's staging or speech order is replayed); in `faithful` mode its
+authority is `mode: faithful`, or a version rule or the scene's note that
+exists (#696's SF-6: any other, `mode: free` among them, is asked again),
+and a dropped or changed event is drift, never staging; never on
+`outcome` or `knowledge_out`) or `drift` (nothing does). The prompt asks
 for elements scored 1-5 on drift only; the code doesn't check that the
 scores follow the drift. Drift is what revise reads (#617: the Telemachy
 pilot's 80 drift were 24 moved, 46 staging, 8 false alarms and 2 real
@@ -387,7 +389,9 @@ _STAGING = {
     'faithful': ('This adaptation\'s mode is `faithful`: every source event happens, but how '
                  'it is staged is the adaptation\'s to choose, so connective invention is '
                  '`staging`, never drift: name `mode: faithful` in `authority` (or the '
-                 'version rule or the note that calls for it, starting `rule:` or `note`).'),
+                 'version rule or the note that calls for it, starting `rule:` or `note`). '
+                 'A source event dropped or changed is never staging in this mode: it is '
+                 '`drift` unless the treatment, its note or a version rule allows it.'),
 }
 
 
@@ -479,15 +483,22 @@ def _authority_problem(tag: str, element: str, authority: str, rules: ReplyRules
         return (f'a staging departure on {element}: a changed outcome or a new fact is not '
                 f'staging')
     if tag == 'staging' and rules.mode == 'faithful':
-        # #658: any authority stages a faithful scene (`mode: faithful`); one
-        # naming a rule or the note must name one that exists
+        # #658: the mode stages a faithful scene (`mode: faithful`), or a
+        # rule or the note that exists; anything else, `mode: free` among
+        # them, means the reply misread the prompt (#696's SF-6): asked again
         lead = authority.strip().lower()
-        if re.match(r'(version )?rules?\b', lead) and not rules.has_rules:
-            return (f'a staging departure on {element} authorized by {authority}: this '
-                    f'project has no version rules')
-        if re.match(r'note\b', lead) and not rules.has_note:
-            return (f'a staging departure on {element} authorized by {authority}: this '
-                    f'scene\'s map row has no note')
+        if re.match(r'(version )?rules?\b', lead):
+            if not rules.has_rules:
+                return (f'a staging departure on {element} authorized by {authority}: this '
+                        f'project has no version rules')
+        elif re.match(r'note\b', lead):
+            if not rules.has_note:
+                return (f'a staging departure on {element} authorized by {authority}: this '
+                        f'scene\'s map row has no note')
+        elif not re.match(r'mode\s*:?\s*faithful\b', lead):
+            return (f'a staging departure on {element} authorized by {authority}: in faithful '
+                    f'mode staging names `mode: faithful`, a version rule (`rule:`) or the '
+                    f'note')
     return ''
 
 

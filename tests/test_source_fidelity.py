@@ -692,16 +692,27 @@ class TestNewTags:
         with pytest.raises(sf.SourceFidelityError, match=message):
             _parse(MOVED.replace('from: the-ship-sails', authority), rules)
 
-    @pytest.mark.parametrize('authority', ['mode: faithful', 'mode: free',
-                                           'connective invention'])
+    @pytest.mark.parametrize('authority', ['mode: faithful', '`mode: faithful`',
+                                           'Mode faithful'])
     def test_staging_in_faithful_mode_needs_no_rule_or_note(self, authority):
         """#658 (plan D8): fidelity means the events happen; a faithful scene
-        is staged as freely as a free one (it needed a rule or the note)."""
+        is staged by its mode (it needed a rule or the note)."""
         text = MOVED.replace('rule: connective only', authority)
         assert _parse(text).count('staging') == 1
         assert _parse(text).count('drift') == 0
         free = sf.ReplyRules('free', neighbours=NEAR)
         assert _parse(text, free).count('staging') == 1
+
+    @pytest.mark.parametrize('authority', ['mode: free', 'connective invention',
+                                           'the scene needed it'])
+    def test_faithful_staging_by_another_authority_is_refused(self, authority):
+        """#696's SF-6: any authority was accepted, `mode: free` too, so a
+        dropped event tagged staging went unfixed in a faithful book."""
+        with pytest.raises(sf.SourceFidelityError, match='staging names `mode: faithful`'):
+            _parse(MOVED.replace('rule: connective only', authority))
+        free = sf.ReplyRules('free', neighbours=NEAR)
+        assert _parse(MOVED.replace('rule: connective only', authority), free).count(
+            'staging') == 1
         with pytest.raises(sf.SourceFidelityError, match='staging departure .* no authority'):
             _parse(MOVED.replace('rule: connective only', 'none'))
 
@@ -716,6 +727,7 @@ class TestNewTags:
         assert 'is allowed only when' not in plan.prompt
         assert 'Otherwise connective invention is `drift`' not in plan.prompt
         assert 'never drift: name `mode: faithful`' in plan.prompt
+        assert 'A source event dropped or changed is never staging in this mode' in plan.prompt
         assert 'the order of speeches and beats inside the scene' in plan.prompt
         assert 'a speech dramatised rather than performed' in plan.prompt
         assert 'not its wording, its length or the order of the speeches' in plan.prompt
