@@ -9,7 +9,10 @@ complete project, as #440 set out:
   its template, except what decision 1 exempts (`key-decisions.md`,
   `visual-style.md`, `canon/`: an author's decisions and art direction can't
   be extracted). The voice folder counts as `voice/book.md` and step 5f's
-  first anchor; its `checks.md` is the author's own marks, exempt too;
+  first anchor; its `checks.md` is the author's own marks, exempt too. The
+  character, world and systems bibles are rows in a prose book (#702): each
+  counts as filled when the ledger has the facts phase 5 wrote in its place
+  (`bibles.extract_writer`), and unfilled as `no rows` otherwise;
 - every file phase 5 changed is in what it commits (`WRITTEN_PATHS`);
 - the L0-L6 floor checks pass, and L0-L4 (what phase 5 writes) alone. L5-L6
   check the scene layer (phases 1-3; phase 5 only marks status and fills
@@ -100,9 +103,16 @@ def run(ctx):
     templates = os.path.join(get_plugin_dir(), 'templates', 'reference')
     provenance = read_provenance(project) or {}
     unfilled, extracted = [], 0
+    from storyforge import bibles, ledger
     names = [n for n in sorted(os.listdir(templates)) if n != 'voice']
+    writers = {r.get('introduced_by') for r in ledger.load(project)}
+    for name in bibles.ESSAYS:   # #702: rows, not essays
+        if bibles.extract_writer(name) in writers:
+            extracted += 1
+        else:
+            unfilled.append(f'{name} (no rows)')
     for name in names + list(NO_TEMPLATE) + list(VOICE_FILES):
-        if name in EXEMPT:
+        if name in EXEMPT or name in bibles.ESSAYS:
             continue
         state = file_state(project, f'reference/{name}', provenance)
         extracted += state == 'extracted'

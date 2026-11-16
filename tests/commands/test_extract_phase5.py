@@ -177,6 +177,14 @@ def book(project_dir):
     return project_dir
 
 
+def _bible_rows(project_dir, writer=None):
+    """The ledger rows extract phase 5 wrote for the bibles (#702)."""
+    from storyforge import ledger
+    return [r for r in ledger.load(project_dir)
+            if (r.get('introduced_by') or '').startswith('extract:')
+            and (writer is None or r['introduced_by'] == writer)]
+
+
 def _anchors_written(project_dir):
     """The anchors 5f wrote, from the provenance record."""
     return {p for p in read_provenance(project_dir) if p.startswith('reference/voice/anchors/')}
@@ -237,12 +245,15 @@ class TestPhase5:
             'reference/spine.csv', 'reference/architecture.csv',
             'reference/themes.csv', 'reference/motif-taxonomy.csv',
             'reference/story-summary.md', 'reference/story-architecture.md',
-            'reference/character-bible.md', 'reference/world-bible.md',
-            'reference/systems-bible.md', 'reference/voice/book.md',
+            'reference/voice/book.md',
             'reference/voice/checks.md', 'reference/timeline.md'} | _anchors_written(book)
         assert _anchors_written(book)
+        # #702: the bibles are rows, never essays
+        assert {r['introduced_by'] for r in _bible_rows(book)} == {
+            'extract:character-bible', 'extract:world-bible', 'extract:systems-bible'}
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
+        assert 'reference/commitments.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
 
     def test_blank_statuses_on_an_already_extracted_book_are_marked(
@@ -1251,15 +1262,38 @@ class TestCharacters:
         assert any('match no character in characters.csv' in n and 'Nobody Known' in n
                    for n in notes)
 
-    def test_the_bible_is_written_with_code_counts(self, book, mock_api, mock_git, mock_costs):
+    def test_the_bible_is_rows(self, book, mock_api, mock_git, mock_costs):
+        """#702: 5d writes trait and relationship facts, notes for what the
+        text leaves open, and no essay; a description of speech, the arc and
+        the POV's purpose aren't rows."""
+        from storyforge import bibles
         mock_api.set_response_fn(_answer(book))
         _run(book)
-        with open(os.path.join(book, 'reference', 'character-bible.md')) as f:
-            doc = f.read()
-        assert doc.startswith('<!-- storyforge:extracted v')
-        assert '**Appears:** POV in 3 scene(s); on stage in 4' in doc
-        assert '**What the text leaves open:**' in doc and 'Expansion Opportunities' not in doc
-        assert '## POV Decisions' in doc and '- **Dorren Hayle:** 3 scene(s). Close access.' in doc
+        rows = _bible_rows(book, 'extract:character-bible')
+        dorren = {r['category']: r for r in rows
+                  if r['subject'] == 'dorren-hayle' and r['type'] == 'trait'}
+        assert set(dorren) == {'role', 'physical', 'want', 'need', 'wound', 'lie',
+                               'flaw_as_strength'}
+        assert all(r['origin'] == 'plan' and r['status'] == 'binding' for r in rows)
+        rel = [r for r in rows if r['type'] == 'relationship']
+        assert len(rel) == 1 and rel[0]['statement'].startswith('Dorren Hayle and ')
+        assert not any(r['statement'] in ('voice shown.', 'arc_start shown.', 'Close access.')
+                       for r in rows)
+        assert 'Dorren Hayle: left open in the text: Their past.' in bibles.notes_text(book)
+        assert bibles.essay_state(book, 'character-bible.md') == 'template'   # untouched
+        # the bible rows reach drafting and the two-writers test
+        assert bibles.standing_facts(_bible_rows(book))
+
+    def test_voice_lines_come_from_the_prose(self, book, mock_api, mock_git, mock_costs):
+        """#702: a character's voice lines are their own lines in the book,
+        tagged with their name, never the model's description."""
+        from storyforge import bibles
+        _write_scene(book, 'act1-sc01', 'The office was cold.\n\n"The map is wrong, and '
+                     'I know it," said Dorren, folding it.\n')
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        voices, problems = bibles.read_voices(book)
+        assert voices == {'dorren-hayle': ['The map is wrong, and I know it,']} and not problems
 
     @pytest.mark.parametrize('mutate,expected', [
         (lambda r, ids: r['characters'].pop(), 'characters leaves out'),
@@ -1296,16 +1330,18 @@ class TestCharacters:
         """F-144: the prompt says to leave a field empty when the text doesn't
         show it; with no lines sampled (Way's verse speeches match no speech
         tag) an empty voice is the honest answer, and phase 5 died on it."""
-        from storyforge.extract_describe import (UNSHOWN, parse_characters,
-                                                 render_character_bible)
+        from storyforge.extract_describe import character_rows, parse_characters
         _, chars, _, _ = _evidence(book)
         assert chars[0].pov_scenes and not chars[0].lines
         reply = json.loads(_characters_reply(book))
         reply['characters'][0]['voice'] = ''
+        reply['characters'][0]['wound'] = ''
         data = parse_characters(json.dumps(reply), chars)
-        doc = render_character_bible(data, chars, 'Book', '')
-        assert f'**Voice Fingerprint:**\n- {UNSHOWN}' in doc
-        assert f'**{chars[0].name}:** {UNSHOWN}' in doc
+        facts, voices, _ = character_rows(data, chars)
+        # what the text doesn't show is no row, and no voice line is made up
+        mine = {f['category'] for f in facts if f['subject'] == chars[0].id}
+        assert 'wound' not in mine and 'voice' not in mine
+        assert not [v for v in voices if v[0] == chars[0].id]
 
 class TestWorld:
     """Step 5e."""
@@ -1318,21 +1354,31 @@ class TestWorld:
         mock_api.set_response_fn(lambda p: _world_reply(book, system=none)
                                  if '**overview**' in p else answer(p))
         _run(book)
-        ref = os.path.join(book, 'reference')
-        with open(os.path.join(ref, 'systems-bible.md')) as f:
-            assert 'No formal system: The maps work by no stated rules.' in f.read()
-        with open(os.path.join(ref, 'world-bible.md')) as f:
-            world = f.read()
-        assert '### Formal System\nNone. The maps work by no stated rules.' in world
-        assert '**Pressure Cartography Office** (1 scene(s))' in world
-        assert '## What the text leaves open' in world and 'Open Questions' not in world
+        from storyforge import bibles
+        system = _bible_rows(book, 'extract:systems-bible')
+        assert [r['statement'] for r in system] == [
+            'The book has no formal system (magic, technology) with rules: The maps work by '
+            'no stated rules.']
+        world = _bible_rows(book, 'extract:world-bible')
+        office = [r for r in world if r['subject'] == 'cartography-office']
+        assert [r['statement'] for r in office] == ['Pressure Cartography Office is grey.',
+                                                    'Clerks.']
+        assert {'setting', 'institution'} <= {r['category'] for r in world}
+        notes = bibles.notes_text(book)
+        assert 'A city of maps.' in notes
+        assert 'Left open in the text: Who erased the village.' in notes
+        for name in ('world-bible.md', 'systems-bible.md'):
+            assert not os.path.exists(os.path.join(book, 'reference', name))
 
     def test_a_system_is_written_with_its_rules(self, book, mock_api, mock_git, mock_costs):
         mock_api.set_response_fn(_answer(book))
         _run(book)
-        with open(os.path.join(book, 'reference', 'systems-bible.md')) as f:
-            doc = f.read()
-        assert '## System 1: Pressure cartography' in doc and '1. A map shows what is.' in doc
+        system = {r['category']: r['statement']
+                  for r in _bible_rows(book, 'extract:systems-bible')}
+        assert system['system'] == 'Pressure cartography: Maps that record pressure.'
+        assert system['rule'] == 'Pressure cartography: A map shows what is.'
+        assert system['who'] == 'Pressure cartography, who: Cartographers.'
+        assert 'costs' not in system   # not shown: no row
 
     @pytest.mark.parametrize('override,expected', [
         ({'overview': ''}, 'overview is empty'),
@@ -1543,17 +1589,18 @@ class TestBiblesReviewFixes:
         assert not any('**overview**' in c['prompt'] for c in mock_api.calls)
         assert not os.path.exists(os.path.join(book, 'reference', 'world-bible.md'))
 
-    def test_headers_name_only_the_sources_used(self, book, mock_api, mock_git, mock_costs):
-        """SF-4: 5d-5f's headers always claimed commitments, prose and the registries."""
+    def test_an_unmigrated_ledger_skips_the_bibles_and_says_why(self, book, mock_api,
+                                                                mock_git, mock_costs, capsys):
+        """#702: the rows go in the ledger, so a ledger that can't be read
+        skips 5d and 5e before any call, and says so."""
         with open(os.path.join(book, 'reference', 'knowledge.csv'), 'w') as f:
             f.write('id|name|aliases|category|origin\n')
         mock_api.set_response_fn(_answer(book))
         _run(book)
-        ref = os.path.join(book, 'reference')
-        with open(os.path.join(ref, 'character-bible.md')) as f:
-            assert 'from=profile,scenes,characters,prose -->' in f.readline()
-        with open(os.path.join(ref, 'world-bible.md')) as f:
-            assert 'from=profile,scenes,locations -->' in f.readline()
+        out = capsys.readouterr().out
+        assert "5d (character bible) skipped: the ledger can't be read" in out
+        assert "5e (world and systems bibles) skipped: the ledger can't be read" in out
+        assert not any('**overview**' in c['prompt'] for c in mock_api.calls)
 
     @pytest.mark.parametrize('override,expected', [
         ({'habits': ['', ' ']}, 'habits has 0 item(s); at least 1'),
@@ -1823,27 +1870,28 @@ class TestBiblesGateAndSteps:
         assert f'{step} stopped part-way' in out
         with open(path) as f:
             assert 'Mine' in f.read()
+        if step in ('5d', '5e'):   # #702: no row was written beside the author's essay
+            assert not _bible_rows(book, f'extract:{rel[:-3]}')
         later = {'5d': ['world and systems bibles', 'voice'], '5e': ['voice'],
                  '5f': []}[step]
         for name in later:
             assert f'{name} skipped: ' in out
 
-    def test_force_and_an_edit_block_both_world_files(self, book, mock_api, mock_git,
-                                                      mock_costs, capsys):
+    def test_force_and_an_authors_essay_block_both_world_bibles(self, book, mock_api,
+                                                                mock_git, mock_costs, capsys):
         mock_api.set_response_fn(_answer(book))
         _run(book)
-        world = os.path.join(book, 'reference', 'world-bible.md')
-        with open(world, 'rb') as f:
-            before = f.read()
-        with open(os.path.join(book, 'reference', 'systems-bible.md'), 'a') as f:
-            f.write('\nMine.\n')
+        before = _bible_rows(book, 'extract:world-bible')
+        with open(os.path.join(book, 'reference', 'systems-bible.md'), 'w') as f:
+            f.write('# Mine\n\nThe maps keep their own rules.\n')
         calls = len(mock_api.calls)
         _run(book, force=True)
         out = capsys.readouterr().out
-        assert '5e (world and systems bibles) skipped: it writes' in out
+        assert "reference/systems-bible.md is the author's essay" in out
+        assert 'bibles convert systems-bible.md' in out
+        assert '5e (world and systems bibles) skipped' in out
         assert not any('**overview**' in c['prompt'] for c in mock_api.calls[calls:])
-        with open(world, 'rb') as f:
-            assert f.read() == before
+        assert _bible_rows(book, 'extract:world-bible') == before
 
     def test_an_edited_anchor_or_book_md_keeps_5f_from_writing(self, book, mock_api,
                                                                mock_git, mock_costs, capsys):
@@ -1924,15 +1972,11 @@ class TestBiblesGateAndSteps:
             if '**logline**' in p else answer(p))
         _run(book)
         ref = os.path.join(book, 'reference')
-        for name, heading in (('character-bible.md', 'Character Bible'),
-                              ('world-bible.md', 'World Bible'),
-                              ('systems-bible.md', 'Systems Bible'),
-                              ('voice/book.md', 'The Voice')):
-            with open(os.path.join(ref, name)) as f:
-                doc = f.read()
-            assert f'# Untitled -- {heading}' in doc and 'PROJECT_TITLE' not in doc
+        with open(os.path.join(ref, 'voice/book.md')) as f:
+            doc = f.read()
+        assert '# Untitled -- The Voice' in doc and 'PROJECT_TITLE' not in doc
+        assert not any('PROJECT_TITLE' in r['statement'] for r in _bible_rows(book))
         out = capsys.readouterr().out
-        assert '5d: storyforge.yaml has no project.title' in out
         assert '5f: storyforge.yaml has no project.title' in out
 
     @pytest.mark.parametrize('mutate,expected', [
@@ -2451,3 +2495,69 @@ class TestSpeechAttribution:
         prompts = dict(cmd_extract._dry_run_bible_prompts(
             d, book, {'narrative_mode': 'first-person'}, scenes))
         assert 'Is she from New York tonight?' in prompts['5d characters']
+
+
+class TestBiblesAsRows:
+    """#702: 5d and 5e write rows, and whose rows and essays they leave alone."""
+
+    def _bible_calls(self, mock_api, since=0):
+        return [c for c in mock_api.calls[since:]
+                if '## Its characters, as the scenes show them' in c['prompt']
+                or '**overview**' in c['prompt']]
+
+    def test_a_rerun_calls_nothing_and_force_adds_no_duplicates(self, book, mock_api,
+                                                                mock_git, mock_costs, capsys):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        first = _bible_rows(book)
+        calls = len(mock_api.calls)
+        _run(book)
+        assert not self._bible_calls(mock_api, calls)
+        assert 'row(s) of character-bible.md were extracted earlier; --force adds' in \
+            capsys.readouterr().out
+        _run(book, force=True)
+        assert self._bible_calls(mock_api, calls)
+        assert _bible_rows(book) == first   # the same reply states nothing new
+        assert 'the ledger already states were not added again' in capsys.readouterr().out
+
+    def test_an_earlier_extractions_essay_is_archived_under_force(self, book, mock_api,
+                                                                  mock_git, mock_costs, capsys):
+        from storyforge import bibles
+        from storyforge.extract_describe import read_provenance, write_described
+        prov = read_provenance(book)
+        assert write_described(book, 'reference/character-bible.md', '# An old extraction\n',
+                               step='5d', version='1.0', force=True, provenance=prov).write
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert '--force writes rows in its place' in capsys.readouterr().out
+        assert not _bible_rows(book, 'extract:character-bible')
+        _run(book, force=True)
+        assert _bible_rows(book, 'extract:character-bible')
+        assert bibles.essay_state(book, 'character-bible.md') == 'retired'
+        assert 'moved to reference/archive/character-bible.md' in capsys.readouterr().out
+
+    def test_rows_another_writer_made_are_never_added_beside(self, book, mock_api, mock_git,
+                                                             mock_costs, capsys):
+        from storyforge import bibles
+        bibles.add_facts(book, [{'type': 'trait', 'subject': 'dorren-hayle',
+                                 'statement': 'Dorren is forty'}], command='test',
+                         writer=bibles.STAGE_WRITER)
+        mock_api.set_response_fn(_answer(book))
+        _run(book, force=True)
+        out = capsys.readouterr().out
+        assert "plan fact(s) of character-bible.md's kind that extraction didn't write" in out
+        assert not _bible_rows(book, 'extract:character-bible')
+        assert _bible_rows(book, 'extract:world-bible')   # 5e is its own step
+
+    def test_rows_that_cant_be_written_stop_the_run(self, book, mock_api, mock_git,
+                                                    mock_costs, monkeypatch, capsys):
+        """A failure writing rows is never passed over: phase 5 stops (exit 1)."""
+        from storyforge import bibles
+        mock_api.set_response_fn(_answer(book))
+
+        def refuse(*a, **k):
+            raise bibles.BiblesError('item 1: refused')
+        monkeypatch.setattr(bibles, 'add_facts', refuse)
+        with pytest.raises(SystemExit):
+            _run(book)
+        assert '5d: the rows could not be written (item 1: refused)' in capsys.readouterr().out

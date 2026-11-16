@@ -9,7 +9,8 @@ the world is now rows:
   `relationship` or `world`, origin `plan`, status `binding`, a registry
   `introduced_by` (never a commitment writer): `essay_writer(name)` for an
   essay's conversion (`bibles import --essay NAME`), `WRITER` for any other
-  import, `STAGE_WRITER` for an elaborate stage's. A secret or a reveal is a
+  import, `STAGE_WRITER` for an elaborate stage's, `extract_writer(name)`
+  for extract phase 5's description of a finished book (#702). A secret or a reveal is a
   `knowledge` fact with `category` `secret` or `reveal`
   (`REVEAL_CATEGORIES`); `add_facts` refuses that category on any other
   type. A blank `scene_id` means true from before the first scene; a fact
@@ -59,6 +60,9 @@ from storyforge.common import log
 WRITER = 'bibles'
 #: `introduced_by` of facts an elaborate stage writes (`cmd_elaborate`)
 STAGE_WRITER = 'elaborate'
+#: The `introduced_by` prefix of facts extract phase 5 writes for a
+#: described book (#702, `extract_writer`)
+EXTRACT_WRITER = 'extract'
 #: The types a bible's standing facts take. Never `knowledge`: a secret in
 #: the standing context gives the reveal away in the first scene
 FACT_TYPES = ('trait', 'relationship', 'world')
@@ -125,6 +129,13 @@ class Gap:
     def slug(self) -> str:
         """`ref` as a check id's tail (no spaces or dots)."""
         return re.sub(r'[^A-Za-z0-9_-]+', '-', self.ref).strip('-')
+
+
+def extract_writer(name: str) -> str:
+    """The `introduced_by` of the facts extract phase 5 writes in essay
+    `name`'s place (`extract:character-bible`, #702): phase 5's own rows,
+    which a re-run with `--force` adds to and nothing else touches."""
+    return f'{EXTRACT_WRITER}:{os.path.splitext(name)[0]}'
 
 
 def essay_writer(name: str) -> str:
