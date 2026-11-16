@@ -162,15 +162,21 @@ class Revision:
 # Sentences
 # ============================================================================
 
-_SENTENCE_END = re.compile(r'(?<=[.!?…])["”’\')\]]*\s+|\n\s*\n|\n')
+#: a sentence's end: its closing quotes and brackets belong to it (`close`),
+#: the space after doesn't. A lowercase word after it carries the sentence
+#: on (`"Who?" she asks.`).
+_SENTENCE_END = re.compile(
+    r'(?<=[.!?…])(?P<close>["”’\')\]]*)\s+(?![\sa-z])|\n\s*\n|\n')
 
 
 def sentence_spans(prose: str) -> list[tuple[int, int]]:
-    """(start, end) of each sentence (or line) in `prose`, in order."""
+    """(start, end) of each sentence (or line) in `prose`, in order. A
+    sentence keeps its closing quote: `"I'll tell you."` ends after the `"`."""
     spans, start = [], 0
     for m in _SENTENCE_END.finditer(prose):
-        if prose[start:m.start()].strip():
-            spans.append((start, m.start()))
+        end = m.start() + len(m.group('close') or '')
+        if prose[start:end].strip():
+            spans.append((start, end))
         start = m.end()
     if prose[start:].strip():
         spans.append((start, len(prose)))

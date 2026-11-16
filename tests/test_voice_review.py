@@ -20,6 +20,19 @@ def test_sentence_spans_cover_each_sentence():
     assert texts[-1] == 'The fig tree, she said.'
 
 
+def test_sentence_spans_keep_closing_quotes():
+    prose = '"I\'ll tell you." His eyes go past him. \u201cSwear it!\u201d (He waits.) Then'
+    texts = [prose[a:b] for a, b in vr.sentence_spans(prose)]
+    assert texts == ['"I\'ll tell you."', 'His eyes go past him.', '\u201cSwear it!\u201d',
+                     '(He waits.)', 'Then']
+
+
+def test_sentence_spans_carry_on_after_a_question_in_dialogue():
+    prose = '"Who is it?" she asks. "Me!" he says.  Nobody.'
+    texts = [prose[a:b] for a, b in vr.sentence_spans(prose)]
+    assert texts == ['"Who is it?" she asks.', '"Me!" he says.', 'Nobody.']
+
+
 def test_flag_spans_finds_the_sentence_even_with_curly_quotes_or_case():
     assert vr.flag_spans(PROSE, 'which frightened him') != []
     assert vr.flag_spans(PROSE, 'WHICH FRIGHTENED HIM') != []
