@@ -413,6 +413,7 @@ def step8_add_bible_visual_notes(
     """
     ref_dir = os.path.join(project_dir, 'reference')
     modified = []
+    from storyforge import bibles, ledger
     from storyforge.bibles import ESSAYS
     from storyforge.common import PROJECT_TITLE, read_yaml_field
     title = (read_yaml_field('project.title', project_dir) or '').strip() or PROJECT_TITLE
@@ -432,8 +433,18 @@ def step8_add_bible_visual_notes(
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(text.replace(PROJECT_TITLE, title))
         modified.append(path)
-        log(f'  {name}: copied in from its template (a graphic novel\'s bibles are essays; '
-            f'the prose book\'s rows stay in commitments.csv)')
+        log(f'  {name}: copied in from its template' + (' (dry run)' if dry_run else ''))
+        try:
+            facts = sum(bibles.is_bible_fact(r) and r['type'] in bibles.ESSAY_TYPES[name]
+                        for r in ledger.load(project_dir))
+        except ledger.LedgerError as e:
+            log(f'  WARNING: {name} is the empty template, and the ledger can\'t be read '
+                f'({e}) to say how many of the book\'s facts belong in it')
+            continue
+        if facts:
+            log(f'  WARNING: {name} is the empty template, and the book has {facts} plan '
+                f'fact(s) of its kind in reference/commitments.csv: the script reads the '
+                f'essay, so fill it from them (`storyforge bibles` lists them)')
 
     bibles = [
         (os.path.join(ref_dir, 'character-bible.md'), _BIBLE_VISUAL_NOTE),

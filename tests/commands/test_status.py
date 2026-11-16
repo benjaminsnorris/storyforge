@@ -1006,3 +1006,12 @@ def test_status_says_when_the_gaps_could_not_be_checked(tmp_path):
 def test_status_says_a_clean_plan_is_clean():
     lines = cmd_status._plan_gap_lines({'gaps': [], 'notes': []})
     assert lines == ['PLAN GAPS: none the two-writers test can see']
+
+
+def test_a_plan_gap_record_rebuilds_its_gap(project_dir):
+    """#705 review TD: the record is `Gap`'s fields by name."""
+    from storyforge.bibles import Gap
+    _hedged_world_fact(project_dir)
+    record = status.plan_gaps_record(project_dir)
+    gaps = [Gap(**g) for g in record['gaps']]
+    assert any(g.kind == 'open-world-rule' for g in gaps)

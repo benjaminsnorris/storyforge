@@ -24,7 +24,7 @@ from storyforge.elaborate import _read_csv
 from storyforge.adaptation import GIVEN_LEVELS
 
 if TYPE_CHECKING:
-    from storyforge import voice_book
+    from storyforge import bibles, voice_book
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
 PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
@@ -93,8 +93,10 @@ class VoiceRecord(TypedDict):
 
 
 class PlanGapRecord(TypedDict):
-    """One gap of the two-writers test (#657, `bibles.Gap`) in `--json`."""
-    kind: str
+    """One gap of the two-writers test (#657, `bibles.Gap`) in `--json`:
+    `Gap`'s fields by name (`dataclasses.asdict`), so `Gap(**record)`
+    rebuilds it."""
+    kind: 'bibles.GapKind'
     ref: str
     subject: str
     detail: str
@@ -111,13 +113,12 @@ class PlanGapsRecord(TypedDict):
 
 def plan_gaps_record(project_dir: str) -> PlanGapsRecord:
     """`bibles.plan_gaps` as the verdict's record. Its notes say what it
-    couldn't read (a ledger not migrated, a registry, the briefs), so an
-    empty `gaps` with no notes means checked and clean."""
+    couldn't check (an essay still unconverted, a file it couldn't read),
+    so an empty `gaps` with no notes means checked and clean."""
+    from dataclasses import asdict
     from storyforge import bibles
     gaps, notes = bibles.plan_gaps(os.path.join(project_dir, 'reference'))
-    return {'gaps': [{'kind': g.kind, 'ref': g.ref, 'subject': g.subject, 'detail': g.detail}
-                     for g in gaps],
-            'notes': list(notes)}
+    return {'gaps': [asdict(g) for g in gaps], 'notes': list(notes)}
 
 
 def _book_text(project_dir: str) -> str:

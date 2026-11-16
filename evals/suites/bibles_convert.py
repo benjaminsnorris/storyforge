@@ -99,6 +99,12 @@ def validate(labels: dict, book_dir: str = BOOK) -> list[str]:
                 problems.append(f'{item["id"]}: id given twice')
             seen.add(item['id'])
         for f in essay['facts']:
+            subject = f.get('subject')
+            if 'subject' not in f or not (subject is None or isinstance(subject, str) or (
+                    isinstance(subject, list) and subject
+                    and all(isinstance(x, str) for x in subject))):
+                problems.append(f'{f["id"]}: subject must be null (not scored), a string '
+                                f'("" for none) or a non-empty list of strings')
             if not f.get('all'):
                 problems.append(f'{f["id"]}: no keyword groups')
             if not set(f.get('types', [])) <= set(IMPORT_TYPES) or not f.get('types'):

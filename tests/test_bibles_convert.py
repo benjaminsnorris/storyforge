@@ -451,3 +451,13 @@ class TestReviewFixes:
     def test_the_review_files_import(self):
         """TD: the facts file's columns are ones `bibles import` takes."""
         assert set(bc.FACT_COLUMNS) <= set(bibles.IMPORT_COLUMNS)
+
+    def test_a_label_subject_takes_three_forms_only(self):
+        """#705 review TD: a missing or empty-list subject was scored wrong
+        or not at all, unsaid."""
+        mod = _module()
+        labels = mod['load_labels']()
+        labels['essays']['world-bible.md']['facts'][0].pop('subject')
+        labels['essays']['world-bible.md']['facts'][1]['subject'] = []
+        problems = mod['validate'](labels)
+        assert len([p for p in problems if 'subject must be null' in p]) == 2

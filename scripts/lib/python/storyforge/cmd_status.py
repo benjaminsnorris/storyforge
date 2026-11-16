@@ -12,7 +12,7 @@ import argparse
 import json
 
 from storyforge.common import detect_project_root, get_medium
-from storyforge.status import CRAFT_ADVISORY_SOURCE, build_status
+from storyforge.status import CRAFT_ADVISORY_SOURCE, PlanGapsRecord, build_status
 
 _STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—', 'unreadable': '!',
                'given': '✓'}
@@ -94,13 +94,13 @@ def render_human(verdict: dict) -> str:
     return '\n'.join(lines)
 
 
-def _plan_gap_lines(record: dict | None) -> list[str]:
+def _plan_gap_lines(record: 'PlanGapsRecord | None') -> list[str]:
     """The two-writers test's gaps (#702), as `storyforge bibles` lists
     them: advisory, since a plan may leave a question open on purpose."""
     if not record:
         return []
     from storyforge.bibles import Gap
-    gaps = [Gap(g['kind'], g['ref'], g['subject'], g['detail']) for g in record['gaps']]
+    gaps = [Gap(**g) for g in record['gaps']]
     lines = []
     if gaps:
         lines.append(f'PLAN GAPS: {len(gaps)} place(s) two writers drafting from the plan could '

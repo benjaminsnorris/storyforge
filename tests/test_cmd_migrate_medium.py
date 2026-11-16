@@ -658,3 +658,23 @@ def test_step8_copies_in_essays_a_prose_book_never_had(project_dir):
         assert 'PROJECT_TITLE' not in text
     with open(os.path.join(ref, 'character-bible.md'), encoding='utf-8') as f:
         assert 'Visual' in f.read()
+
+
+def test_step8_says_the_rows_belong_in_an_empty_template(project_dir, capsys):
+    """#705 review SF-M8: a prose book's facts are rows; the template copied
+    in for the script is empty, and that is said, with the count. The dry run
+    reports the same files the real run writes."""
+    from storyforge import bibles
+    from storyforge.bibles import ESSAYS
+    ref = os.path.join(project_dir, 'reference')
+    for name in ESSAYS:
+        if os.path.exists(os.path.join(ref, name)):
+            os.remove(os.path.join(ref, name))
+    bibles.add_facts(project_dir, [{'type': 'world', 'subject': '',
+                                    'statement': 'Ink remembers'}], command='test')
+    dry = step8_add_bible_visual_notes(project_dir, dry_run=True)
+    assert '(dry run)' in capsys.readouterr().out
+    real = step8_add_bible_visual_notes(project_dir, dry_run=False)
+    assert sorted(dry) == sorted(real)
+    out = capsys.readouterr().out
+    assert 'world-bible.md is the empty template, and the book has 1 plan fact(s)' in out
