@@ -157,7 +157,9 @@ def test_a_graphic_novel_reply_with_rows_writes_none(novel, mock_api, capsys):
     assert '## Arthur: supporting' in _bible(novel)
 
 
-def test_a_prose_spine_writes_facts_voices_and_notes(prose, mock_api):
+def test_a_prose_spine_writes_facts_and_notes_but_no_voices(prose, mock_api, capsys):
+    """#702: a stage's voice lines would be a model's; the block is left
+    out with a NOTE, and character-voices.csv holds the author's lines."""
     from storyforge import bibles, ledger
     _run(mock_api, 'spine', ARCH_REPLY.replace('|architecture\n', '|spine\n') + (
         '```bible-facts-csv\n'
@@ -173,7 +175,9 @@ def test_a_prose_spine_writes_facts_voices_and_notes(prose, mock_api):
         '```\n'))
     row = next(r for r in ledger.load(prose) if r['statement'] == 'Wants to keep his word')
     assert row['introduced_by'] == bibles.STAGE_WRITER
-    assert bibles.read_voices(prose)[0] == {'gawain': ['"I gave my word."']}
+    assert bibles.read_voices(prose)[0] == {}
+    out = capsys.readouterr()
+    assert "left out the reply's character-voices-csv block" in out.out + out.err
     assert 'Courtly, cold' in bibles.notes_text(prose)
     assert _bible(prose) == SPINE_BIBLE   # the essay is read-only
 
@@ -182,7 +186,7 @@ def test_prose_stage_prompts_ask_for_rows(project_dir, plugin_dir):
     from storyforge import prompts_elaborate as pe
     for prompt in (pe.build_spine_prompt(project_dir, plugin_dir, 'seed'),
                    pe.build_architecture_prompt(project_dir, plugin_dir)):
-        assert '```bible-facts-csv' in prompt and '```character-voices-csv' in prompt
+        assert '```bible-facts-csv' in prompt and '```character-voices-csv' not in prompt
         assert '```character-bible' not in prompt and '```world-bible' not in prompt
 
 

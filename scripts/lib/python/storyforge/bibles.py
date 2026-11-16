@@ -807,6 +807,77 @@ def add_voices(project_dir: str, lines: list[tuple[str, str]], *,
     return len(new), notes
 
 
+@dataclass(frozen=True)
+class VoiceLine:
+    """A line a character speaks in a passage the author wrote or chose
+    (#702): `character` an id, `line` the words as written, `source` the
+    file it was found in (relative to the project)."""
+    character: str
+    line: str
+    source: str
+
+
+def anchor_voices(project_dir: str) -> tuple[list[VoiceLine], list[str]]:
+    """The lines each character speaks in the voice anchors
+    (`reference/voice/anchors/*.md`, `voice_book.read_folder`): passages the
+    author wrote or chose (`voice sample` promotes a take only when they
+    pick it; extract phase 5 takes them from the book's own prose). Never a
+    model's words: a line is quoted speech copied from the anchor.
+
+    A line is a character's when a speech tag beside it names them
+    (`extract_describe._speech`: "said Mara", "Mara said,", a lead-in
+    ending in a colon; names from characters.csv: the name, aliases and
+    the name's own words); "I said" is the anchor's `pov:` character's (by id, name or alias).
+    Lines under four words are left out. Returns the lines in anchor order
+    and the notes: no anchors, an anchor left out, a line two characters'
+    tags both claim (left out), an anchor with no line any tag attributes.
+
+    Raises:
+        common.ReferenceDocError: the anchors or characters.csv can't be read.
+    """
+    from storyforge.common import ReferenceDocError
+    from storyforge.elaborate import _read_csv
+    from storyforge.extract_describe import _speaker_names, _speech
+    from storyforge.voice_book import ANCHORS_DIR, read_folder
+    folder = read_folder(project_dir)
+    notes = list(folder.skipped)
+    if not folder.anchors:
+        return [], notes + [f'no anchor in {ANCHORS_DIR}/ to take lines from (find one with '
+                            f'`storyforge voice sample`, then save the take you pick as an '
+                            f'anchor)']
+    path = _ref(project_dir, 'characters.csv')
+    try:
+        characters = [r for r in _read_csv(path) if (r.get('id') or '').strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise ReferenceDocError(path, e) from e
+    if not characters:
+        return [], notes + ['reference/characters.csv has no characters, so no line can be '
+                            'attributed to one']
+    characters = [{**c, 'id': c['id'].strip()} for c in characters]
+    names = _speaker_names(characters)
+    out: list[VoiceLine] = []
+    for anchor in folder.anchors:
+        found: dict[str, list[str]] = {}
+        for c in characters:
+            own = names.get(c['id'], [])
+            pov = anchor.pov.strip().lower()
+            if pov and pov in {n.lower() for n in [c['id'], *own]}:
+                own = own + ['I']   # a first-person anchor's "I said"
+            others = [n for o, ns in names.items() if o != c['id'] for n in ns]
+            for line in _speech(anchor.text, own, others):
+                found.setdefault(line, []).append(c['id'])
+        shared = [line for line, who in found.items() if len(set(who)) > 1]
+        for line in shared:
+            notes.append(f'{anchor.path}: {line[:50]!r} has tags naming '
+                         f'{", ".join(sorted(set(found[line])))}; left out')
+        kept = [VoiceLine(who[0], line, anchor.path) for line, who in found.items()
+                if len(set(who)) == 1]
+        if not kept and not shared:
+            notes.append(f'{anchor.path}: no line with a speech tag naming a character')
+        out += kept
+    return out, notes
+
+
 def add_notes(project_dir: str, text: str, *, dry_run: bool = False) -> int:
     """Append `text`'s lines to bible-notes.md, leaving out blank lines
     and any line the file already has, so a re-run adds nothing; a missing

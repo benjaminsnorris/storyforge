@@ -63,12 +63,7 @@ type|subject|statement|known_by|category
 - `category`: one word for the kind (want, need, wound, lie, age, kinship, rule, secret, ...)
 - A question the plan hasn't answered yet is a row whose statement ends in `?`; it stays on the list of gaps until it is settled
 
-How a character sounds, as two or three lines of them speaking, never a description of their speech:
-
-```character-voices-csv
-character|line
-(character id|a line they say, in quotes)
-```
+Don't write lines for the characters to say, or describe how they speak: their voices are lines the author wrote or chose, which come from the voice anchors.
 
 Only what really resists rows (a culture's feel, a history's shape), as terse notes, one per line; leave the block out when there is none:
 

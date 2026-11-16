@@ -4,6 +4,7 @@ Usage:
     storyforge bibles                     # where the bibles stand, and the plan's gaps
     storyforge bibles import FACTS [--essay NAME] [--voices FILE] [--notes FILE]
     storyforge bibles retire NAME [--force]
+    storyforge bibles voices              # lines from the voice anchors
 
 `import` adds a pipe-delimited file of facts, with a header row (type,
 subject, statement required; known_by, scene_id, category, id optional), to
@@ -13,8 +14,11 @@ character-voices.csv and `--notes` appends a file's new lines to
 bible-notes.md. Every input is read and checked before anything is written,
 so a bad file writes nothing. `retire` moves a converted essay
 (character-bible.md, world-bible.md, systems-bible.md) to reference/archive/,
-where nothing reads it. Both take --dry-run and --no-commit, and commit and
-push otherwise. No API calls.
+where nothing reads it. `voices` adds the lines each character speaks in
+the voice anchors (reference/voice/anchors/, passages the author wrote or
+chose) to character-voices.csv: a voice line is the author's, never a
+model's (#702). Each takes --dry-run and --no-commit, and commits and
+pushes otherwise. No API calls.
 """
 
 from __future__ import annotations
@@ -47,7 +51,9 @@ def parse_args(argv):
     ret.add_argument('name', help='character-bible.md, world-bible.md or systems-bible.md')
     ret.add_argument('--force', action='store_true',
                      help='Retire it even though it isn\'t converted')
-    for p in (imp, ret):
+    voi = sub.add_parser('voices', help="Add each character's lines from the voice anchors "
+                                        'to character-voices.csv')
+    for p in (imp, ret, voi):
         p.add_argument('--dry-run', action='store_true', help='Say what would change; write nothing')
         p.add_argument('--no-commit', action='store_true', help='Write, but don\'t commit')
     return parser.parse_args(argv)
@@ -188,6 +194,37 @@ def _retire(project_dir: str, args) -> int:
     return 0
 
 
+def _voices(project_dir: str, args) -> int:
+    from storyforge import bibles
+    from storyforge.common import ReferenceDocError
+    try:
+        lines, notes = bibles.anchor_voices(project_dir)
+        pairs = [(v.character, v.line) for v in lines]
+        added, add_notes = (bibles.add_voices(project_dir, pairs, dry_run=True)
+                            if pairs else (0, []))
+        if added and not args.dry_run:
+            bibles.add_voices(project_dir, pairs)
+    except bibles.BiblesError as e:
+        log(f'ERROR: {e}')
+        return 1
+    except ReferenceDocError as e:
+        log(f'ERROR: {e}; nothing was added')
+        return 1
+    for n in notes + add_notes:
+        log(f'NOTE: {n}')
+    if not lines:
+        log('No voice line found in the anchors: nothing to add')
+        return 0
+    for v in lines:
+        log(f'  {v.character}: {v.line[:70]!r} ({v.source})')
+    dry = ' (dry run)' if args.dry_run else ''
+    log(f'Voices: {added} line(s) added to reference/{bibles.VOICES_FILE} from the anchors{dry}')
+    if added:
+        _commit(project_dir, args, 'Bibles: voice lines from the anchors',
+                [f'reference/{bibles.VOICES_FILE}'])
+    return 0
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     install_signal_handlers()
@@ -197,6 +234,7 @@ def main(argv=None):
     action = args.action or 'status'
     code = {'status': lambda: _status(project_dir),
             'import': lambda: _import(project_dir, args),
-            'retire': lambda: _retire(project_dir, args)}[action]()
+            'retire': lambda: _retire(project_dir, args),
+            'voices': lambda: _voices(project_dir, args)}[action]()
     if code:
         sys.exit(code)

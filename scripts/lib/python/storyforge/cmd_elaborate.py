@@ -1818,17 +1818,17 @@ def split_enum_descriptions(row: dict, filename: str) -> list[str]:
     return changed
 
 
-#: A prose book's bibles as a stage writes them (#657): facts, voices, notes
-_BIBLE_BLOCKS = ('bible-facts-csv', 'character-voices-csv', 'bible-notes')
+#: A prose book's bibles as a stage writes them (#657): facts and notes.
+#: A `character-voices-csv` block is left out with a NOTE (#702)
+_BIBLE_BLOCKS = ('bible-facts-csv', 'bible-notes')
 
 
 def _apply_bible_block(project_dir: str, label: str, content: str, written: list[str]) -> str:
     """Write one of a stage reply's bible blocks (`_BIBLE_BLOCKS`) through
     `storyforge.bibles`: facts to the ledger as plan facts
-    (`bibles.STAGE_WRITER`), voice lines to character-voices.csv, notes
-    appended to bible-notes.md. Returns '' when it was written, else why
-    not: a row whose cells don't fit the header, an item `add_facts` or
-    `add_voices` refuses, an unreadable ledger, registry or voices file.
+    (`bibles.STAGE_WRITER`), notes appended to bible-notes.md. Returns ''
+    when it was written, else why not: a row whose cells don't fit the
+    header, an item `add_facts` refuses, an unreadable ledger or registry.
     None of that block is written then, and the caller holds the phase
     (#697's review SF-5)."""
     from storyforge import bibles, ledger
@@ -1843,15 +1843,6 @@ def _apply_bible_block(project_dir: str, label: str, content: str, written: list
                 log(f'  NOTE: {n}')
             if added:
                 written.append(f'commitments.csv ({len(added)} plan facts)')
-        elif label == 'character-voices-csv':
-            cols = tuple(bibles.VOICES_COLUMNS)
-            rows = bibles.block_rows(label, content, cols, cols)
-            n_added, notes = bibles.add_voices(project_dir, [(r.get('character', ''),
-                                                              r.get('line', '')) for r in rows])
-            for n in notes:
-                log(f'  NOTE: {n}')
-            if n_added:
-                written.append(f'{bibles.VOICES_FILE} ({n_added} lines)')
         elif bibles.add_notes(project_dir, content):
             written.append(f'{bibles.NOTES_FILE} (notes added)')
     except (bibles.BiblesError, ledger.LedgerError, ReferenceDocError) as e:
@@ -2473,6 +2464,13 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                               encoding='utf-8', newline='') as f:
                         f.write('\n'.join(l.strip() for l in lines_) + '\n')
                     written.append(f'voice-profile.csv ({len(rows)} rows)')
+
+            elif label == 'character-voices-csv':
+                # #702: voice lines are the author's (the anchors, `storyforge
+                # bibles voices`), never a model's, so a stage writes none
+                log(f'  NOTE: left out the reply\'s {label} block: a character\'s voice lines '
+                    f'come from the author\'s anchors (`storyforge bibles voices`) or lines '
+                    f'the author writes (`storyforge bibles import --voices`), never a stage')
 
             elif label in _BIBLE_BLOCKS:
                 if medium == 'graphic-novel':
