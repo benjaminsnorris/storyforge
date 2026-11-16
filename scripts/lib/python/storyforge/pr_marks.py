@@ -15,7 +15,9 @@ line comments.
   GitHub showed it (the end of the comment's `diff_hunk`), so a caller can
   check that the line still says that. A comment on a line since changed
   keeps its `original_line` (`outdated`); one on several lines keeps its
-  `start_line`.
+  `start_line`. Each keeps GitHub's `id` and `created_at`, so a later run
+  can leave out the comments an earlier one acted on (`revise
+  --marks-from-pr`, #691).
 - `general`: comments on a whole file, then review bodies and conversation
   comments, sorted by when they were made.
 - `notes`: what was left out and why.
@@ -52,6 +54,9 @@ class Comment:
     #: the commented line's text as GitHub showed it ('' when unknown)
     line_text: str = ''
     start_line: int | None = None
+    #: GitHub's id for the comment (0 when unknown), and when it was made
+    id: int = 0
+    created_at: str = ''
 
     @property
     def suggestion(self) -> str:
@@ -114,7 +119,8 @@ def parse_comment(item: dict) -> Comment | None:
     note = _SUGGESTION.sub('', body).strip()
     start = item.get('original_start_line') if outdated else item.get('start_line')
     return Comment(item.get('path') or '', int(line), note, suggestions, outdated,
-                   _line_text(item.get('diff_hunk') or ''), start)
+                   _line_text(item.get('diff_hunk') or ''), start,
+                   int(item.get('id') or 0), item.get('created_at') or '')
 
 
 def _is_bot(user: dict | None) -> bool:
@@ -123,8 +129,8 @@ def _is_bot(user: dict | None) -> bool:
 
 
 def pr_info(pr: int, repo_dir: str) -> dict:
-    """The PR's author login, head commit and changed paths (from the
-    repo's root).
+    """The PR's author login, head commit, head branch and changed paths
+    (from the repo's root).
 
     Raises:
         PrMarksError: as `_gh_api`, or no such PR.
@@ -136,7 +142,8 @@ def pr_info(pr: int, repo_dir: str) -> dict:
     paths = [f.get('filename', '') for f in
              _gh_api(repo_dir, f'repos/{{owner}}/{{repo}}/pulls/{pr}/files')]
     return {'author': (head.get('user') or {}).get('login', ''),
-            'head_sha': (head.get('head') or {}).get('sha', ''), 'paths': paths}
+            'head_sha': (head.get('head') or {}).get('sha', ''),
+            'head_ref': (head.get('head') or {}).get('ref', ''), 'paths': paths}
 
 
 def file_at(repo_dir: str, path: str, ref: str) -> str:

@@ -172,7 +172,7 @@ For the prose itself, revise by reaction (#655): the author reads the drafted sc
 ./storyforge revise --marks working/marks.md --dry-run   # each scene's lines to revise and keeps; flags words not in the scene; spends nothing
 ./storyforge revise --marks working/marks.md
 ```
-Each scene's lines asking for a change are rewritten toward the voice (and the keeps) by the voice reviser, then gated and committed on a revise branch. A revision the gate rejects, if it can't be committed provisionally, is rolled back to the old prose. The record is in `working/voice-reviews/<scene>.md`. The marks come from the file only; reading a drafted scene's marks from a PR's comments has no issue yet.
+Each scene's lines asking for a change are rewritten toward the voice (and the keeps) by the voice reviser, then gated and committed on a revise branch. A revision the gate rejects, if it can't be committed provisionally, is rolled back to the old prose. The record is in `working/voice-reviews/<scene>.md`. Or the author marks the scenes on the session's PR and runs `./storyforge revise --marks-from-pr N` (see the revise skill).
 
 `./storyforge revise --polish` (and `--polish --loop`, `--naturalness`) still run, but they are no longer offered as the default (#655): revision of the prose is by reaction, the author's marks. Run them when the author asks for them.
 

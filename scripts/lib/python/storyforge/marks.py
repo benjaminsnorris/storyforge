@@ -47,9 +47,11 @@ KEEP_NOTES = frozenset({'keep', 'more like this', 'yes', 'love this', 'perfect'}
 
 
 class Mark(NamedTuple):
-    """One mark: the scene's words and the author's note."""
+    """One mark: the scene's words and the author's note; `comment_id` the
+    PR comment it came from (`revise --marks-from-pr`; 0 from a file)."""
     quote: str
     note: str
+    comment_id: int = 0
 
 
 def is_keep(mark: Mark) -> bool:

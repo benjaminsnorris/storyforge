@@ -399,7 +399,7 @@ def revise(project_dir: str, scene_id: str, prose: str, flags: list[Flag], *, mo
 def flags_from_marks(marks) -> list[Flag]:
     """The author's marks asking for a change, (the scene's words, the
     note), as flags for the reviser (keeps are `marks.SceneMarks.keeps`)."""
-    return [Flag(q.strip(), '', n.strip(), AUTHOR) for q, n in marks if q.strip()]
+    return [Flag(m[0].strip(), '', m[1].strip(), AUTHOR) for m in marks if m[0].strip()]
 
 
 # ============================================================================

@@ -62,7 +62,7 @@ cut: reads like AI
 keep
 ```
 
-Each `## <scene id>` starts a scene. Each `>` line quotes the scene's words, copied exactly (several `>` lines in a row join into one quote; a blank line ends it). The lines after a quote, up to a blank line, are its note: cut, or anything the author wants to say. A quote with no note, or a note of `keep`, `more like this`, `yes`, `love this` or `perfect`, is a **keep**: the reviser is shown it as an example of what works and never edits it. The file is refused, naming the line, for a heading that isn't `## <scene id>`, a scene given twice, an empty quote, or a note with no quote above it. The marks come from this file only; reading a drafted scene's marks from a PR's comments has no issue yet. Then:
+Each `## <scene id>` starts a scene. Each `>` line quotes the scene's words, copied exactly (several `>` lines in a row join into one quote; a blank line ends it). The lines after a quote, up to a blank line, are its note: cut, or anything the author wants to say. A quote with no note, or a note of `keep`, `more like this`, `yes`, `love this` or `perfect`, is a **keep**: the reviser is shown it as an example of what works and never edits it. The file is refused, naming the line, for a heading that isn't `## <scene id>`, a scene given twice, an empty quote, or a note with no quote above it. Or the author marks the scenes on the PR `write --session` made (see below). Then:
 
 ```bash
 ./storyforge revise --marks working/marks.md --dry-run   # "N line(s) to revise, M kept as examples" per scene; names marked words not in the scene; spends nothing
@@ -70,6 +70,15 @@ Each `## <scene id>` starts a scene. Each `>` line quotes the scene's words, cop
 ```
 
 The command needs `ANTHROPIC_API_KEY` and works on a revise branch. Each scene's marks go to the voice reviser: it gets `reference/voice/book.md`, the anchors, the lines asking for a change and the keeps as examples (never `checks.md`), and rewrites only the marked sentences toward the anchors and the keeps, or keeps one and says why. Code refuses any edit outside the sentence its mark quotes or touching a keep. Marked words that aren't in the scene are a WARNING and left out. Then the scene, its illustration markers kept, is gated against the book as it was before the run and committed ("Revise <id> from the author's marks"), and the re-checks it owes run. A revision the gate rejects that can't be committed provisionally is rolled back (the old prose restored, the record committed); one committed provisionally is listed in `working/gate-pending.csv`; either way the command exits 1. When nothing was rewritten, only the record is committed. The record of what was rewritten, kept and refused is in `working/voice-reviews/<scene>.md`; go through it with the author. The book needs its voice (`reference/voice/`, or an author voice repo); without it the command stops.
+
+**Marks on the scenes' PR (#691).** When the author marked the drafted scenes in GitHub (line comments on `scenes/*.md`, `suggestion` blocks), no file is needed: check out the PR's branch at its head (`gh pr checkout N`, then pull), with nothing uncommitted under `scenes/`, and run
+
+```bash
+./storyforge revise --marks-from-pr N --dry-run   # each scene's suggestions, changes (quote -- note) and keeps; every comment left out and why; general comments listed; spends nothing (needs the book's voice)
+./storyforge revise --marks-from-pr N
+```
+
+A line comment marks its paragraph (a scene file holds a paragraph per line), or just the words it quotes (a `>` line, or a "quoted phrase" at the start or end of the comment) when they're in that paragraph; a comment over several lines marks them all. The rest of the comment is the note; none, or a keep word, is a keep. A `suggestion` block is applied as written before the reviser runs and committed on its own (an empty one cuts the commented lines); other comments on its lines are left out, and so is a suggestion that would remove an illustration marker. A quote that occurs more than once in the scene marks the whole paragraph. Outdated comments, ones on a line that no longer says what GitHub showed, on a blank line or marker, or on another file, are left out and named; review bodies and conversation comments are listed, never sent. Only the PR author's comments count. The revision commits and pushes on the PR's branch. Each record names the comments it acted on (suggestions, and changes the reviser rewrote or kept), so a second run leaves them out; one it didn't answer, or a rolled-back revision's, is sent again (`--since TIME` also leaves out older comments); with nothing left to send, the command exits 1. Go through the dry run's list with the author before the paid run.
 
 The checks the author keeps repeating in marks belong in `reference/voice/checks.md` (`references/voice-folder.md`), so the voice review in the next writing session (`storyforge write --session`) catches them before the author has to.
 
@@ -230,7 +239,7 @@ Offer two options:
 > cd [project_dir] && [plugin_path]/storyforge revise [flags]
 > ```
 > For score-driven (upstream + craft from diagnosis): `./storyforge revise --scores`
-> For the author's marks on drafted scenes: `./storyforge revise --marks FILE`
+> For the author's marks on drafted scenes: `./storyforge revise --marks FILE`, or from the scenes' PR: `./storyforge revise --marks-from-pr N`
 > On request only: craft-only `./storyforge revise --polish`, the polish loop `./storyforge revise --polish --loop`, AI pattern removal `./storyforge revise --naturalness`
 > For structural-only (CSV fixes, no prose): `./storyforge revise --structural`
 

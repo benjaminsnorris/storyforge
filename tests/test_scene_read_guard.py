@@ -48,6 +48,8 @@ RAW_READS = {
                                                   'in the file as written',
     ('cmd_enrich.py', 'main'): 'a title from the first `#` line; a marker is never one',
     ('cmd_revise.py', '_restore_gate_markers'): 'restores markers into the file',
+    ('cmd_revise.py', '_revise_marks_from_pr'): 'applies the author\'s suggestions by '
+        'file line, markers and line endings kept (#691)',
     ('cmd_revise.py', '_scene_texts'): 'detects which scenes a pass changed, '
                                        'markers included',
     ('cmd_write.py', '_gate_drafted_scene'): 'the gate fixes the file by find/replace '
