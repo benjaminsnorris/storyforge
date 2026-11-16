@@ -20,16 +20,21 @@ from storyforge.common import (
     parse_story_summary, read_yaml_field,
 )
 from storyforge.elaborate import _read_csv
+from storyforge.adaptation import GIVEN_LEVELS
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
 PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
 
 # Closed sets, mirrored in the skill/CLI docs — express them as Literals (as
 # scoring_levels.py does for its result shapes) so drift is visible in-type.
-RungState = Literal['solid', 'thin', 'not_started']
+RungState = Literal['solid', 'thin', 'not_started', 'given']
 Stage = Literal['logline', 'synopsis', 'act-shape', 'spine', 'architecture',
                 'scene-map', 'briefs', 'story-power', 'voice', 'draft', 'evaluate',
-                'check']
+                'check', 'interpretation']
+
+#: A rung that holds the next one up: built and solid, or (#658) given by an
+#: adaptation's source and its interpretation decisions
+DONE_STATES = ('solid', 'given')
 
 # Rung name -> `elaborate --stage` argument (only rungs with a command stage).
 ELABORATE_STAGE = {
@@ -268,6 +273,15 @@ def _recommend(stage: Stage, medium: str = 'novel') -> tuple[dict, dict | None]:
                             'blocker)')},
                 {'stage': 'draft', 'action': 'Draft scenes',
                  'command': write_command(medium), 'reason': ''})
+    if stage == 'interpretation':
+        # #658: an adaptation entering at the scene map, before its source
+        # gives the upper rungs (`AdaptationRoute.phase` adds what's missing)
+        return ({'stage': 'interpretation',
+                 'action': 'Record the interpretation decisions',
+                 'command': INTERPRETATION_COMMAND,
+                 'reason': INTERPRETATION_REASON},
+                {'stage': VOICE_STAGE, 'action': 'Find the voice',
+                 'command': VOICE_STAGE_COMMAND, 'reason': ''})
     if stage == 'draft':
         return ({'stage': 'draft', 'action': 'Draft scenes',
                  'command': write_command(medium),
@@ -348,6 +362,138 @@ def free_to_draft(project_dir: str) -> tuple[int, int, list[str]]:
     return len(to_draft), len(to_draft) - len(held), notes
 
 
+#: #658: what shows an adaptation's interpretation decisions and what's
+#: missing (`source status`); `source import` while a source isn't imported
+INTERPRETATION_COMMAND = 'storyforge source status'
+IMPORT_COMMAND = 'storyforge source import'
+INTERPRETATION_REASON = (
+    "An adaptation's logline, synopsis, spine and architecture come from its source "
+    "and the author's interpretation decisions in reference/key-decisions.md (what "
+    "this version is about, whose eyes, what's cut, what's invented, where it ends, "
+    "the mode); record them (elaborate skill)")
+#: the coverage checks between rungs a source gives (act-shape to spine,
+#: spine to architecture, architecture to scenes): nothing to cover
+_GIVEN_COVERAGE_LEVELS = (2, 3, 4)
+
+
+class AdaptationRoute:
+    """#658 (plan D8): how a `source:` book moves up the ladder. Made by
+    `adaptation_route`, which marks the given rungs in the ladder; then
+    `phase(computed)` turns the ladder's phase into the adaptation's and
+    sets `next`/`then` when it routes differently (None: `_recommend`'s),
+    and `blockers(found)` drops coverage between given rungs and adds the
+    adaptation's own (what's missing for the rungs to be given, the voice,
+    source coverage)."""
+
+    def __init__(self, project_dir: str, entry, medium: str):
+        self.project_dir = project_dir
+        self.entry = entry
+        self.medium = medium
+        self.next: dict | None = None
+        self.then: dict | None = None
+        self.notes: list[str] = []
+        self._extra: list[dict] = []
+
+    def phase(self, computed: str) -> str:
+        entry = self.entry
+        if not entry.higher:
+            self.notes.append('this adaptation has a spine or architecture of its own, so it '
+                              'builds its upper rungs as an original does (the full ladder)')
+            return computed
+        given = {LEVEL_NAMES[lvl] for lvl in GIVEN_LEVELS}
+        if not entry.ready:
+            for problem in entry.problems:
+                self._extra.append({'source': 'interpretation', 'level': -1,
+                                    'detail': problem})
+            if computed not in given:
+                return computed
+            self.next = {'stage': 'interpretation',
+                         'action': ('Import the source' if not entry.imported
+                                    else 'Record the interpretation decisions'),
+                         'command': (IMPORT_COMMAND if not entry.imported
+                                     else INTERPRETATION_COMMAND),
+                         'reason': (f'{INTERPRETATION_REASON}. Missing: '
+                                    f'{"; ".join(entry.problems)}')}
+            self.then = {'stage': VOICE_STAGE, 'action': 'Find the voice',
+                         'command': VOICE_STAGE_COMMAND, 'reason': ''}
+            return 'interpretation'
+        if computed not in ('scene-map', 'briefs') or self.medium == MEDIUM_GRAPHIC_NOVEL:
+            return computed
+        # The source gave the upper rungs: the voice comes before the map,
+        # found on a scene from the source (plan D8's table)
+        from storyforge import voice_book
+        from storyforge.voice_repo import VoiceError
+        try:
+            voice = voice_book.resolve(self.project_dir)
+        except VoiceError as e:   # a bad `voice:` block is a blocker, not a crash
+            voice = voice_book.DocState('unreadable', 'storyforge.yaml', str(e))
+        if voice.kind == 'ok':
+            return computed
+        self._extra.append({'source': VOICE_STAGE, 'level': -1,
+                            'detail': (f'{voice.detail}: an adaptation finds its voice before '
+                                       f'the scene map. To give it one, '
+                                       f'{voice_book.REMEDY}')})
+        self.next = {'stage': VOICE_STAGE, 'action': 'Find the voice',
+                     'command': VOICE_STAGE_COMMAND,
+                     'reason': ("The source and the interpretation decisions give the "
+                                "logline, synopsis, spine and architecture; find the voice "
+                                "on a scene from the source before the scene map (see the "
+                                "voice blocker)")}
+        self.then = {'stage': computed, 'action': f'Develop the {computed}',
+                     'command': f'storyforge elaborate --stage {ELABORATE_STAGE[computed]}',
+                     'reason': ''}
+        return VOICE_STAGE
+
+    def blockers(self, found: list[dict]) -> list[dict]:
+        out = found
+        if self.entry.higher:
+            out = [b for b in found if not (b['source'] == 'coverage'
+                                            and b['level'] in _GIVEN_COVERAGE_LEVELS)]
+        return self._extra + out + self._source_coverage()
+
+    def _source_coverage(self) -> list[dict]:
+        """Validate's source coverage, its blocking findings, once the scene
+        map exists: a source event dropped without a recorded decision, a
+        scene with no map row."""
+        if not artifact_present(self.project_dir, 5):
+            return []
+        from storyforge import source
+        try:
+            cfg = source.read_config(self.project_dir)
+            result = source.check_coverage(self.project_dir, cfg) if cfg else None
+        except Exception as e:   # status never fails on what it can't read
+            return [{'source': 'source', 'level': 5,
+                     'detail': f'source coverage not checked: {e or type(e).__name__}'}]
+        if result is None:
+            return []
+        return [{'source': 'source', 'level': 5,
+                 'detail': (f"{f['scene_id']}: " if f.get('scene_id') else '') + f['message']}
+                for f in result['findings'] if f.get('severity') == 'blocking']
+
+
+def adaptation_route(project_dir: str, ladder: list[dict],
+                     medium: str = 'novel') -> AdaptationRoute | None:
+    """#658: None without a `source:` block. Otherwise the book's route;
+    when it enters at the scene map with its source imported and its
+    interpretation decisions recorded, each upper rung (`GIVEN_LEVELS`)
+    it hasn't written itself is marked `given` in `ladder` (one the author
+    did write, a logline say, is judged as it stands)."""
+    from storyforge import adaptation
+    entry = adaptation.entry(project_dir)
+    if entry is None:
+        return None
+    if entry.higher:
+        for rung in ladder:
+            if rung['level'] in GIVEN_LEVELS and rung['state'] == 'not_started':
+                if entry.ready:
+                    rung['state'] = 'given'
+                    rung['detail'] = 'from the source and the interpretation decisions'
+                else:
+                    rung['detail'] = ('the source gives it once the interpretation '
+                                      'decisions are recorded')
+    return AdaptationRoute(project_dir, entry, medium)
+
+
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
     """Compose the full next-step verdict. Deterministic, read-only."""
     floors = score_all_levels(project_dir, medium)   # once (#643's review SF-7)
@@ -355,13 +501,18 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
 
     # Current phase = first rung that is not solid; if all solid, derive from
     # scene draft-state.
+    # #658: an adaptation's upper rungs are given by its source (marks
+    # them `given` in `ladder`)
+    adapted = adaptation_route(project_dir, ladder, medium)
     phase = None
     for rung in ladder:
-        if rung['state'] != 'solid':
+        if rung['state'] not in DONE_STATES:
             phase = rung['name']
             break
     if phase is None:
         phase, _drafted, _total = draft_stage(project_dir)
+    if adapted is not None:
+        phase = adapted.phase(phase)
 
     # #596: briefs to drafting with no voice. Before drafting the voice
     # stage is the phase (next, or then while scenes wait on the gate); once
@@ -406,10 +557,13 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         matches, unmet = True, []
     else:
         unmet = [r for r in ladder
-                 if r['level'] < declared_idx and r['state'] != 'solid']
+                 if r['level'] < declared_idx and r['state'] not in DONE_STATES]
         matches = not unmet
 
     blockers = collect_blockers(project_dir)
+    if adapted is not None:
+        blockers = adapted.blockers(blockers)
+        notes.extend(adapted.notes)
     if voice_blocker:
         blockers.insert(0, voice_blocker)
     if medium != MEDIUM_GRAPHIC_NOVEL:
@@ -428,6 +582,8 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         })
 
     nxt, then = _recommend(phase, medium)
+    if adapted is not None and adapted.next is not None:
+        nxt, then = adapted.next, adapted.then
     # #556's review: scenes waiting on the gate (a provisional commit from
     # `write --keep-going` among them) are blockers, and come before the
     # next rung, except while write can draft a scene (#641): it drafts past

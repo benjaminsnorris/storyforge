@@ -14,7 +14,7 @@ import json
 from storyforge.common import detect_project_root, get_medium
 from storyforge.status import CRAFT_ADVISORY_SOURCE, build_status
 
-_STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—'}
+_STATE_MARK = {'solid': '✓', 'thin': '✗', 'not_started': '—', 'given': '✓'}
 
 
 def parse_args(argv):
