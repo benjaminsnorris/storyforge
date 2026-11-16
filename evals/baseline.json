@@ -1657,44 +1657,44 @@
         },
         "REL": {
           "cases": 5,
-          "recall": 0.4
+          "recall": 0.8
         },
         "TRT": {
           "cases": 4,
-          "recall": 0.5
+          "recall": 1.0
         },
         "WLD": {
           "cases": 3,
-          "recall": 0.0
+          "recall": 0.3333
         }
       },
       "cost": {
-        "calls": 77,
-        "input_tokens": 191328,
-        "output_tokens": 45293,
-        "replayed_calls": 77,
+        "calls": 80,
+        "input_tokens": 214837,
+        "output_tokens": 50661,
+        "replayed_calls": 80,
         "unpriced_calls": 0,
-        "usd_if_live": 0.0418,
+        "usd_if_live": 0.0468,
         "usd_spent": 0.0
       },
       "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
-      "duration_s": 0.29,
+      "duration_s": 0.3,
       "error": null,
       "frozen": false,
       "gates": [
         {
-          "actual": 0.4706,
+          "actual": 0.7647,
           "name": "recall",
           "op": "==",
           "passed": true,
-          "threshold": 0.4706
+          "threshold": 0.7647
         },
         {
-          "actual": 0.4706,
+          "actual": 0.7647,
           "name": "recall_any",
           "op": "==",
           "passed": true,
-          "threshold": 0.4706
+          "threshold": 0.7647
         },
         {
           "actual": 0,
@@ -1725,11 +1725,11 @@
           "threshold": 1
         },
         {
-          "actual": 0.4706,
+          "actual": 0.7647,
           "name": "recall_selected",
           "op": "==",
           "passed": true,
-          "threshold": 0.4706
+          "threshold": 0.7647
         }
       ],
       "metrics": {
@@ -1739,9 +1739,9 @@
         "false_alarms_other_facts": 0,
         "misquoted": 0,
         "questions": 96,
-        "recall": 0.4706,
-        "recall_any": 0.4706,
-        "recall_selected": 0.4706,
+        "recall": 0.7647,
+        "recall_any": 0.7647,
+        "recall_selected": 0.7647,
         "selection_lost": 1,
         "split": 3,
         "variants": 38,
@@ -1750,14 +1750,14 @@
       "mode": "replay",
       "notes": [
         "model: claude-haiku-5-5",
-        "missed 9 of 17: qs-009, qs-013, qs-016, qs-018, qs-019, qs-022, qs-033, qs-034, qs-035",
+        "missed 4 of 17: qs-009, qs-018, qs-033, qs-035",
         "false alarms (0): ",
         "yes facts the gate's selection would not ask (1): qs-018:partner",
         "by_code has 3-6 cases a code: too few to compare codes",
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:03:55+00:00",
+      "started_at": "2026-11-16T21:30:40+00:00",
       "status": "pass",
       "suite": "question-set"
     },

@@ -320,6 +320,27 @@ different request: record it with `--cassettes-dir
 evals/fixtures/tier-comparison/<model>` so the default's recordings stay
 the baseline's. A recording costs cents on haiku.
 
+**Recorded 2026-11-16 on haiku 5.5 (about $0.05): recall 0.76 (13 of 17), no
+false alarm, 3 split answers; a second recording gave the same.** Two
+changes did it, from the misses' own reasons: the prompt counts dialogue
+and a character's memory as the book's word unless the scene itself shows
+it wrong (a wrong name, kinship, place or past in a character's mouth was
+read as "a character's mistake"), and checks every clause, since agreement
+elsewhere in the scene was cancelling a contradiction in one sentence
+("When in doubt, no" is gone); and a question the two askings split on is
+asked a third time, two yeses of three a finding (three of the first
+version's misses were splits). Still missed: qs-009 (a "heavy, sturdy boy"
+against Tiny Tim's crutch, an inference), qs-018 (the gate wouldn't ask it),
+qs-033 (the niece smiling at the unseen Scrooge) and qs-035 (Islington as
+where the turkey goes, not said to be their home). The scorer's `lands_on`
+now takes a quote shorter than `SHARED_RUN` when it holds every word the
+injection changed (`changed_words`): qs-013's `"Frank!"` was a catch scored
+as a miss. A first try put one case's words in the prompt as an example
+(15 of 17); it was taken out, since a prompt fitted to its test set says
+nothing about other books. 17 cases is a small set, tuned on: the gate set
+(#677) is the check on prose it hasn't seen. The tier-comparison recordings
+below are of the 2026-11-09 prompt, stale until re-recorded.
+
 Recorded 2026-11-09 on haiku 5.5 ($0.04): recall 0.47 (8 of 17; PHY 0.8,
 TRT 0.5, REL 0.4, WLD 0.0), no false alarm on 79 questions whose answer is
 `no`, 3 split answers. Sonnet 5.5 on the same set (replay it with
