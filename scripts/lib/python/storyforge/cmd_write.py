@@ -1821,6 +1821,11 @@ def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: st
     return WriteForecast(draft, gate_cost, basis)
 
 
+def _has_prose(path: str) -> bool:
+    """Whether a scene file exists and holds prose; a missing file has none."""
+    return os.path.isfile(path) and bool(read_scene_prose(path).strip())
+
+
 def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_csv, *,
                       dry_run, budget, stop_after, scene_forecast: float = 0.0) -> DraftOutcome:
     """Draft `pending_ids`, in reading order, in one writing session (#655,
@@ -1876,8 +1881,11 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
     span = [s for s in sorted(order, key=order.get)
             if order[pending_ids[0]] <= order[s] <= order[pending_ids[-1]]]
     between = {s for s in span if s not in pending_ids}
-    gaps = [s for s in between if not read_scene_prose(os.path.join(scenes_dir, f'{s}.md'))
-            .strip() and (rows.get(s) or {}).get('status', '').lower() not in ('cut', 'merged')]
+    # a cut or merged scene has no file, and an undrafted one may have none
+    # either: neither is read, here or as the session reaches it
+    gaps = [s for s in between
+            if (rows.get(s) or {}).get('status', '').lower() not in ('cut', 'merged')
+            and not _has_prose(os.path.join(scenes_dir, f'{s}.md'))]
     if gaps:
         log(f'WARNING: the session writes past {len(gaps)} scene(s) with no prose that it '
             f'won\'t draft (held, or left out by the filter): {", ".join(gaps[:8])}'
@@ -1913,8 +1921,9 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
     for i, sid in enumerate(pending_ids):
         for s in span[:span.index(sid)]:
             if s in between:
-                prose_between = read_scene_prose(os.path.join(scenes_dir, f'{s}.md'))
-                if prose_between.strip():
+                path_between = os.path.join(scenes_dir, f'{s}.md')
+                if _has_prose(path_between):
+                    prose_between = read_scene_prose(path_between)
                     sess.insert((rows.get(s) or {}).get('title') or s, prose_between)
                     carried = ''
                 between.discard(s)
