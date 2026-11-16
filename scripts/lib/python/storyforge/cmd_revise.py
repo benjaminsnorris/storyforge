@@ -3423,6 +3423,22 @@ def main(argv=None):
         return _main(argv)
 
 
+def _utc_time(text: str) -> str:
+    """An ISO 8601 time as GitHub writes it (UTC, `YYYY-MM-DDTHH:MM:SSZ`),
+    so it compares with GitHub's times as text; one with no offset is
+    taken as local time.
+
+    Raises:
+        ValueError: it isn't a time.
+    """
+    from datetime import datetime, timezone
+    t = text.strip()
+    when = datetime.fromisoformat(t[:-1] + '+00:00' if t.endswith(('Z', 'z')) else t)
+    if when.tzinfo is None:
+        when = when.astimezone()
+    return when.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 def _marks_preflight(project_dir: str, dry_run: bool) -> bool:
     """The voice the reviser writes toward, and (unless a dry run) the API
     key: False, said, when either is missing."""
@@ -3445,17 +3461,10 @@ def _marks_preflight(project_dir: str, dry_run: bool) -> bool:
 
 
 def _revise_marks(project_dir: str, marks_file: str, log_dir: str, dry_run: bool) -> int:
-    """`revise --marks`: each marked scene's lines asking for a change
-    rewritten toward the voice by the voice reviser, the author's keeps
-    shown as examples and protected (`voice_review.revise`); the record in
-    working/voice-reviews/; the scene gated (against the book as it was
-    before this run) and committed on a revise branch, its illustration
-    markers kept; the re-checks it owes run. A revision the gate stops on
-    that can't be committed provisionally is rolled back (the old prose
-    restored, the record committed). What can't be done is said. Returns 1
-    when the file can't be used, a scene isn't drafted, a reviser call
-    fails, a revision is rolled back or committed provisionally, a re-check
-    doesn't finish, or a commit fails; else 0."""
+    """`revise --marks FILE`: the file's marks (`marks.parse_marks`)
+    revised by `_revise_scenes` on a revise branch (made after the voice and
+    API key are checked). Returns 1 when the file can't be used or the
+    voice or key is missing, else as `_revise_scenes`."""
     from storyforge import marks as marks_mod
     try:
         with open(marks_file, encoding='utf-8-sig') as f:
@@ -3482,8 +3491,10 @@ def _revise_marks_from_pr(project_dir: str, pr: int, since: str, log_dir: str,
     as written and committed, and the marks revised as `--marks` revises
     them, on the PR's own branch. The checkout must be that branch, at the
     PR's head, its scenes unchanged, so the marks are read against the text
-    they were made on. Returns 1 when that isn't so, the PR can't be read,
-    nothing is left to send, or as `_revise_scenes`; else 0."""
+    they were made on. Returns 1 when that isn't so (or git can't tell), the
+    PR or its author can't be read, nothing is left to send, the voice or
+    API key is missing, a suggestion can't be applied and committed, or as
+    `_revise_scenes`; else 0."""
     from storyforge import pr_marks, pr_scene_marks as psm
     from storyforge.git import CommitError, commit_or_raise
     from storyforge.illustrations import read_scene_raw
@@ -3492,23 +3503,39 @@ def _revise_marks_from_pr(project_dir: str, pr: int, since: str, log_dir: str,
     except pr_marks.PrMarksError as e:
         log(f'ERROR: PR #{pr}: {e}')
         return 1
+    if not info['author']:
+        log(f'ERROR: PR #{pr}\'s author can\'t be told (a deleted account?), so whose '
+            f'comments count can\'t be either')
+        return 1
     branch = current_branch(project_dir)
     if not info['head_ref'] or branch != info['head_ref']:
         log(f'ERROR: this checkout is on {branch or "no branch"}, not PR #{pr}\'s branch '
             f'({info["head_ref"] or "unknown"}): check it out first (`gh pr checkout {pr}`)')
         return 1
-    head = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
+    r = _git(project_dir, 'rev-parse', 'HEAD', check=False)
+    head = r.stdout.strip() if r.returncode == 0 else ''
+    if not head:
+        log(f'ERROR: git can\'t say which commit this checkout is at: {r.stderr.strip()[:200]}')
+        return 1
     if head != info['head_sha']:
         log(f'ERROR: this checkout is at {head[:10]}, PR #{pr}\'s head at '
             f'{info["head_sha"][:10]}: pull (or push) first, so the marks are read against '
             f'the text they were made on')
         return 1
     dirty = _git(project_dir, 'status', '--porcelain', '--', 'scenes/', check=False)
-    if dirty.returncode != 0 or dirty.stdout.strip():
+    if dirty.returncode != 0:
+        log(f'ERROR: git status failed, so whether scenes/ matches PR #{pr} can\'t be '
+            f'checked: {dirty.stderr.strip()[:200]}')
+        return 1
+    if dirty.stdout.strip():
         log(f'ERROR: scenes/ has changes not committed: commit or discard them first, so the '
             f'marks are read against PR #{pr}\'s text')
         return 1
-    prefix = _git(project_dir, 'rev-parse', '--show-prefix', check=False).stdout.strip()
+    r = _git(project_dir, 'rev-parse', '--show-prefix', check=False)
+    if r.returncode != 0:
+        log(f'ERROR: git can\'t say where the book is in its repo: {r.stderr.strip()[:200]}')
+        return 1
+    prefix = r.stdout.strip()
     try:
         prs = pr_marks.fetch(pr, project_dir, since=since, author=info['author'])
     except pr_marks.PrMarksError as e:
@@ -3529,53 +3556,66 @@ def _revise_marks_from_pr(project_dir: str, pr: int, since: str, log_dir: str,
     if not _marks_preflight(project_dir, dry_run):
         return 1
     if dry_run:   # the suggestions aren't applied, so their wording isn't a keep yet
-        wording = {(s.scene_id, s.text.strip()) for s in mapped.suggestions}
-        scenes = [type(sm)(sm.scene_id, [m for m in sm.marks
-                                         if (sm.scene_id, m.quote) not in wording])
-                  for sm in mapped.scenes]
-        return _revise_scenes(project_dir, scenes, f'PR #{pr}', log_dir, True)
+        return _revise_scenes(project_dir, mapped.scenes, f'PR #{pr}', log_dir, True)
     create_branch('revise', project_dir)   # the PR's branch: resumed
     from storyforge import voice_review
     by_scene: dict[str, list] = {}
     for s in mapped.suggestions:
         by_scene.setdefault(s.scene_id, []).append(s)
-    for sid, sugs in by_scene.items():
+    committed: list[str] = []
+    for n, (sid, sugs) in enumerate(by_scene.items()):
         path = os.path.join(project_dir, 'scenes', f'{sid}.md')
-        with open(path, encoding='utf-8', newline='') as f:
-            raw = f.read()
-        with open(path, 'w', encoding='utf-8', newline='') as f:
-            f.write(psm.apply_suggestions(raw, sugs))
         ids = [s.comment_id for s in sugs if s.comment_id]
         notes = [f'The author\'s suggestion{"s" if len(sugs) > 1 else ""} from PR #{pr}, '
                  f'applied as written (not rewritten, not gated).']
-        notes += psm.used_notes(project_dir, sid, pr, ids)
-        rel = voice_review.record(project_dir, sid, voice_review.Review(flags=[]), None,
-                                  notes=notes)
-        log(f'{sid}: {len(sugs)} suggestion(s) applied as written ({rel})')
         try:
+            with open(path, encoding='utf-8', newline='') as f:
+                raw = f.read()
+            with open(path, 'w', encoding='utf-8', newline='') as f:
+                f.write(psm.apply_suggestions(raw, sugs))
+            notes += psm.used_notes(project_dir, sid, pr, ids)
+            rel = voice_review.record(project_dir, sid, voice_review.Review(flags=[]), None,
+                                      notes=notes)
+            log(f'{sid}: {len(sugs)} suggestion(s) applied as written ({rel})')
             commit_or_raise(project_dir, f'Apply the author\'s suggestions on {sid} (PR #{pr})',
                             [f'scenes/{sid}.md', voice_review.REVIEWS_DIR.replace(os.sep, '/')
                              + '/'])
-        except CommitError as e:
-            log(f'ERROR: {sid}: {e}; commit it by hand. Nothing was revised.')
+        except (OSError, ValueError, CommitError) as e:
+            left = list(by_scene)[n + 1:]
+            log(f'ERROR: {sid}: the author\'s suggestions could not be applied and committed '
+                f'({e}); see `git status` for what is on disk. The reviser did not run.'
+                + (f' Committed: {", ".join(committed)}.' if committed else '')
+                + (f' Not applied: {", ".join(left)}.' if left else ''))
             return 1
-    return _revise_scenes(project_dir, mapped.scenes, f'PR #{pr}', log_dir, False,
-                          pr=pr, change_ids=mapped.change_ids)
+        committed.append(sid)
+    return _revise_scenes(project_dir, psm.with_suggestion_keeps(mapped), f'PR #{pr}',
+                          log_dir, False, pr=pr)
 
 
 def _revise_scenes(project_dir: str, scenes: list, source: str, log_dir: str, dry_run: bool,
-                   pr: int = 0, change_ids: dict | None = None) -> int:
-    """The revision `_revise_marks` describes, of `scenes` (`SceneMarks`)
-    from `source` (the marks file, or the PR). With `pr`, each scene's
-    record names the comments it acted on (`change_ids`), unless its
-    revision is rolled back; a record always keeps the comments its earlier
-    one named (`pr_scene_marks.used_notes`)."""
+                   pr: int = 0) -> int:
+    """Revise `scenes` (`marks.SceneMarks`, from `source`: the marks file,
+    or the PR) on the current branch: each scene's lines asking for a change
+    rewritten toward the voice by the voice reviser, the keeps shown as
+    examples and protected (`voice_review.revise`); the record in
+    working/voice-reviews/; the scene gated (against the book as it was
+    before this run) and committed, its illustration markers kept; the
+    re-checks it owes run. A revision the gate stops on that can't be
+    committed provisionally is rolled back (the old prose restored, the
+    record committed). A dry run only counts each scene's lines.
+
+    With `pr`, each scene's record names the comments the reviser acted on
+    (`Mark.comment_id` of each change it rewrote or kept, saying why),
+    unless the revision is rolled back; a record always keeps the comments
+    its earlier one named (`pr_scene_marks.used_notes`). Returns 1 when a
+    scene isn't drafted, a reviser call fails, a revision is rolled back or
+    committed provisionally, a re-check doesn't finish, or a commit fails;
+    else 0."""
     from storyforge import api, cmd_write, gate, pr_scene_marks as psm, voice_review
     from storyforge.common import ReferenceDocError
     from storyforge.costs import RunBudget
     from storyforge.git import CommitError, commit_or_raise
     from storyforge.illustrations import keep_markers, read_scene_prose, read_scene_raw
-    change_ids = change_ids or {}
     model = select_model('revision') if not dry_run else ''
     before = gate.snapshot(project_dir) if not dry_run else None
     budget = RunBudget()
@@ -3593,13 +3633,14 @@ def _revise_scenes(project_dir: str, scenes: list, source: str, log_dir: str, dr
             log(f'ERROR: {sid} has no prose; its marks are left out')
             code = 1
             continue
-        flags = voice_review.flags_from_marks(sm.changes)
+        changes = [m for m in sm.changes if m.quote.strip()]
         keeps = [m.quote for m in sm.keeps if voice_review.flag_spans(prose, m.quote)]
-        missing = ([f.quote for f in flags if not voice_review.flag_spans(prose, f.quote)]
+        missing = ([m.quote for m in changes if not voice_review.flag_spans(prose, m.quote)]
                    + [m.quote for m in sm.keeps if m.quote not in keeps])
         for q in missing:
             log(f'  WARNING: {sid}: marked words not in the scene, left out: "{q[:80]}"')
-        flags = [f for f in flags if f.quote not in missing]
+        changes = [m for m in changes if m.quote not in missing]
+        flags = voice_review.flags_from_marks(changes)
         log(f'{sid}: {len(flags)} line(s) to revise, {len(keeps)} kept as examples')
         if dry_run or not flags:
             continue
@@ -3616,7 +3657,9 @@ def _revise_scenes(project_dir: str, scenes: list, source: str, log_dir: str, dr
             log(f'ERROR: {e}')
             code = 1
             continue
-        used = psm.used_notes(project_dir, sid, pr, change_ids.get(sid, ()))
+        acted = [m.comment_id for m, o in zip(changes, revision.outcomes)
+                 if m.comment_id and (o.edits or o.kept)]
+        used = psm.used_notes(project_dir, sid, pr, acted)
         rel = voice_review.record(project_dir, sid, voice_review.Review(flags=flags), revision,
                                   notes=notes + used)
         log(f'  {revision.summary()} ({rel})')
@@ -3634,9 +3677,11 @@ def _revise_scenes(project_dir: str, scenes: list, source: str, log_dir: str, dr
             if not passed and not cmd_write.is_provisional(project_dir, sid):
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(raw)   # the gate rejected it: the scene as it was
-                if used != carried:   # not acted on: a later run may send its marks again
-                    voice_review.record(project_dir, sid, voice_review.Review(flags=flags),
-                                        revision, notes=notes + carried)
+                # not acted on: a later run may send its marks again
+                voice_review.record(project_dir, sid, voice_review.Review(flags=flags),
+                                    revision, notes=[f'Rolled back: the revision did not pass '
+                                                     f'the gate ({why}); the scene is as it '
+                                                     f'was.'] + notes + carried)
                 log(f'ERROR: {sid}: the revision did not pass the gate ({why}); it is rolled '
                     f'back, the record kept ({rel})')
                 message = f'Record a rolled-back revision of {sid} (did not pass the gate)'
@@ -3737,6 +3782,13 @@ def _main(argv=None):
     if args.since and args.marks_from_pr is None:
         log('ERROR: --since goes with --marks-from-pr')
         sys.exit(1)
+    if args.since:
+        try:
+            args.since = _utc_time(args.since)
+        except ValueError:
+            log(f'ERROR: --since {args.since!r} isn\'t a time (ISO 8601, e.g. '
+                f'2026-11-15T09:00:00Z, or with an offset)')
+            sys.exit(1)
     if args.marks:
         sys.exit(_revise_marks(project_dir, args.marks, log_dir, args.dry_run))
     if args.marks_from_pr is not None:

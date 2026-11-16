@@ -27,19 +27,20 @@ cut: a tic
 def test_parse_marks():
     scenes = marks.parse_marks(FILE)
     assert [s.scene_id for s in scenes] == ['act1-sc01', 'act1-sc02']
-    assert scenes[0].marks == [
+    assert [m[:2] for m in scenes[0].marks] == [
         ('Dorren Hayle pressed the brass calipers against the vellum', 'more like this'),
         ('held her breath', 'cut: a tic'),
         ('the master survey', 'keep')]
     assert [m.quote for m in scenes[0].keeps] == [
         'Dorren Hayle pressed the brass calipers against the vellum', 'the master survey']
     assert [m.quote for m in scenes[0].changes] == ['held her breath']
-    assert scenes[1].marks == [('She did not look up.', 'keep')]
+    assert [m[:2] for m in scenes[1].marks] == [('She did not look up.', 'keep')]
+    assert {m.comment_id for s in scenes for m in s.marks} == {0}
 
 
 def test_a_blank_line_ends_a_quote():
     scenes = marks.parse_marks('## s1\n> A one.\n\n> B two.\ncut\n')
-    assert scenes[0].marks == [('A one.', 'keep'), ('B two.', 'cut')]
+    assert [m[:2] for m in scenes[0].marks] == [('A one.', 'keep'), ('B two.', 'cut')]
 
 
 @pytest.mark.parametrize('text, why', [

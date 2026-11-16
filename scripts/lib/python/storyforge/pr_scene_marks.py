@@ -17,26 +17,34 @@ comment marks a paragraph:
 - **The quote:** the words the comment quotes (`>` lines, or a "quoted"
   phrase at the start or end of the comment) when they're in the
   paragraph; otherwise the whole paragraph (and the note says what it
-  quoted). A comment over several lines marks them all.
+  quoted). Words that occur more than once in the scene would land on
+  their first occurrence, so then the paragraph is the quote too (the
+  note says which words). A comment over several lines marks them all.
 - **The note:** the comment without the quoted words. Empty, or one of
   `marks.KEEP_NOTES`: a keep.
 - **A `suggestion` block** is the author's own wording, so nothing
   rewrites it: it's applied as written (`apply_suggestions`), before the
   reviser runs, in its own commit; an empty one cuts the lines. Its text
-  is then a keep, so the reviser can't touch it. A comment with more than
-  one suggestion, or one overlapping an earlier suggestion, is left out;
-  other comments on a suggestion's lines are left out (the line is now
-  the author's).
+  is then a keep (`with_suggestion_keeps`), so the reviser can't touch it.
+  A comment with more than one suggestion, one overlapping an earlier
+  suggestion, or one that would remove an illustration marker is left
+  out; other comments on a suggestion's lines are left out (the line is
+  now the author's). A suggestion comment's other words are shown, not
+  sent.
 - **Left out, never guessed:** an outdated comment (its line changed
   since), one whose line no longer says what GitHub showed
-  (`Comment.line_text`), one on a blank line or an illustration marker.
+  (`Comment.line_text`; only a range's last line can be checked), one on a
+  blank line or an illustration marker, on a scene file that isn't here.
   General comments (review bodies, the conversation, comments on a whole
   file) are listed, never sent: they aren't tied to a line.
 
 Each run's record (`voice_review.record`) names the comments it acted on
-(`used_note`): its changes and its suggestions. A later run over the same
-PR leaves those out (`used_comment_ids`). Keeps are never "acted on", so
-they stay examples for later runs while their lines still match.
+(`used_notes`): its suggestions, and the changes the reviser rewrote or
+kept (saying why). A change it didn't answer, or whose edit was refused,
+or a revision rolled back, isn't used up. A later run over the same PR
+leaves the used ones out (`used_comment_ids`), naming each. Keeps are
+never "acted on", so they stay examples for later runs while their lines
+still match.
 """
 
 from __future__ import annotations
@@ -57,7 +65,7 @@ _USED = re.compile(r'^NOTE: Comments used from PR #(\d+): ([\d, ]+)\s*$', re.M)
 class Suggestion:
     """A suggestion block to apply as written: file lines `start`..`end`
     (1-based, inclusive) of `scenes/<scene_id>.md` become `text` ('' cuts
-    them)."""
+    them). `note`: the comment's other words, shown, not sent."""
     scene_id: str
     start: int
     end: int
@@ -65,33 +73,50 @@ class Suggestion:
     note: str = ''
     comment_id: int = 0
 
+    def __post_init__(self):
+        if not 1 <= self.start <= self.end:
+            raise ValueError(f'a suggestion on lines {self.start}-{self.end}')
+
 
 @dataclass
 class Mapped:
-    """What a PR's comments come to."""
+    """What a PR's comments come to. `scenes` hold the marks from comments
+    (each `Mark.comment_id` set); the suggestions' wording becomes a keep
+    only once they're applied (`with_suggestion_keeps`)."""
     scenes: list[SceneMarks] = field(default_factory=list)
     suggestions: list[Suggestion] = field(default_factory=list)
-    #: per scene, the ids of the comments asking for a change
-    change_ids: dict[str, list[int]] = field(default_factory=dict)
     #: each comment left out, with why
     left_out: list[str] = field(default_factory=list)
-    #: comments an earlier run acted on, or made before --since: counted
+    #: comments an earlier run acted on, or made before --since (also named
+    #: in `left_out`)
     already_used: int = 0
     before_since: int = 0
     general: list[str] = field(default_factory=list)
-
-    def scene(self, sid: str) -> SceneMarks:
-        for sm in self.scenes:
-            if sm.scene_id == sid:
-                return sm
-        sm = SceneMarks(sid)
-        self.scenes.append(sm)
-        return sm
 
     @property
     def has_work(self) -> bool:
         """Whether anything is left to send: a suggestion or a change."""
         return bool(self.suggestions) or any(sm.changes for sm in self.scenes)
+
+
+def _scene_for(scenes: list[SceneMarks], sid: str) -> SceneMarks:
+    """`sid`'s entry in `scenes`, added when there's none."""
+    for sm in scenes:
+        if sm.scene_id == sid:
+            return sm
+    sm = SceneMarks(sid)
+    scenes.append(sm)
+    return sm
+
+
+def with_suggestion_keeps(mapped: Mapped) -> list[SceneMarks]:
+    """`mapped.scenes`, each applied suggestion's wording added as a keep
+    (the reviser may not touch it). For after `apply_suggestions`."""
+    scenes = [SceneMarks(sm.scene_id, list(sm.marks)) for sm in mapped.scenes]
+    for s in mapped.suggestions:
+        if s.text.strip():
+            _scene_for(scenes, s.scene_id).marks.append(Mark(s.text.strip(), 'keep'))
+    return scenes
 
 
 def _is_marker(line: str) -> bool:
@@ -145,13 +170,14 @@ def map_comments(prs, read_scene, prefix: str = '', skip_ids=frozenset(),
                  since: str = '') -> Mapped:
     """The PR's line comments (`prs`, a `pr_marks.PrMarks`) as each scene's
     marks and suggestions. `read_scene(sid)` gives `scenes/<sid>.md` as it
-    is at the PR's head ('' when there's none); `prefix` is the project's
+    is at the PR's head (None when there's none); `prefix` is the project's
     folder in the repo ('' at its root, else ending in '/'). Comments whose
-    id is in `skip_ids`, or made before `since` (ISO 8601), are counted
-    and left out."""
+    id is in `skip_ids`, or made before `since` (UTC, `...Z`, as GitHub
+    gives times), are left out. Every comment left out is named."""
+    from storyforge.illustrations import MARKER_ANY_RE
     out = Mapped(general=list(prs.general))
-    texts: dict[str, list[str]] = {}
-    marks: list[tuple[str, int, int, Mark, int]] = []
+    texts: dict[str, list[str] | None] = {}
+    marks: list[tuple[str, int, int, Mark]] = []
     for c in prs.lines:
         where = f'{c.path}:{c.line}'
         sid = _scene_id(c.path, prefix)
@@ -160,18 +186,27 @@ def map_comments(prs, read_scene, prefix: str = '', skip_ids=frozenset(),
             continue
         if c.id and c.id in skip_ids:
             out.already_used += 1
+            out.left_out.append(f'{where}: an earlier run acted on it (comment {c.id})')
             continue
         if since and c.created_at and c.created_at < since:
             out.before_since += 1
+            out.left_out.append(f'{where}: made before --since ({c.created_at})')
             continue
         if c.outdated:
             out.left_out.append(f'{where}: outdated (its line has changed since the comment)')
             continue
         if sid not in texts:
-            texts[sid] = (read_scene(sid) or '').replace('\r\n', '\n').split('\n')
+            raw = read_scene(sid)
+            texts[sid] = None if raw is None else raw.replace('\r\n', '\n').split('\n')
         lines = texts[sid]
-        start = c.start_line if c.start_line and c.start_line <= c.line else c.line
-        if not lines or c.line > len(lines) or start < 1:
+        if lines is None:
+            out.left_out.append(f'{where}: there is no scene file {sid}.md here')
+            continue
+        if c.start_line and c.start_line > c.line:
+            out.left_out.append(f'{where}: its lines run backwards (from {c.start_line})')
+            continue
+        start = c.start_line or c.line
+        if c.line > len(lines) or start < 1:
             out.left_out.append(f'{where}: the scene file has no line {c.line}')
             continue
         if not c.line_text:
@@ -186,15 +221,25 @@ def map_comments(prs, read_scene, prefix: str = '', skip_ids=frozenset(),
                                 f'give each its own comment')
             continue
         if c.suggestions:
-            out.suggestions.append(Suggestion(sid, start, c.line, c.suggestions[0],
-                                              c.body.strip(), c.id))
+            text = c.suggestions[0]
+            span = '\n'.join(lines[start - 1:c.line])
+            lost = [m for m in MARKER_ANY_RE.findall(span) if f'[[illus:{m}]]' not in text]
+            if lost:
+                out.left_out.append(f'{where}: the suggestion would remove illustration '
+                                    f'marker(s) {", ".join(lost)}; keep them in it, or move '
+                                    f'them with `storyforge illustrate` first')
+                continue
+            out.suggestions.append(Suggestion(sid, start, c.line, text, c.body.strip(), c.id))
             continue
         paragraph = _prose(lines[start - 1:c.line])
         if not paragraph:
             out.left_out.append(f'{where}: on a blank line or an illustration marker')
             continue
         quote, note = split_body(c.body, paragraph)
-        marks.append((sid, start, c.line, Mark(quote, note or 'keep'), c.id))
+        if quote != paragraph and not _unique(quote, _prose(lines)):
+            note = f'{note} (on "{quote}", which occurs more than once in the scene)'.strip()
+            quote = paragraph
+        marks.append((sid, start, c.line, Mark(quote, note or 'keep', c.id)))
     # suggestions: the first on a line wins; the lines are then the author's
     taken: dict[str, list[tuple[int, int]]] = {}
     kept = []
@@ -207,31 +252,43 @@ def map_comments(prs, read_scene, prefix: str = '', skip_ids=frozenset(),
         spans.append((s.start, s.end))
         kept.append(s)
     out.suggestions = kept
-    for sid, a, b, mark, cid in sorted(marks, key=lambda t: (t[0], t[1])):
+    for sid, a, b, mark in sorted(marks, key=lambda t: (t[0], t[1])):
         if any(a <= y and x <= b for x, y in taken.get(sid, [])):
             out.left_out.append(f'{prefix}scenes/{sid}.md:{b}: its line has the author\'s '
                                 f'suggestion, applied as written')
             continue
-        out.scene(sid).marks.append(mark)
-        if not is_keep(mark) and cid:
-            out.change_ids.setdefault(sid, []).append(cid)
-    for s in out.suggestions:
-        if s.text.strip():
-            out.scene(s.scene_id).marks.append(Mark(s.text.strip(), 'keep'))
+        _scene_for(out.scenes, sid).marks.append(mark)
     return out
+
+
+def _unique(quote: str, prose: str) -> bool:
+    """Whether the reviser would find `quote` in one place only: an exact
+    match occurring once (its first match is where it lands)."""
+    n = prose.count(quote.strip())
+    return n == 1 or (n == 0 and _found(quote, prose))
 
 
 def apply_suggestions(text: str, suggestions: list[Suggestion]) -> str:
     """`text` (a scene file) with each suggestion's lines replaced by its
     wording, as written; an empty one cuts its lines (and the blank line
-    left doubled). The suggestions mustn't overlap (`map_comments`)."""
+    left doubled, or leading).
+
+    Raises:
+        ValueError: suggestions that overlap, or a line past the file's end.
+    """
     nl = '\r\n' if '\r\n' in text else '\n'
     lines = text.replace('\r\n', '\n').split('\n')
+    after = len(lines) + 1
     for s in sorted(suggestions, key=lambda s: s.start, reverse=True):
+        if s.end >= after or s.end > len(lines):
+            raise ValueError(f'a suggestion on lines {s.start}-{s.end} overlaps another or '
+                             f'runs past the file')
+        after = s.start
         new = s.text.split('\n') if s.text else []
         lines[s.start - 1:s.end] = new
         i = s.start - 1
-        if not new and 0 < i < len(lines) and not lines[i].strip() and not lines[i - 1].strip():
+        if not new and i < len(lines) and not lines[i].strip() and (
+                i == 0 or not lines[i - 1].strip()):
             del lines[i]
     return nl.join(lines)
 
@@ -292,7 +349,7 @@ def describe(mapped: Mapped, pr: int) -> list[str]:
             lines = f'line {s.end}' if s.start == s.end else f'lines {s.start}-{s.end}'
             what = f'"{s.text[:120]}"' if s.text else '(cut)'
             out.append(f'  suggestion on {lines}, applied as written: {what}'
-                       + (f' (its note: {s.note[:120]})' if s.note else ''))
+                       + (f' (its note, not sent: {s.note[:200]})' if s.note else ''))
         sm = next((m for m in mapped.scenes if m.scene_id == sid), None)
         for m in (sm.changes if sm else []):
             out.append(f'  change: "{m.quote[:120]}" -- {m.note[:200]}')
@@ -300,9 +357,10 @@ def describe(mapped: Mapped, pr: int) -> list[str]:
             out.append(f'  keep: "{m.quote[:120]}"')
     if mapped.already_used:
         out.append(f'{mapped.already_used} comment(s) an earlier run on PR #{pr} acted on, '
-                   f'left out')
+                   f'left out (named below)')
     if mapped.before_since:
-        out.append(f'{mapped.before_since} comment(s) made before --since, left out')
+        out.append(f'{mapped.before_since} comment(s) made before --since, left out (named '
+                   f'below)')
     for why in mapped.left_out:
         out.append(f'Left out: {why}')
     for g in mapped.general:
