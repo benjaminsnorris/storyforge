@@ -2,7 +2,9 @@
 
 The architecture prompt asks for "additional character entries", and the
 stage wrote the block over the whole file, so the spine's protagonist and
-antagonist entries were lost (found on the Gawain novel, G-016)."""
+antagonist entries were lost (found on the Gawain novel, G-016). Since #657
+only a graphic novel's stages write the essay; a prose book's write rows,
+and its essay is left as it is."""
 
 import os
 
@@ -27,13 +29,23 @@ ARCH_REPLY = (
 SPINE_BIBLE = '# Character Bible\n\n## Gawain: protagonist\n\nThe knight.\n'
 
 
-@pytest.fixture
-def novel(project_dir, monkeypatch, mock_git, mock_costs):
-    with open(os.path.join(project_dir, 'reference', 'character-bible.md'), 'w') as f:
+def _setup(proj, monkeypatch):
+    with open(os.path.join(proj, 'reference', 'character-bible.md'), 'w') as f:
         f.write(SPINE_BIBLE)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-    monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root', lambda: project_dir)
-    return project_dir
+    monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root', lambda: proj)
+    return proj
+
+
+@pytest.fixture
+def novel(project_dir_gn, monkeypatch, mock_git, mock_costs):
+    """A graphic novel: its stages still write the essay."""
+    return _setup(project_dir_gn, monkeypatch)
+
+
+@pytest.fixture
+def prose(project_dir, monkeypatch, mock_git, mock_costs):
+    return _setup(project_dir, monkeypatch)
 
 
 def _bible(proj):
@@ -62,3 +74,23 @@ def test_spine_writes_the_bible_whole(novel, mock_api):
     bible = _bible(novel)
     assert '## Arthur: supporting' in bible
     assert 'Gawain: protagonist' not in bible
+
+
+ROWS_REPLY = ARCH_REPLY + (
+    '```bible-facts-csv\n'
+    'type|subject|statement|known_by|category\n'
+    'trait|arthur|Is the king||role\n'
+    '```\n'
+)
+
+
+def test_a_prose_book_writes_rows_and_leaves_the_essay(prose, mock_api, capsys):
+    """#657: the essay is read-only reference until converted; the reply's
+    essay block is left out with a NOTE and its facts block becomes rows."""
+    from storyforge import ledger
+    _run(mock_api, 'architecture', ROWS_REPLY)
+    assert _bible(prose) == SPINE_BIBLE
+    out = capsys.readouterr()
+    assert 'left out the reply\'s character-bible block' in out.out + out.err
+    row = next(r for r in ledger.load(prose) if r['statement'] == 'Is the king')
+    assert (row['type'], row['origin'], row['introduced_by']) == ('trait', 'plan', 'bibles')
