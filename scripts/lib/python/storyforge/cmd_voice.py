@@ -591,6 +591,8 @@ def _sample(args) -> int:
                 samples = {args.take: samples[args.take]}
             counted = vs.count_marks(marks, samples)
             if not counted and not prs.general and not args.allow_unmarked:
+                for note in notes:   # what was left out, before the refusal
+                    log(f'NOTE: {note}')
                 log(f'ERROR: PR #{args.from_pr} has no marks of its author\'s on round '
                     f'{latest}' + (f' on sample {args.take}' if args.take else '')
                     + ' (comments in an unsubmitted review can\'t be read: submit it). '
@@ -604,6 +606,8 @@ def _sample(args) -> int:
             log(f'Round {latest}: {counted} mark(s) on {len(samples)} sample(s), '
                 f'{len(prs.general)} general reaction(s), from PR #{args.from_pr}')
         if not scene:
+            for note in notes:
+                log(f'NOTE: {note}')
             log('ERROR: name the scene (--scene)'
                 + (': the last round\'s key, which would name it, isn\'t usable here'
                    if args.from_pr else ''))
