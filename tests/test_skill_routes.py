@@ -55,7 +55,7 @@ def test_status_stages_named_in_docs():
 
     from storyforge.status import Stage
     docs = (PLUGIN_DIR / 'docs' / 'agent-reference.md').read_text(encoding='utf-8')
-    assert 'Stages: spine / architecture / voice /' in docs
+    assert 'Stages: voice / spine / architecture /' in docs
     assert {'voice', 'check'} <= set(get_args(Stage))
 
 

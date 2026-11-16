@@ -52,11 +52,12 @@ Before doing anything else, orient yourself:
      (L0–L6; the voice is not a ladder rung, it shows as the `voice`
      stage and blocker).
    - `voice` — the voice's own record (#656; `null` for a graphic novel):
-     `state` (`solid`/`thin`/`not_started`), `detail`, `when` (`first`, the
+     `state` (`solid`/`thin`/`not_started`/`unreadable`), `detail`, `when` (`first`, the
      default: it comes after the act shape, before the spine; `later`: the
      author put `voice_stage: later` in key-decisions.md to build the
      structure first) and `pov_gaps` (POVs of the map `book.md` says nothing
-     of). Show it between L2 and L3 (after L6 when `later`).
+     of; `[]` when the check after the map ran clean, `null` when it didn't
+     run). Show it between L2 and L3 (after L6 when `later`).
 
    Two stages route the same in every phase, elaboration or not:
    - **`next.stage` is `check`**: scenes wait on the gate. Have the author run

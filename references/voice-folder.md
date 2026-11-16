@@ -33,14 +33,18 @@ close, the tense) and, for the narrator, on a `narrator_pov:` line of
 follow it.
 
 After the map, a short second check: when `book.md` says nothing of a POV
-the map uses (by its id, name, an alias or first name; a narrator POV by
-"narrator"), `status` names the voice as next again, before the briefs, and
-`storyforge elaborate --stage voice` lists those POVs. Say how each one's
-scenes are told. Once the briefs are done, it is a NOTE.
+the map uses, `status` names the voice as next again, before any brief is
+written or scene drafted, and `storyforge elaborate --stage voice` lists
+those POVs (or says they're all named). A POV is named by its full name, id
+or a `characters.csv` alias, as written (case counts); a first name alone
+counts only as an alias. A narrator POV is named by "narrator", not "no
+narrator". Say how each one's scenes are told. After that point, and always
+with `voice_stage: later`, it is a NOTE.
 
 This order is a default you can skip: put `voice_stage: later` on a line of
 `reference/key-decisions.md` to build the structure first (`voice_stage:
-first`, or no line, is the default). The voice then comes before drafting.
+first`, or no line, is the default; bold, code marks and quotes around it are
+fine, and the last such line wins). The voice then comes before drafting.
 
 ## When the voice is ready
 
