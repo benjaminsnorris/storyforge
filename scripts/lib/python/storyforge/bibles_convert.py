@@ -35,7 +35,8 @@ from storyforge.bibles import ESSAYS, IMPORT_TYPES, REVEAL_CATEGORIES, VOICES_CO
 #: The task's model tier (`common.select_model`): reading an essay and
 #: sorting fact from interpretation, as evaluation does
 MODEL_TASK = 'evaluation'
-#: The reply's budget: an essay of a few thousand words is about 60-150 rows
+#: The reply's budget: room for a long essay's rows (the eval's three
+#: synthetic essays, about 1,500 words in all, gave 56)
 MAX_TOKENS = 12_000
 #: Where the conversion is written for review, under the project
 REVIEW_DIR = os.path.join('working', 'bibles')
