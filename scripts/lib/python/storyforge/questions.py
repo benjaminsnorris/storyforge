@@ -36,18 +36,20 @@ by asking about each one narrowly:
   all of a scene's questions in one call per asking, the second in reverse
   order, on the smallest model that holds the question set's floors
   (`resolve_model`: `STORYFORGE_QUESTIONS_MODEL`, else the extraction tier).
-  A finding is kept only when **both** answers are `yes` **and** the quote
-  verifies (`quotes.quote_in`): the intersection of narrow readings. A
-  split answer, or two yeses with no quote in the scene, is a note, never a
-  finding.
+  A finding needs two `yes` answers **and** a quote that verifies
+  (`quotes.quote_in`). The questions the two askings split on are asked a
+  third time, alone (`TIE_ASKING`), so two yeses of three are a finding
+  (2026-11-16: three of the question set's 17 cases were splits). Two
+  yeses with no quote in the scene are a note, never a finding.
 - **Disputes** (registry facts extraction says the scene changes,
   `checker.Dispute`) are asked the same way, each fact once (a disputed
   fact isn't also asked plainly), with the doubt leaning the other way:
-  two yeses with a verified quote are a contradiction, two noes clear it,
-  anything else leaves it unruled, which blocks the commit as the open
-  checker's does.
+  two yeses with a verified quote are a contradiction (a split broken by
+  the third asking included), two noes from the first two askings clear it
+  (a third no doesn't: clearing one lifts a block), anything else leaves it
+  unruled, which blocks the commit as the open checker's does.
 - **The brief's promises** (`promises_for`, `ask_promises`) are their own
-  call, asked twice: does the scene deliver each item of its brief? Two
+  call, asked twice, with no third asking (a split is unsure, as before): does the scene deliver each item of its brief? Two
   noes are a broken promise (advisory, unless a `must:` beat, #642), two
   yeses with a verified quote deliver it and fill a promised registry
   fact's blank quote (`kept`, as the open checker's), and anything else is a
@@ -86,9 +88,12 @@ ASKINGS = yes_no.ASKINGS
 #: in the notes; a dispute past it is unruled). The brief's promises are
 #: their own call with their own cap
 MAX_QUESTIONS = 30
-#: The asking that breaks a split (the first `ASKINGS` disagree): only the
-#: split questions, one more call
+#: The number of the asking that breaks a split (an asking's number names
+#: its log, `.a3`, and its prompt, "independent asking 3"): only the split
+#: questions, one more call. "Two yeses of three" holds only for two
+#: askings before it, so a change to `ASKINGS` must rethink the rule
 TIE_ASKING = ASKINGS + 1
+assert ASKINGS == 2, 'the tie-break is two yeses of three: rethink it for other ASKINGS'
 
 SCHEMA = {
     'type': 'object',
@@ -206,19 +211,23 @@ class QuestionResult:
     findings: list[Finding] = field(default_factory=list)
     #: what couldn't be asked or answered, and why (never silent)
     notes: list[str] = field(default_factory=list)
-    #: fact and dispute questions asked (each `ASKINGS` times)
+    #: fact and dispute questions asked (each `ASKINGS` times, a split one
+    #: a third time)
     asked: int = 0
-    #: questions the first two askings split on (a note), each asked a
-    #: third time (`TIE_ASKING`)
+    #: fact and dispute questions the first two askings split on (a note),
+    #: each asked a third time (`TIE_ASKING`)
     split: int = 0
-    #: of those, the ones the third asking found: two yeses of three
+    #: findings made by the third asking: split, then yes with a quote in
+    #: the scene (two yeses of three)
     tie_found: int = 0
+    #: brief promises the two askings split on (never asked again: unsure)
+    promise_split: int = 0
     #: questions answered yes twice with no quote in the scene (a note)
     misquoted: int = 0
-    #: disputes both askings said the scene doesn't contradict
+    #: disputes the first two askings both said the scene doesn't contradict
     cleared: list[Dispute] = field(default_factory=list)
-    #: disputes with no ruling (split, misquoted, past the cap, no fact to
-    #: ask about): they block
+    #: disputes with no ruling (split then no, misquoted, past the cap, no
+    #: fact to ask about): they block
     unruled: list[Dispute] = field(default_factory=list)
     #: the subjects found present (normalized ids), for the log
     present: list[str] = field(default_factory=list)
@@ -459,19 +468,20 @@ def max_tokens(count: int) -> int:
     return 600 + 160 * count
 
 
-def _finding(q: Question, quote: str, why: str, asked: str = '') -> Finding:
+def _finding(q: Question, quote: str, why: str, tie_break: bool = False) -> Finding:
+    asked = (f'asked {TIE_ASKING} times, split, then yes' if tie_break
+             else f'asked {ASKINGS} times')
     return Finding(kind='contradiction', code=q.code, scene_quote=quote,
                    established_scene=q.established_scene,
                    established_quote=q.established_quote, fact_id=q.fact_id,
-                   explanation=f'(question, {asked or f"asked {ASKINGS} times"}) The book '
-                               f'has: "{q.statement}". {why}')
+                   explanation=f'(question, {asked}) The book has: "{q.statement}". {why}')
 
 
-def _verified(answers: list[dict], n: int, prose: str) -> tuple[str, str]:
-    """The first asking's (quote, why) whose quote is in the scene; ('', '')
-    when none is."""
-    return next(((a[n]['quote'], a[n]['why']) for a in answers
-                 if a[n]['quote'] and quote_in(prose, a[n]['quote'])), ('', ''))
+def _verified(said: list[dict[str, str]], prose: str) -> tuple[str, str]:
+    """Of one question's answers (`said`, in asking order), the first
+    (quote, why) whose quote is in the scene; ('', '') when none is."""
+    return next(((a['quote'], a['why']) for a in said
+                 if a['quote'] and quote_in(prose, a['quote'])), ('', ''))
 
 
 def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model: str,
@@ -505,38 +515,41 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
                          what=f'{scene_id}: the questions', error=QuestionError,
                          fields=('quote', 'why'))
     result.asked = count
-    yes, split = yes_no.agreed(answers, count, 'yes')
+    agreed_yes, split = yes_no.agreed(answers, count, 'yes')
     no, _ = yes_no.agreed(answers, count, 'no')
-    # the askings that said yes, per question found (`_verified` reads them)
-    said_yes = {n: [{n: a[n]} for a in answers] for n in yes}
-    tied = [n for n in range(1, count + 1) if n not in yes and n not in no]
-    asked = {n: '' for n in yes}
+    # each yes question's answers that said yes, in asking order (`_verified`)
+    said_yes = {n: [a[n] for a in answers] for n in agreed_yes}
+    tied = [n for n in range(1, count + 1) if n not in agreed_yes and n not in no]
+    tie_yes: set[int] = set()
+    tie_no: list[int] = []
     if tied:
         # a split is broken by a third asking of just those questions: two
         # yeses of three are a finding. A dispute is still cleared only by
-        # the first two both saying no: a third no leaves it unruled
+        # the first two saying no: a third no leaves it unruled
         sub = [questions[n - 1] for n in tied]
+        names = ', '.join(q.fact_id for q in sub)
         third = yes_no.structured_call(
             build_prompt(scene_id, prose, sub, TIE_ASKING), model,
             yes_no.asking_log(log_file, TIE_ASKING), max_tokens(len(sub)), SCHEMA,
             f'questions {scene_id} (tie)',
             lambda t: yes_no.parse_answers(t, len(sub), ('quote', 'why')),
-            f'{scene_id}: the split questions', QuestionError)
-        for i, n in enumerate(tied, start=1):
+            f'{scene_id}: the third asking of the split questions ({names}), after the '
+            f'first two answered', QuestionError)
+        for i, n in enumerate(tied, start=1):   # `third` is numbered as `sub`
             if third[i]['answer'] == 'yes':
-                yes.append(n)
-                said_yes[n] = [{n: a[n]} for a in answers if a[n]['answer'] == 'yes'] \
-                    + [{n: third[i]}]
-                asked[n] = f'asked {TIE_ASKING} times, split, then yes'
-                result.tie_found += 1
+                tie_yes.add(n)
+                said_yes[n] = [a[n] for a in answers if a[n]['answer'] == 'yes'] + [third[i]]
+            else:
+                tie_no.append(n)
     misquoted = 0
-    for n in sorted(yes):
+    for n in sorted(said_yes):
         q = questions[n - 1]
-        quote, why = _verified(said_yes[n], n, prose)
+        quote, why = _verified(said_yes[n], prose)
         if not quote:
             misquoted += 1
             continue
-        result.findings.append(_finding(q, quote, why, asked[n]))
+        result.findings.append(_finding(q, quote, why, tie_break=n in tie_yes))
+        result.tie_found += n in tie_yes
     found = {f.fact_id for f in result.findings}
     for n, q in enumerate(questions, start=1):
         if not q.dispute or q.fact_id in found:
@@ -544,8 +557,16 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
         (result.cleared if n in no else result.unruled).append(q.dispute)
     result.split, result.misquoted = split, misquoted
     if split:
-        result.notes.append(f'{split} question(s) got split answers and were asked a third '
-                            f'time: {result.tie_found} found (two yeses of three)')
+        result.notes.append(
+            f'{split} question(s) got split answers and were asked a third time: '
+            f'{result.tie_found} found (two yeses of three, the quote in the scene): '
+            + ', '.join(questions[n - 1].fact_id for n in tied))
+    held = [questions[n - 1].fact_id for n in tie_no if questions[n - 1].dispute]
+    if held:
+        result.notes.append(
+            f'{len(held)} dispute(s) split, then no on the third asking, left unruled: two '
+            f'of three say the scene doesn\'t contradict it, but only the first two askings '
+            f'both saying no clear one: ' + ', '.join(held))
     if misquoted:
         result.notes.append(f'{misquoted} question(s) answered yes twice with no quote in '
                             f'the scene: not findings')
@@ -640,7 +661,7 @@ def ask_promises(scene_id: str, prose: str, promises: list[Promise], *, model: s
     unsure = []
     for n, p in enumerate(promises, start=1):
         if n in yes:
-            quote, _why = _verified(answers, n, prose)
+            quote, _why = _verified([a[n] for a in answers], prose)
             if not quote:
                 result.misquoted += 1
                 unsure.append((p, 'yes twice, with no quote in the scene'))
@@ -661,7 +682,7 @@ def ask_promises(scene_id: str, prose: str, promises: list[Promise], *, model: s
                 result.findings.append(_broken(p, why))
         else:
             unsure.append((p, 'split answers'))
-    result.split = split
+    result.promise_split = split
     for p, problem in unsure:
         if p.must:
             result.unverified.append(_broken(p, '', problem))
@@ -771,7 +792,7 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
             result.kept_unverified += got.kept_unverified
             result.plan_departures += got.plan_departures
             result.promises_asked = got.promises_asked
-            result.split += got.split
+            result.promise_split = got.promise_split
             result.misquoted += got.misquoted
             result.notes += got.notes
     result.notes.insert(0, f'{result.asked} question(s) about facts and disputes and '
