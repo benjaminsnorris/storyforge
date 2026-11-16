@@ -188,3 +188,19 @@ def test_refused_edits_are_recorded_against_their_flag(project_dir):
     with open(os.path.join(project_dir, rel)) as f:
         text = f.read()
     assert 'Edit refused: its edit reaches outside' in text
+
+
+def test_an_edit_across_a_sentence_line_break():
+    """T-3: a scene a sentence per line; the reviser's find has a space."""
+    prose = 'He waits by the door.\nShe comes slowly in.\nThen he goes.\n'
+    flag = vr.Flag('He waits by the door. She comes', '1', 'x')
+    assert vr.flag_spans(prose, flag.quote) == [(0, prose.index('in.') + 3)]
+    r = vr.apply_revision(prose, [flag], {'edits': [
+        {'flag': 1, 'find': 'door. She comes', 'replace': 'door. Nobody. She comes'}]})
+    assert r.prose == 'He waits by the door.\nNobody.\nShe comes slowly in.\nThen he goes.\n'
+    assert not r.outcomes[0].refused
+    # loosened, it still may not reach past the flagged sentences
+    r = vr.apply_revision(prose, [vr.Flag('She comes slowly in.', '1', 'x')], {'edits': [
+        {'flag': 1, 'find': 'in. Then he', 'replace': 'in. He'}]})
+    assert r.prose == prose and 'outside the flagged sentence' in r.outcomes[0].refused[0]
+

@@ -389,9 +389,11 @@ _PRESENT = {p for p, _ in _VERBS}
 _PAST = {p for _, p in _VERBS}
 #: speech, which is as people speak: straight, curly and single-curly
 #: quotes. A single-curly quote is closed by a ’ not followed by a letter,
-#: so "‘I don’t know’" is one quote. A quote runs across the lines of a
-#: paragraph (a scene has a sentence per line, `scene_layout`); one left
-#: open at a paragraph's end (common in fiction) stops at the blank line.
+#: so "‘I don’t know’" is one quote. A straight or single-curly quote runs
+#: across the lines of a paragraph (a scene has a sentence per line,
+#: `scene_layout`), and one left open at a paragraph's end (common in
+#: fiction) stops at the blank line; a curly double quote runs on to its
+#: closing mark, across paragraphs (a speech of several paragraphs).
 _SPEECH = re.compile(r'"(?:[^"\n]|\n(?![ \t]*\n))*"|“[^”]*”'
                      r'|‘(?:[^’\n]|’(?=\w)|\n(?![ \t]*\n))*’')
 _WORD = re.compile(r"[A-Za-z]+")

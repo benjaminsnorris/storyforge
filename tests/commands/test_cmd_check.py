@@ -529,8 +529,28 @@ class TestFix:
         with pytest.raises(gate.GateError):   # never across a blank line
             gate.apply_edits(prose, [{'find': 'comes. They', 'replace': 'x'}])
         assert gate.apply_edits(prose, []) == prose   # no edits: untouched
-        # text not laid out (a voice sample) keeps its layout
-        assert gate.apply_edits('One. Two. Three.', [{'find': 'Two.', 'replace': 'Too.'}]) == 'One. Too. Three.'
+        # only the paragraph edited is laid out; layout=False (a voice sample) keeps it
+        old = 'One. Two. Three.\n\nFour. Five.\n'
+        edit = [{'find': 'Two.', 'replace': 'Too.'}]
+        assert gate.apply_edits(old, edit) == 'One.\nToo.\nThree.\n\nFour. Five.\n'
+        assert gate.apply_edits(old, edit, layout=False) == 'One. Too. Three.\n\nFour. Five.\n'
+
+    def test_a_padded_find_matches_across_a_line_break(self):
+        """SF-7 / I5: a find copied from a paragraph-per-line reply keeps its
+        trailing space; the scene has a line break there."""
+        prose = 'He fell.\nThe dust rose.\n'
+        assert gate.apply_edits(prose, [{'find': 'He fell. ', 'replace': 'He fell hard. '}]) == \
+            'He fell hard.\nThe dust rose.\n'
+
+    def test_an_ambiguous_loose_match_is_said(self):
+        with pytest.raises(gate.GateError, match='0 times exactly, 2 ignoring line breaks'):
+            gate.apply_edits('A b.\nC d.\n\nA b.\nC d.\n', [{'find': 'A b. C d.', 'replace': 'x'}])
+
+    def test_an_undone_edit_is_found_across_the_layout(self):
+        """T-5: `_undone_edit` compares whitespace aside."""
+        r = gate.FixRound(problems=[], edits=[{'find': 'He waits. She', 'replace': 'She'}])
+        assert gate._undone_edit([r], 'She comes.\n', 'He waits.\nShe comes.\n') == 'He waits. She'
+        assert gate._undone_edit([r], 'She comes.\n', 'She comes.\n') is None
 
     @pytest.mark.parametrize('edits, why', [
         ([{'find': 'x', 'replace': 'y'}], 'occurs 0 times'),

@@ -2435,7 +2435,10 @@ class TestFirstFixNeverWorse(_FixRounds):
         out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again, partial],
                                  [(self.FIXED, self.EDITS)])
         assert out.result is partial and out.fixed and out.discarded == 0
-        assert out.prose == self.PROSE.replace(' for two days', '')
+        # the edited paragraph is laid out a sentence per line, the rest keep their bytes
+        from storyforge.scene_layout import sentence_lines
+        assert out.prose == sentence_lines(self.PROSE.replace(' for two days', ''),
+                                           old=self.PROSE)
         assert [r.edits for r in out.rounds] == [[self.EDITS[0]]]
         assert 'kept its 1 edit(s) that did not' in out.notes[0]
         assert 'took the case in her left hand' in out.notes[0]

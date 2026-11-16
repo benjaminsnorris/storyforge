@@ -2791,53 +2791,46 @@ def build_fix_prompt(scene_id: str, prose: str, problems: list[str],
 {prose}"""
 
 
-def _find_span(prose: str, find: str) -> tuple[int, int] | None:
-    """Where `find` occurs exactly once in `prose`, else None. A scene has a
-    sentence per line (`scene_layout`), so a `find` that runs across a
-    sentence's end may have a space where the scene has a line break (or the
-    other way): when the exact text isn't there, a run of whitespace in it
-    matches any run of whitespace within a paragraph (never a blank line)."""
-    count = prose.count(find)
-    if count == 1:
-        start = prose.index(find)
-        return start, start + len(find)
-    if count or not find.strip() or find.strip() != find:
-        return None
-    gap = r'(?:[ \t]*\r?\n[ \t]*|[ \t]+)'   # spaces, or one line break
-    hits = list(re.finditer(gap.join(re.escape(w) for w in find.split()), prose))
-    return (hits[0].start(), hits[0].end()) if len(hits) == 1 else None
-
-
-def apply_edits(prose: str, edits: list[dict]) -> str:
-    """`prose` with each edit's `find` (exactly once in `prose`) replaced.
-    Prose laid out a sentence per line (`scene_layout.sentence_lines`, as a
-    scene is by the time it's gated) stays so; other text (a voice sample)
-    keeps its own layout.
+def apply_edits(prose: str, edits: list[dict], layout: bool = True) -> str:
+    """`prose` with each edit's `find` replaced. A `find` is placed by
+    `scene_layout.find_span`: exactly once, or, when it isn't there exactly,
+    once with its whitespace loosened within a prose paragraph (a space for
+    a sentence's line break); spaces around it are matched only when the
+    replacement has them too. `layout`: the paragraphs the edits changed
+    are laid out a sentence per line (`scene_layout.sentence_lines`, with
+    the prose as `old`: the rest keep their bytes); False keeps the text's
+    own layout (a voice sample).
 
     Raises:
-        GateError: a `find` is missing, occurs more than once, or overlaps
-            another edit's; nothing is applied then.
+        GateError: a `find` can't be placed (missing, or in more than one
+            place, exactly or loosened), or overlaps another edit's;
+            nothing is applied then.
     """
-    from storyforge.scene_layout import sentence_lines
-    laid_out = sentence_lines(prose) == prose
+    from storyforge.scene_layout import find_span, sentence_lines
     spans = []
     for e in edits:
         find = (e.get('find') or '').replace('\r\n', '\n')
         if '\r\n' in prose:
             find = find.replace('\n', '\r\n')
-        span = _find_span(prose, find) if find else None
-        if span is None:
-            count = prose.count(find) if find else 0
-            raise GateError(f'a fix edit\'s text occurs {count} times in the scene: '
-                            f'{find[:80]!r}')
-        spans.append((*span, e.get('replace') or ''))
+        replace = e.get('replace') or ''
+        found = find_span(prose, find)
+        if found.span is None:
+            raise GateError(f'a fix edit\'s text occurs {found.problem(find)}')
+        if not found.exact:   # loosened: its own padding isn't in the scene
+            lead, trail = find[:len(find) - len(find.lstrip())], find[len(find.rstrip()):]
+            if lead and replace.startswith(lead):
+                replace = replace[len(lead):]
+            if trail and replace.endswith(trail):
+                replace = replace[:len(replace) - len(trail)]
+        spans.append((*found.span, replace))
     spans.sort()
     for (_, end, _), (start, _, _) in zip(spans, spans[1:]):
         if start < end:
             raise GateError('two fix edits overlap')
+    new = prose
     for start, end, replace in reversed(spans):
-        prose = prose[:start] + replace + prose[end:]
-    return sentence_lines(prose) if laid_out and edits else prose
+        new = new[:start] + replace + new[end:]
+    return sentence_lines(new, old=prose) if layout and edits else new
 
 
 class Fixer(Protocol):
@@ -2972,7 +2965,8 @@ def _blocking_count(result: GateResult) -> int:
 
 def _undone_edit(earlier: list[FixRound] | tuple, before: str, after: str) -> str | None:
     """The `find` of an earlier fix's edit that a later fix put back: words the
-    earlier edit removed, absent from `before`, present again in `after`."""
+    earlier edit removed, absent from `before`, present again in `after`
+    (whitespace aside: a scene is a sentence per line, a `find` may not be)."""
     def flat(text: str) -> str:   # a sentence per line: compare across line breaks
         return ' '.join(text.split())
     before, after = flat(before), flat(after)
