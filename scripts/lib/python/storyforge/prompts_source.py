@@ -290,7 +290,7 @@ def entry_section(project_dir: str) -> str:
     labels = ', '.join(label.lower() for _, label in adaptation.DECISIONS)
     return f"""### Entering at the scene map
 
-This adaptation has no spine or architecture of its own: its source gives them. Its logline, synopsis, spine and architecture are the source's events read through the author's interpretation decisions (Key Decisions, `## {adaptation.HEADING}`: {labels}). Build the scene map from those, not from an architecture:
+This adaptation has no spine or architecture of its own: its source gives them. Its logline, synopsis, act shape, spine and architecture are the source's events read through the author's interpretation decisions (Key Decisions, `## {adaptation.HEADING}`: {labels}). Build the scene map from those, not from an architecture:
 
 - Group the source events into scenes, each with its POV (whose eyes the decisions give) and the turn.
 - Leave `architecture_scene` empty: there are no architecture scenes.

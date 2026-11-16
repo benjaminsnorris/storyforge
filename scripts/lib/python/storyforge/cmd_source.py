@@ -159,7 +159,7 @@ def _status(project_dir: str, cfg) -> int:
     found = adaptation.entry(project_dir)
     if found is not None and found.enters_at_map:
         log('Ladder: enters at the scene map (the source and the interpretation decisions '
-            'give the logline, synopsis, spine and architecture)')
+            'give the logline, synopsis, act shape, spine and architecture)')
     elif found is not None:
         log('Ladder: the full ladder (the book has a spine or architecture of its own)')
     if found is not None and found.decisions is not None:

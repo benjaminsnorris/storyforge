@@ -3,6 +3,8 @@ map without the spine and architecture stages (plan D8)."""
 
 import os
 
+import pytest
+
 from storyforge import cmd_elaborate, cmd_source, source, status
 
 from source_helpers import YAML, _write, make_adaptation
@@ -87,7 +89,10 @@ def test_source_import_to_the_scene_map_without_spine_or_architecture(
         cmd_elaborate.main(['--stage', 'map'])
     except SystemExit as e:
         assert not e.code
+    assert len(mock_api.calls_for('invoke_to_file')) == 1      # the map stage alone
     prompt = mock_api.calls_for('invoke_to_file')[0]['prompt']
+    assert "expanding the source's events and the interpretation decisions into" in prompt
+    assert 'Expand the architecture' not in prompt
     assert '### Entering at the scene map' in prompt
     assert 'Leave `architecture_scene` empty' in prompt
     assert 'Telemachus, close third' in prompt          # the decisions (Key Decisions)
@@ -98,12 +103,25 @@ def test_source_import_to_the_scene_map_without_spine_or_architecture(
     v = status.build_status(proj)
     assert _states(v)['scene-map'] == 'solid', v['ladder']
     assert _states(v)['spine'] == _states(v)['architecture'] == 'given'
-    # #656's check after the map: book.md names neither POV yet
+    from storyforge.elaborate import _read_csv
+    rows = _read_csv(os.path.join(proj, 'reference', 'scenes.csv'))
+    assert rows and all(not r.get('architecture_scene') for r in rows)
+    # #656's check after the map, run for real: book.md names neither POV yet
     assert v['next']['action'] == 'Check the voice against the map'
     assert v['then']['stage'] == 'briefs'
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as done:
+        cmd_elaborate.main(['--stage', 'voice'])
+    assert done.value.code == 0
+    out = capsys.readouterr().out
+    assert 'says nothing of 2 POV(s)' in out
     _write(proj, {'reference/voice/book.md': (
         '# The voice\n\nShort, plain sentences. The narrator holds the gods\' council, '
         'from far off; Telemachus\'s scenes are close third, past tense.\n')})
+    with pytest.raises(SystemExit) as done:
+        cmd_elaborate.main(['--stage', 'voice'])
+    assert done.value.code == 0
+    assert 'names every POV of the map' in capsys.readouterr().out
     v = status.build_status(proj)
     assert v['phase'] == 'briefs'
     assert not [b for b in v['blockers'] if b['source'] in ('source', 'coverage',
@@ -114,21 +132,56 @@ def test_source_import_to_the_scene_map_without_spine_or_architecture(
     assert 'phase: briefs' in open(os.path.join(proj, 'storyforge.yaml')).read()
 
 
-def test_the_map_stage_says_which_decisions_it_goes_without(
-        tmp_path, monkeypatch, mock_api, mock_git, mock_costs, capsys):
+def _setup(tmp_path, monkeypatch, decisions=None):
     proj = make_adaptation(tmp_path)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     for mod in (cmd_elaborate, cmd_source):
         monkeypatch.setattr(mod, 'detect_project_root', lambda: proj)
     assert cmd_source.main(['import', '--no-commit']) == 0
+    if decisions:
+        with open(os.path.join(proj, 'reference', 'key-decisions.md'), 'a',
+                  encoding='utf-8') as f:
+            f.write(decisions)
+    return proj
+
+
+def _map(mock_api):
     mock_api.set_response(REPLY)
     try:
         cmd_elaborate.main(['--stage', 'map'])
+    except SystemExit as e:
+        return e.code or 0
+    return 0
+
+
+@pytest.mark.parametrize('decisions, why', [
+    (None, 'has no `## Interpretation decisions` section'),
+    (DECISIONS.replace('- **Where it ends:** the assembly breaks up.\n', ''),
+     'missing Where it ends'),
+    (DECISIONS.replace('faithful.', 'free.'), "source.mode is faithful"),
+])
+def test_the_map_stage_refuses_without_the_decisions(
+        tmp_path, monkeypatch, mock_api, mock_git, mock_costs, capsys, decisions, why):
+    """SF-1/CR-4: it warned and made the paid call; now it stops first."""
+    proj = _setup(tmp_path, monkeypatch, decisions)
+    assert _map(mock_api) == 1
+    out = capsys.readouterr().out
+    assert 'ERROR: the map of this adaptation is built from its source' in out
+    assert why in out and 'Nothing was spent' in out
+    assert not mock_api.calls_for('invoke_to_file')
+    assert not os.path.exists(source.source_map_path(proj))
+
+
+def test_a_dry_run_says_the_map_would_stop(tmp_path, monkeypatch, mock_api, mock_git,
+                                           mock_costs, capsys):
+    _setup(tmp_path, monkeypatch)
+    try:
+        cmd_elaborate.main(['--stage', 'map', '--dry-run'])
     except SystemExit:
         pass
-    out = capsys.readouterr().out
-    assert ('WARNING: the map is built from the source and the interpretation decisions, '
-            'and reference/key-decisions.md has no `## Interpretation decisions`') in out
+    assert 'WARNING: the map is built from the source and the interpretation decisions, ' \
+        'and the run would stop here' in capsys.readouterr().out
+    assert not mock_api.calls_for('invoke_to_file')
 
 
 def test_the_spine_stage_on_an_adaptation_says_it_takes_the_full_ladder(

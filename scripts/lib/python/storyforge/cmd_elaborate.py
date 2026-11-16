@@ -1945,23 +1945,36 @@ def _run_voice_stage(project_dir: str, dry_run: bool) -> int:
     return 0
 
 
-def _note_adaptation_entry(project_dir: str, stage: str) -> None:
+def _adaptation_entry_check(project_dir: str, stage: str, dry_run: bool) -> bool:
     """#658 (plan D8): an adaptation enters the ladder at the scene map. The
     spine and architecture stages are still there for one that strays far
-    from its source (running one puts the book on the full ladder), and
-    the map stage says which interpretation decisions it is built without."""
+    from its source (running one puts the book on the full ladder: a NOTE).
+    The map of a book entering at the map is built from the source and the
+    interpretation decisions, so without them (or with a Mode that
+    disagrees with storyforge.yaml) it is refused, an ERROR, before any
+    spend (#696's SF-1: a map built without them would invent the POVs, the
+    cuts and the ending the author decides); a dry run only says so.
+    Returns False when the stage must stop."""
     from storyforge import adaptation
     found = adaptation.entry(project_dir)
     if found is None or not found.enters_at_map:
-        return
+        return True
     if stage in ('spine', 'architecture'):
         log(f'NOTE: this adaptation\'s source gives its spine and architecture (it enters '
             f'the ladder at the scene map). Running the {stage} stage builds them yourself, '
             f'as an original does, and from then on status climbs the full ladder.')
-    elif stage == 'map' and found.decisions is not None and not found.decisions.ok:
-        log(f'WARNING: the map is built from the source and the interpretation decisions, '
-            f'and {found.decisions.summary()}: the map prompt goes without them '
-            f'(`storyforge source status` lists them)')
+    elif stage == 'map' and not found.ready:
+        why = '; '.join(found.problems)
+        if dry_run:
+            log(f'WARNING: the map is built from the source and the interpretation decisions, '
+                f'and the run would stop here: {why} (`storyforge source status` lists them)')
+            return True
+        log(f'ERROR: the map of this adaptation is built from its source and the '
+            f'interpretation decisions in reference/key-decisions.md, and they aren\'t ready: '
+            f'{why}. Record them (`storyforge source status` lists them), then run the map '
+            f'stage. Nothing was spent.')
+        return False
+    return True
 
 
 def _voice_check_after_the_map(project_dir: str) -> int:
@@ -2073,8 +2086,8 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     except source_mod.SourceError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
-    if source_cfg is not None:
-        _note_adaptation_entry(project_dir, stage)
+    if source_cfg is not None and not _adaptation_entry_check(project_dir, stage, dry_run):
+        sys.exit(1)
     source_map_problem = ''
 
     # Build shared context once for all stage API calls (prompt caching)

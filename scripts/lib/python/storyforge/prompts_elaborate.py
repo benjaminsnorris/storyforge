@@ -422,8 +422,12 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
     registries_section += f'\n{src}\n' if src else ''
     entering = entry_section(project_dir)   # #658: an adaptation entering at the map
     registries_section += f'\n{entering}\n' if entering else ''
+    # the map's basis (#696's comment 4): an adaptation entering at the map
+    # has no architecture to expand
+    basis = ("the source's events and the interpretation decisions" if entering
+             else 'the architecture')
 
-    return f"""You are mapping a novel — expanding the architecture into a complete scene-by-scene plan with locations, timeline, characters, and thread tracking.
+    return f"""You are mapping a novel — expanding {basis} into a complete scene-by-scene plan with locations, timeline, characters, and thread tracking.
 
 {context}
 
@@ -441,7 +445,7 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
 {refs_section}{registries_section}
 ## Instructions
 
-Expand the architecture into {lo}-{hi} scenes (when Key Decisions records a scene count for the book, that count wins over this estimate). Prefer **more, shorter scenes** (1500-2000 words each) over fewer, longer ones. This is important for drafting quality — Claude follows brief constraints more reliably in focused scenes under 2500 words, and scoring/revision are more precise on smaller units.
+Expand {basis} into {lo}-{hi} scenes (when Key Decisions records a scene count for the book, that count wins over this estimate). Prefer **more, shorter scenes** (1500-2000 words each) over fewer, longer ones. This is important for drafting quality — Claude follows brief constraints more reliably in focused scenes under 2500 words, and scoring/revision are more precise on smaller units.
 
 For each scene:
 
