@@ -408,6 +408,42 @@ def test_a_drafted_scene_between_two_to_draft_reaches_the_writer(project_dir, lo
     assert all(a != b for a, b in zip(roles, roles[1:]))
 
 
+def _set_status(project_dir, sid, status):
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().split('\n')
+    header = lines[0].split('|')
+    col = header.index('status')
+    for n, line in enumerate(lines):
+        cells = line.split('|')
+        if cells[0] == sid:
+            cells[col] = status
+            lines[n] = '|'.join(cells)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+
+def test_a_merged_scene_with_no_file_between_two_to_draft_is_passed_over(
+        project_dir, loop, requests, capsys):
+    requests.replies = _route
+    _set_status(project_dir, 'act1-sc02', 'merged')
+    os.remove(os.path.join(project_dir, 'scenes', 'act1-sc02.md'))
+    out = loop['run'](['act1-sc01', 'act2-sc01'])
+    assert out.drafted == 2 and out.failed == []
+    said = capsys.readouterr().out.splitlines()
+    assert not [line for line in said if 'writes past' in line and 'act1-sc02' in line]
+
+
+def test_an_undrafted_scene_with_no_file_between_two_to_draft_is_a_gap(
+        project_dir, loop, requests, capsys):
+    requests.replies = _route
+    os.remove(os.path.join(project_dir, 'scenes', 'act1-sc02.md'))
+    out = loop['run'](['act1-sc01', 'act2-sc01'])
+    assert out.drafted == 2 and out.failed == []
+    said = capsys.readouterr().out
+    assert 'WARNING: the session writes past' in said and 'act1-sc02' in said
+
+
 def test_a_scene_that_fails_verification_stops_the_session(project_dir, loop, requests,
                                                            monkeypatch):
     from storyforge import cmd_write
