@@ -77,8 +77,7 @@ Before doing anything else, orient yourself:
      --stage voice` only sets up the folder's files. Draft after.
 3. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
 4. **Scan for key artifacts** — check for the existence of:
-   - `reference/character-bible.md`
-   - `reference/world-bible.md`
+   - `reference/character-bible.md` and `reference/world-bible.md`, or, once converted (#657), their rows: `./storyforge bibles` says which; the facts are plan rows in `reference/commitments.csv`, with `reference/character-voices.csv` and `reference/bible-notes.md`
    - `reference/story-summary.md` (logline / synopsis / act-shape / theme — canonical prose tier)
    - `reference/spine.csv`, `reference/architecture.csv` (structural-anchor tier — each has a `summary` column)
    - `reference/outline.md` (read-only expanding outline rendered from the three summary columns)
@@ -229,7 +228,7 @@ Use `--dry-run` to preview without invoking the LLM.
 ```bash
 ./storyforge score --bible-consistency
 ```
-LLM check of every drafted scene against `character-bible.md`, `world-bible.md`, `voice/book.md`. Bibles are cached (~$20-25/run). Findings get stable `finding_id`s so overrides via `working/scoring-overrides.csv` persist.
+LLM check of every drafted scene against the character and world bibles (the essays, or their rows once converted, or both) and `voice/book.md`. Bibles are cached (~$20-25/run). Findings get stable `finding_id`s so overrides via `working/scoring-overrides.csv` persist.
 
 **"Clean up" / "Health check" / "Check my project" / "Fix CSV issues" / "Project cleanup":**
 Invoke the `cleanup` skill. This runs the project health report (CSV schema validation, scene artifact detection, structural checks), then works through action items — fixing what it can directly and delegating to other skills/scripts as needed.
@@ -360,7 +359,7 @@ Determine the single highest-value next action based on project state. Work thro
 
 **7. Ready to publish:** If manuscript is polished → "Publish" → invoke `publish`.
 
-**8. Artifact gaps:** Missing character bible, world bible, or voice (`reference/voice/`) → "Deepen your foundations" → invoke `elaborate` with specific direction.
+**8. Artifact gaps:** No character or world facts (neither an essay nor bible rows: `./storyforge bibles`), or no voice (`reference/voice/`) → "Deepen your foundations" → invoke `elaborate` with specific direction.
 
 On approval, execute immediately by invoking the appropriate skill.
 

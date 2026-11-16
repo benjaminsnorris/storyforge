@@ -22,9 +22,9 @@ Before doing anything else, orient yourself:
 1. **Read `storyforge.yaml`** — title, genre, subgenre, logline, phase, coaching level, target word count.
 2. **Read key reference documents** (all that exist):
    - `reference/story-architecture.md` — themes, structure, central conflict
-   - `reference/character-bible.md` — protagonist and cast
+   - `reference/character-bible.md` (or, once converted, the character rows: `./storyforge bibles`; #657) — protagonist and cast
    - `reference/voice/book.md` and `reference/voice/anchors/` — tone, mood, register (a graphic novel's is `reference/voice-guide.md`)
-   - `reference/world-bible.md` — setting, atmosphere
+   - `reference/world-bible.md` (or its rows once converted) — setting, atmosphere
    - `reference/key-decisions.md` — settled creative decisions
    - `reference/scenes.csv` — scene count, structure
 3. **Read evaluation synthesis** if it exists (`working/evaluations/synthesis.md` or most recent `findings.yaml`) — this tells you the manuscript's strengths, which are marketing gold.

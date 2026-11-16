@@ -13,7 +13,7 @@ You are helping an author convert their Storyforge project between novel and gra
 - Resets all scene statuses to `mapped` (prose or panel scripts are archived, not deleted)
 - Clears the medium-specific numeric columns from `scenes.csv`
 - For GN→novel: clears GN-specific brief columns (`page_layout`, `panel_breakdown`, etc.)
-- For novel→GN: appends visual migration notes to `character-bible.md` and `world-bible.md`
+- For novel→GN: appends visual migration notes to `character-bible.md` and `world-bible.md` (a graphic novel's script reads its essays' Visual sections; a prose book that retired its essays to `reference/archive/` (#657) gets no notes appended until the essays are restored there, so move them back first)
 
 **What it preserves:**
 - `reference/scene-intent.csv` (medium-agnostic)
