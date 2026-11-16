@@ -1,7 +1,76 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-15 (#654's test 6, `voice-austen`); before that 2026-11-14 (the voice folder, #682, long writing sessions, #655, and `voice sample`, #654); before that 2026-11-10 (the blog voice set aside, voice samples started, #680); before that 2026-11-09 (the blocking-set baseline, the gate set #677, Ben's voice repo); before that 2026-11-08, at v1.162.0 (the gate's blocking read, #626); before that v1.161.0 (sync hook for subfolder projects #612, E8's mislabelled cases #614, register check #615; PR #625); before that v1.157.0 (reading level and key decisions in revision prompts, #616); before that 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalness` forecast before they spend, #510; one cost budget per run and `check --pending --keep-going`, #503; see Latest; carried states and the gate's spend at v1.130.2, #491; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling became 3 (#488); 4 at #513, and 1 since #614's audit (v1.161.0)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-16 (the Wrath pilot's first session and what it found; bibles as rows, #657/#702; the adaptation ladder, #658; v1.185.0); before that 2026-11-15 (#654's test 6, `voice-austen`); before that 2026-11-14 (the voice folder, #682, long writing sessions, #655, and `voice sample`, #654); before that 2026-11-10 (the blog voice set aside, voice samples started, #680); before that 2026-11-09 (the blocking-set baseline, the gate set #677, Ben's voice repo); before that 2026-11-08, at v1.162.0 (the gate's blocking read, #626); before that v1.161.0 (sync hook for subfolder projects #612, E8's mislabelled cases #614, register check #615; PR #625); before that v1.157.0 (reading level and key decisions in revision prompts, #616); before that 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalness` forecast before they spend, #510; one cost budget per run and `check --pending --keep-going`, #503; see Latest; carried states and the gate's spend at v1.130.2, #491; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling became 3 (#488); 4 at #513, and 1 since #614's audit (v1.161.0)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
+
+## Latest: the Wrath pilot's first session, bibles as rows, the adaptation ladder (2026-11-16, v1.185.0)
+
+**The pilot has started.** *Wrath Like Smoke*'s first `write --session`
+drafted three scenes and stopped for a read (2026-11-15; iliad-adult PR
+#20). What it found is fixed:
+
+- **#694:** the session crashed on a `merged` scene with no file between
+  the scenes it drafts.
+- **#695:** the session plan listed `must:` key_dialogue only among the
+  author's notes; `must:` lines are now always under "Must be said".
+- **#699 (PR #703):** the run left its bookkeeping uncommitted (the cost
+  ledger, the pipeline row, the timeline cues, scenes-review.md). `write`
+  now commits what it changed at the end of every run, never the author's
+  own edits (`git.changed_files`, taken before the run).
+- **#700 (PR #703):** the writer wrote `''` for an empty hand, so its stage
+  note was rejected and not carried. The instructions name `"empty"`; a
+  blank is still never guessed to be empty.
+- **#704:** drafted and revised scenes are laid out a sentence per line
+  (`scene_layout`), so a PR line comment marks one sentence. The three
+  scenes were reflowed by hand.
+
+**Reading the marks.** `revise --marks-from-pr N` (#691, PR #692; #693
+fixed a reply in a thread being read as a mark) reads the author's line
+comments and suggestions on the session's PR and sends them to the voice
+reviser, as `--marks FILE` does.
+
+**Bibles as facts (#657, PR #697; follow-ups #702, PR #705).** A prose
+book's bibles are ledger rows (`trait`, `relationship`, `world`, secrets as
+`knowledge`), `reference/character-voices.csv` and
+`reference/bible-notes.md`, not essays; `check --questions` asks about
+them. The two-writers gap list is in `validate`, the stage reviews and
+`status` (`plan_gaps`, advisory). A new book never has essays (init copies
+none for prose; graphic novels keep them); an existing book converts each
+one (`bibles convert`, paid, written to `working/bibles/` for review, its
+voice lines only the essay's quotations and their speakers checked against
+the essay; then `bibles import --essay`, `bibles retire`); an extracted
+book gets rows from phase 5. Voice lines come from the anchors (`bibles
+voices`), never a model.
+
+**An adaptation enters at the scene map (#658, PR #696; #701).** A
+`source:` book with no spine or architecture of its own has logline through
+architecture `given` once the source is imported and the six
+interpretation decisions are recorded in key-decisions.md; `status` routes
+to `interpretation` until then. Source fidelity and the drafting prompt
+treat staging (a speech dramatised, beats moved within a scene) as the
+writer's, as long as no outcome, cause or knowledge changes; `must:` lines
+stay word for word.
+
+**Also:** series character sheets (#686), sent only with the scenes their
+character is in, for the Homer series.
+
+**Next:**
+1. Ben reads and marks the three drafted scenes in the session's PR, then
+   `revise --marks-from-pr N`, then runs the session again to go on through
+   Act 1.
+2. #659 (blind pairwise reads, pipeline prose against session prose) once
+   there's enough session prose to pair.
+3. Judge the stage sheet and the question layer again on session prose
+   (the plan says so once sessions exist). #677's gate set is built and
+   waits to be recorded (about $180 for three runs of each suite, Ben's
+   approval) until the question layer is a candidate to replace the open
+   checker: on #649's numbers it caught 8 of 17 against the open checker's
+   about 12.
+4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
+5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
+   (gold notes, judging, a re-score) is all that's left. Since then 5d and
+   5e write bible rows and 5f writes `reference/voice/`, so the judging
+   should target those, not essays.
 
 ## Latest: the voice folder, long writing sessions and voice samples (2026-11-14)
 
