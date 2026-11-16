@@ -24,7 +24,12 @@ one call at the command's default model) and scored:
   of speech kept as a line; `invented_lines`: lines the reply gave that the
   essay doesn't quote (left out by code: counted, never kept);
 - `note_recall`: what resists rows, found in the notes;
-- `rows`, `left_out`: counts, reported, not gated.
+- `rows`, `left_out`: counts, reported, not gated;
+- `speaker_unconfirmed`, `speaker_contradicted`: voice lines whose speaker
+  the essay doesn't confirm (held back for the author) or whose speech tag
+  names another character (left out), by code (`bibles_convert.attribute`);
+  reported, not gated. `voice_recall` counts a held-back line as kept: it
+  measures what the model found, and the speaker check is code's.
 
 Gates hold each recorded value exactly (`FLOORS`, #488); the trust bar the
 command is judged against is in the notes. Cheap and not frozen: a prompt
@@ -149,7 +154,7 @@ def score(labels: dict, conversions: dict) -> dict:
     from storyforge.bibles_convert import NOT_QUOTED, _normal
     found = typed = placed = scored = secrets = secrets_kept = opens = opens_kept = 0
     total = leaks = note_leaks = lines = lines_kept = described = invented = 0
-    speech = notes = notes_found = 0
+    speech = notes = notes_found = unconfirmed = contradicted = 0
     missed, wrong, leaked = [], [], []
     for name, essay in labels['essays'].items():
         conv = conversions[name]
@@ -192,13 +197,17 @@ def score(labels: dict, conversions: dict) -> dict:
             leaked += [trap['id']] * len(hits) + [f'{trap["id"]} (a note)'] * len(in_notes)
         speech += sum(any(d in text.lower() for d in essay['not_voices'])
                       for text in [r['statement'] for r in conv.facts] + conv.notes)
-        kept = {(who, _normal(line)) for who, line in conv.voices}
+        # the model's recall: a line held back for its speaker to be
+        # checked (`attribute`) was still found and kept as written
+        kept = {(who, _normal(line)) for who, line in conv.voices + conv.unconfirmed}
         for v in essay['voices']:
             lines += 1
             lines_kept += (v['character'], _normal(v['line'])) in kept
         described += sum(any(d in line.lower() for d in essay['not_voices'])
-                         for _, line in conv.voices)
+                         for _, line in conv.voices + conv.unconfirmed)
         invented += sum(NOT_QUOTED in x for x in conv.left_out)
+        unconfirmed += len(conv.unconfirmed)
+        contradicted += sum('speech tag gives it to' in x for x in conv.left_out)
         for n in essay['notes']:
             notes += 1
             notes_found += any(any(k in note.lower() for k in n['any']) for note in conv.notes)
@@ -213,6 +222,7 @@ def score(labels: dict, conversions: dict) -> dict:
         'facts_labelled': total, 'secrets_labelled': secrets, 'open_labelled': opens,
         'rows': sum(len(c.facts) for c in conversions.values()),
         'left_out': sum(len(c.left_out) for c in conversions.values()),
+        'speaker_unconfirmed': unconfirmed, 'speaker_contradicted': contradicted,
     }
     return {'metrics': metrics, 'missed': missed, 'wrong': wrong, 'leaked': leaked}
 

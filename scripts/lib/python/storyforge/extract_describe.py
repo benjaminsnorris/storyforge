@@ -1537,7 +1537,8 @@ def _sample_line(inner: str) -> str:
     return head.rstrip() + ' …'
 
 
-def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list[str]:
+def _speech(text: str, names: Sequence[str], others: Sequence[str] = (),
+            min_words: int = 4) -> list[str]:
     """Quoted speech in `text` attributed to one of `names`:
 
     - a speech tag against the quote: "said NAME" or "NAME said"
@@ -1554,9 +1555,11 @@ def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list
       turn back from war Achilles awed ...:" the last phrase has no speech
       verb, so Achilles, the one spoken to, gets nothing.
 
-    Names follow `_name_pattern` (never a possessive). Lines under four
-    words are left out; one over _MAX_LINE_CHARS is cut to its opening
-    (`_sample_line`)."""
+    Names follow `_name_pattern` (never a possessive). Lines under
+    `min_words` words (four: a voice sample wants a sentence) are left out;
+    one over _MAX_LINE_CHARS is cut to its opening (`_sample_line`).
+    `bibles_convert.quotations` passes 1: it checks who says a line, "Bah!"
+    included."""
     from .prose_analysis import dialogue_spans
     names = [n for n in names if n.strip()]
     others = [n for n in others if n.strip()]
@@ -1590,7 +1593,7 @@ def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list
     spans = dialogue_spans(text)
     out = []
     for i, (start, end, inner) in enumerate(spans):
-        if len(inner.split()) < 4:
+        if len(inner.split()) < min_words:
             continue
         prev_end = spans[i - 1][1] if i else 0
         before = text[max(start - _ATTRIBUTION_CHARS, prev_end):start]

@@ -308,9 +308,16 @@ def _convert(project_dir: str, args) -> int:
         log(f'  left out: {item}')
     for kind, path in written.items():
         log(f'  {kind}: {os.path.relpath(path, project_dir)}')
-    if not (conv.facts or conv.voices or conv.notes):
+    if conv.unconfirmed:
+        rel = os.path.relpath(written['unconfirmed'], project_dir)
+        log(f'NOTE: {len(conv.unconfirmed)} voice line(s) whose speaker the essay doesn\'t '
+            f'confirm (no speech tag or section names them) are held back in {rel}, not '
+            f'imported: check each speaker, then `storyforge bibles import --voices {rel}`')
+    if not (conv.facts or conv.voices or conv.notes or conv.unconfirmed):
         log(f'WARNING: the reply gave nothing to import from reference/{args.name}')
         return 1
+    if not (conv.facts or conv.voices or conv.notes):
+        return 0   # only lines held back to check: nothing to import yet
     paths = bc.review_paths(project_dir, args.name)
     if not args.do_import:
         rel = {k: os.path.relpath(v, project_dir) for k, v in paths.items()}

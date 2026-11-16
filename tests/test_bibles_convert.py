@@ -109,7 +109,7 @@ class TestParse:
     def test_a_quoted_line_is_kept(self, project_dir):
         # curly quotes and a line break in the essay; straight in the reply
         with open(_ref(project_dir, 'character-bible.md'), 'a', encoding='utf-8') as f:
-            f.write('\nShe says: \u201cThe map isn\u2019t\nwrong. The land is.\u201d\n')
+            f.write('\nDorren said, \u201cThe map isn\u2019t\nwrong. The land is.\u201d\n')
         line = "The map isn't wrong. The land is."
         conv = self._parse(project_dir, {'facts': [], 'notes': [],
                                          'voices': [{'character': 'Dorren', 'line': line}]})
@@ -340,7 +340,8 @@ class TestSuite:
 # ---------------------------------------------------------------------------
 
 ESSAY_EXTRA = ('\nDorren walks the office at dawn and counts the drawers twice.\n'
-               'He says: "Bah!" and later, “The map isn’t wrong. The land is.”\n')
+               'Dorren said: "Bah!" and later, Dorren said, “The map isn’t wrong. '
+               'The land is.”\n')
 
 
 class TestReviewFixes:
@@ -461,3 +462,74 @@ class TestReviewFixes:
         labels['essays']['world-bible.md']['facts'][1]['subject'] = []
         problems = mod['validate'](labels)
         assert len([p for p in problems if 'subject must be null' in p]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Whose line it is (#705: the speaker was the model's reading, unchecked)
+# ---------------------------------------------------------------------------
+
+class TestSpeakers:
+    def _parse(self, project_dir, extra, voices):
+        with open(_ref(project_dir, 'character-bible.md'), 'a', encoding='utf-8') as f:
+            f.write(extra)
+        essay = bc.essay_text(project_dir, 'character-bible.md')
+        return bc.parse_reply(json.dumps({'facts': [], 'notes': [], 'voices': voices}),
+                              'character-bible.md', essay,
+                              bc._registry(project_dir, 'characters.csv'),
+                              bc._registry(project_dir, 'locations.csv'))
+
+    def test_a_line_the_essays_tag_gives_to_someone_else_is_left_out(self, project_dir):
+        conv = self._parse(project_dir, '\n"Bah!" said Tessa.\n',
+                           [{'character': 'Dorren', 'line': 'Bah!'}])
+        assert conv.voices == [] and conv.unconfirmed == []
+        assert any('the essay\'s speech tag gives it to tessa-merrin' in x
+                   for x in conv.left_out)
+
+    def test_a_short_tagged_line_is_confirmed(self, project_dir):
+        conv = self._parse(project_dir, '\n"Bah!" said Dorren.\n',
+                           [{'character': 'Dorren', 'line': 'Bah!'}])
+        assert conv.voices == [('dorren-hayle', 'Bah!')]
+
+    def test_a_line_in_its_speakers_section_is_confirmed(self, project_dir):
+        """The fixture's essay ends in Tessa Merrin's section."""
+        conv = self._parse(project_dir, '\nHer refrain: "Paper is not the land."\n',
+                           [{'character': 'Tessa', 'line': 'Paper is not the land.'}])
+        assert conv.voices == [('tessa-merrin', 'Paper is not the land.')]
+
+    def test_a_line_the_essay_doesnt_attribute_is_held_back(self, project_dir):
+        """In Tessa's section, untagged, given to Dorren: maybe spoken to
+        her, maybe the model's misreading. The author checks it."""
+        conv = self._parse(project_dir, '\nShe hears it often: "Paper is not the land."\n',
+                           [{'character': 'Dorren', 'line': 'Paper is not the land.'}])
+        assert conv.voices == []
+        assert conv.unconfirmed == [('dorren-hayle', 'Paper is not the land.')]
+        assert conv.left_out == []
+
+    def test_held_back_lines_are_never_imported(self, project_dir, monkeypatch, fake_api,
+                                                mock_git, capsys):
+        from storyforge import cmd_bibles
+        with open(_ref(project_dir, 'character-bible.md'), 'a', encoding='utf-8') as f:
+            f.write('\n"Bah!" said Dorren. She hears it often: "Paper is not the land."\n')
+        fake_api({'facts': [], 'notes': [],
+                  'voices': [{'character': 'Dorren', 'line': 'Bah!'},
+                             {'character': 'Dorren', 'line': 'Paper is not the land.'}]})
+        monkeypatch.chdir(project_dir)
+        cmd_bibles.main(['convert', 'character-bible.md', '--import', '--no-commit'])
+        assert bibles.read_voices(project_dir)[0] == {'dorren-hayle': ['Bah!']}
+        held = bc.review_paths(project_dir, 'character-bible.md')['unconfirmed']
+        assert open(held, encoding='utf-8').read().splitlines()[1:] == [
+            'dorren-hayle|Paper is not the land.']
+        out = capsys.readouterr().out
+        assert '1 voice line(s) whose speaker the essay doesn\'t confirm' in out
+        assert 'bibles import --voices working/bibles/character-bible/voices-unconfirmed.csv' in out
+
+    def test_only_held_back_lines_is_not_an_empty_reply(self, project_dir, monkeypatch,
+                                                         fake_api, capsys):
+        from storyforge import cmd_bibles
+        with open(_ref(project_dir, 'character-bible.md'), 'a', encoding='utf-8') as f:
+            f.write('\nShe hears it often: "Paper is not the land."\n')
+        fake_api({'facts': [], 'notes': [],
+                  'voices': [{'character': 'Dorren', 'line': 'Paper is not the land.'}]})
+        monkeypatch.chdir(project_dir)
+        assert cmd_bibles.main(['convert', 'character-bible.md']) in (0, None)
+        assert 'gave nothing to import' not in capsys.readouterr().out

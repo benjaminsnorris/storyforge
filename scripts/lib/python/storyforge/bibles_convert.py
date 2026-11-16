@@ -13,6 +13,13 @@ rules the import does, and to two of its own:
   would be read as the character's own voice (#702: voice lines are the
   author's, never a model's). A description of how someone speaks isn't a
   line, and the prompt says so.
+- **A voice line's speaker is the essay's.** Which character a quotation
+  belongs to is checked against the essay (`attribute`): a speech tag
+  beside it ("said Mara", `extract_describe._speech`), or the character
+  section it sits in (a heading naming one character). A line a tag gives
+  to someone else is left out and said; one the essay doesn't attribute
+  either way is held back in `voices-unconfirmed.csv` for the author to
+  check, never imported with the rest.
 - **Nothing is imported unseen by default.** The rows go to
   `working/bibles/<essay>/` (`facts.csv`, `voices.csv`, `notes.md`,
   `left-out.md`) for the author to read and edit, then `bibles import
@@ -85,13 +92,17 @@ class ConvertError(RuntimeError):
 class Conversion:
     """What the reply gave, held to the rules: `facts` (dicts of
     `FACT_COLUMNS`), `voices` ((character, line) pairs, each in the essay as
-    written), `notes` (terse lines), and `left_out` (each item the reply gave
-    that isn't kept, with why)."""
+    written, its speaker confirmed by the essay), `notes` (terse lines),
+    `left_out` (each item the reply gave that isn't kept, with why), and
+    `unconfirmed` (lines kept apart: `attribute`)."""
     essay: str
     facts: list[dict] = field(default_factory=list)
     voices: list[tuple[str, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     left_out: list[str] = field(default_factory=list)
+    #: voice lines the essay quotes whose speaker it doesn't confirm (no
+    #: speech tag, no character section): held back for the author to check
+    unconfirmed: list[tuple[str, str]] = field(default_factory=list)
 
 
 def essay_text(project_dir: str, name: str) -> str:
@@ -205,6 +216,66 @@ def _quoted(line: str, quoted: list[str]) -> bool:
                for q in quoted)
 
 
+@dataclass(frozen=True)
+class Quotation:
+    """One of the essay's quotations (`_normal`), with the characters a
+    speech tag beside it names (`tagged`) and the one character whose
+    section it sits in ('' for none)."""
+    text: str
+    tagged: frozenset
+    section: str
+
+
+def quotations(essay: str, characters: list[dict]) -> list[Quotation]:
+    """The essay's quotations, each with what the essay says of its
+    speaker: the characters a speech tag beside it names, by the rules
+    `bibles.anchor_voices` uses on the anchors (`extract_describe._speech`
+    with `_speaker_names`), and the character a markdown heading above it
+    names, when it names exactly one."""
+    import re
+    from storyforge.extract_describe import _name_pattern, _speaker_names, _speech
+    from storyforge.prose_analysis import dialogue_spans
+    characters = [c for c in characters if (c.get('id') or '').strip()]
+    names = _speaker_names(characters)
+    tagged: dict[str, list[str]] = {}
+    for c in characters:
+        others = [n for o, ns in names.items() if o != c['id'] for n in ns]
+        tagged[c['id']] = [_normal(t.removesuffix(' …')) for t in
+                           _speech(essay, names.get(c['id'], []), others, min_words=1)]
+    headings = [(m.start(), m.group(1)) for m in re.finditer(r'(?m)^#+\s*(.+)$', essay)]
+    patterns = {cid: re.compile(_name_pattern(ns)) for cid, ns in names.items() if ns}
+    out = []
+    for start, _, inner in dialogue_spans(essay):
+        text = _normal(inner)
+        above = [h for at, h in headings if at < start]
+        named = {cid for cid, p in patterns.items() if above and p.search(above[-1])}
+        out.append(Quotation(
+            text, frozenset(cid for cid, ts in tagged.items()
+                            if any(t and (t == text or t in text or text in t) for t in ts)),
+            next(iter(named)) if len(named) == 1 else ''))
+    return out
+
+
+def attribute(line: str, character: str, quoted: list[Quotation]) -> tuple[str, str]:
+    """What the essay says of `character` speaking `line`: ('confirmed',
+    how), ('contradicted', whose tag), or ('unconfirmed', why). A speech
+    tag decides; with none, the section the quotation is in confirms it
+    (another character's section doesn't contradict it: a line quoted
+    there may be spoken to them)."""
+    text = _normal(line)
+    found = [q for q in quoted if text == q.text or text in q.text]
+    tags = frozenset().union(*(q.tagged for q in found)) if found else frozenset()
+    if tags:
+        if character in tags and len(tags) == 1:
+            return 'confirmed', 'a speech tag names them'
+        if character not in tags:
+            return 'contradicted', ', '.join(sorted(tags))
+        return 'unconfirmed', f'speech tags name {", ".join(sorted(tags))}'
+    if any(q.section == character for q in found):
+        return 'confirmed', 'it is in their section'
+    return 'unconfirmed', 'no speech tag or section of the essay names its speaker'
+
+
 def _resolver(rows: list[dict]) -> dict[str, str]:
     """Lowercase id, name or alias → id."""
     out: dict[str, str] = {}
@@ -222,7 +293,9 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
     schema's JSON object; every item left out is in `left_out` with why: a
     fact with no statement, a `|`, a secret's category on a type that isn't
     knowledge, a repeat; a voice line the essay doesn't quote as written, or
-    whose speaker is no character, given twice; a `known_by` on a fact
+    whose speaker is no character, given twice, or whose speech tag in the
+    essay names someone else (`attribute`; a line the essay doesn't
+    attribute goes to `unconfirmed`); a `known_by` on a fact
     that isn't knowledge (dropped, the fact kept); a fact of a speech category
     (`SPEECH_CATEGORIES`: a description of how someone speaks); an empty
     note. A subject or `known_by`
@@ -277,6 +350,7 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
         seen.add(key)
         conv.facts.append(row)
     quoted = quoted_spans(essay)
+    speakers = quotations(essay, characters)
     for n, v in enumerate(data['voices'], start=1):
         if not isinstance(v, dict):
             conv.left_out.append(f'voice {n}: not an object')
@@ -293,10 +367,17 @@ def parse_reply(reply: str, name: str, essay: str, characters: list[dict],
             conv.left_out.append(f'voice {n} ({line[:50]!r}): {NOT_QUOTED}')
         elif '|' in line:
             conv.left_out.append(f'voice {n} ({line[:50]!r}): a `|` in the line')
-        elif (cid, line) in conv.voices:
+        elif (cid, line) in conv.voices or (cid, line) in conv.unconfirmed:
             conv.left_out.append(f'voice {n} ({line[:50]!r}): given twice')
         else:
-            conv.voices.append((cid, line))
+            verdict, why = attribute(line, cid, speakers)
+            if verdict == 'contradicted':
+                conv.left_out.append(f'voice {n} ({line[:50]!r}): given to {cid}, but the '
+                                     f'essay\'s speech tag gives it to {why}')
+            elif verdict == 'unconfirmed':
+                conv.unconfirmed.append((cid, line))
+            else:
+                conv.voices.append((cid, line))
     for n, note in enumerate(data['notes'], start=1):
         text = ' '.join(str(note or '').split()).lstrip('-* ').strip()
         if text:
@@ -357,6 +438,7 @@ def review_paths(project_dir: str, name: str) -> dict[str, str]:
     base = os.path.join(project_dir, REVIEW_DIR, os.path.splitext(name)[0])
     return {'facts': os.path.join(base, 'facts.csv'),
             'voices': os.path.join(base, 'voices.csv'),
+            'unconfirmed': os.path.join(base, 'voices-unconfirmed.csv'),
             'notes': os.path.join(base, 'notes.md'),
             'left_out': os.path.join(base, 'left-out.md')}
 
@@ -376,6 +458,9 @@ def write_review(project_dir: str, conv: Conversion) -> dict[str, str]:
         'voices': ('|'.join(VOICES_COLUMNS) + '\n'
                    + ''.join(f'{who}|{line}\n' for who, line in conv.voices)
                    if conv.voices else ''),
+        'unconfirmed': ('|'.join(VOICES_COLUMNS) + '\n'
+                        + ''.join(f'{who}|{line}\n' for who, line in conv.unconfirmed)
+                        if conv.unconfirmed else ''),
         'notes': ''.join(f'- {n}\n' for n in conv.notes),
         'left_out': (f'# Left out of the conversion of {conv.essay}\n\n'
                      + ''.join(f'- {x}\n' for x in conv.left_out) if conv.left_out else ''),
