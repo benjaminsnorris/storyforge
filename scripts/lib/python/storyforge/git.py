@@ -36,6 +36,31 @@ def _first_line(text: str) -> str:
     return next((ln.strip() for ln in (text or '').splitlines() if ln.strip()), '')
 
 
+def changed_files(project_dir: str) -> dict[str, str] | None:
+    """Every file under project_dir that differs from HEAD (staged or not,
+    deleted included) or is untracked and not ignored, relative to
+    project_dir, each with a digest of its content ('' for a deleted file),
+    so a later call tells a file that changed since from one that was
+    already changed and left alone. None when git can't say (no HEAD, git
+    failed)."""
+    import hashlib
+    diff = _git(project_dir, 'diff', 'HEAD', '--name-only', '--relative', '--no-renames',
+                '-z', check=False)
+    new = _git(project_dir, 'ls-files', '--others', '--exclude-standard', '-z', check=False)
+    if diff.returncode != 0 or new.returncode != 0:
+        return None
+    out: dict[str, str] = {}
+    for rel in {p for p in (diff.stdout + '\0' + new.stdout).split('\0') if p}:
+        try:
+            with open(os.path.join(project_dir, rel), 'rb') as f:
+                out[rel] = hashlib.sha1(f.read()).hexdigest()
+        except FileNotFoundError:
+            out[rel] = ''
+        except OSError as e:   # unreadable: its error stands in for the digest
+            out[rel] = f'unreadable: {e}'
+    return out
+
+
 def work_tree_problem(project_dir: str) -> str:
     """Why project_dir isn't in a usable git work tree; '' when it is.
 

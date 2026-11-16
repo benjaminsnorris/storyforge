@@ -101,7 +101,7 @@ Reply to each plan with the scene, then the stage at its end, in exactly this fo
 (the scene's prose, and nothing else: no title, no notes)
 {scene_close}
 {stage_open}
-(a JSON list of the stage at the scene's very end, one object per fact: {{"who": "<name>", "field": "<field>", "item": "<thing, for worn, light or door>", "value": "<value>", "quote": "<the scene's words that set it, or empty>"}}. Fields: posture (standing, sitting, kneeling, lying, crouching, mounted, down), hand_left and hand_right (what the hand holds, or empty), worn (on or off, with the item), present (here or gone), position, facing. Only what the scene shows.)
+(a JSON list of the stage at the scene's very end, one object per fact: {{"who": "<name>", "field": "<field>", "item": "<thing, for worn, light or door>", "value": "<value>", "quote": "<the scene's words that set it, or \"\">"}}. Fields: posture (standing, sitting, kneeling, lying, crouching, mounted, down), hand_left and hand_right (what the hand holds, or the word "empty" for an empty hand: never ""), worn (on or off, with the item), present (here or gone), position, facing. Only what the scene shows.)
 {stage_close}
 
 Some turns are notes on a scene you wrote: a check found something wrong. Answer them exactly as the note asks."""
