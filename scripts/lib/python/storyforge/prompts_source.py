@@ -539,7 +539,9 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
                  'who does what, and what each speech does in the story. How it is staged '
                  'is yours: a speech can be dramatised, broken into exchange or partly '
                  'reported rather than performed whole, and beats inside the scene can '
-                 'move, as long as every event happens and each speech\'s point lands. '
+                 'move, as long as every event happens, each speech\'s point lands, and '
+                 'the move changes no outcome, no cause and nothing a character knows '
+                 'when. A `must:` line in the brief is still word for word. '
                  'Never copy the translation\'s wording; write it in this novel\'s voice.'
                  + ' ' + REVOICE_RULE)
     cat = source.catalogue(project_dir, cfg)

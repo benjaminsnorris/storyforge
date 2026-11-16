@@ -664,6 +664,16 @@ def test_the_source_wins_on_what_happens_and_the_staging_is_the_writers(adapted)
     # re-performed ("the substance of every speech")
     from storyforge.prompts_source import drafting_section
     text = drafting_section(adapted, 'athena-at-the-door')
-    assert 'substance of every speech' not in text and 'their order' not in text
+    assert 'substance of every speech' not in text and 'events, their order' not in text
+    assert 'they win' in text   # the brief (its must: lines) still outranks the source
     assert 'what each speech does in the story' in text
     assert 'as long as every event happens' in text
+    assert 'nothing a character knows' in text   # the limit the checks keep
+    assert 'A `must:` line in the brief is still word for word' in text
+
+
+def test_the_gate_source_check_treats_harmless_staging_as_no_contradiction():
+    from storyforge.gate_source import build_prompt
+    text = build_prompt('s1', 'Prose.', [{'statement': 'x', 'quote': 'y'}], [], 'Source.',
+                        {}, '', 'compress', '')
+    assert 'nor is staging' in text and 'nothing a character knows when' in text
