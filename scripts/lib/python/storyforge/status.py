@@ -92,6 +92,34 @@ class VoiceRecord(TypedDict):
     pov_gaps: list[str] | None
 
 
+class PlanGapRecord(TypedDict):
+    """One gap of the two-writers test (#657, `bibles.Gap`) in `--json`."""
+    kind: str
+    ref: str
+    subject: str
+    detail: str
+
+
+class PlanGapsRecord(TypedDict):
+    """The verdict's `plan_gaps` (#702): the gaps the two-writers test sees
+    in the plan (`bibles.plan_gaps`, the list `validate` and the stage
+    reviews show), and what it couldn't check. Advisory: a plan may leave
+    a question open on purpose, so a gap never blocks and never routes."""
+    gaps: list[PlanGapRecord]
+    notes: list[str]
+
+
+def plan_gaps_record(project_dir: str) -> PlanGapsRecord:
+    """`bibles.plan_gaps` as the verdict's record. Its notes say what it
+    couldn't read (a ledger not migrated, a registry, the briefs), so an
+    empty `gaps` with no notes means checked and clean."""
+    from storyforge import bibles
+    gaps, notes = bibles.plan_gaps(os.path.join(project_dir, 'reference'))
+    return {'gaps': [{'kind': g.kind, 'ref': g.ref, 'subject': g.subject, 'detail': g.detail}
+                     for g in gaps],
+            'notes': list(notes)}
+
+
 def _book_text(project_dir: str) -> str:
     """book.md's text ('' when missing, empty, the template or unreadable:
     an unreadable one is said by `resolve`)."""
@@ -795,4 +823,7 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         # exist (#643, `source` CRAFT_ADVISORY_SOURCE)
         'advisory': advisory + craft_advisory(
             [f for f in floors if artifact_present(project_dir, f['level'])]),
+        # #702: the two-writers test's gaps in the plan (`PlanGapsRecord`),
+        # advisory like `validate`'s and the stage reviews'
+        'plan_gaps': plan_gaps_record(project_dir),
     }

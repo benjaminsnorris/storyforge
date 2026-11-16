@@ -462,7 +462,9 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     assert data['next']['stage'] == 'logline'
     # Full verdict contract forge/elaborate route on — lock the whole shape.
     assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
-                         'ladder', 'next', 'then', 'blockers', 'notes', 'advisory', 'voice'}
+                         'ladder', 'next', 'then', 'blockers', 'notes', 'advisory', 'voice',
+                         'plan_gaps'}
+    assert set(data['plan_gaps']) == {'gaps', 'notes'}
     assert set(data['voice']) == {'name', 'state', 'detail', 'when', 'pov_gaps'}
     assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
     assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
@@ -952,3 +954,55 @@ def test_a_graphic_novel_is_drafted_scene_by_scene(tmp_path, monkeypatch):
     v = status.build_status(pd, 'graphic-novel')
     assert v['next']['command'] == 'storyforge write --keep-going'
     assert status.write_command('novel') == 'storyforge write --session'
+
+
+# ---------------------------------------------------------------------------
+# The two-writers test's gaps (#702)
+# ---------------------------------------------------------------------------
+
+def _hedged_world_fact(project_dir):
+    from storyforge import bibles
+    bibles.add_facts(project_dir, [{'type': 'world', 'subject': '',
+                                    'statement': 'The survey may or may not be faked'}],
+                     command='test')
+
+
+def test_status_json_lists_the_plan_gaps(project_dir, capsys, monkeypatch):
+    """#702: the gaps `validate` and the stage reviews list are in
+    `status --json` too, each with its kind, ref, subject and detail."""
+    import json as _json
+    _hedged_world_fact(project_dir)
+    monkeypatch.setattr(cmd_status, 'detect_project_root', lambda: project_dir)
+    cmd_status.main(['--json'])
+    data = _json.loads(capsys.readouterr().out)   # nothing else on stdout
+    world = [g for g in data['plan_gaps']['gaps'] if g['kind'] == 'open-world-rule']
+    assert len(world) == 1
+    assert set(world[0]) == {'kind', 'ref', 'subject', 'detail'}
+    assert 'may or may not' in world[0]['detail']
+
+
+def test_status_prints_the_plan_gaps_and_blocks_nothing(project_dir, capsys, monkeypatch):
+    _hedged_world_fact(project_dir)
+    verdict = status.build_status(project_dir)
+    monkeypatch.setattr(cmd_status, 'detect_project_root', lambda: project_dir)
+    cmd_status.main([])
+    out = capsys.readouterr().out
+    assert 'PLAN GAPS:' in out and 'open-world-rule:' in out
+    # advisory: a gap is never a blocker, and never routes
+    assert not any('may or may not' in b['detail'] for b in verdict['blockers'])
+    assert 'may or may not' not in str(verdict['next'])
+
+
+def test_status_says_when_the_gaps_could_not_be_checked(tmp_path):
+    """An unreadable ledger is a note in the record, never a silent []."""
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'commitments.csv'), 'not|a|ledger\nx|y|z\n')
+    record = status.plan_gaps_record(pd)
+    assert record['gaps'] == []
+    assert any("can't be checked" in n for n in record['notes'])
+    assert any(line.startswith('  NOTE:') for line in cmd_status._plan_gap_lines(record))
+
+
+def test_status_says_a_clean_plan_is_clean():
+    lines = cmd_status._plan_gap_lines({'gaps': [], 'notes': []})
+    assert lines == ['PLAN GAPS: none the two-writers test can see']
