@@ -1281,7 +1281,7 @@ class TestPolishLoopPass:
             project_dir, monkeypatch,
             f'=== SCENE: act1-sc01 ===\n{prose}\n=== END SCENE: act1-sc01 ===')
         with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
-            assert f.read().strip() == prose.strip()
+            assert f.read().strip() == prose.strip().replace('. ', '.\n')   # a sentence per line
         assert rows[0]['status'] == 'completed' and commits
         assert calls == [True]
 
@@ -1309,7 +1309,7 @@ class TestPolishLoopPass:
                       f'=== END SCENE: act1-sc02 ===')
         assert exc.value.code == 1
         with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
-            assert f.read().strip() == prose.strip()
+            assert f.read().strip() == prose.strip().replace('. ', '.\n')   # a sentence per line
         with open(sc02) as f:
             assert f.read() == before
         out = capsys.readouterr().out

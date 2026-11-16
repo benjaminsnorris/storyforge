@@ -322,10 +322,13 @@ def test_a_suggestion_that_would_remove_a_marker_is_left_out(monkeypatch):
 
 
 def test_a_quote_found_twice_marks_the_paragraph(monkeypatch):
+    # a line that occurs twice, alone in its paragraph: no edit could be placed
     scene = f'{P1}\n\nHe went in.\n\n{P4}\n'
     m = _mapped(monkeypatch, [_c(1, 3, '> He went in.\ncut', 'He went in.')], scene=scene)
-    mark = m.scenes[0].changes[0]
-    assert mark.quote == 'He went in.' and 'occurs more than once' not in mark.note
+    assert m.scenes == [] and 'occurs more than once in the scene' in m.left_out[0]
+    # a keep needs only to be the first occurrence
+    m = _mapped(monkeypatch, [_c(1, 3, 'keep', 'He went in.')], scene=scene)
+    assert m.scenes[0].keeps[0].quote == 'He went in.'
     m = _mapped(monkeypatch, [_c(1, 1, '"the gate" flat', P1)],
                 scene=f'{P1}\n\nAt the gate he stopped.\n')
     mark = m.scenes[0].changes[0]
@@ -505,3 +508,20 @@ def test_a_reply_with_a_suggestion_is_a_mark(monkeypatch):
     reply = dict(_c(10, 7, '```suggestion\nThe dogs slept.\n```', P3), in_reply_to_id=3)
     m = _mapped(monkeypatch, [reply])
     assert [s.text for s in m.suggestions] == ['The dogs slept.']
+
+
+def test_a_repeated_sentence_line_takes_in_its_neighbour(monkeypatch):
+    """H1: a scene is a sentence per line, and short sentences repeat. A
+    mark on the second "No." must not land on the first."""
+    scene = '"No."\nShe turned.\n\nHe waited.\n"No."\nThe door shut.\n'
+    m = _mapped(monkeypatch, [_c(1, 5, 'harder', '"No."')], scene=scene)
+    mark = m.scenes[0].changes[0]
+    assert mark.quote == 'He waited.\n"No."' and 'line next to it' in mark.note
+    # a keep is never edited: its widening isn't noted, and it stays a keep
+    m = _mapped(monkeypatch, [_c(1, 5, 'keep', '"No."')], scene=scene)
+    assert m.scenes[0].keeps[0].quote == 'He waited.\n"No."'
+    # a repeated quoted phrase on a keep stays a keep (it used to become a change)
+    m = _mapped(monkeypatch, [_c(1, 4, '"He waited" keep', 'He waited.')],
+                scene='He waited. He waited.\n\nThen.\nHe waited.\n')
+    assert m.scenes[0].keeps and not m.scenes[0].changes
+
