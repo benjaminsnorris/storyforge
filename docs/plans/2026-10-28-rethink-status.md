@@ -64,8 +64,27 @@ character is in, for the Homer series.
    (the plan says so once sessions exist). The question layer caught 8 of
    17 on #649's numbers against the open checker's about 12; since PR #714
    (2026-11-16) it catches 13 of 17 with no false alarm, twice. That is
-   the case for recording #677's gate set (about $180 for three runs of
-   each suite, Ben's approval) on prose the prompt wasn't tuned on.
+   the case for recording #677's gate set on prose the prompt wasn't tuned
+   on. **Ready, waiting on Ben's go (2026-11-16: "don't start yet"):**
+   - The set is built in `~/Developer/evals/gate-set` (built 2026-11-09):
+     46 positives over 15 cases and 31 controls, 77 items gated once each.
+     The corpus books it rebuilds from are on this machine (E8 gets past
+     `e8.prepare`; it is stale only because a revision prompt changed).
+   - First, free: a dry check that validates every item against today's
+     E1 cases (`gate_set.validate`) and rebuilds each case's pre-pass book
+     (`e8.prepare`, no API calls), so drifted inputs don't fail a paid run.
+   - Then, paid (frozen suites record only as `--runs 3`; this month's eval
+     budget is already over, so each needs `--over-budget` naming Ben's
+     approval):
+     `python3 evals/run.py --mode record --suite gate-set --runs 3 --over-budget "<who approved, why>"`
+     (the open checker, about $40 a run) and the same with `--suite
+     gate-set-questions` (the question layer, about $20 a run): about $180.
+   - What it decides: whether the question layer matches the open checker
+     (`recall`, `recall_per_case`) on firmer labels than the question set's,
+     with `false_alarm_on_fact` on the 31 controls the measure of the new
+     prompt's risk (a character wrong on purpose read as a contradiction).
+     It is half of decision 5's evidence: the E4 half (Act 1 drafts gated in
+     order) is still a follow-up.
 4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
 5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
    (gold notes, judging, a re-score) is all that's left. Since then 5d and
