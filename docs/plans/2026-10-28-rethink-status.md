@@ -65,26 +65,28 @@ character is in, for the Homer series.
    17 on #649's numbers against the open checker's about 12; since PR #714
    (2026-11-16) it catches 13 of 17 with no false alarm, twice. That is
    the case for recording #677's gate set on prose the prompt wasn't tuned
-   on. **Ready, waiting on Ben's go (2026-11-16: "don't start yet"):**
-   - The set is built in `~/Developer/evals/gate-set` (built 2026-11-09):
-     46 positives over 15 cases and 31 controls, 77 items gated once each.
-     The corpus books it rebuilds from are on this machine (E8 gets past
-     `e8.prepare`; it is stale only because a revision prompt changed).
-   - First, free: a dry check that validates every item against today's
-     E1 cases (`gate_set.validate`) and rebuilds each case's pre-pass book
-     (`e8.prepare`, no API calls), so drifted inputs don't fail a paid run.
-   - Then, paid (frozen suites record only as `--runs 3`; this month's eval
-     budget is already over, so each needs `--over-budget` naming Ben's
-     approval):
-     `python3 evals/run.py --mode record --suite gate-set --runs 3 --over-budget "<who approved, why>"`
-     (the open checker, about $40 a run) and the same with `--suite
-     gate-set-questions` (the question layer, about $20 a run): about $180.
-   - What it decides: whether the question layer matches the open checker
-     (`recall`, `recall_per_case`) on firmer labels than the question set's,
-     with `false_alarm_on_fact` on the 31 controls the measure of the new
-     prompt's risk (a character wrong on purpose read as a contradiction).
-     It is half of decision 5's evidence: the E4 half (Act 1 drafts gated in
-     order) is still a follow-up.
+   on. **Recorded 2026-11-16 (Ben's go; storyforge-evals branch
+   `gate-set-recording-677`), and it doesn't answer the question yet:**
+   - Open checker (`gate-set`, $130): recall 0.57 / 0.50 / 0.57, 10-11 of
+     15 cases, false alarms on the 31 controls 5 / 3 / 3; it stops 96-98%
+     of positives and 74-81% of controls.
+   - Question layer (`gate-set-questions`, $35): recall 0.02 / 0.02 / 0.04
+     (1-2 of 46), false alarms 0 / 2 / 1; it stops 63-65% of positives,
+     mostly on broken promises, which have no quote and can't catch.
+   - Why: the question layer asks only about ledger rows, and the corpus
+     books' pre-pass ledgers don't hold the cases' facts. 4 of the 15 cases
+     (governor-014, shared-dark-030, shared-dark-037, thornwall-020; 10
+     positives) have no `commitments.csv`, and in most of the rest no row
+     shares more than about a fifth of the words of the established quote (only
+     governor-022 and shared-dark-041 come close). So this measures ledger
+     coverage, not the prompt. That is itself a finding for decision 5: on
+     a book whose ledger is thin, the question layer can't replace the
+     open checker.
+   - FLOORS are still unset (both suites exit 1 against the `-1`
+     placeholders). Next, Ben's call: either gate the set with each case's
+     established fact added as a ledger row first (a suite change, then
+     re-record only `gate-set-questions`, about $35), or take the result as
+     it stands and judge decision 5 on the E4 half.
 4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
 5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
    (gold notes, judging, a re-score) is all that's left. Since then 5d and
