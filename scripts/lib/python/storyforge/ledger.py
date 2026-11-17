@@ -956,6 +956,13 @@ def subject_names(project_dir: str) -> tuple[dict[str, set[str]], list[str]]:
     missing or has no `id` column only narrows the match to ids. A subject
     not in either registry is matched by its id alone.
 
+    A character's `name` of two or more words is also given surname first
+    (`surname_first`: "Erdel, Tam", as casualty lists, records and rolls
+    write it; #677, where a scene that named Tam Erdel only that way had
+    his facts left unasked). Only a character's name: a place, an alias
+    ("the old woman") or an id reversed is ordinary prose ("the road,
+    north"; #726's review).
+
     Raises:
         OSError, UnicodeDecodeError: a registry that exists but can't be read.
     """
@@ -977,7 +984,26 @@ def subject_names(project_dir: str) -> tuple[dict[str, set[str]], list[str]]:
                 names.setdefault(rid, set()).update(
                     _norm(n) for n in [row.get('name', '')] + _split(row.get('aliases', ''))
                     if _norm(n))
+                if registry == 'characters.csv':
+                    inverted = surname_first(row.get('name', ''))
+                    if inverted:
+                        names[rid].add(inverted)
     return names, notes
+
+
+def surname_first(name: str) -> str:
+    """A person's name of two or more words, surname first and normalized
+    ("Tam Erdel" → "erdel, tam"; "Anne Smith-Jones" → "smith jones, anne",
+    the surname split on spaces before `_norm` turns its hyphen into one),
+    or '' for one that isn't a full name: a single word, one starting with
+    "the" or a title ending in a period ("Dr. Hayle"; "Captain Tam Erdel"
+    becomes "erdel, captain tam", which never matches). A particle stays
+    with the given names ("Anne de Bourgh" → "bourgh, anne de"), so "de
+    Bourgh, Anne" isn't matched; nor is a comma with no space after it."""
+    words = (name or '').split()
+    if len(words) < 2 or words[0].casefold() == 'the' or words[0].endswith('.'):
+        return ''
+    return _norm(f'{words[-1]}, {" ".join(words[:-1])}')
 
 
 _MIN_PHRASE = 3
@@ -991,20 +1017,15 @@ def _norm(text: str) -> str:
 
 def _phrases(subject: str, names: dict[str, set[str]]) -> set[str]:
     """How a statement can name `subject` (normalized): its id and its
-    registry names, each without a leading "the", and each name of two or
-    more words also surname first ("Erdel, Tam": casualty lists, records
-    and rolls; #677, where a scene that named Tam Erdel only that way had
-    his facts left unasked); a phrase shorter than three characters is too
-    loose to match on."""
+    registry names (a character's also surname first, `subject_names`),
+    each without a leading "the"; a phrase shorter than three characters is
+    too loose to match on."""
     out = set()
     for p in {subject} | names.get(subject, set()):
         if p.startswith('the '):
             p = p[4:]
         if len(p) >= _MIN_PHRASE:
             out.add(p)
-            words = p.split()
-            if len(words) >= 2:
-                out.add(f'{words[-1]}, {" ".join(words[:-1])}')
     return out
 
 
@@ -1035,7 +1056,8 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
       for a knowledge fact, its subject is one of F's `known_by`, or
     - names F's subject in its statement, or F's statement names its
       subject (by id, or by a registry name or alias in `names`, from
-      `subject_names`; `{}` matches ids only; case, hyphens and spacing
+      `subject_names`, a character's name also surname first; `{}`
+      matches ids only; case, hyphens and spacing
       aside, as whole words), or
     - when F has no subject (and, for knowledge, no `known_by`): is of
       F's type. F is then in `.unrelated` still, since a type is a guess
