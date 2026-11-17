@@ -1681,7 +1681,7 @@ def test_state_override_beats_the_forward_walk_in_the_request(in_project,
     """`maps` has a transition at act1-sc02 and the row overrides it."""
     request = captured()['the-blank-page']
     assert 'one corner curled back under a paperweight' in request
-    assert 'the new survey blank where the village was' not in request
+    assert 'the new survey sheet under the overlays' not in request
 
 
 def test_the_prompt_file_and_the_packet_entry_agree_about_the_state(in_project,

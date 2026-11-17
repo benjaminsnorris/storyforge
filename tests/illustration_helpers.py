@@ -130,18 +130,24 @@ def plan_row(**overrides) -> dict[str, str]:
 #
 # tests/fixtures/test-project is a small, coherent illustrated project: the
 # three book-level canon files, three entity canon files, a two-row plan, and a
-# visual-state log. Every id is a real registry id (characters.csv,
+# visual-state log (the log predates #288: phase 2 added `village` and
+# `master-survey`). Every entity canon id is a real registry id (characters.csv,
 # locations.csv, motif-taxonomy.csv), every scene id a fixture scene the chapter
 # map positions, and every transition's evidence is verbatim in that scene's
 # prose. `test_illustrated_fixture.py` holds all of that true, including that
-# every tracked entity is named by the prose — an entity the prose never names
-# empties the audit's candidate set, and every test that thinks it exercises
-# the model path then takes the no-call branch and still passes.
+# every tracked entity's search terms appear in positioned prose, and that the
+# audit's candidate set is non-empty — an empty one means every test that
+# thinks it exercises the model path takes the no-call branch and still passes.
+#
+# `master-survey` is deliberately a state-only entity with no canon file: the
+# search-term path for an id no canon prefix confirms, and a tracked entity no
+# plan row names. It tracks what the survey shows (the village gone); `maps`,
+# the motif, tracks the sheet itself.
 #
 # The constants below are what the fixture's canon files carry; that test
-# asserts the files and these constants agree. A test that needs a project
-# *without* part of this removes it explicitly with the helpers at the end of
-# this section, so the case it covers stays named.
+# regenerates each file from them with `write_canon_file` and compares bytes.
+# A test that needs a project *without* part of this removes it explicitly with
+# the helpers at the end of this section, so the case it covers stays named.
 
 #: canon_id -> (canon_type, Embeddable block body). Each body contains a '.',
 #: which the drift test perturbs.
@@ -205,9 +211,9 @@ FIXTURE_APPEARANCES: dict[str, tuple[str, str]] = {
 
 
 #: canon_id -> `display_name` frontmatter. The `maps` motif's anchor is the
-#: master survey, and the prose names the survey, never "maps": without this its
-#: only search term would be `maps`, which no positioned scene contains, and the
-#: entity could never make a scene an audit candidate.
+#: master survey, and no positioned scene says "maps" (only new-x1, which the
+#: chapter map omits): without this its only search term would be `maps`, and
+#: no prose the audit reads would name it.
 FIXTURE_DISPLAY_NAMES: dict[str, str] = {'maps': 'Master survey'}
 
 
@@ -268,10 +274,17 @@ def remove_illustration_seed(project_dir: str) -> None:
 
 def unstate_entity(project_dir: str, entity: str) -> None:
     """Drop every transition for *entity*, so a plan row that names it has no
-    stated state — the gap the packet and `--prompts` must report."""
+    stated state — the gap the packet and `--prompts` must report.
+
+    Raises ValueError when the log has no transition for *entity*: a typo
+    would otherwise leave the state in place and the test asserting its
+    absence would be testing nothing.
+    """
     from storyforge import visual_state as vs
-    rows = [t for t in vs.read_transitions(project_dir)
-            if t['entity'] != entity]
+    before = vs.read_transitions(project_dir)
+    rows = [t for t in before if t['entity'] != entity]
+    if len(rows) == len(before):
+        raise ValueError(f'no transition for {entity!r} in the fixture log')
     vs.write_transitions(project_dir, rows)
 
 

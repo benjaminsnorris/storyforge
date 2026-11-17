@@ -4,10 +4,10 @@
 plan, and a visual-state log. Every illustration suite builds on it, so these
 tests hold it coherent: ids that match the registries, scenes the chapter map
 positions, evidence and search terms the prose really contains, and no finding
-on the unmodified fixture. The failure #288 is about is the last of those going
-quietly wrong: a tracked entity the prose never names empties the audit's
-candidate set, and every test that believes it is exercising the model path
-takes the no-call branch and still passes.
+on the unmodified fixture. The failure #288 is about is the search terms going
+quietly wrong: when no tracked entity is named where the audit looks, its
+candidate set is empty, and every test that believes it is exercising the model
+path takes the no-call branch and still passes.
 
 Then one end-to-end run, canon -> plan -> state -> prompts -> packet, on the
 fixture as it ships, with the API mocked at `cmd_illustrate._invoke` as the
@@ -20,8 +20,10 @@ import os
 import pytest
 
 from illustration_helpers import (
-    BOOK_LEVEL_CANON, ENTITY_CANON, FIXTURE_PLAN_IDS, fixture_anchors,
+    BOOK_LEVEL_CANON, ENTITY_CANON, FIXTURE_APPEARANCES, FIXTURE_DISPLAY_NAMES,
+    FIXTURE_PLAN_IDS, fixture_anchors, unstate_entity, write_canon_file,
 )
+from fixture_helpers import FIXTURE_DIR
 from storyforge import canon, cmd_illustrate, packet
 from storyforge import illustrations as ill
 from storyforge import visual_state as vs
@@ -63,6 +65,33 @@ def test_the_canon_files_carry_what_the_helpers_say(project_dir):
     for canon_id, (_type, body) in BOOK_LEVEL_CANON.items():
         path = canon.resolve_canon_path(project_dir, canon_id)
         assert canon.embeddable_block_text(path).strip() == body
+
+
+def test_every_canon_file_is_exactly_what_write_canon_file_makes(tmp_path):
+    """Byte for byte, from the constants. The fixture files were written by
+    `write_canon_file`, so a hand edit to either side shows up here rather
+    than as a test elsewhere comparing against a constant the file no longer
+    matches."""
+    specs = {cid: ('', ctype, body)
+             for cid, (ctype, body) in BOOK_LEVEL_CANON.items()}
+    specs.update(ENTITY_CANON)
+    assert set(FIXTURE_APPEARANCES) == set(specs)
+    assert set(FIXTURE_DISPLAY_NAMES) <= set(ENTITY_CANON)
+    for canon_id, (subdir, canon_type, body) in specs.items():
+        appears_in, first = FIXTURE_APPEARANCES[canon_id]
+        made = write_canon_file(
+            str(tmp_path), canon_id=canon_id, canon_type=canon_type,
+            body=body, subdir=subdir, appears_in=appears_in,
+            first_appearance=first,
+            display_name=FIXTURE_DISPLAY_NAMES.get(canon_id, ''))
+        shipped = FIXTURE_DIR / os.path.relpath(made, str(tmp_path))
+        assert shipped.read_bytes() == open(made, 'rb').read(), canon_id
+    shipped_files = {
+        os.path.relpath(os.path.join(d, name),
+                        FIXTURE_DIR / 'reference' / 'canon')
+        for d, _dirs, names in os.walk(FIXTURE_DIR / 'reference' / 'canon')
+        for name in names}
+    assert len(shipped_files) == len(specs), sorted(shipped_files)
 
 
 def test_the_reference_tier_is_complete(project_dir):
@@ -121,8 +150,11 @@ def test_every_transition_evidence_is_verbatim_in_its_scene(project_dir):
 
 
 def test_every_tracked_entity_is_named_by_the_prose(project_dir):
-    """The #288 guard. An entity whose search terms appear in no scene the
-    audit reads can never make a scene a candidate."""
+    """Each entity's search terms appear in some positioned, drafted scene —
+    the prose the audit reads. This is necessary, not sufficient, for the
+    entity to make a scene a candidate: the audit also needs the mention at or
+    after its first transition and outside its own transition scenes, which
+    `test_the_entities_that_can_make_a_candidate` pins."""
     prose = _positioned_drafted_scenes(project_dir)
     terms = vs.prepass(project_dir)['search_terms']
     assert set(terms) == {t['entity'] for t in vs.read_transitions(project_dir)}
@@ -142,6 +174,36 @@ def test_the_unmodified_fixture_has_no_illustration_finding(project_dir):
 def test_the_audit_has_candidates_on_the_fixture(project_dir):
     """Non-empty, or the contradiction pass is never exercised by default."""
     assert vs.prepass(project_dir)['candidate_scenes'] == ['act1-sc02']
+
+
+def test_the_entities_that_can_make_a_candidate(project_dir):
+    """Under the audit's own rule: named in a positioned scene at or after
+    the entity's first transition, and not one of its transition scenes.
+
+    Only two qualify, and `dorren-hayle` only through act1-sc02's frontmatter
+    `pov:` line. The other three are named in prose, but only at or before
+    their own transition, so they never add a candidate. Pinned rather than
+    extended: widening it means new prose in act2-sc01, which some forty test
+    files read."""
+    order = ill._scene_order(project_dir)
+    prose = _positioned_drafted_scenes(project_dir)
+    transitions = vs.read_transitions(project_dir)
+    able = set()
+    for entity, terms in vs.prepass(project_dir)['search_terms'].items():
+        own = {order[t['from_scene']] for t in transitions
+               if t['entity'] == entity}
+        if any(order[sid] >= min(own) and order[sid] not in own
+               and any(vs._mentions(text, term) for term in terms)
+               for sid, text in prose.items()):
+            able.add(entity)
+    assert able == {'village', 'dorren-hayle'}
+
+
+def test_unstate_entity_refuses_an_entity_the_log_does_not_have(project_dir):
+    """A typo would leave the state in place, and the test asserting its
+    absence would be testing nothing."""
+    with pytest.raises(ValueError):
+        unstate_entity(project_dir, 'cartography-ofice')
 
 
 def test_the_fixture_keeps_scenes_the_chapter_map_omits(project_dir):
@@ -175,13 +237,21 @@ def test_canon_plan_state_prompts_packet_end_to_end(project_dir, monkeypatch,
         raise AssertionError(f'unexpected model call: {operation}')
     monkeypatch.setattr(cmd_illustrate, '_invoke', _invoke)
     log_before = open(vs.state_path(project_dir), 'rb').read()
+    assert any('never been run' in g
+               for g in packet.resolve(project_dir)['gaps'])
 
     # State: the audit reads the candidate scene against the log, and the
     # model is actually called — the path the fixture exists to exercise.
     assert cmd_illustrate.main(['--audit']) == 0
     assert len(calls.get('illustrate-audit', [])) == 1
-    assert 'Blank parchment' in calls['illustrate-audit'][0][1]
+    audit_prompt = calls['illustrate-audit'][0][1]
+    # Only in act1-sc02's prose, not in any log cell: the scene was read.
+    assert 'Not even a contour line' in audit_prompt
+    # act2-sc01 is no candidate, so its prose is not paid for.
+    assert 'She checked her compass' not in audit_prompt
     assert open(vs.state_path(project_dir), 'rb').read() == log_before
+    assert not any('never been run' in g
+                   for g in packet.resolve(project_dir)['gaps'])
 
     # Prompts: one request per plan row, each carrying its canon anchors and
     # the state at its scene, with the row's override overlaid.
@@ -195,7 +265,7 @@ def test_canon_plan_state_prompts_packet_end_to_end(project_dir, monkeypatch,
     assert 'black waistcoat, sleeves buttoned' in first
     assert anchors['maps'] in second
     assert 'paperweight' in second
-    assert 'the new survey blank where the village was' not in second
+    assert 'the new survey sheet under the overlays' not in second
     plan = ill.read_plan_as_map(project_dir)
     for illus_id in FIXTURE_PLAN_IDS:
         prompt_file = plan[illus_id]['prompt_file']

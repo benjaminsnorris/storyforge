@@ -204,10 +204,10 @@ def test_entries_are_in_reading_order(project_dir):
 
 def test_state_resolves_the_matrix_and_overlays_the_override(project_dir):
     entries = {e['id']: e for e in packet.resolve(project_dir)['entries']}
-    # act1-sc02 resolves maps -> "the new survey blank…", which the row's
+    # act1-sc02 resolves maps -> "the new survey sheet…", which the row's
     # state_override then replaces for this image only.
     assert 'paperweight' in entries['the-blank-page']['state']
-    assert 'blank where the village was' not in \
+    assert 'the new survey sheet' not in \
         entries['the-blank-page']['state']
     # And the earlier illustration is unaffected by that override.
     assert 'paperweight' not in entries['the-finest-cartographer']['state']
@@ -1243,8 +1243,8 @@ def test_contrast_with_no_register_capitalizes_the_neighbour_clause(
         project_dir):
     """The follows-only arm of `_assemble` — the arm nearly every real row takes.
 
-    `register` is populated on neither of the fixture's two rows and, per
-    CLAUDE.md, on almost no real project either, so this is the production path.
+    This test blanks `register` on the fixture's two rows (both carry one);
+    per CLAUDE.md almost no real project sets it, so this is the production path.
     It was also the *only* one of the three arms with no test: replacing its
     whole return with a constant left the suite green. That arm is where the
     `_assemble` refactor was riskiest, because it is the one doing the
