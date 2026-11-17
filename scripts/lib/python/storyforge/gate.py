@@ -306,6 +306,9 @@ class GateResult:
     #: couldn't ask or answer, and what it doesn't check, for the log and the
     #: report; never blocking
     question_notes: list[str] = field(default_factory=list)
+    #: #677: the ledger fact ids the question layer asked about
+    #: (`QuestionResult.asked_fact_ids`), in order, each once
+    asked_fact_ids: list[str] = field(default_factory=list)
     #: what `_commit` needs from the run (`_CommitContext`); None until the
     #: run reaches the check
     _ctx: 'object' = field(default=None, repr=False, compare=False)
@@ -3735,6 +3738,8 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
     check.cleared += got.cleared
     check.unruled += got.unruled
     result.question_notes = list(got.notes) + list(QUESTION_LAYER_GAPS)
+    result.asked_fact_ids += [i for i in dict.fromkeys(got.asked_fact_ids)
+                              if i not in result.asked_fact_ids]
     log(f'  {scene_id}: questions: ' + '; '.join(got.notes))
 
 
