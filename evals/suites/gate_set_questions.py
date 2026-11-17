@@ -4,16 +4,23 @@ way as `gate-set` (see it). Decision 5 retires the open checker once this
 suite's recall matches `gate-set`'s.
 
 **Each case is gated with its own fact in the ledger** (`gate_set.FACTS_FILE`,
-`seed_facts`). The question layer asks only about ledger rows, and the
-corpus books' ledgers mostly lack the cases' facts: the first recording
-(2026-11-16, unseeded) caught 1-2 of 46 because it had nothing to ask. So
-this measures the questions given the fact, which is what a book whose
-ledger is kept up would give it; the open checker's suite gets no rows (it
-reads the established scene's prose). A case whose fact is only in the
-gated scene gets no row and is never asked (named in the notes).
+`seed_facts`). The question layer asks about a case's fact only through a
+ledger row, and the corpus books' ledgers mostly lack the cases' facts: the
+first recording (2026-11-16, unseeded) caught 1-2 of 46 because it had
+nothing to ask. So this measures the questions given the fact, which is
+what a book whose ledger is kept up would give it; the open checker's suite
+gets no rows (it reads the established scene's prose). A case whose book
+doesn't state the fact outside the gated scene gets no row and is gated
+without one (named in the notes); a seeded row is still asked only when
+`questions.facts_to_ask` selects it (its subject present, or in no
+registry, and within the cap), and the notes name the items where it
+wasn't. `recall` is over every positive, `recall_seeded` over the seeded
+cases', and `recall_asked` over those whose fact was asked: the last is
+the questions' own recall.
 
 Private and frozen like `gate-set`; its recordings are
-`gate-set/cassettes/gate-set-questions/` (and `run2/`, `run3/`) in the
+`gate-set/cassettes/gate-set-questions/` and, for runs 2 and 3,
+`gate-set/cassettes/run2/gate-set-questions/` and `run3/`, in the
 storyforge-evals repo. Each suite keeps its own recordings. Recording it
 needs ``--over-budget`` until the baseline has its forecast.
 """

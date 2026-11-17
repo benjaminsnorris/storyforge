@@ -17,12 +17,10 @@ and, for runs 2 and 3, `gate-set/cassettes/run2/gate-set/` and `run3/`);
 notes carry counts and ids only, and without that checkout the suite is
 reported unavailable (``stale``). Frozen (#645): recorded on purpose, as
 three runs. Needs the corpus books cloned under ``STORYFORGE_CORPUS_DIR``, as
-E8 does. **Not recorded yet**: record it when the question layer is a
-candidate to replace the open checker; the first recording has no forecast
-in the baseline, so it needs ``--over-budget`` with Ben's approval
-(`gate_set.runner.record_command`). Until then a replay is unavailable
-(``stale``, "not recorded yet"); once `FLOORS` are set, missing recordings
-are the harness's error.
+E8 does. First recorded 2026-11-16 (three runs, about $43 each, with
+``--over-budget`` and Ben's approval: `gate_set.runner.record_command`);
+`FLOORS` are run 1's (the default cassettes, which a replay reads), so
+missing recordings are the harness's error.
 """
 
 from __future__ import annotations
