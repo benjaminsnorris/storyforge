@@ -13,7 +13,8 @@ gets no rows (it reads the established scene's prose). A case whose book
 doesn't state the fact outside the gated scene gets no row and is gated
 without one (named in the notes); a seeded row is still asked only when
 `questions.facts_to_ask` selects it (its subject present, or in no
-registry, and within the cap), and the notes name the items where it
+registry) and `questions.ask_questions` keeps it within the cap, and the
+notes name the items where it
 wasn't. `recall` is over every positive, `recall_seeded` over the seeded
 cases', and `recall_asked` over those whose fact was asked: the last is
 the questions' own recall.

@@ -81,34 +81,38 @@ character is in, for the Homer series.
    - Question layer, seeded (`gate-set-questions`, $35): each case's fact
      added to the ledger from `facts.json` (quoted from its pre-pass book;
      lantern-folk-020, thornwall-020 and thornwall-024, 7 positives, have
-     none). Recall 0.37 / 0.33 / 0.37 over 46; false alarms 1 / 2 / 1;
+     none). Before the 2026-11-17 top-up: recall 0.37 / 0.33 / 0.37 over 46; false alarms 1 / 2 / 1;
      control stops 48-61%. Run 1 against the open checker's run 1, item by
      item: seeded positives (39) 0.44 vs 0.59; positives whose fact the
      question layer actually asked (30) 0.53 vs 0.63 (12 both, 7 open only,
      4 questions only); false alarms on the asked controls (24) 1 vs 5. Nine seeded positives were never asked (subject not in
-     the scene by the gate's cast, or past the 30-question cap).
+     the scene by the gate's cast; none was past the 30-question cap).
    - What it says for decision 5: given the fact, the question layer is
      close to the open checker but below it (0.53 vs 0.63) with fewer
      false alarms and far fewer control stops; without the fact in the
      ledger it catches nothing, and 9 of 39 seeded facts weren't asked. It
      doesn't match yet. Both suites' FLOORS are run 1's.
    - **The 7 and the 9, read (2026-11-17, free from the recordings).** The
-     30-question cap never bound (at most 15 a scene). What's left:
-     - *Names written surname first* ("Erdel, Tam", a casualty list): Tam
+     30-question cap cut no positive's fact, so all 9 unasked are presence
+     misses. (The cap does bind: four gates had up to 49 questions, and
+     it cut a governor-022 control's fact.) What's left:
+     - *Names written surname first* (a casualty list's "Erdel, Tam"): Tam
        wasn't present, so his fact went unasked (governor-018, 2 items).
-       Fixed: `ledger._phrases` also matches a name of two or more words
-       surname first, and the suite was topped up ($0.02, Ben's go). Run 1
-       now: recall 0.41 (was 0.37), asked 32 (was 30) at 0.56, both newly
-       asked caught, no new false alarm.
+       Fixed (#726): `ledger.subject_names` also gives a character's name
+       of two or more words surname first (`surname_first`; a character's
+       `name` only, since a place or an alias reversed is ordinary prose),
+       and the suite was topped up ($0.02, Ben's go). Run 1 now: recall
+       0.41 (was 0.37), asked 32 (was 30) at 0.56, both newly asked
+       caught, no new false alarm.
      - *An identity swap* (governor-024, 6 items; governor-025, 4): the
-       old victim is renamed (an Erdel), or left unnamed ("the old woman
-       on the top floor"), so a question about Sera Holdt has nothing of
-       hers to read, and answers no, correctly by its own terms. The open
-       checker caught 4 of 024's and none of 025's. In governor's registry
-       `the-old-woman` is a separate character from `sera-holdt`. Two of
-       024's asked items did find a contradiction of the seeded fact (her
-       floor; "mid-thirties"), but not the labelled one, so they don't
-       count.
+       old victim is renamed (an Erdel) or left unnamed (a description in
+       place of her name). 6 of the 10 were never asked, because Sera
+       Holdt isn't named. Of 024's 4 asked items, 2 were answered no
+       (correctly by the question's own terms), and 2 found a
+       contradiction of the seeded fact but not the labelled one (her
+       floor; an age far off), so they don't count. The open checker
+       caught all 6 of 024's and none of 025's. In governor's registry
+       `the-old-woman` is a separate character from `sera-holdt`.
      - *A quote in another sentence* (governor-023, 1): the layer found the
        labelled error (Sera alive) and quoted a different clause showing
        it, so the scoring's one-evidence-sentence rule counts it a miss.
@@ -121,9 +125,9 @@ character is in, for the Homer series.
        item.
    - So decision 5 stays open. The open checker's real edge here is errors
      where someone is given the wrong name, which a question about a named
-     subject can't see. Also seen: governor's ledger has 77 facts with no
-     subject, which the layer never asks about. The E4 half is still a
-     follow-up.
+     subject can't see. Also seen: governor's pre-pass ledger has 82
+     binding facts with no subject (77 holding for haddons-reckoning),
+     which the layer never asks about. The E4 half is still a follow-up.
 4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
 5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
    (gold notes, judging, a re-score) is all that's left. Since then 5d and
