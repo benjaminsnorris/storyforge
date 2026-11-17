@@ -1152,6 +1152,10 @@ class Carried:
     source: str = ''
     prev: str = ''
     note: str = ''
+    #: nothing was carried because no sheet of the previous scene is of its
+    #: prose as it stands (none there, or each stale or unreadable), and it
+    #: has prose: extracting a sheet from it now would give one (#720)
+    extract: bool = False
 
 
 def carried_stage(project_dir: str, scene_id: str) -> Carried:
@@ -1182,10 +1186,14 @@ def carried_stage(project_dir: str, scene_id: str) -> Carried:
         return Carried([])
     prev = max(before, key=lambda s: order[s])
     paths = {src: sheet_path(project_dir, prev, src) for src in SOURCES}
-    if not any(os.path.isfile(p) for p in paths.values()):
-        return Carried([], prev=prev, note=f'no state carried over: {prev} has no stage sheet '
-                                           f'yet')
     from storyforge.illustrations import read_scene_raw, strip_markers
+    if not any(os.path.isfile(p) for p in paths.values()):
+        try:
+            raw = read_scene_raw(project_dir, prev)
+        except (OSError, ValueError):
+            raw = None
+        return Carried([], prev=prev, note=f'no state carried over: {prev} has no stage sheet '
+                                           f'yet', extract=bool((raw or '').strip()))
     # the bytes the gate read (the gate exception, docs/history.md)
     try:
         raw = read_scene_raw(project_dir, prev)
@@ -1196,6 +1204,7 @@ def carried_stage(project_dir: str, scene_id: str) -> Carried:
         return Carried([], prev=prev, note=f'no state carried over: {prev} has no prose')
     digests = {'extracted': prose_hash(raw), 'writer': prose_hash(strip_markers(raw))}
     passed = []   # why a sheet there is wasn't used (a missing one goes unsaid)
+    matched = False   # a sheet there is of the prose as it stands
     for src in SOURCES:
         label = SOURCE_LABELS[src]
         if not os.path.isfile(paths[src]):
@@ -1212,13 +1221,15 @@ def carried_stage(project_dir: str, scene_id: str) -> Carried:
                           f'code can\'t tell whether the change moved anyone, so none of it '
                           f'is carried')
             continue
+        matched = True
         entries = _entries(sheet.get('end', []), 'end')
         if not entries:
             passed.append(f'{prev}\'s {label} records no state at its end')
             continue
         return Carried([replace(e, origin='carried', seq=-1) for e in entries], src, prev,
                        '; '.join(passed))
-    return Carried([], prev=prev, note='no state carried over: ' + '; '.join(passed))
+    return Carried([], prev=prev, note='no state carried over: ' + '; '.join(passed),
+                   extract=not matched and bool(raw.strip()))
 
 
 def carried_opening(project_dir: str, scene_id: str) -> tuple[list[Entry], str]:
@@ -1300,6 +1311,94 @@ def stage_for(prose: str, quote: str, positions: list[int], r: Replay) -> str:
     return render(r.end)
 
 
+def _prose(project_dir: str, scene_id: str, prose: str | None) -> str:
+    """`prose`, else the scene file's bytes (the gate exception,
+    docs/history.md). Raises StageSheetError when there is none."""
+    if prose is None:
+        from storyforge.illustrations import read_scene_raw
+        prose = read_scene_raw(project_dir, scene_id)
+    if not (prose or '').strip():
+        raise StageSheetError(f'{scene_id} has no prose to check')
+    return prose
+
+
+def _record(project_dir: str, scene_id: str, prose: str, model: str, log_file: str,
+            carry: bool, notes: list[str]) -> tuple[Extraction, list[int], Replay]:
+    """The sheet's part of the check (the extraction, one call, and the
+    replay): (the extraction, each event's place in the prose, the replay).
+    What couldn't be recorded or checked is added to `notes`. Raises as
+    `check_stage_sheet` does."""
+    from storyforge import world_table
+    world = world_table.load(project_dir)
+    pov, time_of_day = _scene_meta(project_dir, scene_id)
+    opening: list[Entry] = []
+    if carry:
+        opening, note = carried_opening(project_dir, scene_id)
+        if note:
+            notes.append(note)
+    x = extract(scene_id, prose, pov=pov, model=model, log_file=log_file)
+    if x.no_events:
+        notes.append(f'the extraction recorded no physical event in {len(prose.split())} '
+                     f'words (asked twice): nothing was checked')
+    events, positions = in_prose_order(prose, x.events)
+    r = replay(events, opening=opening, world=world, time_of_day=time_of_day)
+    notes += r.notes(len(events))
+    cast = {_who(c) for c in x.cast}
+    strangers = sorted({e.who for e in events if e.who and cast and _who(e.who) not in cast})
+    if strangers:
+        notes.append(f'{len(strangers)} name(s) in the events not in the cast '
+                     f'({", ".join(strangers)[:120]}): kept apart from the cast\'s states, '
+                     f'so a slip across the two names is not checked')
+    return x, positions, r
+
+
+@dataclass
+class Extracted:
+    """A scene's sheet made by `extract_sheet`: the sheet, what couldn't be
+    recorded or checked (`notes`, as `StageResult.notes`), and why its end
+    state can't be carried (`unrecorded`; '' when it can)."""
+    sheet: dict
+    notes: list[str] = field(default_factory=list)
+    unrecorded: str = ''
+
+
+def extract_sheet(project_dir: str, scene_id: str, *, model: str | None = None,
+                  log_file: str = '') -> Extracted:
+    """`scene_id`'s stage sheet from its prose as it stands (its file's
+    bytes), made as `check_stage_sheet` makes it (the same extraction,
+    opening with the scene before's end state, the same replay) and saved
+    as its extracted sheet, but checked no further: the yes/no questions
+    aren't asked, as they never change the sheet. One call (two when a long
+    scene's first reply records no event). For a resumed `write --session`
+    (#720), whose first scene opens with this sheet's end state.
+
+    When the extraction recorded no event (`Extraction.no_events`) the end
+    state would be only what was carried into the scene, a guess: that is
+    `unrecorded`, and the sheet isn't saved, so a later run extracts again.
+
+    Raises as `check_stage_sheet` does, and OSError when the sheet can't be
+    written."""
+    prose, model = _prose(project_dir, scene_id, None), resolve_model(model)
+    notes: list[str] = []
+    x, _, r = _record(project_dir, scene_id, prose, model, log_file, True, notes)
+    out = Extracted(build_sheet(scene_id, prose, r, model=model, cast=x.cast), notes)
+    if x.no_events:
+        out.unrecorded = (f'the extraction recorded no physical event in '
+                          f'{len(prose.split())} words (asked twice)')
+        return out
+    write_sheet(project_dir, out.sheet)
+    return out
+
+
+def extraction_cost(prose: str, model: str) -> float:
+    """About what `extract` costs on `prose` (one call; the prompt and the
+    prose in, about an event per ten words out at 60 tokens each, as
+    `max_tokens` allows for), in US dollars."""
+    from storyforge.costs import calculate_cost
+    return calculate_cost(model, (len(PROMPT) + len(prose)) // 4,
+                          500 + len(prose.split()) * 6)
+
+
 def check_stage_sheet(project_dir: str, scene_id: str, *, prose: str | None = None,
                       model: str | None = None, log_file: str = '',
                       carry: bool = True, save: bool = False) -> StageResult:
@@ -1314,37 +1413,13 @@ def check_stage_sheet(project_dir: str, scene_id: str, *, prose: str | None = No
             off or off-schema twice running.
         world_table.WorldTableError: `reference/world.csv` is malformed.
     """
-    from storyforge import world_table
-    if prose is None:
-        from storyforge.illustrations import read_scene_raw
-        prose = read_scene_raw(project_dir, scene_id)   # the gate exception (docs/history.md)
-    if not (prose or '').strip():
-        raise StageSheetError(f'{scene_id} has no prose to check')
-    world = world_table.load(project_dir)
-    model = resolve_model(model)
-    pov, time_of_day = _scene_meta(project_dir, scene_id)
+    prose, model = _prose(project_dir, scene_id, prose), resolve_model(model)
     result = StageResult(scene_id)
-    opening: list[Entry] = []
-    if carry:
-        opening, note = carried_opening(project_dir, scene_id)
-        if note:
-            result.notes.append(note)
-    x = extract(scene_id, prose, pov=pov, model=model, log_file=log_file)
-    if x.no_events:
-        result.notes.append(f'the extraction recorded no physical event in '
-                            f'{len(prose.split())} words (asked twice): nothing was checked')
-    events, positions = in_prose_order(prose, x.events)
-    result.events = len(events)
-    r = replay(events, opening=opening, world=world, time_of_day=time_of_day)
+    x, positions, r = _record(project_dir, scene_id, prose, model, log_file, carry,
+                              result.notes)
+    result.events = len(positions)
     for s in r.slips:
         result.findings.append(to_finding(scene_id, s))
-    result.notes += r.notes(len(events))
-    cast = {_who(c) for c in x.cast}
-    strangers = sorted({e.who for e in events if e.who and cast and _who(e.who) not in cast})
-    if strangers:
-        result.notes.append(f'{len(strangers)} name(s) in the events not in the cast '
-                            f'({", ".join(strangers)[:120]}): kept apart from the cast\'s '
-                            f'states, so a slip across the two names is not checked')
     if x.misquoted_questions:
         result.notes.append(f'{x.misquoted_questions} question(s) quote words not in the '
                             f'scene: not asked')

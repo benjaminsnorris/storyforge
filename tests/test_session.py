@@ -676,7 +676,9 @@ def test_a_resumed_session_carries_the_writers_note(project_dir, loop, requests,
 def test_a_resumed_session_says_why_an_edited_scenes_note_isnt_carried(project_dir, loop,
                                                                         requests, capsys):
     """#707: the reviser changed the scene after the writer's note, so the
-    note is of other prose: not carried, and the log says why."""
+    note is of other prose: not carried, and the log says why. (The
+    extraction at the resume, #720, gets a scene for its reply here, so it
+    fails and carries nothing.)"""
     requests.replies = _route
     loop['run'](['act1-sc01'])
     capsys.readouterr()
@@ -687,6 +689,154 @@ def test_a_resumed_session_says_why_an_edited_scenes_note_isnt_carried(project_d
             "was changed after the writer wrote it" in out)
     plan = [r for r in requests if not r.get('output_config')][0]['messages'][-1]['content']
     assert '## The stage as the last scene left it' not in plan
+
+
+# --- the stage extracted at a resume (#720) ---
+
+def _extraction(body):
+    return 'events' in ((body.get('output_config') or {}).get('format', {})
+                        .get('schema', {}).get('properties', {}))
+
+
+def _resume_route(extract):
+    """Answer the stage extraction with `extract(body)`, the review with
+    no flags, and the writer with a scene."""
+    def route(body):
+        if _extraction(body):
+            return extract(body)
+        if body.get('output_config'):
+            return _reply(json.dumps({'flags': []}))
+        return _reply(scene_reply(LONG))
+    return route
+
+
+#: what the fixture's act1-sc01 is read to leave: Dorren standing, the map
+#: in her hand
+SC01_EVENTS = {'cast': ['Dorren Hayle'], 'questions': [], 'events': [
+    {'quote': '', 'who': 'Dorren Hayle', 'field': 'posture', 'item': '', 'from': '',
+     'to': 'standing'},
+]}
+
+
+@pytest.fixture
+def resume(project_dir, monkeypatch):
+    """act1-sc01 (prose in the fixture, no sheet) is the scene before
+    act1-sc02's session; each extraction reply quotes its own first words."""
+    monkeypatch.setenv('STORYFORGE_STAGE_SHEET_MODEL', 'claude-haiku-5-5')
+    from storyforge.illustrations import read_scene_raw
+    prose = read_scene_raw(project_dir, 'act1-sc01')
+    quote = ' '.join(prose.split()[:4])
+    events = json.loads(json.dumps(SC01_EVENTS))
+    events['events'][0]['quote'] = quote
+    return {'events': events, 'quote': quote}
+
+
+def test_a_resume_with_no_sheet_extracts_the_scene_before(project_dir, loop, requests,
+                                                           resume, capsys):
+    from storyforge import stage_sheet
+    from storyforge.costs import ledger_rows
+    requests.replies = _resume_route(lambda body: _reply(json.dumps(resume['events'])))
+    out = loop['run'](['act1-sc02'])
+    assert out.drafted == 1
+    assert len([r for r in requests if _extraction(r)]) == 1
+    log = capsys.readouterr().out
+    assert 'no state carried over: act1-sc01 has no stage sheet yet' in log
+    assert "extracting act1-sc01's stage sheet from its prose as it stands" in log
+    assert ('the stage act1-sc01 left is carried from its stage sheet extracted at this '
+            'resume (1 state(s))') in log
+    saved = stage_sheet.load_sheet(stage_sheet.sheet_path(project_dir, 'act1-sc01'))
+    assert saved['source'] == 'extracted' and saved['end'][0]['value'] == 'standing'
+    plan = [r for r in requests if not r.get('output_config')][0]['messages'][-1]['content']
+    assert '## The stage as the last scene left it' in plan and 'standing' in plan
+    rows = ledger_rows(project_dir, ('stage-resume',))
+    assert len(rows) == 1 and rows[0]['target'] == 'act1-sc01'
+
+
+def test_a_resume_with_a_usable_sheet_extracts_nothing(project_dir, loop, requests, resume,
+                                                       capsys):
+    from storyforge import stage_sheet
+    from storyforge.costs import ledger_rows
+    from storyforge.illustrations import read_scene_raw
+    r = stage_sheet.replay([stage_sheet.Event(resume['quote'], 'Dorren Hayle', 'posture', '',
+                                              '', 'kneeling')])
+    stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(
+        'act1-sc01', read_scene_raw(project_dir, 'act1-sc01'), r))
+    requests.replies = _resume_route(lambda body: pytest.fail('extracted again'))
+    loop['run'](['act1-sc02'])
+    assert 'carried from its stage sheet (1 state(s))' in capsys.readouterr().out
+    assert ledger_rows(project_dir, ('stage-resume',)) == []
+
+
+def test_a_failed_extraction_carries_nothing_and_the_session_goes_on(project_dir, loop,
+                                                                      requests, resume, capsys):
+    from storyforge import stage_sheet
+    from storyforge.costs import ledger_rows
+    requests.replies = _resume_route(lambda body: _reply('not the schema'))
+    out = loop['run'](['act1-sc02'])
+    assert out.drafted == 1 and out.failed == []
+    log = capsys.readouterr().out
+    assert ("WARNING: act1-sc01's stage sheet could not be extracted (act1-sc01: the stage "
+            "sheet extraction failed twice") in log
+    assert 'no state carried over, and the session goes on without it' in log
+    assert 'carried from its stage sheet' not in log
+    assert not os.path.exists(stage_sheet.sheet_path(project_dir, 'act1-sc01'))
+    plan = [r for r in requests if not r.get('output_config')][0]['messages'][-1]['content']
+    assert '## The stage as the last scene left it' not in plan
+    assert len(ledger_rows(project_dir, ('stage-resume',))) == 1   # the spend still logged
+
+
+def test_an_extraction_with_no_event_carries_nothing(project_dir, loop, requests, resume,
+                                                     capsys):
+    from storyforge import stage_sheet
+    empty = {'cast': ['Dorren Hayle'], 'events': [], 'questions': []}
+    requests.replies = _resume_route(lambda body: _reply(json.dumps(empty)))
+    out = loop['run'](['act1-sc02'])
+    assert out.drafted == 1
+    log = capsys.readouterr().out
+    assert ("can't give its end state (the extraction recorded no physical event" in log
+            and 'no state carried over, and the sheet is not saved' in log)
+    assert not os.path.exists(stage_sheet.sheet_path(project_dir, 'act1-sc01'))
+    plan = [r for r in requests if not r.get('output_config')][0]['messages'][-1]['content']
+    assert '## The stage as the last scene left it' not in plan
+
+
+def test_a_dry_run_says_it_would_extract_and_calls_nothing(project_dir, monkeypatch, resume,
+                                                           capsys):
+    from storyforge import api, cmd_write
+    monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+    monkeypatch.setattr(cmd_write, 'select_model', lambda t: 'claude-opus-5-5')
+    monkeypatch.setattr(api, '_api_request', lambda *a, **k: pytest.fail('spent'))
+    monkeypatch.setattr(api, 'max_input_tokens', lambda m: 200_000)
+    try:
+        cmd_write.main(['--session', '--coaching', 'full', '--dry-run', '--force',
+                        'act1-sc02'])
+    except SystemExit as e:
+        assert not e.code
+    out = capsys.readouterr().out
+    assert re.search(r"Cost forecast: .*~\$\d+\.\d\d to extract act1-sc01's stage at the "
+                     r"resume", out)
+    assert re.search(r"would extract act1-sc01's stage sheet from its prose as it stands "
+                     r"\(one call on claude-haiku-5-5, ~\$\d+\.\d\d\)", out)
+
+
+def test_the_forecast_counts_the_extraction_only_when_it_will_run(project_dir, monkeypatch,
+                                                                  resume):
+    from storyforge import cmd_write, stage_sheet
+    from storyforge.illustrations import read_scene_raw
+    monkeypatch.setattr(cmd_write, 'select_model', lambda t: 'claude-opus-5-5')
+    monkeypatch.setattr(session, 'forecast', lambda *a, **k: (1.0, 0.0, 'base'))
+    csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    f = cmd_write._session_forecast(project_dir, ['act1-sc02'], csv)
+    cost = stage_sheet.extraction_cost(read_scene_raw(project_dir, 'act1-sc01'),
+                                       'claude-haiku-5-5')
+    assert f.draft == pytest.approx(1.0 + cost) and 'to extract act1-sc01' in f.basis
+    # the first scene has none before it; a usable sheet needs no extraction
+    assert cmd_write._session_forecast(project_dir, ['act1-sc01'], csv).draft == 1.0
+    r = stage_sheet.replay([stage_sheet.Event(resume['quote'], 'Dorren Hayle', 'posture', '',
+                                              '', 'kneeling')])
+    stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(
+        'act1-sc01', read_scene_raw(project_dir, 'act1-sc01'), r))
+    assert cmd_write._session_forecast(project_dir, ['act1-sc02'], csv).draft == 1.0
 
 
 def test_the_spend_reaches_the_cost_ledger(project_dir, loop, requests):
@@ -1074,6 +1224,7 @@ def test_is_bookkeeping():
     assert _is_bookkeeping('working/costs/ledger.csv')
     assert _is_bookkeeping('working/recommendations-3.md')
     assert _is_bookkeeping('reference/scenes-review.md')
+    assert _is_bookkeeping('working/stage-sheets/act1-sc01.json')   # saved at a resume (#720)
     assert not _is_bookkeeping('working/recommendations/x.md')
     assert not _is_bookkeeping('working/pipeline.csv.bak')
     assert not _is_bookkeeping('scenes/act1-sc01.md')

@@ -1321,6 +1321,88 @@ class TestWritersSheetCarried:
         assert r.notes == [] and r.sheet['opening'][0]['value'] == 'sitting'
 
 
+class TestExtractAtResume:
+    """#720: when no sheet of the previous scene is of its prose as it
+    stands, `carried_stage` says extracting one would give one, and
+    `extract_sheet` makes and saves it as the gate's method does."""
+
+    PROSE = 'Ann sat on the step.'
+
+    def test_no_sheet_with_prose_asks_for_an_extraction(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.extract and c.prev == PREV and c.entries == []
+
+    def test_only_stale_sheets_ask_for_an_extraction(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        TestWritersSheetCarried()._writer(project_dir, 'An earlier draft.')
+        TestWritersSheetCarried()._extracted(project_dir, 'Earlier prose.')
+        assert stage_sheet.carried_stage(project_dir, SCENE).extract
+
+    def test_a_usable_sheet_asks_for_none(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        TestWritersSheetCarried()._writer(project_dir, self.PROSE)
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.entries and not c.extract
+
+    def test_a_sheet_of_the_prose_with_no_end_asks_for_none(self, project_dir):
+        """Extracting the same prose again would give the same sheet."""
+        _write_scene(project_dir, PREV, self.PROSE)
+        stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(PREV, self.PROSE,
+                                                                     replay([])))
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.entries == [] and not c.extract
+
+    def test_no_prose_or_no_previous_scene_asks_for_none(self, project_dir):
+        _write_scene(project_dir, PREV, '  \n')
+        assert not stage_sheet.carried_stage(project_dir, SCENE).extract
+        assert not stage_sheet.carried_stage(project_dir, PREV).extract
+
+    def test_the_sheet_is_extracted_saved_and_its_questions_not_asked(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        fake = _fake([{'cast': ['Ann'], 'events': [ev('Ann sat on the step', 'Ann', 'posture',
+                                                       'sitting')],
+                       'questions': [{'quote': 'Ann sat', 'question': 'Can Ann sit?'}]}])
+        with patch('storyforge.api._api_request', side_effect=fake) as api:
+            got = stage_sheet.extract_sheet(project_dir, PREV, model='m')
+        assert api.call_count == 1 and got.unrecorded == ''
+        saved = stage_sheet.load_sheet(stage_sheet.sheet_path(project_dir, PREV))
+        assert saved == got.sheet and saved['prose_sha256'] == stage_sheet.prose_hash(self.PROSE)
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.source == 'extracted' and [e.value for e in c.entries] == ['sitting']
+
+    def test_it_is_the_sheet_the_check_saves(self, project_dir):
+        _write_scene(project_dir, PREV, HARBOUR)
+        reply = {'cast': ['Tom', 'Ann'], 'events': HARBOUR_EVENTS, 'questions': []}
+        with patch('storyforge.api._api_request', side_effect=_fake([reply])):
+            got = stage_sheet.extract_sheet(project_dir, PREV, model='m')
+            checked = check_stage_sheet(project_dir, PREV, model='m')
+        assert got.sheet == checked.sheet
+        assert got.notes == [n for n in checked.notes if 'question' not in n]
+
+    def test_no_events_is_unrecorded_and_not_saved(self, project_dir):
+        long = ' '.join(['Ann thought about the harbour and the boats.'] * 12)
+        _write_scene(project_dir, PREV, long)
+        empty = {'cast': ['Ann'], 'events': [], 'questions': []}
+        with patch('storyforge.api._api_request', side_effect=_fake([empty])) as api:
+            got = stage_sheet.extract_sheet(project_dir, PREV, model='m')
+        assert api.call_count == 2   # asked once more, as the check does
+        assert 'recorded no physical event' in got.unrecorded
+        assert not os.path.exists(stage_sheet.sheet_path(project_dir, PREV))
+
+    def test_a_failed_extraction_raises_and_saves_nothing(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        with patch('storyforge.api._api_request', side_effect=_fake([{'nope': 1}])):
+            with pytest.raises(StageSheetError):
+                stage_sheet.extract_sheet(project_dir, PREV, model='m')
+        assert not os.path.exists(stage_sheet.sheet_path(project_dir, PREV))
+
+    def test_the_cost_grows_with_the_prose(self):
+        short = stage_sheet.extraction_cost('Ann sat.', 'claude-haiku-5-5')
+        long = stage_sheet.extraction_cost('Ann sat. ' * 2000, 'claude-haiku-5-5')
+        assert 0 < short < long
+
+
 @pytest.mark.blocking_read
 class TestGateRecordsTheMethod:
     """CR-2, T2: gate-prose.csv records how the blocking was checked, and a

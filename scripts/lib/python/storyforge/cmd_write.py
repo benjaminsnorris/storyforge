@@ -396,7 +396,8 @@ def main(argv=None):
     log('============================================')
 
     if not args.dry_run and (drafted_count > 0 or uncommitted):
-        print_summary(project_dir, ('draft', 'gate', 'gate-fix', 'voice-review'),
+        print_summary(project_dir, ('draft', 'gate', 'gate-fix', 'voice-review',
+                                     STAGE_RESUME_OPERATION),
                       session_start=session_start_iso)
     if not args.dry_run and uncommitted:
         # The review phase commits (and is paid for), and the drift check
@@ -1558,11 +1559,15 @@ def _commit(project_dir: str, message: str, paths: list[str]) -> None:
 #: its own commits (and its review and recommendations, if those commits
 #: failed), the drift check's cues, and `reference/` (as a scene commit takes
 #: it), for what the last commit's pre-commit sync regenerated after staging,
-#: such as scenes-review.md. `working/logs/` is ignored in a book
-#: (`templates/gitignore`); it is listed for a repo that tracks it. Only what
-#: the run changed is committed (`_commit_bookkeeping`).
+#: such as scenes-review.md, and the stage sheets (a resumed session saves the
+#: sheet of the scene before its first before drafting, #720: committed with
+#: that scene's notes, or here when the session stops first).
+#: `working/logs/` is ignored in a book (`templates/gitignore`); it is listed
+#: for a repo that tracks it. Only what the run changed is committed
+#: (`_commit_bookkeeping`).
 BOOKKEEPING_PATHS = ('working/costs/', 'working/pipeline.csv', 'working/timeline-cues.csv',
-                     'working/reviews/', 'working/logs/', 'reference/')
+                     'working/reviews/', 'working/logs/', 'reference/',
+                     'working/stage-sheets/')
 
 
 def _is_bookkeeping(rel: str) -> bool:
@@ -1934,7 +1939,102 @@ def _session_forecast(project_dir: str, pending_ids: list[str], metadata_csv: st
     draft, gate_cost, basis = session.forecast(
         project_dir, pending_ids[:count], model, avg, len(story.split()), system_tokens, review,
         review_model=review_model)
+    resume = _resume_extraction(project_dir, pending_ids[0])
+    if resume is not None:
+        prev, _, cost = resume
+        draft += cost
+        basis += f'; ~${cost:.2f} to extract {prev}\'s stage at the resume'
     return WriteForecast(draft, gate_cost, basis)
+
+
+#: The cost ledger's operation for a resumed session's stage extraction (#720)
+STAGE_RESUME_OPERATION = 'stage-resume'
+
+
+def _resume_extraction(project_dir: str, first: str) -> tuple[str, str, float] | None:
+    """When a session opening at `first` will extract the stage the scene
+    before it left (#720: that scene has prose but no sheet of it as it
+    stands, `stage_sheet.carried_stage`'s `extract`): (that scene, the
+    extraction's model, its forecast cost). None when it won't."""
+    from storyforge import stage_sheet
+    carry = stage_sheet.carried_stage(project_dir, first)
+    if not carry.extract:
+        return None
+    return (carry.prev, *_resume_price(project_dir, carry.prev, dry_run=True))
+
+
+def _resume_price(project_dir: str, prev: str, dry_run: bool) -> tuple[str, float]:
+    """(the stage extraction's model, what extracting `prev`'s sheet should
+    cost). A dry run without an API key can't ask the Models API, so it
+    prices the extraction tier's newest listed model; a real run has the
+    key."""
+    from storyforge import stage_sheet
+    try:
+        model = stage_sheet.resolve_model()
+    except RuntimeError:
+        if not dry_run:
+            raise
+        from storyforge import costs
+        from storyforge.common import _TASK_TIER
+        model = costs._TIER_FALLBACK[_TASK_TIER['extraction']]
+    prose = read_scene_raw(project_dir, prev) or ''
+    return model, stage_sheet.extraction_cost(prose, model)
+
+
+def _resume_stage(project_dir: str, first: str, carry, log_dir: str, dry_run: bool):
+    """The stage the scene before a resumed session's first (`first`,
+    whose `stage_sheet.carried_stage` is `carry`) left, when it
+    has prose but no sheet of it (`carry.extract`, #707's fallback found
+    none usable): its sheet extracted now, from its prose as it stands
+    (`stage_sheet.extract_sheet`, the `stage-sheet` gate method's
+    extraction; one small-model call, metered and logged to the cost ledger
+    as `STAGE_RESUME_OPERATION`), saved as its extracted sheet so a later
+    run reuses it while the prose is unchanged, and its end state carried
+    (#720). Returns the `stage_sheet.Carried` to open with.
+
+    The extracted sheet's quality isn't established yet (#646), so the log
+    says the carried stage was extracted at the resume, with the notes on
+    what it couldn't record; an extraction that fails, or records no
+    event, carries nothing and says why, and the session goes on (as it
+    did before, with no stage). A dry run says it would extract, and what
+    that costs, and calls nothing."""
+    from storyforge import api, stage_sheet
+    from storyforge.world_table import WorldTableError
+    prev = carry.prev
+    log(f'Session: {carry.note}')
+    model, cost = _resume_price(project_dir, prev, dry_run)
+    none = stage_sheet.Carried([], prev=prev)
+    if dry_run:
+        log(f'Session (dry run): would extract {prev}\'s stage sheet from its prose as it '
+            f'stands (one call on {model}, ~${cost:.2f}) and carry its end state')
+        return none
+    log(f'Session: extracting {prev}\'s stage sheet from its prose as it stands (one call '
+        f'on {model}, ~${cost:.2f})')
+    with api.metered() as meter:
+        try:
+            got = stage_sheet.extract_sheet(
+                project_dir, prev, model=model,
+                log_file=os.path.join(log_dir, 'stage-resume', f'{prev}.json'))
+        except (stage_sheet.StageSheetError, WorldTableError, OSError) as e:
+            log(f'WARNING: {prev}\'s stage sheet could not be extracted ({e}); no state '
+                f'carried over, and the session goes on without it')
+            return none
+        finally:
+            try:
+                meter.log(project_dir, STAGE_RESUME_OPERATION, prev)
+            except Exception as e:   # the ledger only; never the run
+                log(f'WARNING: could not log the cost of {STAGE_RESUME_OPERATION} {prev}: {e}')
+    for note in got.notes:
+        log(f'  NOTE: {prev}: stage sheet, not recorded or checked: {note}')
+    if got.unrecorded:
+        log(f'WARNING: {prev}\'s stage sheet, extracted at the resume, can\'t give its end '
+            f'state ({got.unrecorded}); no state carried over, and the sheet is not saved')
+        return none
+    again = stage_sheet.carried_stage(project_dir, first)
+    if again.source != 'extracted':
+        log(f'Session: {again.note or "no state carried over"}')
+        return none
+    return again
 
 
 def _has_prose(path: str) -> bool:
@@ -1988,15 +2088,23 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
     if not checks:
         log(f'NOTE: {voice_book.CHECKS_FILE} has no checks yet, so no scene gets a voice '
             f'review')
-    # the stage the scene before the first left: its extracted sheet, else
-    # the writer's note from the session that drafted it (#707)
+    # the stage the scene before the first left: its extracted sheet, else the
+    # writer's note from the session that drafted it (#707); with neither of
+    # its prose as it stands, its sheet extracted now (#720)
     carry = stage_sheet.carried_stage(project_dir, pending_ids[0])
+    resumed = carry.extract
+    if resumed:
+        carry = _resume_stage(project_dir, pending_ids[0], carry, log_dir, dry_run)
     carried = stage_sheet.render(carry.entries) if carry.entries else ''
-    if carry.entries:
+    if carry.entries and resumed:
+        log(f'Session: the stage {carry.prev} left is carried from its stage sheet extracted '
+            f'at this resume ({len(carry.entries)} state(s)); the extracted sheet\'s quality '
+            f'is not yet established (#646)')
+    elif carry.entries:
         log(f'Session: the stage {carry.prev} left is carried from its '
             f'{stage_sheet.SOURCE_LABELS[carry.source]} ({len(carry.entries)} state(s))'
             + (f'; {carry.note}' if carry.note else ''))
-    elif carry.note:
+    elif carry.note and not resumed:
         log(f'Session: {carry.note}')
     # the scenes between the first and the last to draft that this run
     # won't write: drafted ones go in the conversation; others are gaps
