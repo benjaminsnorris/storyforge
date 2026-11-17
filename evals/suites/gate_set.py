@@ -17,12 +17,12 @@ and, for runs 2 and 3, `gate-set/cassettes/run2/gate-set/` and `run3/`);
 notes carry counts and ids only, and without that checkout the suite is
 reported unavailable (``stale``). Frozen (#645): recorded on purpose, as
 three runs. Needs the corpus books cloned under ``STORYFORGE_CORPUS_DIR``, as
-E8 does. **Not recorded yet**: record it when the question layer is a
-candidate to replace the open checker; the first recording has no forecast
-in the baseline, so it needs ``--over-budget`` with Ben's approval
-(`gate_set.runner.record_command`). Until then a replay is unavailable
-(``stale``, "not recorded yet"); once `FLOORS` are set, missing recordings
-are the harness's error.
+E8 does. First recorded 2026-11-16 (three runs, about $43 each, with
+``--over-budget`` and Ben's approval: `gate_set.runner.record_command`);
+`FLOORS` are run 1's (the default cassettes, which a replay reads), so
+missing recordings are the harness's error. **Stale since #713** (the
+typed-state extraction prompt changed while it was being recorded): its
+replay misses every item until it is re-recorded (about $130, Ben's call).
 """
 
 from __future__ import annotations
@@ -39,9 +39,11 @@ MIN_POSITIVES = 40
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    'recall': None, 'recall_per_case': None, 'cases_caught': None,
-    'stop_rate_positive': None, 'false_alarm_on_fact': None, 'stop_rate_control': None,
-    'unfinished': None,
+    # recorded 2026-11-16 at 4d26a353 (run 1; runs 2 and 3: recall 0.5 and
+    # 0.5652, false alarms 3 and 3, control stops 0.7419 and 0.8065)
+    'recall': 0.5652, 'recall_per_case': 0.5411, 'cases_caught': 10,
+    'stop_rate_positive': 0.9565, 'false_alarm_on_fact': 5, 'stop_rate_control': 0.7419,
+    'unfinished': 0,
 }
 
 

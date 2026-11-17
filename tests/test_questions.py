@@ -757,6 +757,15 @@ class TestCheckQuestions:
         assert r.notes[0].startswith(f'{r.asked} question(s) about facts and disputes')
         assert any('about people or places not in the scene' in n for n in r.notes)
 
+    def test_the_facts_asked_and_left_out_are_named_by_id(self, project_dir):
+        # #677: an eval that seeds a fact tells "asked and missed" from
+        # "never asked" by id; the absent ones are named, not just counted
+        rows = _add_rows(project_dir, TESSA_KIND, KAEL_SHY)
+        r, _ = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert r.asked_fact_ids == ['tessa-kind']
+        assert any(n.startswith('2 fact(s) about people or places not in the scene')
+                   and n.endswith('not asked: scar-left-hand-kael, kael-shy') for n in r.notes)
+
     def test_a_brief_item_in_words_entering_the_scene_is_asked(self, project_dir):
         from storyforge.elaborate import _read_csv, _write_csv
         path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
@@ -844,6 +853,8 @@ class TestGate:
         assert result.passed and result.committed
         assert result.question_notes[-1:] == list(gate.QUESTION_LAYER_GAPS)
         assert result.question_notes[0].startswith(f'{1} question(s) about facts')
+        # #677: the fact asked about is on the gate's result, by id
+        assert result.asked_fact_ids == ['tessa-kind']
 
     def _brief(self, project_dir, **fields):
         from storyforge.elaborate import _read_csv, _write_csv
