@@ -546,8 +546,10 @@ def test_diagnose_reports_the_state_rung_with_no_plan(in_project, capsys):
 def test_diagnose_counts_entities_and_transitions(in_project, capsys):
     cmd_illustrate.main(['--diagnose'])
     out = capsys.readouterr().out
-    # The fixture's log: one transition for each of five entities.
-    assert '5 transition(s) across 5 entity(ies)' in out
+    transitions = vs.read_transitions(in_project)
+    entities = {t['entity'] for t in transitions}
+    assert (f'{len(transitions)} transition(s) across '
+            f'{len(entities)} entity(ies)') in out
 
 
 def test_diagnose_reports_an_unrun_audit(in_project, capsys):

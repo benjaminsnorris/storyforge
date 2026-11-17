@@ -215,7 +215,7 @@ def test_a_from_scene_that_exists_nowhere_is_an_error(project_dir):
 
 
 def test_a_blank_from_scene_is_the_same_error(project_dir):
-    # The log alone: the fixture's plan names entities ROWS does not state.
+    # The log alone: the fixture's plan names entities this log omits.
     remove_plan(project_dir)
     _write_state(project_dir, [('master-survey', '', 'burned', '')])
     kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
@@ -226,7 +226,7 @@ def test_a_scene_the_chapter_map_omits_is_a_warning_not_an_error(project_dir):
     """new-x1 is in scenes.csv and not in the fixture's chapter map. The
     transition row is well-formed; the map is what is incomplete. Flagging it as
     an error would push the author to delete a good row."""
-    # The log alone: the fixture's plan names entities ROWS does not state.
+    # The log alone: the fixture's plan names entities this log omits.
     remove_plan(project_dir)
     from storyforge import illustrations as ill
     _write_state(project_dir, [('master-survey', 'new-x1', 'burned', '')])
@@ -249,7 +249,7 @@ def test_a_cut_scene_stays_an_error_even_though_scenes_csv_lists_it(project_dir)
     """check_chapter_map_freshness excludes cut/merged/archived scenes, which is
     exactly right: a transition keyed to a cut scene must not read as a mere
     chapter-map gap."""
-    # The log alone: the fixture's plan names entities ROWS does not state.
+    # The log alone: the fixture's plan names entities this log omits.
     remove_plan(project_dir)
     path = os.path.join(project_dir, 'reference', 'scenes.csv')
     with open(path, encoding='utf-8') as f:
@@ -289,7 +289,7 @@ def test_evidence_survives_reflowed_prose(project_dir):
 
 
 def test_a_transition_with_no_evidence_is_not_a_finding(project_dir):
-    # The log alone: the fixture's plan names entities ROWS does not state.
+    # The log alone: the fixture's plan names entities this log omits.
     remove_plan(project_dir)
     _write_state(project_dir, [('x', 'act1-sc01', 'y', '')])
     assert vs.prepass(project_dir)['findings'] == []
@@ -687,7 +687,7 @@ class TestMalformedStateOverrideIsReported:
     malformed override survived both clean."""
 
     @pytest.fixture(autouse=True)
-    def _seeded(self, project_dir):
+    def _module_log(self, project_dir):
         # The fixture's canon and plan, under this module's log.
         _write_state(project_dir)
 
