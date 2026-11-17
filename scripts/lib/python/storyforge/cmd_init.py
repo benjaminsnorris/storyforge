@@ -37,7 +37,9 @@ import shutil
 import subprocess
 import sys
 
-from storyforge.common import PROJECT_TITLE, get_plugin_dir, install_signal_handlers, log
+from storyforge.common import (
+    PIPELINE_HEADER, PROJECT_TITLE, get_plugin_dir, install_signal_handlers, log,
+)
 
 # Graphic-novel-only templates that a prose project does not get: the
 # canon tree and art direction, and the character, world and systems bible
@@ -49,8 +51,6 @@ from storyforge.common import PROJECT_TITLE, get_plugin_dir, install_signal_hand
 GN_ONLY = {'canon', 'visual-style.md',
            'character-bible.md', 'world-bible.md', 'systems-bible.md'}
 
-PIPELINE_HEADER = ('cycle|started|status|evaluation|scoring|plan|review|'
-                   'recommendations|summary')
 
 DIRS = ['reference', 'scenes', 'manuscript/press-kit',
         'working/logs', 'working/evaluations', 'working/plans']

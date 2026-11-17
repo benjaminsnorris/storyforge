@@ -72,7 +72,7 @@ EXPECTED_DIRS = [
     'working/recommendations',
 ]
 
-PIPELINE_EXPECTED = 'cycle|started|status|evaluation|scoring|plan|review|recommendations|summary'
+PIPELINE_EXPECTED = common.PIPELINE_HEADER
 
 EXPECTED_TOP_DIRS = set('scenes reference working manuscript storyforge .git'.split())
 EXPECTED_TOP_FILES = set('storyforge.yaml CLAUDE.md .gitignore .DS_Store storyforge'.split())
@@ -116,10 +116,7 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     'working/craft-weights.csv': [
         'section', 'principle', 'weight', 'author_weight', 'notes',
     ],
-    'working/pipeline.csv': [
-        'cycle', 'started', 'status', 'evaluation', 'scoring',
-        'plan', 'review', 'recommendations', 'summary',
-    ],
+    'working/pipeline.csv': list(common.PIPELINE_COLUMNS),
     'working/costs/ledger.csv': [
         'timestamp', 'operation', 'target', 'model', 'input_tokens',
         'output_tokens', 'cache_read', 'cache_create', 'cost_usd',
@@ -249,7 +246,7 @@ _PAST_TENSE: Final = {
     'add': 'Added', 'clean': 'Cleaned', 'clear': 'Cleared',
     'create': 'Created', 'delete': 'Deleted', 'fill': 'Filled', 'migrate': 'Migrated',
     'move': 'Moved', 'remove': 'Removed', 'rename': 'Renamed',
-    'update': 'Updated',
+    'repair': 'Repaired', 'update': 'Updated',
 }
 
 
@@ -403,6 +400,16 @@ class DiskFacts:
         if os.path.isabs(rel):
             return False
         return self._norm(rel) in self.pending_files
+
+    def isdir(self, rel: str) -> bool:
+        """Is `rel` a directory, or will an earlier step have created one?"""
+        if os.path.isdir(os.path.join(self.root, rel)):
+            return True
+        if os.path.isabs(rel):
+            return False
+        norm = self._norm(rel)
+        return bool(norm) and any(p == norm or p.startswith(norm + '/')
+                                  for p in self.pending_dirs)
 
     def list_files(self, reldir: str) -> list[str]:
         """Project-relative paths of the files directly inside `reldir`."""
@@ -958,16 +965,25 @@ def reorganize_loose_files(project_dir: str) -> None:
 # Pipeline CSV migration
 # ============================================================================
 
-def plan_pipeline_csv(project_dir: str) -> StepPlan:
-    """Plan the `working/pipeline.csv` header migration.
+def plan_pipeline_csv(project_dir: str, disk: DiskFacts) -> StepPlan:
+    """Plan the `working/pipeline.csv` header migration and cycle-row repair.
 
     One computation for both modes. `--dry-run` used to compare the header
     itself while the real run rebuilt every row from it — the same predicate
     written twice, which is how they drift.
+
+    The row repair is #709: `evaluate` wrote its cycle row positionally for an
+    old six-column header into the nine-column file. Only that exact shape is
+    repaired (`_old_evaluate_row`), each repaired row is named, and a row that
+    looks like it but doesn't match is reported and left alone. One step, not
+    two, because both rewrite the same file and every plan is built before any
+    runs: a second planner would read the header the first is about to change.
+    `disk` answers whether `working/evaluations/eval-<ts>/` exists.
     """
     title = 'Checking pipeline.csv...'
-    csv_path = os.path.join(project_dir, 'working', 'pipeline.csv')
-    if not os.path.isfile(csv_path):
+    rel = 'working/pipeline.csv'
+    csv_path = disk.abspath(rel)
+    if not disk.isfile(rel):
         return StepPlan(title, (), _no_op)
 
     try:
@@ -979,26 +995,129 @@ def plan_pipeline_csv(project_dir: str) -> StepPlan:
             f'of cleanup still runs.')
         return StepPlan(title, (), _no_op)
 
-    new_lines = _migrated_pipeline_lines(lines)
-    if new_lines is None:
-        return StepPlan(title, (), _no_op)
+    changes: list[PlannedChange] = []
+    migrated = _migrated_pipeline_lines(lines)
+    if migrated is not None:
+        changes.append(_change('add', 'missing columns to pipeline.csv'))
+    new_lines = list(migrated if migrated is not None else lines)
 
-    change = _change('add', 'missing columns to pipeline.csv')
+    repaired, unknown_evals, near_misses = [], [], []
+    for i, line in enumerate(new_lines[1:], start=1):
+        cells = line.rstrip('\r\n').split('|')
+        fixed = _repaired_evaluate_row(cells, disk)
+        if fixed is None:
+            if len(cells) > 1 and cells[1].strip() == 'evaluating':
+                near_misses.append(cells[0])
+            continue
+        values, eval_found = fixed
+        new_lines[i] = '|'.join(values) + '\n'
+        repaired.append(values[0])
+        evaluation = values[3] or 'blank'
+        if not eval_found:
+            unknown_evals.append((values[0], values[1]))
+        changes.append(_change(
+            'repair', f'cycle {csv_safe(values[0])} in pipeline.csv, written in '
+            f"evaluate's old column layout (started {values[1]}, status "
+            f'{csv_safe(values[2])}, evaluation {evaluation})'))
+
+    summary = _pipeline_rows_summary(repaired, unknown_evals, near_misses)
+    if not changes:
+        return StepPlan(title, (), _no_op, summary)
 
     def apply() -> tuple[PlannedChange, ...]:
-        with open(csv_path, 'w', encoding='utf-8') as f:
+        with open(csv_path, 'w', encoding='utf-8', newline='') as f:
             f.writelines(new_lines)
-        return (change,)
+        return tuple(changes)
 
-    return StepPlan(title, (change,), apply)
+    return StepPlan(title, tuple(changes), apply, summary)
 
 
 def migrate_pipeline_csv(project_dir: str) -> None:
-    plan_pipeline_csv(project_dir).apply()
+    plan_pipeline_csv(project_dir, DiskFacts(project_dir)).apply()
+
+
+#: An ISO start time as `evaluate` wrote it (`%Y-%m-%dT%H:%M:%S`).
+_ISO_SECONDS = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
+
+
+def _repaired_evaluate_row(cells: list[str],
+                           disk: DiskFacts) -> tuple[list[str], bool] | None:
+    """A cycle row #709's `evaluate` wrote, with its cells under their columns.
+
+    Returns `(nine cells, whether the evaluation directory was found)`, or None
+    for any row not in exactly that shape. `evaluate` appended
+    `cycle|evaluating|eval-<ts>|||<start time>` to the nine-column file, then
+    wrote by the real header: `status` over the `eval-<ts>` cell, and later
+    `review` and `recommendations` past the start time. So the shape is: at most
+    nine cells, `evaluating` under `started`, `evaluation` and `scoring` blank,
+    an ISO start time under `plan`. Nothing else writes `plan` or `scoring`, so
+    the mapping is unambiguous.
+
+    The evaluation's name: still there if `status` was never written over it;
+    otherwise `eval-` + the start time as `YYYYMMDD-HHMMSS`, only when
+    `working/evaluations/` has that directory (`evaluate` took its stamp a
+    moment before the row's start time, so they can differ), else blank.
+    """
+    if not 6 <= len(cells) <= 9:
+        return None
+    started_cell, status_cell = cells[1].strip(), cells[2].strip()
+    if (started_cell != 'evaluating' or cells[3].strip() or cells[4].strip()
+            or not _ISO_SECONDS.fullmatch(cells[5].strip())):
+        return None
+    started = cells[5].strip()
+    if status_cell.startswith('eval-'):
+        status, evaluation, found = 'evaluating', status_cell, True
+    else:
+        status = status_cell
+        stamp = (started.replace('-', '').replace(':', '')
+                 .replace('T', '-'))
+        evaluation = f'eval-{stamp}'
+        found = disk.isdir(f'working/evaluations/{evaluation}')
+        if not found:
+            evaluation = ''
+    rest = cells[6:] + [''] * (9 - len(cells))
+    return [cells[0], started, status, evaluation, '', ''] + rest, found
+
+
+def _pipeline_rows_summary(repaired: list[str],
+                           unknown_evals: list[tuple[str, str]],
+                           near_misses: list[str]) -> PlannedChange | None:
+    """What the author should know about pipeline.csv's cycle rows, said in
+    both modes (a real run's changes print only with `--verbose`)."""
+    would, did = [], []
+    if repaired:
+        ids = ', '.join(csv_safe(c) for c in repaired)
+        would.append(f'pipeline.csv cycle(s) {ids} were written in evaluate\'s '
+                     f'old column layout (#709); their cells would move under '
+                     f'their columns.')
+        did.append(f'pipeline.csv cycle(s) {ids} were written in evaluate\'s '
+                   f'old column layout (#709); their cells were moved under '
+                   f'their columns.')
+    for cycle, started in unknown_evals:
+        stamp = started.replace('-', '').replace(':', '').replace('T', '-')
+        note = (f'Cycle {csv_safe(cycle)}\'s evaluation is not known (no '
+                f'working/evaluations/eval-{stamp}/), so its evaluation cell '
+                f'is blank: fill it in by hand if you know it.')
+        would.append(note)
+        did.append(note)
+    if near_misses:
+        ids = ', '.join(csv_safe(c) for c in near_misses)
+        note = (f'pipeline.csv cycle(s) {ids} have `evaluating` under '
+                f'`started` but not the exact shape of evaluate\'s old layout, '
+                f'so they were left as they are: check them by hand.')
+        would.append(note)
+        did.append(note)
+    if not would:
+        return None
+    return PlannedChange(' '.join(would), ' '.join(did))
 
 
 def _migrated_pipeline_lines(lines: list[str]) -> list[str] | None:
-    """The rewritten pipeline.csv, or None when the header is already correct."""
+    """The rewritten pipeline.csv, or None when the header is already correct.
+
+    A file on evaluate's old header (`cycle|status|evaluation|plan|revision|
+    timestamp`, #709) keeps its start time: `timestamp` becomes `started`.
+    """
     if not lines:
         return None
 
@@ -1009,6 +1128,8 @@ def _migrated_pipeline_lines(lines: list[str]) -> list[str] | None:
     old_cols = header.split('|')
     exp_cols = PIPELINE_EXPECTED.split('|')
     old_pos = {col: i for i, col in enumerate(old_cols)}
+    if 'started' not in old_pos and 'timestamp' in old_pos:
+        old_pos['started'] = old_pos['timestamp']
 
     new_lines = [PIPELINE_EXPECTED + '\n']
     for line in lines[1:]:
@@ -3072,7 +3193,7 @@ def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
         plan_gitignore(project_dir),
         plan_missing_dirs(project_dir, missing_dirs),
         plan_storyforge_yaml(project_dir, disk),
-        plan_pipeline_csv(project_dir),
+        plan_pipeline_csv(project_dir, disk),
         plan_act_column(project_dir),
         plan_junk_files(project_dir, disk),
         plan_legacy_files(project_dir, disk),

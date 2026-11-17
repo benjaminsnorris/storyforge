@@ -102,6 +102,27 @@ def _needs_pipeline_csv() -> str:
     return root
 
 
+#: A cycle row as #709's `evaluate` left it: six positional cells for an old
+#: header, then `status`, `review` and `recommendations` written by the real one.
+OLD_EVALUATE_ROW = ('1|evaluating|revising|||2026-11-08T09:28:34|'
+                    'pipeline-review-20261108-132610.md|recommendations-1.md\n')
+
+
+def _needs_pipeline_row_repair() -> str:
+    root = _bare()
+    _write(root, 'working/pipeline.csv',
+           cc.PIPELINE_EXPECTED + '\n' + OLD_EVALUATE_ROW)
+    _write(root, 'working/evaluations/eval-20261108-092834/synthesis.md')
+    return root
+
+
+def _needs_pipeline_row_repair_no_eval() -> str:
+    root = _bare()
+    _write(root, 'working/pipeline.csv',
+           cc.PIPELINE_EXPECTED + '\n' + OLD_EVALUATE_ROW)
+    return root
+
+
 def _needs_act_column() -> str:
     # `_bare`'s yaml defines a part, so scenes.csv keeps its `part` values.
     root = _bare()
@@ -161,6 +182,10 @@ ARRANGEMENTS = {
     'directories': (_bare, 'Checking directories...'),
     'storyforge_yaml': (_bare, 'Checking storyforge.yaml...'),
     'pipeline_csv': (_needs_pipeline_csv, 'Checking pipeline.csv...'),
+    'pipeline_csv_old_evaluate_row': (_needs_pipeline_row_repair,
+                                      'Checking pipeline.csv...'),
+    'pipeline_csv_old_evaluate_row_no_eval': (
+        _needs_pipeline_row_repair_no_eval, 'Checking pipeline.csv...'),
     'act_column': (_needs_act_column, 'Checking act column...'),
     'junk_files': (_needs_junk, 'Cleaning junk files...'),
     'legacy_files': (_needs_legacy, 'Checking legacy files...'),
@@ -205,6 +230,14 @@ TRANSCRIPTS = {
     'loose_files': [
         'Would move 1 recommendation files to working/recommendations/'],
     'pipeline_csv': ['Would add missing columns to pipeline.csv'],
+    'pipeline_csv_old_evaluate_row': [
+        "Would repair cycle 1 in pipeline.csv, written in evaluate's old "
+        'column layout (started 2026-11-08T09:28:34, status revising, '
+        'evaluation eval-20261108-092834)'],
+    'pipeline_csv_old_evaluate_row_no_eval': [
+        "Would repair cycle 1 in pipeline.csv, written in evaluate's old "
+        'column layout (started 2026-11-08T09:28:34, status revising, '
+        'evaluation blank)'],
     'pipeline_reviews': [
         'Would remove 1 duplicate pipeline review(s), keeping the latest per '
         'day'],
@@ -393,7 +426,7 @@ class TestTheGuardedReadsReportRatherThanRaise:
         _write(str(tmp_path), 'working/pipeline.csv', 'x')
         (tmp_path / 'working' / 'pipeline.csv').write_bytes(b'cycle|caf\xe9\n')
 
-        plan = cc.plan_pipeline_csv(str(tmp_path))
+        plan = cc.plan_pipeline_csv(str(tmp_path), cc.DiskFacts(str(tmp_path)))
 
         assert plan.changes == ()
         assert ('WARNING: could not read working/pipeline.csv'
@@ -408,7 +441,7 @@ class TestTheGuardedReadsReportRatherThanRaise:
         report — the thing cleanup is actually for — with it."""
         _write(str(tmp_path), 'working/pipeline.csv', '')
 
-        assert cc.plan_pipeline_csv(str(tmp_path)).changes == ()
+        assert cc.plan_pipeline_csv(str(tmp_path), cc.DiskFacts(str(tmp_path))).changes == ()
 
     def test_a_review_filename_without_a_date_is_left_alone(self, tmp_path):
         """`pipeline-review-*.md` is the glob; `pipeline-review-(\\d+)-` is the

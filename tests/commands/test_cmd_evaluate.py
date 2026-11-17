@@ -6,6 +6,7 @@ synthesis, assessment, dry run, scene filtering, cost logging, error handling.
 
 import json
 import os
+import re
 import sys
 
 import pytest
@@ -928,3 +929,77 @@ class TestCostTracking:
         summary_calls = [op for op in mock_costs.operations
                         if op.get('fn') == 'print_summary']
         assert len(summary_calls) >= 1
+
+
+# ============================================================================
+# Pipeline cycle rows (#709)
+# ============================================================================
+
+class TestPipelineCycleRow:
+    """`evaluate` wrote `cycle|evaluating|eval-<ts>|||<time>` for an old
+    six-column header into the nine-column `working/pipeline.csv`."""
+
+    def _rows(self, project_dir):
+        path = os.path.join(project_dir, 'working', 'pipeline.csv')
+        with open(path) as f:
+            lines = f.read().splitlines()
+        return lines[0], [l.split('|') for l in lines[1:]]
+
+    def test_a_fresh_project_gets_the_nine_column_header(self, tmp_path):
+        from storyforge.cmd_evaluate import _start_cycle
+        from storyforge.common import PIPELINE_HEADER
+
+        assert _start_cycle(str(tmp_path), '20261108-092834') == '1'
+
+        header, rows = self._rows(str(tmp_path))
+        assert header == PIPELINE_HEADER
+        assert len(rows[0]) == 9
+
+    def test_the_row_is_built_by_the_header(self, tmp_path):
+        from storyforge.cmd_evaluate import _start_cycle, _update_cycle
+        from storyforge.common import PIPELINE_HEADER
+
+        (tmp_path / 'working').mkdir()
+        (tmp_path / 'working' / 'pipeline.csv').write_text(
+            PIPELINE_HEADER + '\n'
+            '1|2026-03-05|complete|eval-20260305-103251||||||\n')
+
+        cycle = _start_cycle(str(tmp_path), '20261108-092834')
+
+        assert cycle == '2'
+        header, rows = self._rows(str(tmp_path))
+        row = dict(zip(header.split('|'), rows[1]))
+        assert len(rows[1]) == 9
+        assert row['cycle'] == '2'
+        assert re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}',
+                            row['started'])
+        assert row['status'] == 'evaluating'
+        assert row['evaluation'] == 'eval-20261108-092834'
+        assert all(row[c] == '' for c in
+                   ('scoring', 'plan', 'review', 'recommendations', 'summary'))
+
+        _update_cycle(str(tmp_path), cycle, 'status', 'complete')
+
+        header, rows = self._rows(str(tmp_path))
+        row = dict(zip(header.split('|'), rows[1]))
+        assert row['status'] == 'complete'
+        assert row['evaluation'] == 'eval-20261108-092834'
+        assert len(rows[1]) == 9
+
+    def test_a_file_on_an_old_header_says_what_it_could_not_record(
+            self, tmp_path, capsys):
+        from storyforge.cmd_evaluate import _start_cycle
+
+        (tmp_path / 'working').mkdir()
+        (tmp_path / 'working' / 'pipeline.csv').write_text(
+            'cycle|status|evaluation|plan|revision|timestamp\n')
+
+        _start_cycle(str(tmp_path), '20261108-092834')
+
+        header, rows = self._rows(str(tmp_path))
+        row = dict(zip(header.split('|'), rows[0]))
+        assert row['status'] == 'evaluating'
+        assert row['evaluation'] == 'eval-20261108-092834'
+        assert len(rows[0]) == 6
+        out = capsys.readouterr().out
+        assert 'no started column' in out and 'storyforge cleanup' in out
