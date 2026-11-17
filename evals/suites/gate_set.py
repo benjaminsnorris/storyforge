@@ -40,7 +40,7 @@ MIN_POSITIVES = 40
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-16 at 4d26a353, topped up after #713 (run 1, the same
+    # recorded 2026-11-16 at 4d26a353, topped up after #713 at 88f574bf (run 1, the same
     # after the top-up; runs 2 and 3: recall 0.5 and 0.5652, false alarms 3
     # and 3, control stops 0.7097 and 0.7742)
     'recall': 0.5652, 'recall_per_case': 0.5411, 'cases_caught': 10,
