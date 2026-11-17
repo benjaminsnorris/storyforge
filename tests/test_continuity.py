@@ -588,9 +588,38 @@ class TestForwardTime:
                                                     phrase='twelve days ago'))
         assert f == [] and 'count from this scene itself' in notes[0]
 
-    def test_unlabelled_forward_is_a_note_not_measured_back(self):
+    def test_unlabelled_forward_words_are_measured_forward(self):
         f, notes = continuity.check_time(self._book('15', way=''))
-        assert f == [] and 'not labelled before or after' in notes[0]
+        assert codes(f) == ['TIM'] and notes == []
+        assert 'points ahead to return, day 15' in f[0].explanation
+        assert continuity.check_time(self._book('22', way='')) == ([], [])
+
+    def test_unlabelled_forward_from_the_scene_itself_is_still_a_note(self):
+        f, notes = continuity.check_time(self._book('22', way='', item='speech'))
+        assert f == [] and 'count from this scene itself' in notes[0]
+
+    @pytest.mark.parametrize('phrase', ['twelve days ago', 'twelve days since',
+                                        'twelve days before now'])
+    def test_unlabelled_back_words_are_checked_as_before(self, phrase):
+        def book(day_then):
+            return make_book('speech', {'then': [], 'speech': [
+                R('elapsed', item='then', value=phrase, quote=phrase)]},
+                scenes={'then': {'timeline_day': day_then}, 'speech': {'timeline_day': '10'}})
+        assert continuity.check_time(book('-2')) == ([], [])
+        f, notes = continuity.check_time(book('5'))
+        assert codes(f) == ['TIM'] and notes == []
+        assert f'"{phrase}" counts from then, day 5; this scene is day 10' in f[0].explanation
+
+    @pytest.mark.parametrize('phrase', ['twelve days later', 'twelve days after',
+                                        'the twelfth day'])
+    def test_unlabelled_two_way_words_are_a_note(self, phrase):
+        b = make_book('speech', {'then': [], 'speech': [
+            R('elapsed', item='then', value=phrase, quote=phrase)]},
+            scenes={'then': {'timeline_day': '5'}, 'speech': {'timeline_day': '10'}})
+        f, notes = continuity.check_time(b)
+        assert f == [] and len(notes) == 1
+        assert 'not labelled before or after this scene, whose words could count either way' \
+            in notes[0] and phrase in notes[0]
 
     def test_a_label_against_the_words_is_a_note(self):
         f, notes = continuity.check_time(self._book('15', way='before'))

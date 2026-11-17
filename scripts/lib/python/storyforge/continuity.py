@@ -635,7 +635,12 @@ _ORD = r'(?P<o>\d+(?:st|nd|rd|th)|' + '|'.join(sorted(_ORDINALS, key=len, revers
 _UNIT = r'(?P<u>' + '|'.join(sorted(_UNITS, key=len, reverse=True)) + r')s?'
 _COUNT_RE = re.compile(rf'\b{_NUM}\s+(?:(?:full|whole|long|more)\s+)?{_UNIT}\b')
 _ORDINAL_RE = re.compile(rf'\b{_ORD}\s+{_UNIT}\b')
-_PAST = re.compile(r'\b(ago|since|later|after|past|gone|before this|earlier)\b')
+_PAST = re.compile(r'\b(ago|since|later|after|past|gone|before (?:this|now)|earlier)\b')
+#: Words that count back from the scene's present and nothing else: with no
+#: way labelled, a phrase with one is still measured back (#713). "later" and
+#: "after" are two-way ("twelve days later we sail"), and so is an ordinal
+#: with neither ("on the twelfth day")
+_ONLY_BACK = re.compile(r'\b(ago|since|past|gone|before (?:this|now)|earlier)\b')
 _FUTURE = re.compile(r'^\s*(in|within)\b|\b(from now|hence|to come|more to)\b')
 _VAGUE = re.compile(r'\b(few|several|many|countless|a couple|couple of|ages|years and)\b')
 #: Words before a count that make it a bound or an estimate, not exact
@@ -759,6 +764,17 @@ def parse_elapsed(phrase: str) -> tuple[Span | None, str]:
     return Span(low, high, direction), ''
 
 
+def _way_from_words(phrase: str, span: Span) -> str:
+    """The way a phrase's own words count when the model labelled none:
+    `after` for a future form ("in twelve days", "a week from now"),
+    `before` for words that only count back ("ago", "since", "before now"),
+    '' when they could go either way ("later", "after", a bare ordinal)."""
+    if span.direction == 'future':
+        return 'after'
+    p = ' '.join((phrase or '').lower().replace('-', ' ').split())
+    return 'before' if _ONLY_BACK.search(p) else ''
+
+
 def check_time(book: Book) -> tuple[list[Finding], list[str]]:
     """TIM: each `elapsed` phrase (`parse_elapsed`) against the days between
     this scene and the scene of the counted event (#713). The extractor
@@ -766,9 +782,11 @@ def check_time(book: Book) -> tuple[list[Finding], list[str]]:
     `before` is measured back from this scene ("three days ago"), `after`
     forward to the scene where the promised or planned event happens ("in
     twelve days"); code computes the days. A forward reference is never
-    measured as time already passed. Notes, not checked: a phrase the parser
-    can't read; one labelled neither way (neither end is the present), or
-    labelled against its own words ("ago" labelled `after`); one counting
+    measured as time already passed. A phrase with no way labelled is
+    measured as its own words count (`_way_from_words`: "ago" back, "in"
+    forward), as before the labels. Notes, not checked: a phrase the parser
+    can't read; one with no label whose words could count either way
+    ("twelve days later", "the tenth day"), or labelled against its own words ("ago" labelled `after`); one counting
     from this scene itself (a span from a scene to itself can't be read);
     one counting from no scene; one between scenes without a `timeline_day`
     or from a summary or off-present scene. Exempt: an off-present scene."""
@@ -789,8 +807,10 @@ def check_time(book: Book) -> tuple[list[Finding], list[str]]:
             continue
         way = r.detail.strip().lower()
         if way not in ELAPSED_WAYS:
-            unlabelled.append(f'"{r.value}"')
-            continue
+            way = _way_from_words(r.value, span)
+            if not way:
+                unlabelled.append(f'"{r.value}"')
+                continue
         if (way == 'after') != (span.direction == 'future'):
             crossed.append(f'"{r.value}" (labelled {way}, its words count '
                            f'{"forward" if span.direction == "future" else "back"})')
@@ -824,7 +844,7 @@ def check_time(book: Book) -> tuple[list[Finding], list[str]]:
                      f'checked: ' + '; '.join(unread[:5]))
     if unlabelled:
         notes.append(f'time: {len(unlabelled)} elapsed-time phrase(s) not labelled before or '
-                     f'after this scene (neither end is its present), not checked: '
+                     f'after this scene, whose words could count either way, not checked: '
                      + '; '.join(unlabelled[:5]))
     if crossed:
         notes.append(f'time: {len(crossed)} elapsed-time phrase(s) labelled against their own '
