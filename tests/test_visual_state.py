@@ -10,6 +10,7 @@ import os
 
 import pytest
 
+from illustration_helpers import remove_plan
 from storyforge import visual_state as vs
 
 ROWS = [
@@ -190,7 +191,7 @@ def test_valid_registers_are_the_two_lighting_extremes():
 # ============================================================================
 
 def _plan(project_dir, **overrides):
-    """Write a one-row plan and return the row. The fixture ships no plan."""
+    """Replace the fixture's plan with a one-row plan and return the row."""
     from storyforge import illustrations as ill
     row = ill.blank_row('lantern-vigil')
     row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
@@ -214,6 +215,8 @@ def test_a_from_scene_that_exists_nowhere_is_an_error(project_dir):
 
 
 def test_a_blank_from_scene_is_the_same_error(project_dir):
+    # The log alone: the fixture's plan names entities this log omits.
+    remove_plan(project_dir)
     _write_state(project_dir, [('master-survey', '', 'burned', '')])
     kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
     assert kinds == {'state_unknown_scene'}
@@ -223,6 +226,8 @@ def test_a_scene_the_chapter_map_omits_is_a_warning_not_an_error(project_dir):
     """new-x1 is in scenes.csv and not in the fixture's chapter map. The
     transition row is well-formed; the map is what is incomplete. Flagging it as
     an error would push the author to delete a good row."""
+    # The log alone: the fixture's plan names entities this log omits.
+    remove_plan(project_dir)
     from storyforge import illustrations as ill
     _write_state(project_dir, [('master-survey', 'new-x1', 'burned', '')])
     findings = vs.prepass(project_dir)['findings']
@@ -244,6 +249,8 @@ def test_a_cut_scene_stays_an_error_even_though_scenes_csv_lists_it(project_dir)
     """check_chapter_map_freshness excludes cut/merged/archived scenes, which is
     exactly right: a transition keyed to a cut scene must not read as a mere
     chapter-map gap."""
+    # The log alone: the fixture's plan names entities this log omits.
+    remove_plan(project_dir)
     path = os.path.join(project_dir, 'reference', 'scenes.csv')
     with open(path, encoding='utf-8') as f:
         text = f.read()
@@ -282,6 +289,8 @@ def test_evidence_survives_reflowed_prose(project_dir):
 
 
 def test_a_transition_with_no_evidence_is_not_a_finding(project_dir):
+    # The log alone: the fixture's plan names entities this log omits.
+    remove_plan(project_dir)
     _write_state(project_dir, [('x', 'act1-sc01', 'y', '')])
     assert vs.prepass(project_dir)['findings'] == []
 
@@ -355,6 +364,8 @@ def test_an_unresolvable_illustration_scene_is_logged_not_double_reported(
 
 
 def test_clean_log_yields_no_findings(project_dir):
+    # The log alone: the fixture's plan names entities ROWS does not state.
+    remove_plan(project_dir)
     _write_state(project_dir)
     assert vs.prepass(project_dir)['findings'] == []
 
@@ -625,6 +636,7 @@ def test_validate_plan_folds_in_the_state_findings(project_dir):
 def test_validate_plan_reports_state_findings_with_no_plan_at_all(project_dir):
     """A log can be wrong before a single illustration is planned."""
     from storyforge import illustrations as ill
+    remove_plan(project_dir)
     assert ill.read_plan(project_dir) == []
     _write_state(project_dir, [('x', 'gone', 'y', '')])
     kinds = {f['kind'] for f in ill.validate_plan(project_dir)}
@@ -675,9 +687,8 @@ class TestMalformedStateOverrideIsReported:
     malformed override survived both clean."""
 
     @pytest.fixture(autouse=True)
-    def _seeded(self, project_dir):
-        from illustration_helpers import seed_packet_project
-        seed_packet_project(project_dir)
+    def _module_log(self, project_dir):
+        # The fixture's canon and plan, under this module's log.
         _write_state(project_dir)
 
     def _plan_with_override(self, project_dir, cell):

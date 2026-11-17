@@ -2674,6 +2674,10 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'unverified, not clean. The spoiler check is the only thing that catches '
         'a render that shows the next page, so a row it could not read is a row '
         'nothing has checked',
+    'scene_unchecked':
+        'Re-save the scene file as UTF-8 (or fix its permissions), then re-run '
+        'storyforge validate — the illustration checks named here did not run '
+        'for it, so it is unverified, not clean',
     'missing_anchor':
         'Quote a short verbatim phrase from the scene into the anchor cell, or '
         'set placement to scene_open / scene_close. Without an anchor the marker '

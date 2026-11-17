@@ -19,7 +19,8 @@ from storyforge import prompts_illustrate as pi
 from illustration_helpers import (
     scene_split,
     SCENE, SCENE_ADVERSARIAL, make_jpeg, make_png, plan_row,
-    truncated_png, write_csv, write_scene,
+    remove_canon, remove_plan, truncated_png, write_canon_file, write_csv,
+    write_scene,
 )
 
 
@@ -84,11 +85,13 @@ def test_sanitize_cell_removes_pipes_and_newlines():
 # ============================================================================
 
 def test_diagnose_with_no_plan(in_project, capsys):
+    remove_plan(in_project)   # the fixture carries a plan
     assert cmd_illustrate.main(['--diagnose']) == 0
     assert 'No illustration plan yet' in capsys.readouterr().out
 
 
 def test_diagnose_reports_a_clean_plan(in_project, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', ill.insert_marker(SCENE, plan_row())['text'])
     make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
                           'lantern-vigil.png'), 8, 8)
@@ -115,6 +118,7 @@ def test_diagnose_reports_an_incomplete_reference_tier(in_project, capsys):
     """Mode detection shifted from 'no direction document' to 'no reference
     tier' — diagnose names the missing canon ids, not missing document
     sections."""
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', ill.insert_marker(SCENE, plan_row())['text'])
     make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
                           'lantern-vigil.png'), 8, 8)
@@ -228,6 +232,7 @@ def test_ingest_rejects_an_unreadable_image(in_project, tmp_path, capsys):
 
 
 def test_ingest_without_a_plan_fails(in_project, tmp_path, capsys):
+    remove_plan(in_project)   # the fixture carries a plan
     renders = tmp_path / 'renders'
     make_png(str(renders / 'anything.png'), 8, 8)
     assert cmd_illustrate.main(['--ingest', str(renders)]) == 1
@@ -423,6 +428,7 @@ def test_plan_merges_proposals_and_flags_bad_anchors(in_project, monkeypatch,
 
 
 def test_plan_coach_writes_a_brief_and_no_csv(in_project, monkeypatch):
+    remove_plan(in_project)   # the fixture carries a plan
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: json.dumps({
         'proposals': [{'id': 'candidate', 'scene_id': 'vigil',
@@ -458,6 +464,7 @@ def test_plan_reports_an_empty_response(in_project, monkeypatch, capsys):
 # ============================================================================
 
 def test_prompts_with_nothing_planned(in_project, capsys):
+    remove_plan(in_project)   # the fixture carries a plan
     assert cmd_illustrate.main(['--prompts']) == 0
     assert 'No rows at status=planned' in capsys.readouterr().out
 
@@ -492,6 +499,7 @@ def test_prompts_warns_missing_when_reference_tier_is_entirely_absent(
         in_project, capsys):
     """No reference/canon/ book-level files at all: the fix belongs to
     --direction, so the WARNING points there."""
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row()])
 
@@ -527,6 +535,7 @@ def test_prompts_warns_to_edit_when_reference_tier_is_placeholder(
 
 
 def test_prompts_full_writes_body_and_appends_new_anchors(in_project, monkeypatch):
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row()])
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
@@ -812,6 +821,7 @@ def test_append_anchor_stubs_skips_empty_values(project_dir, capsys):
 
 
 def test_anchors_for_prompt_with_no_canon_dir(project_dir):
+    remove_canon(project_dir)   # a project before its canon tier
     assert pi.anchors_for_prompt(project_dir) == {}
 
 
@@ -877,6 +887,7 @@ def test_strict_checklist_reports_data_and_proposes_nothing(project_dir):
 # ============================================================================
 
 def test_schema_validation_with_no_plan(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     from storyforge.schema import validate_illustration_plan
     result = validate_illustration_plan(project_dir)
     assert result == {'row_count': 0, 'errors': [], 'warnings': []}
@@ -1328,6 +1339,7 @@ _BOOK_LEVEL_CANON_IDS = ('visual-foundation', 'visual-vocabulary',
 
 
 def test_direction_strict_writes_a_template_without_an_api_key(in_project):
+    remove_canon(in_project)   # a project before its canon tier
     from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
 
@@ -1346,6 +1358,7 @@ def test_direction_strict_writes_a_template_without_an_api_key(in_project):
 
 
 def test_direction_coach_template_asks_questions(in_project):
+    remove_canon(in_project)   # a project before its canon tier
     from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'coach']) == 0
 
@@ -1357,6 +1370,7 @@ def test_direction_coach_template_asks_questions(in_project):
 
 
 def test_direction_template_stubs_an_anchor_per_registry_entry(in_project):
+    remove_canon(in_project)   # a project before its canon tier
     from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
 
@@ -1392,6 +1406,7 @@ def test_anchor_candidates_warns_on_a_registry_row_with_no_id(
 
 
 def test_direction_full_without_an_api_key_fails(in_project, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     assert cmd_illustrate.main(['--direction', '--coaching', 'full']) == 1
     out = capsys.readouterr().out
     assert 'ANTHROPIC_API_KEY is not set' in out
@@ -1399,6 +1414,7 @@ def test_direction_full_without_an_api_key_fails(in_project, capsys):
 
 
 def test_direction_full_writes_the_model_output(in_project, monkeypatch, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     from storyforge import canon
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
@@ -1423,6 +1439,7 @@ def test_direction_full_writes_the_model_output(in_project, monkeypatch, capsys)
 
 
 def test_direction_reports_incomplete_sections(in_project, monkeypatch, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     from storyforge import canon
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k:
@@ -1437,25 +1454,6 @@ def test_direction_reports_incomplete_sections(in_project, monkeypatch, capsys):
     assert 'content-limits' in needs_line
     assert 'visual-foundation' not in needs_line
     assert canon.is_canon_block_populated(in_project, 'visual-foundation')
-
-
-def _write_book_level_canon(project_dir, canon_id, canon_type, body):
-    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(
-            '---\n'
-            f'canon_id: {canon_id}\n'
-            f'canon_type: {canon_type}\n'
-            'canon_updated: 2026-07-28\n'
-            'appears_in:\n'
-            'first_appearance:\n'
-            '---\n\n'
-            '## Embeddable block\n\n'
-            f'{body}\n\n'
-            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
-        )
-    return path
 
 
 def test_direction_skips_a_canon_file_that_already_exists(in_project, capsys):
@@ -1493,6 +1491,7 @@ def test_direction_warns_when_an_existing_id_is_at_a_different_path(
     write it. Unlike the plain steady-state skip above, this is a real
     problem — two paths could both claim to be the canonical file for this
     id — so it stays a WARNING, and no second file gets written for it."""
+    remove_canon(in_project)   # a project before its canon tier
     path = os.path.join(in_project, 'reference', 'canon', 'characters',
                         'dorren-hayle-renamed.md')
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1524,6 +1523,7 @@ def test_direction_reports_a_preexisting_placeholder_as_needing_input(
     second strict run over an all-placeholder reference tier silently
     reported nothing — 'Every canon file already exists... Edit them
     directly' read as an all-clear over pure TODO scaffolding."""
+    remove_canon(in_project)   # a project before its canon tier
     from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
     capsys.readouterr()  # discard the first run's output
@@ -1543,6 +1543,7 @@ def test_direction_reports_a_preexisting_placeholder_as_needing_input(
 def test_direction_reports_gaps_across_canon_files(in_project, capsys):
     """One book-level file already has real content; the rest remain
     placeholder templates and get reported as needing the author."""
+    remove_canon(in_project)   # a project before its canon tier
     _write_book_level_canon(
         in_project, 'visual-foundation', 'foundation',
         'Cinematic photorealistic storybook art.')
@@ -1556,6 +1557,7 @@ def test_direction_reports_gaps_across_canon_files(in_project, capsys):
 
 
 def test_direction_dry_run_writes_nothing(in_project, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     assert cmd_illustrate.main(['--direction', '--dry-run',
                                 '--coaching', 'strict']) == 0
     assert '[dry-run] would write' in capsys.readouterr().out
@@ -1565,59 +1567,23 @@ def test_direction_dry_run_writes_nothing(in_project, capsys):
 def _write_entity_canon(project_dir, subdir, canon_id, anchor_text,
                         canon_type=None, canon_updated='2026-07-28',
                         display_name=None):
-    """Minimal entity canon file for prompt-anchor tests. Anchors now come
-    from reference/canon/, not the direction document's Continuity anchors
-    section (task 4) — this is the canon-side equivalent of write_direction's
-    old anchor headings.
-
-    `canon_updated` is settable because it is the cutoff the reference chain
-    compares ingest dates against; `display_name` because it is the first
-    authority for an anchor's rendered label.
-    """
+    """Entity canon file for prompt-anchor tests, through the shared
+    `write_canon_file`. `canon_type` defaults from the subdirectory."""
     canon_type = canon_type or {
         'characters': 'character', 'locations': 'location',
         'motifs': 'motif',
     }[subdir]
-    path = os.path.join(project_dir, 'reference', 'canon', subdir,
-                        f'{canon_id}.md')
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(
-            '---\n'
-            f'canon_id: {canon_id}\n'
-            f'canon_type: {canon_type}\n'
-            f'canon_updated: {canon_updated}\n'
-            + (f'display_name: {display_name}\n' if display_name else '')
-            + 'appears_in: vigil\n'
-            'first_appearance: vigil\n'
-            '---\n\n'
-            '## Embeddable block\n\n'
-            f'{anchor_text}\n\n'
-            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
-        )
-    return path
+    return write_canon_file(project_dir, canon_id=canon_id,
+                            canon_type=canon_type, body=anchor_text,
+                            subdir=subdir, canon_updated=canon_updated,
+                            display_name=display_name or '')
 
 
 def _write_book_level_canon(project_dir, canon_id, canon_type, body):
     """One of the three CANON_PLAN book-level canon files (visual-foundation,
-    visual-vocabulary, content-limits). This is the canon-side equivalent of
-    the old direction document's non-anchor sections."""
-    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(
-            '---\n'
-            f'canon_id: {canon_id}\n'
-            f'canon_type: {canon_type}\n'
-            'canon_updated: 2026-07-28\n'
-            'appears_in:\n'
-            'first_appearance:\n'
-            '---\n\n'
-            '## Embeddable block\n\n'
-            f'{body}\n\n'
-            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
-        )
-    return path
+    visual-vocabulary, content-limits), through the shared `write_canon_file`."""
+    return write_canon_file(project_dir, canon_id=canon_id,
+                            canon_type=canon_type, body=body)
 
 
 def test_reference_tier_reaches_the_art_direction_prompt(in_project,
@@ -1758,6 +1724,7 @@ def test_review_marks_the_visual_key(in_project):
 
 
 def test_review_without_a_plan_fails(in_project, capsys):
+    remove_plan(in_project)   # the fixture carries a plan
     assert cmd_illustrate.main(['--review']) == 1
     assert 'No illustration plan to review' in capsys.readouterr().out
 
@@ -1890,6 +1857,7 @@ def test_no_phase_flag_exits_nonzero_through_the_cli(project_dir):
 
 
 def test_a_zero_return_still_exits_zero(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     code, out = run_cli(project_dir, '--diagnose')
     assert code == 0
     assert 'No illustration plan yet' in out
@@ -2348,6 +2316,7 @@ def _ingested_prior(project_dir, illus_id='earlier', ingested_at=''):
 
 
 def test_references_skip_art_ingested_before_the_canon(in_project, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     ill.write_plan(in_project, [
@@ -2397,6 +2366,7 @@ def test_references_report_an_unparseable_ingest_date(in_project, capsys):
 
 
 def test_references_keep_art_ingested_after_the_canon(in_project):
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     ill.write_plan(in_project, [
@@ -2412,6 +2382,7 @@ def test_references_keep_art_ingested_the_same_day_as_the_canon(in_project):
     """Same-day is the ordinary incremental loop — write canon, render, ingest,
     prompt the next one — and a date cannot separate the two. Treating it as
     stale would empty the chain on every normal run."""
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     ill.write_plan(in_project, [
@@ -2426,6 +2397,7 @@ def test_references_are_unchecked_when_no_canon_date_exists(in_project, capsys):
     """No canon means no governing direction, so nothing can predate it.
     Inventing a cutoff here would discard every reference on a book that never
     adopted the canon tier."""
+    remove_canon(in_project)   # a project before its canon tier
     ill.write_plan(in_project, [_ingested_prior(in_project), plan_row()])
 
     cutoff = cmd_illustrate._reference_cutoff(in_project, False)
@@ -3091,6 +3063,7 @@ def test_canon_edited_after_the_cover_with_no_review_names_the_clearing_action(
         in_project):
     """The regression: the warning must name an action that clears it, and
     re-rendering is not one for art that cannot be re-rendered."""
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _backdate(_style_ref(in_project), '2026-07-01')
@@ -3118,6 +3091,7 @@ def test_a_cover_newer_than_the_canon_is_still_unreviewed(in_project):
 
 
 def test_an_acknowledged_style_reference_does_not_warn(in_project):
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     art = _style_ref(in_project)
@@ -3134,6 +3108,7 @@ def test_an_acknowledged_style_reference_does_not_warn(in_project):
 
 
 def test_a_canon_update_after_the_review_warns_again(in_project):
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _style_ref(in_project)
@@ -3234,6 +3209,7 @@ def test_half_a_review_record_is_no_record(in_project):
 
 
 def test_accepting_refuses_with_no_canon_date(in_project, capsys):
+    remove_canon(in_project)   # a project before its canon tier
     _style_ref(in_project)
     assert cmd_illustrate.main(['--accept-style-reference']) == 1
     assert 'no canon state to record' in capsys.readouterr().out
@@ -3509,6 +3485,7 @@ def test_accept_with_diagnose_is_an_error(in_project, capsys):
 def test_a_refused_accept_stops_the_run(in_project, monkeypatch, capsys):
     """#303 C-3: a refusal must not let --package build against the
     unreviewed cover the author just tried to clear."""
+    remove_canon(in_project)   # a project before its canon tier
     _style_ref(in_project)        # no canon date: accept refuses
     called = []
     monkeypatch.setattr(cmd_illustrate, 'run_package',
@@ -3585,6 +3562,7 @@ def test_accept_says_a_canon_edit_must_move_canon_updated(in_project, capsys):
 def test_a_canon_edit_that_keeps_its_date_is_the_documented_limit(in_project):
     """Pins SF-6's chosen behaviour: same newest date, same verdict — and
     bumping the date is what re-raises it."""
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _style_ref(in_project)
@@ -3638,6 +3616,7 @@ def test_the_style_staleness_check_survives_no_prior_refs(in_project):
     """`_reference_cutoff` returns '' under --no-prior-refs, and inheriting that
     would leave the highest-stakes run — cover is 100% of the signal — as the
     only unchecked one."""
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _backdate(_style_ref(in_project), '2026-07-01')
@@ -3785,6 +3764,7 @@ def test_an_unreadable_artwork_is_unknown_not_fresh(in_project, monkeypatch):
 def test_no_canon_date_means_the_check_did_not_run_and_says_so(in_project):
     """The silent-unchecked case. `--no-prior-refs` skips the line that used to
     mention it, which is the run where the cover is the whole style signal."""
+    remove_canon(in_project)   # a project before its canon tier
     _style_ref(in_project)
     style = cmd_illustrate.resolve_style_reference(in_project)
     assert style['checked_against'] == ''
@@ -3797,6 +3777,7 @@ def test_no_canon_date_means_the_check_did_not_run_and_says_so(in_project):
 
 def test_the_headline_names_both_sides_of_the_review(in_project):
     """A bare date is a verdict the reader completes themselves."""
+    remove_canon(in_project)   # a project before its canon tier
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _style_ref(in_project)
@@ -4046,6 +4027,7 @@ def test_two_rows_proposing_the_same_anchor_write_one_canon_file(in_project,
     proposals in one batch write one file. A naive fan-out breaks that
     guarantee: both workers see no file and both write. First proposal wins,
     and the second is reported rather than overwriting it."""
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [
         plan_row(id='lf-01', scene_id='vigil'),
@@ -4695,6 +4677,7 @@ def test_preflight_says_nothing_when_the_book_has_no_entity_canon(in_project,
     """With no anchors at all there is no narrowing to fall back from, and
     _reference_tier_gaps already covers the missing reference tier — a second
     warning about the same absence is noise."""
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row(canon_refs='')])
 
@@ -4707,6 +4690,7 @@ def test_new_stubs_name_the_rerun_for_the_other_rows(in_project, monkeypatch,
     """The stub is written after every request was built, so the other prompts
     in this run cannot contain it. Saying so without naming the re-run leaves
     the author to work out the remedy."""
+    remove_canon(in_project)   # a project before its canon tier
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [
         plan_row(id='lf-01', scene_id='vigil'),
@@ -4772,6 +4756,8 @@ def test_state_strict_writes_a_template_and_makes_no_api_call(in_project, monkey
     """The key must be set or the missing-key guard fires before the trap and
     this test passes vacuously."""
     from storyforge import visual_state as vs
+    shipped = vs.read_transitions(in_project)
+    assert shipped
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
     def _boom(*a, **k):
@@ -4787,8 +4773,8 @@ def test_state_strict_writes_a_template_and_makes_no_api_call(in_project, monkey
     with open(checklist, encoding='utf-8') as f:
         body = f.read()
     assert 'proposes nothing' in body
-    # The two rows the fixture ships must survive the strict write.
-    assert len(vs.read_transitions(in_project)) == 2
+    # The rows the fixture ships must survive the strict write.
+    assert vs.read_transitions(in_project) == shipped
 
 
 def test_state_coach_writes_questions_and_makes_no_api_call(in_project, monkeypatch):
@@ -5064,6 +5050,8 @@ def test_state_full_treats_no_proposals_as_an_answer_not_a_parse_error(
     """A model that read the book and found nothing whose visible state changes
     is answering. Exiting 1 told the author their response was unreadable."""
     from storyforge import visual_state as vs
+    shipped = vs.read_transitions(in_project)
+    assert shipped
     before = open(os.path.join(in_project, 'reference', 'visual-state.csv'),
                   'rb').read()
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
@@ -5075,7 +5063,7 @@ def test_state_full_treats_no_proposals_as_an_answer_not_a_parse_error(
     assert 'could not parse' not in out
     assert open(os.path.join(in_project, 'reference', 'visual-state.csv'),
                 'rb').read() == before
-    assert len(vs.read_transitions(in_project)) == 2
+    assert vs.read_transitions(in_project) == shipped
 
 
 def test_state_full_refuses_a_proposal_naming_a_scene_that_does_not_exist(

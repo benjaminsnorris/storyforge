@@ -13,7 +13,8 @@ from illustration_helpers import (
     scene_split,
     SAMPLE_DIRECTION, SCENE, SCENE_ADVERSARIAL, SCENE_WITH_FRONTMATTER,
     make_jpeg, make_png, make_webp, make_webp_vp8, make_webp_vp8l, pandoc_html,
-    plan_row, truncated_png, write_csv, write_direction_file,
+    plan_row, remove_canon, remove_plan, truncated_png, write_csv,
+    write_direction_file,
     write_scene,
 )
 from storyforge import illustrations as ill
@@ -38,6 +39,7 @@ def test_plan_round_trips(project_dir):
 
 
 def test_read_plan_missing_file_is_empty(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     assert ill.read_plan(project_dir) == []
     assert ill.read_plan_as_map(project_dir) == {}
 
@@ -877,6 +879,117 @@ def test_an_undecodable_prompt_file_does_not_escape_validate_plan(project_dir):
     assert 'prompt_spoiler_unchecked' in kinds
 
 
+def _latin1(project_dir, scene_id, text='# Malm\xf6\n\nThe prose.\n'):
+    """Write a scene file that is not UTF-8 — what a hand edit in another
+    editor leaves behind."""
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    with open(path, 'wb') as f:
+        f.write(text.encode('latin-1'))
+    return path
+
+
+def _unchecked(findings, scene_id):
+    return [f for f in findings
+            if f['kind'] == 'scene_unchecked' and f['scene_id'] == scene_id]
+
+
+def test_an_undecodable_scene_is_reported_and_the_scan_goes_on(project_dir):
+    """The marker scan read every scene file as UTF-8 unguarded: on a project
+    with a plan or an illustrations directory, one latin-1 scene file killed
+    `validate` and the whole `cleanup` report (#288). Skipping it silently is
+    no better — `validate` then said "valid" over checks that never ran — so
+    the file gets a finding, and the scan carries on past it: `zz` sorts after
+    `bad` and its orphan marker is still found, and the plan's own findings
+    still come back."""
+    ill.write_plan(project_dir, [plan_row(scene_id='act1-sc01',
+                                          layout='poster')])
+    _latin1(project_dir, 'bad')
+    write_scene(project_dir, 'zz', 'Prose.\n\n![[illus:nobody-planned-this]]\n')
+
+    findings = ill.validate_plan(project_dir)
+    kinds = {f['kind'] for f in findings}
+
+    unchecked = _unchecked(findings, 'bad')
+    assert len(unchecked) == 1
+    assert 'UnicodeDecodeError' in unchecked[0]['detail']
+    assert 'marker checks' in unchecked[0]['detail']
+    assert ill.severity_of('scene_unchecked') == 'warning'
+    assert any(f['kind'] == 'orphan_marker' and f['scene_id'] == 'zz'
+               for f in findings)
+    assert 'invalid_layout' in kinds
+
+
+def test_the_malformed_marker_scan_reports_an_undecodable_scene(project_dir):
+    _latin1(project_dir, 'bad')
+    write_scene(project_dir, 'zz', 'Prose.\n\n![[illus:bad id!]]\n')
+
+    findings = ill.malformed_marker_findings(project_dir)
+
+    assert len(_unchecked(findings, 'bad')) == 1
+    assert any(f['kind'] == 'malformed_marker' and f['scene_id'] == 'zz'
+               for f in findings)
+
+
+def test_an_undecodable_planned_scene_is_a_finding_not_a_crash(project_dir):
+    """The fixture's plan and log both name act1-sc01, so the per-row read, the
+    evidence check, and the audit narrowing all reach it. One merged finding
+    names every check that did not run, and the row's own cells and files are
+    still checked."""
+    _latin1(project_dir, 'act1-sc01', 'Dorren held her breath. Malm\xf6.\n')
+    rows = ill.read_plan(project_dir)
+    rows[0].update({'status': 'ingested',
+                    'asset_file': ill.default_asset_rel(rows[0]['id'])})
+    ill.write_plan(project_dir, rows)
+
+    findings = ill.validate_plan(project_dir)
+
+    unchecked = _unchecked(findings, 'act1-sc01')
+    assert len(unchecked) == 1, unchecked
+    detail = unchecked[0]['detail']
+    assert 'evidence check' in detail
+    assert 'audit' in detail
+    assert rows[0]['id'] in detail
+    assert '|' not in detail
+    # The row's file check does not need the scene, so it still runs.
+    assert any(f['kind'] == 'missing_file' and f['id'] == rows[0]['id']
+               for f in findings)
+
+
+def test_the_prepass_reports_an_undecodable_scene(project_dir):
+    from storyforge import visual_state as vs
+    _latin1(project_dir, 'act1-sc02', 'Blank parchment. Malm\xf6.\n')
+
+    result = vs.prepass(project_dir)
+
+    assert len(_unchecked(result['findings'], 'act1-sc02')) == 1
+    assert 'act1-sc02' not in result['candidate_scenes']
+    assert 'act1-sc02' not in result['undrafted_scenes']
+
+
+def test_digest_drift_reports_an_undecodable_audited_scene(project_dir):
+    from storyforge import visual_state as vs
+    vs.write_provenance(project_dir, [
+        {'scene_id': 'act1-sc02', 'digest': 'x' * 64, 'audited_at': '2026-11-01'}])
+    _latin1(project_dir, 'act1-sc02')
+
+    assert len(_unchecked(vs.digest_drift(project_dir), 'act1-sc02')) == 1
+
+
+def test_plan_report_survives_an_undecodable_scene(project_dir):
+    _latin1(project_dir, 'act1-sc01')
+    report = ill.plan_report(project_dir)
+    first = ill.read_plan(project_dir)[0]['id']
+    assert first not in report['embedded'] + report['unembedded']
+
+
+def test_schema_validation_warns_on_an_undecodable_scene(project_dir):
+    from storyforge.schema import validate_illustration_plan
+    _latin1(project_dir, 'act1-sc01')
+    result = validate_illustration_plan(project_dir)
+    assert result['errors'] == []
+    assert any('scene_unchecked' in w['message'] for w in result['warnings'])
+
+
 def test_the_spoiler_finding_reaches_validate_plan(project_dir):
     write_scene(project_dir, 'vigil', SCENE)
     rel = _write_prompt_body(
@@ -933,6 +1046,7 @@ def test_resolve_for_local_drops_markers_with_no_plan_row(project_dir):
 
 
 def test_resolve_for_local_with_no_plan_strips_markers(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     resolved = ill.resolve_for_local(project_dir, 'a\n\n![[illus:x]]\n\nb\n')
     assert resolved == 'a\n\nb\n'
 
@@ -1121,6 +1235,9 @@ def test_is_supported_image(name, supported):
 # ============================================================================
 
 def test_plan_report_counts_by_status_and_embedding(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_scene(project_dir, 'vigil',
                 ill.insert_marker(SCENE, plan_row())['text'])
     write_scene(project_dir, 'other', SCENE)
@@ -1141,6 +1258,7 @@ def test_plan_report_counts_by_status_and_embedding(project_dir):
 
 
 def test_plan_report_on_empty_plan(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     report = ill.plan_report(project_dir)
     assert report['total'] == 0
     assert report['next_unrendered'] == ''
@@ -1151,6 +1269,9 @@ def test_plan_report_on_empty_plan(project_dir):
 # ============================================================================
 
 def test_validate_clean_plan_has_no_findings(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_scene(project_dir, 'vigil',
                 ill.insert_marker(SCENE, plan_row())['text'])
     make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
@@ -1659,6 +1780,7 @@ def test_render_order_skips_superseded(project_dir):
 
 
 def test_render_order_is_empty_without_a_plan(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     assert ill.render_order(project_dir) == []
     assert ill.next_to_render(project_dir) == ''
 
@@ -1677,6 +1799,9 @@ def test_next_to_render_follows_the_render_order(project_dir):
 
 
 def test_next_to_render_is_empty_when_all_are_ingested(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1'])
     ill.write_plan(project_dir, [plan_row(scene_id='s1', status='ingested')])
     assert ill.next_to_render(project_dir) == ''
@@ -2073,6 +2198,9 @@ def test_validate_reports_an_ingested_illustration_with_no_marker(project_dir):
 
 
 def test_an_embedded_ingested_illustration_is_not_flagged(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_scene(project_dir, 'vigil',
                 ill.insert_marker(SCENE, plan_row())['text'])
     make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
@@ -2140,8 +2268,7 @@ def test_truncated_book_level_canon_is_a_blocking_finding(project_dir):
 
 
 def test_clean_canon_produces_no_truncation_finding(project_dir):
-    from illustration_helpers import seed_canon
-    seed_canon(project_dir)
+    # The fixture's canon tier is the clean case.
     ill.write_plan(project_dir, [plan_row(canon_refs='dorren-hayle')])
     assert [f for f in ill.validate_plan(project_dir)
             if f['kind'] == 'canon_anchor_truncated'] == []

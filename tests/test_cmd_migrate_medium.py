@@ -19,6 +19,7 @@ from storyforge.cmd_migrate_medium import (
     main,
 )
 from storyforge.common import get_medium
+from illustration_helpers import remove_canon
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,9 @@ def test_migrate_novel_to_gn_basic(project_dir, monkeypatch):
     - bibles have stub note appended
     """
     monkeypatch.chdir(project_dir)
+    # The fixture is an illustrated prose book with its own canon tree, which
+    # step8b would rightly leave alone; this is the fresh-novel case.
+    remove_canon(project_dir)
 
     # Verify starting state
     assert get_medium(project_dir) == 'novel'
@@ -418,6 +422,7 @@ def test_step8b_scaffolds_canon_tree(project_dir):
     """step8b copies templates/reference/canon/ + visual-style.md so the
     author can start authoring canon blocks immediately after the
     novel→GN migration completes."""
+    remove_canon(project_dir)   # the fixture's prose canon tree
     assert not os.path.isdir(os.path.join(project_dir, 'reference', 'canon'))
     assert not os.path.isfile(
         os.path.join(project_dir, 'reference', 'visual-style.md'),
@@ -439,6 +444,7 @@ def test_step8b_scaffolds_canon_tree(project_dir):
 def test_step8b_idempotent_when_canon_dir_exists(project_dir):
     """If reference/canon/ already exists (author started canon work
     between migration runs), step8b must not clobber it."""
+    remove_canon(project_dir)   # the fixture's prose canon tree
     canon_dir = os.path.join(project_dir, 'reference', 'canon')
     os.makedirs(canon_dir)
     with open(os.path.join(canon_dir, 'authors-own-canon.md'), 'w') as f:
@@ -461,6 +467,7 @@ def test_step8b_skips_when_canon_dir_exists_even_if_incomplete(project_dir):
     have purposefully removed canon they don't want — but it's silent
     by design. Pinned so a future "helpful" change to fill in missing
     files doesn't sneak past review."""
+    remove_canon(project_dir)   # the fixture's prose canon tree
     canon_dir = os.path.join(project_dir, 'reference', 'canon', 'characters')
     os.makedirs(canon_dir)
     # Only a subdir file — no root canon.
@@ -479,6 +486,7 @@ def test_step8b_skips_when_canon_dir_exists_even_if_incomplete(project_dir):
 def test_step8b_dry_run_makes_no_changes(project_dir):
     """In dry-run mode, step8b reports what it would do but writes
     nothing."""
+    remove_canon(project_dir)   # the fixture's prose canon tree
     created = step8b_scaffold_canon_tree(project_dir, dry_run=True)
     assert 'reference/canon/' in created
     assert not os.path.isdir(

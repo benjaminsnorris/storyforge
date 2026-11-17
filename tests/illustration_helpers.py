@@ -12,6 +12,7 @@ fixtures pytest injects.
 """
 
 import os
+import shutil
 import struct
 import subprocess
 import zlib
@@ -124,18 +125,29 @@ def plan_row(**overrides) -> dict[str, str]:
 
 
 # ============================================================================
-# Seeding the fixture for the packet (#278 phase 3)
+# The fixture's illustrated project (#288)
 # ============================================================================
 #
-# tests/fixtures/test-project carries a visual-state.csv (phase 2) but NO
-# reference/canon/ tree and NO illustration plan — checked, not assumed. The
-# packet needs both, so these builders write them into a *copy* of the fixture
-# rather than into the shared fixture itself: seeding canon files there would
-# change what every cleanup, validate, and canon test sees.
+# tests/fixtures/test-project is a small, coherent illustrated project: the
+# three book-level canon files, three entity canon files, a two-row plan, and a
+# visual-state log (the log predates #288: phase 2 added `village` and
+# `master-survey`). Every entity canon id is a real registry id (characters.csv,
+# locations.csv, motif-taxonomy.csv), every scene id a fixture scene the chapter
+# map positions, and every transition's evidence is verbatim in that scene's
+# prose. `test_illustrated_fixture.py` holds all of that true, including that
+# every tracked entity's search terms appear in positioned prose, and that the
+# audit's candidate set is non-empty — an empty one means every test that
+# thinks it exercises the model path takes the no-call branch and still passes.
 #
-# Every id below is a real registry id in the fixture (characters.csv,
-# locations.csv, motif-taxonomy.csv) and every scene id is a real fixture scene
-# that the chapter map positions, so the seeded state actually resolves.
+# `master-survey` is deliberately a state-only entity with no canon file: the
+# search-term path for an id no canon prefix confirms, and a tracked entity no
+# plan row names. It tracks what the survey shows (the village gone); `maps`,
+# the motif, tracks the sheet itself.
+#
+# The constants below are what the fixture's canon files carry; that test
+# regenerates each file from them with `write_canon_file` and compares bytes.
+# A test that needs a project *without* part of this removes it explicitly with
+# the helpers at the end of this section, so the case it covers stays named.
 
 #: canon_id -> (canon_type, Embeddable block body). Each body contains a '.',
 #: which the drift test perturbs.
@@ -176,10 +188,49 @@ ENTITY_CANON: dict[str, tuple[str, str, str]] = {
     ),
 }
 
+#: The fixture plan's ids, in reading order.
+FIXTURE_PLAN_IDS: tuple[str, ...] = ('the-finest-cartographer', 'the-blank-page')
+
+
+def fixture_anchors() -> dict[str, str]:
+    """canon_id -> anchor text for the fixture's entity canon files: what
+    `canon.anchor_texts` reports on an unmodified copy of the fixture."""
+    return {cid: body for cid, (_sub, _type, body) in ENTITY_CANON.items()}
+
+
+#: canon_id -> (appears_in, first_appearance) for the fixture's canon files.
+#: Both keys are required, and a blank one is a `canon_missing_key` warning.
+FIXTURE_APPEARANCES: dict[str, tuple[str, str]] = {
+    'visual-foundation': ('every illustration', 'act1-sc01'),
+    'visual-vocabulary': ('every illustration', 'act1-sc01'),
+    'content-limits': ('every illustration', 'act1-sc01'),
+    'dorren-hayle': ('act1-sc01; act1-sc02', 'act1-sc01'),
+    'cartography-office': ('act1-sc01', 'act1-sc01'),
+    'maps': ('act1-sc01; act1-sc02', 'act1-sc01'),
+}
+
+
+#: canon_id -> `display_name` frontmatter. The `maps` motif's anchor is the
+#: master survey, and no positioned scene says "maps" (only new-x1, which the
+#: chapter map omits): without this its only search term would be `maps`, and
+#: no prose the audit reads would name it.
+FIXTURE_DISPLAY_NAMES: dict[str, str] = {'maps': 'Master survey'}
+
 
 def write_canon_file(project_dir: str, *, canon_id: str, canon_type: str,
-                     body: str, subdir: str = '') -> str:
-    """Write one minimal-valid canon file and return its path."""
+                     body: str, subdir: str = '',
+                     appears_in: str = 'act1-sc01',
+                     first_appearance: str = 'act1-sc01',
+                     canon_updated: str = '2026-07-28',
+                     display_name: str = '') -> str:
+    """Write one minimal-valid canon file and return its path.
+
+    The fixture's canon files have exactly this shape (written by this
+    function), so a test adding a variant (another entity, a long anchor)
+    writes one that matches them. `canon_updated` is the cutoff the reference
+    chain compares ingest dates against; `display_name`, when given, is the
+    first authority for an anchor's rendered label.
+    """
     parts = [project_dir, 'reference', 'canon']
     if subdir:
         parts.append(subdir)
@@ -190,9 +241,10 @@ def write_canon_file(project_dir: str, *, canon_id: str, canon_type: str,
             '---\n'
             f'canon_id: {canon_id}\n'
             f'canon_type: {canon_type}\n'
-            'canon_updated: 2026-07-28\n'
-            'appears_in:\n'
-            'first_appearance:\n'
+            f'canon_updated: {canon_updated}\n'
+            + (f'display_name: {display_name}\n' if display_name else '')
+            + f'appears_in: {appears_in}\n'
+            f'first_appearance: {first_appearance}\n'
             '---\n\n'
             '## Embeddable block\n\n'
             f'{body}\n\n'
@@ -201,85 +253,39 @@ def write_canon_file(project_dir: str, *, canon_id: str, canon_type: str,
     return path
 
 
-def seed_canon(project_dir: str) -> dict[str, str]:
-    """Write the three book-level canon files and three entity anchors.
-
-    Returns canon_id -> anchor text for the entity files, which is what
-    `canon.anchor_texts` should then report.
-    """
-    for canon_id, (canon_type, body) in BOOK_LEVEL_CANON.items():
-        write_canon_file(project_dir, canon_id=canon_id,
-                         canon_type=canon_type, body=body)
-    for canon_id, (subdir, canon_type, body) in ENTITY_CANON.items():
-        write_canon_file(project_dir, canon_id=canon_id,
-                         canon_type=canon_type, body=body, subdir=subdir)
-    return {cid: body for cid, (_sub, _type, body) in ENTITY_CANON.items()}
+def remove_canon(project_dir: str) -> None:
+    """Delete the copy's whole `reference/canon/` tree: a project with no
+    canon tier yet."""
+    shutil.rmtree(os.path.join(project_dir, 'reference', 'canon'))
 
 
-def seed_state_transitions(project_dir: str) -> None:
-    """Append transitions for two seeded canon entities.
+def remove_plan(project_dir: str) -> None:
+    """Delete the copy's illustration plan: a project that has planned none."""
+    os.remove(ill.plan_path(project_dir))
 
-    Evidence quotes are verbatim from the fixture prose (checked: 'held her
-    breath' is in act1-sc01, 'Blank parchment' in act1-sc02), so the pre-pass
-    has nothing to report about them. `cartography-office` deliberately gets
-    NO transition — the packet must report an entity a plan row names but
-    nothing states.
+
+def remove_illustration_seed(project_dir: str) -> None:
+    """A project with no canon tier and no plan, as before `--direction` and
+    `--plan` ever ran. The visual-state log is left alone (it predates both in
+    the fixture's history and the audit suites own its variants)."""
+    remove_canon(project_dir)
+    remove_plan(project_dir)
+
+
+def unstate_entity(project_dir: str, entity: str) -> None:
+    """Drop every transition for *entity*, so a plan row that names it has no
+    stated state — the gap the packet and `--prompts` must report.
+
+    Raises ValueError when the log has no transition for *entity*: a typo
+    would otherwise leave the state in place and the test asserting its
+    absence would be testing nothing.
     """
     from storyforge import visual_state as vs
-    existing = list(vs.read_transitions(project_dir))
-    existing.extend([
-        {'entity': 'dorren-hayle', 'from_scene': 'act1-sc01',
-         'state': 'black waistcoat, sleeves buttoned, calipers in hand',
-         'evidence': 'held her breath'},
-        {'entity': 'maps', 'from_scene': 'act1-sc02',
-         'state': 'the new survey blank where the village was',
-         'evidence': 'Blank parchment'},
-    ])
-    vs.write_transitions(project_dir, existing)
-
-
-def seed_illustration_plan(project_dir: str) -> list[dict[str, str]]:
-    """Write a two-row plan on real fixture scenes and return the rows."""
-    first = ill.blank_row('the-finest-cartographer')
-    first.update({
-        'scene_id': 'act1-sc01',
-        'anchor': 'held her breath',
-        'placement': 'after_anchor',
-        'layout': 'full_page',
-        'beat': 'Dorren measures the ridgeline for the third time',
-        'rationale': 'The image holds the precision the chapter spends its '
-                     'first page establishing',
-        'subject': 'Dorren bent over the master survey with brass calipers',
-        'composition': 'Close on her hands and the vellum, lamp behind her',
-        'canon_refs': 'dorren-hayle;cartography-office',
-        'register': 'brightest',
-    })
-    second = ill.blank_row('the-blank-page')
-    second.update({
-        'scene_id': 'act1-sc02',
-        'anchor': 'Blank parchment',
-        'placement': 'before_anchor',
-        'layout': 'half_page',
-        'beat': 'The village is gone from the new survey',
-        'rationale': 'The absence is the turn of the chapter and prose cannot '
-                     'show an absence',
-        'subject': 'The empty quarter of the map under a low reading lamp',
-        'composition': 'Overhead, square, the sheet filling the frame',
-        'canon_refs': 'maps',
-        'register': 'darkest',
-        'state_override': 'maps:one corner curled back under a paperweight',
-    })
-    rows = [first, second]
-    ill.write_plan(project_dir, rows)
-    return rows
-
-
-def seed_packet_project(project_dir: str) -> dict[str, str]:
-    """Canon + plan + state, the state the packet is assembled from."""
-    anchors = seed_canon(project_dir)
-    seed_state_transitions(project_dir)
-    seed_illustration_plan(project_dir)
-    return anchors
+    before = vs.read_transitions(project_dir)
+    rows = [t for t in before if t['entity'] != entity]
+    if len(rows) == len(before):
+        raise ValueError(f'no transition for {entity!r} in the fixture log')
+    vs.write_transitions(project_dir, rows)
 
 
 def write_direction_file(project_dir: str, body: str) -> str:

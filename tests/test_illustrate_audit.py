@@ -14,6 +14,7 @@ from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge import visual_state as vs
+from illustration_helpers import remove_plan
 
 STATE_PATH = os.path.join('reference', 'visual-state.csv')
 REPORT = os.path.join('working', 'illustration-contradictions.md')
@@ -90,6 +91,9 @@ def test_audit_makes_no_api_call_when_there_is_no_log(in_project, monkeypatch):
 def test_audit_makes_no_api_call_when_the_prepass_is_empty(in_project, monkeypatch):
     """A clean log whose entity the prose never names: no findings, no
     candidates, nothing a model could add."""
+    # The log against the prose alone: the fixture's plan names entities this
+    # log does not state, which would add plan findings to the report.
+    remove_plan(in_project)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     _write_state(in_project, [
         ('nothing-in-the-prose', 'act1-sc01', 'x', 'held her breath'),
@@ -170,6 +174,9 @@ def test_audit_dry_run_writes_nothing_at_all(in_project, monkeypatch, capsys):
 def test_audit_reports_a_prose_assertion_that_contradicts_the_log(in_project, monkeypatch):
     """Two transitions do not disagree with each other; a scene between them
     asserts a state the span cannot support."""
+    # The log against the prose alone: the fixture's plan names entities this
+    # log does not state, which would add plan findings to the report.
+    remove_plan(in_project)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     # Neither row disagrees with the other — a village drawn in act 1 and redrawn
     # in act 2 is a story. act1-sc02 sits between them and names the village, so
@@ -528,6 +535,7 @@ def test_diagnose_reports_no_state_log(in_project, capsys):
 
 def test_diagnose_reports_the_state_rung_with_no_plan(in_project, capsys):
     """The log is about the book, not the illustrations — worth building first."""
+    remove_plan(in_project)
     assert not ill.read_plan(in_project)
     assert cmd_illustrate.main(['--diagnose']) == 0
     out = capsys.readouterr().out
@@ -538,7 +546,10 @@ def test_diagnose_reports_the_state_rung_with_no_plan(in_project, capsys):
 def test_diagnose_counts_entities_and_transitions(in_project, capsys):
     cmd_illustrate.main(['--diagnose'])
     out = capsys.readouterr().out
-    assert '2 transition(s) across 2 entity(ies)' in out
+    transitions = vs.read_transitions(in_project)
+    entities = {t['entity'] for t in transitions}
+    assert (f'{len(transitions)} transition(s) across '
+            f'{len(entities)} entity(ies)') in out
 
 
 def test_diagnose_reports_an_unrun_audit(in_project, capsys):
@@ -779,6 +790,9 @@ def test_findings_with_no_candidates_does_not_claim_the_files_were_missing(
         in_project, monkeypatch):
     """There were no candidates at all — no candidate 'turned out' to be
     anything."""
+    # The log against the prose alone: the fixture's plan names entities this
+    # log does not state, which would add plan findings to the report.
+    remove_plan(in_project)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     _write_state(in_project, [('lamp', 'scene-that-was-cut', 'dark', '')])
 
@@ -809,6 +823,7 @@ def test_search_terms_are_logged_so_a_wide_narrowing_is_diagnosable(
 def test_diagnose_fails_on_a_state_error_even_with_no_plan(in_project, capsys):
     """The skill tells authors to build the log before the plan, so the early
     return must not hide a blocking finding about it."""
+    remove_plan(in_project)
     assert not ill.read_plan(in_project)
     _write_state(in_project, [('lamp', 'scene-that-was-cut', 'dark', '')])
     assert cmd_illustrate.main(['--diagnose']) == 1
