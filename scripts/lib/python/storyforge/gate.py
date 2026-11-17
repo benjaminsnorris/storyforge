@@ -4515,9 +4515,10 @@ RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKI
 #: Under `GATE_CHECK_METHOD` `questions` (#649) the open checker's readings
 #: drop out of a gate run: extraction and persistence on sonnet ($0.13-0.19
 #: a scene from two books' cost ledgers, #649's history; rounded up), the
-#: question layer's four small-model calls (two askings of the facts, two
-#: of the brief's promises: about $0.001-0.01 a scene; rounded up) and the
-#: blocking check as above. A forecast, not measured on a gated book
+#: question layer's four or five small-model calls (two askings of the
+#: facts, a third of any they split on, two of the brief's promises: about
+#: $0.001-0.01 a scene; rounded up) and the blocking check as above. A
+#: forecast, not measured on a gated book
 QUESTIONS_GATE_COST_PER_SCENE = 0.3 + 0.02 + (0.05 if GATE_BLOCKING else 0)
 
 

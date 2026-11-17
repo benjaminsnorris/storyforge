@@ -14,11 +14,13 @@ in every variant of it:
 - **benign**: one of E2's benign rewordings: every answer `no`.
 
 The suite asks each variant's questions the way the gate does
-(`questions.ask_questions`: one call per asking, two askings, a finding
-only when both say yes and the quote is in the scene). A `yes` is caught
-when its finding's quote lands on the injected words (`lands_on` a
-`contradicted` quote: three words in a row in common); `recall_any` counts
-a finding on the broken fact whose quote is anywhere in the scene.
+(`questions.ask_questions`: one call per asking, two askings, a third of
+the questions they split on; a finding needs two yeses and the quote in the
+scene). A `yes` is caught when its finding's quote lands on the injected
+words (`lands_on` a `contradicted` quote: three words in a row in common, or
+a shorter quote that holds every word the injection changed);
+`recall_any` counts a finding on the broken fact whose quote is anywhere in
+the scene. `tie_found` counts the findings the third asking made.
 
 It asks every labelled fact, so `recall` measures the questions, the prompt
 and the model. The gate asks only the facts its selection picks
@@ -51,18 +53,24 @@ CASES_FILE = os.path.join(EVALS_DIR, 'fixtures', 'question-set', 'cases.json')
 #: the same commit; a loss is a decision). The plan's targets are notes:
 #: recall at least the open checker's on the frozen E4/E8, no false alarms
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-09 (haiku 5.5, $0.04 for the set). Sonnet 5.5 on the
-    # same set (fixtures/tier-comparison/claude-sonnet-5-5, $0.54): recall
-    # 0.5294 (one case more), no false alarms, no split answers
-    'recall': 0.4706,
-    'recall_any': 0.4706,
+    # recorded 2026-11-16 (haiku 5.5, about $0.05 for the set): the prompt
+    # counts dialogue and memory as the book's word and checks every
+    # clause, and a split is asked a third time (two yeses of three). A
+    # second recording gave the same: 0.7647, no false alarms. Was 0.4706
+    # (2026-11-09). fixtures/tier-comparison/ holds the 2026-11-09 prompt's
+    # sonnet run: stale until re-recorded
+    'recall': 0.7647,
+    'recall_any': 0.7647,
     'false_alarms': 0,
     'split': 3,
+    # of the 3 splits, the third asking made one finding (qs-016's salary);
+    # qs-033 and qs-035 split, then no (#714's review SF-3)
+    'tie_found': 1,
     # #673's review (T6, CR-2/SF-3): a prompt that breaks quoting shows here,
     # not only as a recall drop; and what the gate's selection costs recall
     'misquoted': 0,
     'selection_lost': 1,
-    'recall_selected': 0.4706,
+    'recall_selected': 0.7647,
 }
 
 
@@ -124,6 +132,10 @@ def validate(data: dict, book_dir: str, injections: dict[str, dict]) -> list[str
                     or text(v['scene']).count(inj['injection']['find']) != 1:
                 problems.append(f'{v["id"]}: {v["injection"]} does not apply once to '
                                 f'{v["scene"]}')
+            elif v['kind'] == 'error' and not changed_words(inj):
+                # a short quote could never land on it (`lands_on`)
+                problems.append(f'{v["id"]}: {v["injection"]} changes no word (only deletes, '
+                                f'reorders or punctuates)')
         shape = {'error': (True, True), 'benign': (True, False), 'control': (False, False)}
         if shape.get(v['kind']) != (bool(v['injection']), bool(v['yes'])):
             problems.append(f'{v["id"]}: an error has an injection and a yes, a benign '
@@ -179,18 +191,40 @@ def selected(data: dict, book_dir: str, scene: str, prose: str) -> set[str]:
 SHARED_RUN = 3
 
 
-def lands_on(quote: str, where: str) -> bool:
-    """Whether a finding's quote is on the injected words: the two share a
-    run of `SHARED_RUN` words (all of the injected quote's, when it has
-    fewer), case and punctuation aside. A finding quoting more or less of the
-    sentence than the injection's quote still lands."""
+def _words(text: str) -> list[str]:
     import re
 
     from storyforge.quotes import normalize
-    a, b = (re.findall(r"[\w'-]+", normalize(t).lower()) for t in (quote, where))
+    return re.findall(r"[\w'-]+", normalize(text).lower())
+
+
+def changed_words(case: dict) -> frozenset:
+    """The words an E2 case's injection put in that weren't there before
+    (its `replace` less its `find`, lowercase): 'frank' for "Fred!" ->
+    "Frank!". Empty for one that only deletes, reorders or punctuates
+    (`validate` refuses that for an error case). Computed per injection,
+    which assumes one `contradicted` site, as every case has."""
+    inj = case.get('injection') or {}
+    return frozenset(_words(inj.get('replace', ''))) - frozenset(_words(inj.get('find', '')))
+
+
+def lands_on(quote: str, where: str, *, changed: frozenset) -> bool:
+    """Whether a finding's quote is on the injected words: the two share a
+    run of `SHARED_RUN` words (all of the injected quote's, when it has
+    fewer), case and punctuation aside. A finding quoting more or less of the
+    sentence than the injection's quote still lands. A quote of fewer words
+    than that run (`SHARED_RUN`, or the whole injected quote when shorter)
+    lands when its words run inside the injected quote and hold every word
+    the injection `changed` ('"Frank!"' for Fred -> Frank; "Bob" alone
+    doesn't for "his uncle Bob", which changed "uncle" too); with nothing
+    changed, it never lands."""
+    a, b = _words(quote), _words(where)
     n = min(SHARED_RUN, len(b))
-    if not n or len(a) < n:
+    if not n or not a:
         return False
+    if len(a) < n:
+        inside = any(tuple(b[i:i + len(a)]) == tuple(a) for i in range(len(b) - len(a) + 1))
+        return bool(changed) and inside and changed <= set(a)
     runs = {tuple(b[i:i + n]) for i in range(len(b) - n + 1)}
     return any(tuple(a[i:i + n]) in runs for i in range(len(a) - n + 1))
 
@@ -221,7 +255,8 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
                     lost.append(f'{v["id"]}:{fid}')
                 if quote is not None:
                     caught_any += 1
-                    if any(lands_on(quote, w) for w in where):
+                    changed = changed_words(injections[v['injection']])
+                    if any(lands_on(quote, w, changed=changed) for w in where):
                         caught += 1
                         caught_selected += picked
                         row['caught'] += 1
@@ -244,6 +279,7 @@ def score(data: dict, outcomes: dict[str, dict], injections: dict[str, dict]) ->
         'false_alarms_benign': false['benign'],
         'false_alarms_other_facts': false['error'],
         'split': sum(o['split'] for o in outcomes.values()),
+        'tie_found': sum(o.get('tie_found', 0) for o in outcomes.values()),
         'misquoted': sum(o['misquoted'] for o in outcomes.values()),
     }
     codes = {c: {'cases': r['cases'], 'recall': round(r['caught'] / r['cases'], 4)}
@@ -282,6 +318,7 @@ def run(ctx):
                                     model=model)
         outcomes[v['id']] = {'findings': {f.fact_id: f.scene_quote for f in r.findings},
                              'split': r.split, 'misquoted': r.misquoted,
+                             'tie_found': r.tie_found,
                              'selected': selected(data, book_dir, v['scene'], prose)}
     result = score(data, outcomes, injections)
     gates, notes = floor_gates(result['metrics'], FLOORS)

@@ -51,7 +51,7 @@ def _answering(answers, asked=None):
         prompt = body['messages'][0]['content']
         asked.append(prompt)
         n = prompt.count('   Question: ')
-        asking = 2 if 'independent asking 2' in prompt else 1
+        asking = next((k for k in (3, 2) if f'independent asking {k}' in prompt), 1)
         return _text({'answers': answers(asking, n)})
     return fake
 
@@ -319,11 +319,35 @@ class TestAskQuestions:
         assert '(question, asked 2 times)' in f.explanation and 'She is rough.' in f.explanation
         assert r.notes == []
 
-    def test_one_yes_is_split_not_a_finding(self):
-        r, _ = self._ask([Q('gentle')], lambda a, n: [
+    def test_a_split_and_then_no_is_not_a_finding(self):
+        r, asked = self._ask([Q('gentle')], lambda a, n: [
             ans(1, 'yes' if a == 1 else 'no', 'slammed the door')])
-        assert r.findings == []
-        assert r.notes == ['1 question(s) got split answers: not findings']
+        assert r.findings == [] and len(asked) == 3
+        assert r.notes == ['1 question(s) got split answers and were asked a third time: '
+                           '0 found (two yeses of three, the quote in the scene): gentle']
+
+    def test_a_split_and_then_yes_is_a_finding(self):
+        """Three of the question set's 17 cases were split answers, which
+        the two-yes rule threw away: the third asking breaks a split, two
+        yeses of three."""
+        r, asked = self._ask([Q('gentle'), Q('kin', 'relationship')], lambda a, n: [
+            ans(k, 'yes' if a != 2 else 'no', 'slammed the door' if a != 2 else '')
+            for k in range(1, n + 1)])
+        assert len(asked) == 3 and asked[2].count('   Question: ') == 2
+        assert 'independent asking 3' in asked[2]
+        assert [f.fact_id for f in r.findings] == ['gentle', 'kin'] and r.tie_found == 2
+        assert '(question, asked 3 times, split, then yes)' in r.findings[0].explanation
+
+    def test_only_the_split_questions_are_asked_again(self):
+        r, asked = self._ask([Q('gentle'), Q('kin', 'relationship')], lambda a, n: (
+            [ans(1, 'no'), ans(2, 'yes' if a == 1 else 'no', 'Oren laughed')] if n == 2
+            else [ans(1, 'no')]))
+        assert len(asked) == 3 and asked[2].count('   Question: ') == 1
+        assert 'kin' not in [f.fact_id for f in r.findings]
+
+    def test_no_split_no_third_asking(self):
+        _, asked = self._ask([Q('gentle')], lambda a, n: [ans(1, 'no')])
+        assert len(asked) == 2
 
     def test_two_yeses_with_no_quote_in_the_scene_are_noted(self):
         r, _ = self._ask([Q('gentle')], lambda a, n: [ans(1, 'yes', 'she struck him')])
@@ -369,6 +393,127 @@ class TestAskQuestions:
         self._ask([Q('a')], lambda a, n: [ans(1, 'no')], log_file=log)
         assert os.path.isfile(log) and os.path.isfile(str(tmp_path / 'q.a2.json'))
 
+    def test_the_third_asking_logs_beside_them(self, tmp_path):
+        """#714 review T-5: written to the first asking's log, it would
+        overwrite it."""
+        log = str(tmp_path / 'q.json')
+        self._ask([Q('a')], lambda a, n: [ans(1, 'yes' if a == 1 else 'no', 'Oren laughed')],
+                  log_file=log)
+        assert os.path.isfile(str(tmp_path / 'q.a3.json'))
+        assert 'independent asking' not in open(log, encoding='utf-8').read()
+
+
+def _by_fact(answer):
+    """A fake API answering each question by its fact (`Q`'s "<fid> holds"):
+    `answer(asking, fid)` -> (answer, quote)."""
+    import re
+    asked = []
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        asked.append(prompt)
+        a = next((k for k in (3, 2) if f'independent asking {k}' in prompt), 1)
+        out = []
+        for n, fid in re.findall(r'(\d+)\. Established in s1: "(\w+) holds"', prompt):
+            yes_no_, quote = answer(a, fid)
+            out.append(ans(int(n), yes_no_, quote, f'{fid} asking {a}'))
+        return _text({'answers': out})
+    return fake, asked
+
+
+class TestTieBreak:
+    """#714's review: the third asking's numbering, quotes, failures."""
+
+    def _ask(self, qs, answer, **kw):
+        fake, asked = _by_fact(answer)
+        with patch('storyforge.api._api_request', side_effect=fake):
+            return questions.ask_questions(SCENE, PROSE, qs, model='m', **kw), asked
+
+    def test_each_third_answer_lands_on_its_own_question(self):
+        """T-3: two yeses, split then no, two noes, split then yes."""
+        plan = {'a': ['yes', 'yes'], 'b': ['yes', 'no', 'no'], 'c': ['no', 'no'],
+                'd': ['no', 'yes', 'yes']}
+        r, asked = self._ask([Q('a'), Q('b'), Q('c'), Q('d')], lambda a, f: (
+            plan[f][a - 1], 'Oren laughed' if plan[f][a - 1] == 'yes' else ''))
+        assert len(asked) == 3
+        assert 'b holds' in asked[2] and 'd holds' in asked[2]
+        assert 'a holds' not in asked[2] and 'c holds' not in asked[2]
+        assert [f.fact_id for f in r.findings] == ['a', 'd']
+        assert '(question, asked 2 times)' in r.findings[0].explanation
+        assert '(question, asked 3 times, split, then yes)' in r.findings[1].explanation
+        assert (r.split, r.tie_found) == (2, 1)
+        assert r.notes[0].endswith(': b, d')
+
+    def test_the_third_quote_when_the_first_isnt_in_the_scene(self):
+        """T-2: and never the quote of the asking that said no."""
+        r, _ = self._ask([Q('a')], lambda a, f: {
+            1: ('yes', 'not in the scene'), 2: ('no', 'Mara slammed the door'),
+            3: ('yes', 'Oren laughed')}[a])
+        assert r.findings[0].scene_quote == 'Oren laughed'
+        assert 'a asking 3' in r.findings[0].explanation
+
+    def test_split_then_yes_with_no_quote_is_misquoted_not_found(self):
+        """T-6 / SF-1: the note said "1 found" for a finding that wasn't."""
+        r, _ = self._ask([Q('a')], lambda a, f: (
+            ('no', '') if a == 2 else ('yes', 'not in the scene')))
+        assert r.findings == [] and (r.tie_found, r.misquoted) == (0, 1)
+        assert '0 found' in r.notes[0]
+
+    def test_a_third_asking_that_fails_says_which_questions(self):
+        """T-4 / SF-5."""
+        calls = iter([_text({'answers': [ans(1, 'yes', 'Oren laughed')]}),
+                      _text({'answers': [ans(1, 'no')]}),
+                      _text({'answers': []}), _text({'answers': []})])
+        with patch('storyforge.api._api_request', side_effect=lambda *a, **k: next(calls)):
+            with pytest.raises(QuestionError, match=r'third asking of the split questions '
+                                                    r'\(a\), after the first two answered '
+                                                    r'failed twice'):
+                questions.ask_questions(SCENE, PROSE, [Q('a')], model='m')
+
+    def test_a_dispute_split_then_no_is_named(self):
+        """SF-2: an unruled dispute two of three askings would clear."""
+        d = Dispute('reg-fact', 'Mara is gentle', 'Mara slammed the door')
+        q = questions.dispute_question(d, row('reg-fact', 'trait', quote='kind words'), 'Mara')
+        with patch('storyforge.api._api_request', side_effect=_answering(
+                lambda a, n: [ans(1, 'yes' if a == 1 else 'no', 'Mara slammed the door')])):
+            r = questions.ask_questions(SCENE, PROSE, [q], model='m')
+        assert r.unruled == [d]
+        assert any('1 dispute(s) split, then no on the third asking, left unruled' in n
+                   and n.endswith('reg-fact') for n in r.notes)
+
+    def test_disputes_cleared_and_unruled_side_by_side(self):
+        """T-7: a first-two no clears; a split never does."""
+        d1 = Dispute('reg-a', 'Mara is gentle', 'x')
+        d2 = Dispute('reg-b', 'Oren is loud', 'y')
+        q1 = questions.dispute_question(d1, row('reg-a', 'trait', quote='kind'), 'Mara')
+        q2 = questions.dispute_question(d2, row('reg-b', 'trait', quote='loud'), 'Oren')
+
+        def answers(a, n):
+            if n == 1:   # the third asking: only reg-b, split
+                return [ans(1, 'no')]
+            return [ans(1, 'no'), ans(2, 'yes' if a == 1 else 'no', 'Oren laughed')]
+        with patch('storyforge.api._api_request', side_effect=_answering(answers)):
+            r = questions.ask_questions(SCENE, PROSE, [q1, q2], model='m')
+        assert r.cleared == [d1] and r.unruled == [d2]
+
+    def test_a_dispute_split_then_yes_with_no_quote_is_unruled(self):
+        d = Dispute('reg-fact', 'Mara is gentle', 'x')
+        q = questions.dispute_question(d, row('reg-fact', 'trait', quote='kind'), 'Mara')
+        with patch('storyforge.api._api_request', side_effect=_answering(
+                lambda a, n: [ans(1, 'no' if a == 2 else 'yes', 'not in the scene')])):
+            r = questions.ask_questions(SCENE, PROSE, [q], model='m')
+        assert r.unruled == [d] and r.findings == [] and r.misquoted == 1
+
+
+class TestPrompt:
+    def test_the_answering_rules(self):
+        """T-9: the rules the 2026-11-16 recall rests on."""
+        p = questions.PROMPT
+        assert 'When in doubt' not in p
+        assert "Dialogue and a character's memory count as the book's word" in p
+        assert 'Check every clause' in p
+        p.format(scene_id='s', prose='p', questions='q')   # renders
+
 
 class TestDisputes:
     D = Dispute('reg-fact', 'Mara is gentle', 'Mara slammed the door')
@@ -384,8 +529,8 @@ class TestDisputes:
         assert '"Mara slammed the door"' in q.text and q.dispute is self.D
 
     def test_the_doubt_goes_to_yes(self):
-        # T1: the plain questions say "when in doubt, no", which would clear a
-        # doubtful dispute the open checker left unruled
+        # T1: a dispute's doubt goes to yes, so a doubtful one isn't cleared
+        # where the open checker would have left it unruled
         q = questions.dispute_question(self.D, row('reg-fact'))
         assert "if you can't tell, answer `yes`" in q.text
 
@@ -393,7 +538,7 @@ class TestDisputes:
         # SF-4: an empty claim used to make the dispute vanish
         d = Dispute('reg-fact', 'Mara is gentle', '')
         r = self._ask(lambda a, n: [ans(1, 'yes' if a == 1 else 'no', 'Mara slammed')], d)
-        assert r.unruled == [d]
+        assert r.unruled == [d]   # split, then no on the third asking
         r = self._ask(lambda a, n: [ans(1, 'no')], d)
         assert r.cleared == [d]
 
@@ -406,7 +551,12 @@ class TestDisputes:
         r = self._ask(lambda a, n: [ans(1, 'no')])
         assert r.cleared == [self.D] and r.unruled == [] and r.findings == []
 
+    def test_a_split_then_yes_rules_it_a_contradiction(self):
+        r = self._ask(lambda a, n: [ans(1, 'no' if a == 2 else 'yes', 'Mara slammed the door')])
+        assert [f.fact_id for f in r.findings] == ['reg-fact'] and r.unruled == []
+
     @pytest.mark.parametrize('answers', [
+        # split, and the third asking says no: a third no never clears one
         lambda a, n: [ans(1, 'yes' if a == 1 else 'no', 'Mara slammed the door')],
         lambda a, n: [ans(1, 'yes', 'not in the scene')]])
     def test_anything_else_leaves_it_unruled(self, answers):
@@ -485,7 +635,7 @@ class TestPromises:
             ans(2, 'yes' if a == 1 else 'no', 'Oren laughed')])
         assert [(f.fact_id, f.problem) for f in r.unverified] == [
             ('key_actions', 'split answers')]
-        assert r.findings == [] and r.split == 2
+        assert r.findings == [] and r.promise_split == 2 and r.split == 0
         assert any('2 brief promise(s) neither delivered nor broken' in n for n in r.notes)
 
     def test_a_must_beat_delivered_with_no_quote_in_the_scene_blocks(self):
