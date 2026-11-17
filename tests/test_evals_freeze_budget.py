@@ -531,6 +531,122 @@ def test_auto_tops_a_stale_frozen_suite_up_recording_only_what_changed(tmp_path,
     assert _result(tmp_path, 'e4')['status'] == 'pass' and live == []
 
 
+def _stale_top_up(tmp_path, live):
+    """A recorded frozen e4 whose second request has since changed."""
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
+    _record_frozen(tmp_path)
+    # a different length: a same-size rewrite in the same second reuses the old .pyc
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='a changed prompt')
+    live.clear()
+
+
+def _figure(tmp_path, usd):
+    (tmp_path / 'baseline.json').write_text(json.dumps({'results': [
+        {'suite': 'e4', 'status': 'pass', 'metrics': {}, 'cost': {'usd_if_live': usd}}]}))
+
+
+def test_a_top_up_reports_how_much_it_recorded(tmp_path, live):
+    """#725 SF-6: the report says topped up, and how much went live."""
+    _stale_top_up(tmp_path, live)
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'x') == 0
+    r = _result(tmp_path, 'e4')
+    assert r['topped_up'] == {'recorded': 1, 'replayed': 1}
+    assert r['notes'][0] == ('frozen suite topped up: 1 of 2 call(s) recorded live, the rest '
+                             'replayed')
+
+
+def test_a_top_up_with_nothing_changed_records_nothing_and_says_so(tmp_path, live):
+    """#725 T-5: only what changed goes live."""
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
+    _record_frozen(tmp_path)
+    live.clear()
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'x') == 0
+    assert live == []
+    assert 'nothing had changed' in _result(tmp_path, 'e4')['notes'][0]
+
+
+def test_a_top_up_naming_a_suite_that_is_not_frozen_is_refused(tmp_path, live, capsys):
+    """#725 SF-8 / T-2: it would record every call of the other suite live, three times."""
+    _stale_top_up(tmp_path, live)
+    _suite(tmp_path, 'e2')
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--suite', 'e2', '--runs', '3',
+                '--over-budget', 'x') == 2
+    assert 'a top-up names only frozen suites: e2' in capsys.readouterr().err
+    assert live == []
+
+
+def test_a_top_up_of_a_run_with_no_recordings_is_refused(tmp_path, live, capsys):
+    """#725 SF-1 / T-3: it would record that run in full, unasked."""
+    import shutil
+    _stale_top_up(tmp_path, live)
+    shutil.rmtree(tmp_path / 'e6' / 'run2' / 'e4')
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'x') == 2
+    err = capsys.readouterr().err
+    assert 'e4 run 2 has no recordings' in err and '--mode record --suite e4' in err
+    assert live == []
+
+
+def test_a_top_up_is_refused_when_its_worst_case_passes_the_budget(tmp_path, live, capsys):
+    """#725 SF-3 / T-1: a top-up the budget cuts off partway leaves its runs
+    mixed, so it is forecast at a full re-record, as record is."""
+    _stale_top_up(tmp_path, live)
+    _figure(tmp_path, 5.0)
+    _spent(tmp_path, 12.0)   # 12 + 3 x 5 > 25, though 12 < 25
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3') == 2
+    assert 'this run forecasts $15.00' in capsys.readouterr().err
+    assert live == []
+
+
+def test_a_top_up_with_no_figure_says_its_forecast_is_no_ceiling(tmp_path, live, capsys):
+    """#725 SF-2: never "at most $0.00"."""
+    _stale_top_up(tmp_path, live)
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'x') == 0
+    out, err = capsys.readouterr()
+    assert 'at most' not in out.splitlines()[0]
+    assert "a top-up's worst case is a full re-record" in err
+
+
+def test_a_failed_top_up_says_to_re_run_it_naming_its_directories(tmp_path, live, capsys,
+                                                                  monkeypatch):
+    """#725 CR-2 / SF-4 / TD-2: not "re-record all 3 runs"."""
+    _stale_top_up(tmp_path, live)
+
+    def fail(*a):
+        raise RuntimeError('API down')
+    monkeypatch.setattr(api, '_live_request', fail)
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'x') == 2
+    err = capsys.readouterr().err
+    assert 'Re-run the top-up to finish it' in err
+    assert '--mode auto --suite e4 --runs 3' in err and 'Re-record all' not in err
+    for d in (tmp_path / 'cassettes' / 'e4', tmp_path / 'e6' / 'run2' / 'e4',
+              tmp_path / 'e6' / 'run3' / 'e4'):
+        assert str(d) in err
+
+
+def test_a_named_recording_that_records_nothing_is_not_a_pass(tmp_path, live, capsys):
+    """#725 SF-5: stale on a recording asked for by name exits 2."""
+    from harness import SuiteUnavailable  # noqa: F401  (the suite raises it)
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
+    _record_frozen(tmp_path)
+    (tmp_path / 'suites' / 'e4.py').write_text(textwrap.dedent('''
+        from harness import Suite, SuiteUnavailable
+
+        def run(ctx):
+            raise SuiteUnavailable('its private set is not on this machine')
+
+        SUITE = Suite('e4', 'unavailable here', run, frozen=True)
+    '''))
+    live.clear()
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'x') == 2
+    assert 'e4 was named to record but recorded nothing' in capsys.readouterr().err
+
+
 def test_runs_with_auto_on_a_suite_that_is_not_frozen_is_refused(tmp_path, live, capsys):
     _suite(tmp_path, 'e2')
     assert _run(tmp_path, '--mode', 'auto', '--suite', 'e2', '--runs', '3') == 2
