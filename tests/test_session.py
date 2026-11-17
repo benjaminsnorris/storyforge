@@ -10,6 +10,7 @@ import pytest
 
 from storyforge import gate, session, voice_book
 from storyforge.common import get_plugin_dir
+from storyforge.schema import VALID_OUTCOMES
 
 SCENE = 'act1-sc01'
 
@@ -502,9 +503,48 @@ def test_the_gate_names_a_must_marker_in_a_note_column():
 
 def test_a_craft_label_outcome_is_left_out_of_the_plan(project_dir):
     _brief(project_dir, outcome='yes-but')
-    assert '## How it ends' not in session.scene_plan(project_dir, SCENE, notes=False)
+    said = []
+    plan = session.scene_plan(project_dir, SCENE, notes=False, said=said)
+    assert '## How it ends' not in plan and 'yes-but' not in plan
+    assert not [s for s in said if 'outcome' in s]
     _brief(project_dir, outcome='She keeps the map and tells no one.')
-    assert 'She keeps the map' in session.scene_plan(project_dir, SCENE, notes=False)
+    said = []
+    plan = session.scene_plan(project_dir, SCENE, notes=False, said=said)
+    assert '## How it ends\n\nShe keeps the map' in plan
+    assert not [s for s in said if 'outcome' in s]
+
+
+@pytest.mark.parametrize('label', sorted(VALID_OUTCOMES) + ['Yes-But'])
+def test_a_label_outcome_is_not_said_since_an_ending_there_fails_validate(project_dir, label):
+    # iliad-adult: a session dry run said outcome=yes was "a craft label, not
+    # an ending"; the author wrote the ending in, and validate's schema check
+    # refused it. The label is the brief's designed value (plan decision 9):
+    # nothing to say, nothing in the plan.
+    from storyforge.schema import validate_schema
+    ref = os.path.join(project_dir, 'reference')
+    _brief(project_dir, outcome=label)
+    said = []
+    plan = session.scene_plan(project_dir, SCENE, notes=False, said=said)
+    assert not [s for s in said if 'outcome' in s] and '## How it ends' not in plan
+    # what the old note asked for is what the schema refuses
+    _brief(project_dir, outcome='She keeps the map and tells no one.')
+    assert any(e.get('column') == 'outcome' for e in validate_schema(ref)['errors'])
+
+
+def test_a_session_dry_run_says_nothing_of_a_label_outcome(project_dir, monkeypatch, capsys):
+    from storyforge import api, cmd_write
+    _brief(project_dir, outcome='yes')
+    monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+    monkeypatch.setattr(cmd_write, 'select_model', lambda t: 'claude-opus-5-5')
+    monkeypatch.setattr(api, '_api_request', lambda *a, **k: pytest.fail('spent'))
+    monkeypatch.setattr(api, 'max_input_tokens', lambda m: 200_000)
+    try:
+        cmd_write.main(['--session', '--coaching', 'full', '--dry-run', '--force', SCENE])
+    except SystemExit as e:
+        assert not e.code
+    out = capsys.readouterr().out
+    assert '# Next: The Finest Cartographer (act1-sc01)' in out
+    assert 'craft label' not in out and 'its outcome' not in out
 
 
 

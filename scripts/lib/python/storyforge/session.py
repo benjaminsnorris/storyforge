@@ -75,7 +75,7 @@ STAGE_OPEN = '<stage>'
 STAGE_CLOSE = '</stage>'
 SCENE_OPEN = '<scene>'
 SCENE_CLOSE = '</scene>'
-#: outcome values that are a craft framework's label, not an ending
+#: outcome's schema values: a craft framework's label, not an ending
 CRAFT_OUTCOMES = VALID_OUTCOMES
 #: the share of the window a session may fill before its next request; the
 #: rest is the answer's room
@@ -310,8 +310,9 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
                carried: str = '', said: list[str] | None = None,
                sheets_sent: set[str] | None = None) -> str:
     """The plan the writer gets for one scene. What it leaves out that the
-    scene has (a tense that isn't one, a craft-label outcome, a fact id the
-    ledger lacks) is appended to `said`, for the log.
+    scene has (a tense that isn't one, a fact id the ledger lacks) is
+    appended to `said`, for the log. An outcome that is a craft label (the
+    schema's values, the normal case) is left out and not said.
 
     With `sheets_sent` (the session's record), the plan carries the series'
     character sheet (`series.cast_sheets`) of each of the scene's cast the
@@ -368,13 +369,14 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
                         f'an item of key_actions or key_dialogue that starts with must: '
                         f'is required)')
     outcome = (scene.get('outcome') or '').strip()
-    # an older brief's outcome is a craft label (yes-but, no-and): a scene
-    # needn't fit a framework (#643), and it says nothing of the ending
+    # outcome is a schema enum, a craft label (yes-but, no-and) the briefs
+    # stage writes by design (plan decision 9): the normal case, left out of
+    # the plan unsaid, since a scene needn't fit a framework (#643) and the
+    # events and the end-of-scene facts carry the ending. Nothing is said for
+    # it: the only edit a note could ask for, a prose ending, fails validate.
+    # Prose there (checks off, an extracted brief) is an ending: it goes in.
     if outcome and outcome.lower() not in CRAFT_OUTCOMES:
         lines += ['', f'## How it ends\n\n{outcome}']
-    elif outcome:
-        said.append(f'its outcome is a craft label ({outcome!r}), not an ending: the plan '
-                    f'says nothing of how it ends')
     know = _statements(project_dir, scene.get('knowledge_out') or '', 'knowledge', said)
     if know:
         lines += ['', '## Known by the end'] + [f'- {k}' for k in know]
