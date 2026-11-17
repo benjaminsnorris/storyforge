@@ -1442,7 +1442,11 @@ def build_shared_context(project_dir: str, model: str = '',
 # Pipeline manifest
 # ============================================================================
 
+#: `working/pipeline.csv`'s header: the one spelling `init`, `evaluate`,
+#: cleanup's migration and `start_new_cycle` all write (#709: `evaluate` kept
+#: its own six-column copy and wrote its rows positionally to it).
 PIPELINE_HEADER = 'cycle|started|status|evaluation|scoring|plan|review|recommendations|summary'
+PIPELINE_COLUMNS = tuple(PIPELINE_HEADER.split('|'))
 
 
 def get_pipeline_file(project_dir: str) -> str:
@@ -1481,14 +1485,46 @@ def read_cycle_field(project_dir: str, cycle_id: int, field: str) -> str:
     return get_field(pf, str(cycle_id), field, key_col='cycle')
 
 
+def append_cycle(project_dir: str, values: dict[str, str]) -> None:
+    """Append a cycle row to `working/pipeline.csv`, by the file's own header.
+
+    Every value goes under its named column and the row has exactly one cell
+    per column. A positional row is what #709 was: `evaluate` wrote six cells
+    for an old header into the nine-column file, so `started` held a status and
+    the start time sat under `plan`. A column the file's header lacks (a file
+    still on an old header) is said, not dropped silently.
+    """
+    ensure_pipeline_manifest(project_dir)
+    pf = get_pipeline_file(project_dir)
+    with open(pf, encoding='utf-8') as f:
+        content = f.read()
+    lines = content.splitlines()
+    header = lines[0].strip().split('|') if lines else []
+    if not header or header == ['']:
+        header = list(PIPELINE_COLUMNS)
+        content = PIPELINE_HEADER + '\n'
+        with open(pf, 'w', encoding='utf-8') as f:
+            f.write(content)
+    missing = [k for k in values if k not in header]
+    if missing:
+        log(f'WARNING: working/pipeline.csv has no {", ".join(missing)} '
+            f'column, so this cycle\'s {", ".join(missing)} was not recorded. '
+            f'Run `storyforge cleanup` to bring its header up to date.')
+    row = '|'.join(values.get(col, '') for col in header)
+    with open(pf, 'a', encoding='utf-8', newline='') as f:
+        if content and not content.endswith('\n'):
+            f.write('\n')
+        f.write(row + '\n')
+
+
 def start_new_cycle(project_dir: str) -> int:
     ensure_pipeline_manifest(project_dir)
-    current = get_current_cycle(project_dir)
-    new_id = current + 1
-    today = datetime.now().strftime('%Y-%m-%d')
-    from storyforge.csv_cli import append_row
-    pf = get_pipeline_file(project_dir)
-    append_row(pf, f'{new_id}|{today}|pending|||||||')
+    new_id = get_current_cycle(project_dir) + 1
+    append_cycle(project_dir, {
+        'cycle': str(new_id),
+        'started': datetime.now().strftime('%Y-%m-%d'),
+        'status': 'pending',
+    })
     return new_id
 
 
