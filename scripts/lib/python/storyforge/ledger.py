@@ -991,14 +991,20 @@ def _norm(text: str) -> str:
 
 def _phrases(subject: str, names: dict[str, set[str]]) -> set[str]:
     """How a statement can name `subject` (normalized): its id and its
-    registry names, each without a leading "the"; a phrase shorter than
-    three characters is too loose to match on."""
+    registry names, each without a leading "the", and each name of two or
+    more words also surname first ("Erdel, Tam": casualty lists, records
+    and rolls; #677, where a scene that named Tam Erdel only that way had
+    his facts left unasked); a phrase shorter than three characters is too
+    loose to match on."""
     out = set()
     for p in {subject} | names.get(subject, set()):
         if p.startswith('the '):
             p = p[4:]
         if len(p) >= _MIN_PHRASE:
             out.add(p)
+            words = p.split()
+            if len(words) >= 2:
+                out.add(f'{words[-1]}, {" ".join(words[:-1])}')
     return out
 
 

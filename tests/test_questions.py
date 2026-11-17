@@ -183,6 +183,17 @@ class TestPresent:
         assert present_subjects([], self.CHARS, self.PLACES, prose='Orenna sang.',
                                 names=names) == set()
 
+    def test_a_name_written_surname_first_counts(self):
+        # #677: a casualty list's "Erdel, Tam. Seventy-four." left Tam's facts unasked
+        names = {'tam erdel': {'tam erdel'}, 'mara': {'mara', 'mara vell'}}
+        got = present_subjects([], {}, {}, prose='*Erdel, Tam. Seventy-four. Unit three.*',
+                               names=names)
+        assert got == {'tam erdel'}
+        assert present_subjects([], {}, {}, prose='Vell, Mara: absent.', names=names) == {'mara'}
+        # the surname alone, or the two words with no comma, is not the name
+        assert present_subjects([], {}, {}, prose='Erdel came. Erdel Tam stayed.',
+                                names=names) == set()
+
     def test_an_at_records_alias_resolves(self):
         # SF-2: "the old mill" is the-mill's alias
         assert present_subjects([Record('at', 'Oren Tal', 'The Old Mill')], self.CHARS,
