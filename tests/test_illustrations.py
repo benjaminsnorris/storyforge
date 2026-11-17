@@ -877,6 +877,18 @@ def test_an_undecodable_prompt_file_does_not_escape_validate_plan(project_dir):
     assert 'prompt_spoiler_unchecked' in kinds
 
 
+def test_an_undecodable_scene_file_does_not_escape_validate_plan(project_dir):
+    """The marker scan read every scene file as UTF-8 unguarded. Before the
+    fixture had a plan (#288), `validate_plan` returned early and nothing
+    reached it; on a project with a plan, one latin-1 scene file killed
+    `validate` and the whole `cleanup` report, which reports the file itself."""
+    ill.write_plan(project_dir, [plan_row()])
+    with open(os.path.join(project_dir, 'scenes', 'bad.md'), 'wb') as f:
+        f.write(b'# Malm\xf6\n\nThe prose.\n')
+
+    ill.validate_plan(project_dir)   # must not raise
+
+
 def test_the_spoiler_finding_reaches_validate_plan(project_dir):
     write_scene(project_dir, 'vigil', SCENE)
     rel = _write_prompt_body(

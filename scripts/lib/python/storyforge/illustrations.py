@@ -2777,8 +2777,16 @@ def validate_plan(project_dir: str, *,
         for name in sorted(os.listdir(scenes_dir)):
             if not name.endswith('.md'):
                 continue
-            with open(os.path.join(scenes_dir, name), encoding='utf-8') as f:
-                text = f.read()
+            try:
+                with open(os.path.join(scenes_dir, name),
+                          encoding='utf-8') as f:
+                    text = f.read()
+            except (OSError, UnicodeDecodeError):
+                # As in malformed_marker_findings: cleanup's scene check
+                # reports the file itself. Raising here killed the whole
+                # cleanup report (and validate) on any project with a plan
+                # (#288 — the first fixture with a plan found it).
+                continue
             for mid in sorted(set(inline_marker_ids(text))):
                 findings.append({
                     'kind': 'inline_marker', 'id': mid, 'scene_id': name[:-3],
