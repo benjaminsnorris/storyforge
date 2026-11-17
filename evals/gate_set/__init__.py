@@ -32,6 +32,8 @@ Layout of `gate-set/` (written by `build.py`, from E8's cassettes):
        "recording": "cassettes"}         # which E8 recording it came from
 
 - `prose/<id>.md`: the judged prose.
+- `facts.json` (`FACTS_FILE`, written by hand, not by `build.py`): each
+  case's own fact as ledger rows, seeded only by the question layer's suite.
 
 **Roles** (`assign_roles`; `validate` checks the stored roles against it).
 A `reintroduced` item whose evidence falls at exactly one place in its prose
@@ -47,7 +49,9 @@ A control's evidence sentence states the fact correctly, so a finding
 landing on it is a false alarm on that very fact.
 
 **What is measured.** Each run item's pre-pass book is materialized
-(`e8.prepare`), its prose written in, and the gate run once on it
+(`e8.prepare`), for the question layer's suite its case's `facts.json`
+rows added to the ledger (`seed_facts`, before the snapshot), its prose
+written in, and the gate run once on it
 (`gate.gate_scene`, no fix loop), with `before` the book before the prose,
 as revise passes it. A positive is `caught` when a verified finding that
 blocks (`GateResult.findings`) has its scene quote overlapping the evidence
@@ -83,7 +87,8 @@ COMMANDS = {'redraft-from-brief': 'redraft', 'naturalness-upstream': 'redraft',
 #: The metrics where a rise is a gain (for `floor_gates`); for the rest
 #: (false alarms, control stops, unfinished) a fall is
 HIGHER_IS_BETTER = frozenset({'recall', 'recall_per_case', 'cases_caught',
-                              'stop_rate_positive'})
+                              'stop_rate_positive', 'recall_seeded', 'recall_asked',
+                              'asked_positives', 'asked_controls'})
 
 
 class SetMissing(SuiteUnavailable):
@@ -236,22 +241,33 @@ def assign_roles(items: list[dict]) -> None:
 # --- scoring ----------------------------------------------------------------
 
 def _outcome(iid: str, *, finished: bool, stopped: bool, caught: bool,
-             inherited_on: bool, findings: int) -> dict:
-    """The one shape of an item's outcome, for `score` and the results file."""
-    return {'id': iid, 'finished': finished, 'stopped': stopped, 'caught': caught,
-            'inherited_on': inherited_on, 'findings': findings}
+             inherited_on: bool, findings: int, seeded: list[str] | None = None,
+             asked: list[str] | None = None) -> dict:
+    """The one shape of an item's outcome, for `score` and the results file.
+    With `seeded` (the question layer's suite: the case's seeded fact ids,
+    maybe none), also `seeded` (whether it had any) and `seed_asked`
+    (whether the gate asked about one of them: `asked`)."""
+    out = {'id': iid, 'finished': finished, 'stopped': stopped, 'caught': caught,
+           'inherited_on': inherited_on, 'findings': findings}
+    if seeded is not None:
+        out['seeded'] = bool(seeded)
+        out['seed_asked'] = any(i in (asked or []) for i in seeded)
+    return out
 
 
-def outcome(item: dict, result) -> dict:
+def outcome(item: dict, result, seeded: list[str] | None = None) -> dict:
     """What the gate did with one item (a `gate.GateResult`, or None when it
     couldn't finish): `stopped`, `caught` (a blocking verified finding on
     the evidence), `inherited_on` (a finding on the evidence the gate classed
     as already in the book), `findings` (blocking, verified). A finding with
-    no scene quote (a broken promise) can't land on the evidence."""
+    no scene quote (a broken promise) can't land on the evidence. `seeded`:
+    the case's seeded fact ids, for `seed_asked` (`GateResult.asked_fact_ids`):
+    a seeded fact the question layer didn't select (its subject not in the
+    scene, past the cap) is a miss of another kind."""
     from storyforge.quotes import normalize
     if result is None:
         return _outcome(item['id'], finished=False, stopped=True, caught=False,
-                        inherited_on=False, findings=0)
+                        inherited_on=False, findings=0, seeded=seeded)
     place = evidence_place(item['prose'], item.get('evidence', ''))
     norm = normalize(item['prose'])
 
@@ -262,7 +278,148 @@ def outcome(item: dict, result) -> dict:
     return _outcome(item['id'], finished=True, stopped=not result.passed,
                     caught=on_evidence(result.findings),
                     inherited_on=on_evidence(result.inherited),
-                    findings=len(result.findings))
+                    findings=len(result.findings), seeded=seeded,
+                    asked=list(getattr(result, 'asked_fact_ids', []) or []))
+
+
+#: Each case's own fact as ledger rows, for the question layer's suite only
+#: (#677's second recording): the question layer asks about a case's fact
+#: only through a ledger row, and the corpus books' pre-pass ledgers mostly
+#: don't hold the cases' facts (4 of the 15 have no ledger), so the first,
+#: unseeded recording caught 1-2 of 46: it had nothing to ask. Private,
+#: beside `cases.json`, written by hand::
+#:
+#:     {"about": "...", "cases": {"<E1 case id>": {"rows": [<row>], "why_none": ""}}}
+#:
+#: a row being ``{"id", "scene_id", "type", "subject", "statement",
+#: "quote"}``: what the case's pre-pass book (`e8.prepare`) says about the
+#: case's fact outside the gated scene, its `quote` verbatim from that scene
+#: of that book (E1's established quotes come from other commits and often
+#: aren't in it), never naming the wrong value. A case whose pre-pass book
+#: doesn't state the fact outside the gated scene has no row and says why
+#: (`why_none`); the question layer never asks a scene about its own facts
+FACTS_FILE = 'facts.json'
+_FACT_FIELDS = ('id', 'scene_id', 'type', 'subject', 'statement', 'quote')
+#: The fields that are ids or enums in the ledger: a `|` or a line break
+#: would break the row (the prose fields are made CSV-safe, which would
+#: change the quote `seed_facts` checked)
+_ID_FIELDS = ('id', 'scene_id', 'type', 'subject')
+
+
+class FactUnusable(ValueError):
+    """A seeded fact the book can't take. Its message names only case, row
+    and scene ids, never the book's prose, so a run may print it."""
+
+
+def load_facts(path: str) -> dict[str, dict]:
+    """`facts.json`'s cases. Raises `ValueError` when it isn't there or has
+    no `cases` object: the seeded suite never runs unseeded."""
+    file = os.path.join(path, FACTS_FILE)
+    if not os.path.isfile(file):
+        raise ValueError(f'{SET_NAME}/{FACTS_FILE} is not there: the question layer\'s suite '
+                         f'gates each case with its fact in the ledger')
+    with open(file, encoding='utf-8') as f:
+        data = json.load(f)
+    cases = data.get('cases') if isinstance(data, dict) else None
+    if not isinstance(cases, dict):
+        raise ValueError(f'{SET_NAME}/{FACTS_FILE}: no "cases" object')
+    return cases
+
+
+def run_cases(items: list[dict]) -> list[str]:
+    """The cases with a run item (a positive or a control), sorted."""
+    return sorted({i['case'] for i in items if i['role'] in ('positive', 'control')})
+
+
+def facts_problems(facts: dict[str, dict], items: list[dict]) -> list[str]:
+    """What makes the facts unusable, by case id (never quoting them): a run
+    case with no entry, an entry that isn't an object or whose `rows` isn't
+    a list, a row that isn't an object, misses a field, has a `|` or line
+    break in an id field, or is of a type the question layer doesn't ask,
+    two rows with one id, a case with no rows and no `why_none`. What only
+    the book can tell (its scene, its quote, its ledger) is
+    `runner.preflight`'s."""
+    from storyforge.questions import QUESTION_TYPES
+    problems = []
+    ids: set[str] = set()
+    for cid in run_cases(items):
+        entry = facts.get(cid)
+        if not isinstance(entry, dict):
+            problems.append(f'{cid}: no entry in {FACTS_FILE}' if entry is None
+                            else f'{cid}: its entry is not an object')
+            continue
+        rows = entry.get('rows', [])
+        if not isinstance(rows, list):
+            problems.append(f'{cid}: rows is not a list')
+            continue
+        why = entry.get('why_none', '')
+        if not rows and not (isinstance(why, str) and why.strip()):
+            problems.append(f'{cid}: no rows and no why_none')
+        for n, row in enumerate(rows, 1):
+            if not isinstance(row, dict):
+                problems.append(f'{cid} row {n}: not an object')
+                continue
+            missing = [k for k in _FACT_FIELDS if not str(row.get(k) or '').strip()]
+            if missing:
+                problems.append(f'{cid} row {n}: no {", ".join(missing)}')
+                continue
+            broken = [k for k in _ID_FIELDS
+                      if '|' in (v := str(row[k])) or '\n' in v or v != v.strip()]
+            if broken:
+                problems.append(f'{cid} row {n}: a |, line break or padding in {", ".join(broken)}')
+            elif row['type'] not in QUESTION_TYPES:
+                problems.append(f'{cid} row {n}: type {row["type"]!r} is not asked about')
+            elif row['id'] in ids:
+                problems.append(f'{cid} row {n}: id {row["id"]!r} is used twice')
+            ids.add(str(row['id']))
+    return problems
+
+
+def unused_facts(facts: dict[str, dict], items: list[dict]) -> list[str]:
+    """`facts.json`'s entries for cases with no run item (a case renamed or
+    dropped since it was written), for the notes."""
+    return sorted(set(facts) - set(run_cases(items)))
+
+
+def seed_facts(project: str, scene_id: str, rows: list[dict]) -> None:
+    """Add `rows` (checked by `facts_problems`) to the book's ledger as
+    binding, fixed author facts, a ledger made when the book has none.
+    Every row is checked before any is written. Raises `FactUnusable`,
+    naming the row's id, when a row is the gated scene's own (never asked),
+    its scene isn't in the book, or its quote isn't in that scene's prose (a
+    seeded fact the prose doesn't hold would test something else); or when
+    the book's ledger or scene order can't be read or won't take the rows
+    (an id already in it), naming the error's type only (its message can
+    quote the ledger)."""
+    from storyforge import ledger
+    from storyforge.quotes import quote_in
+    if not rows:
+        return
+    try:
+        have = ledger.load(project)
+        order = ledger.scene_order(project)
+    except (ValueError, OSError, ledger.LedgerError) as e:
+        raise FactUnusable(f'{rows[0]["id"]}: the book\'s ledger or scene order can\'t be read '
+                           f'({type(e).__name__})') from e
+    for row in rows:
+        scene = row['scene_id']
+        if scene == scene_id:
+            raise FactUnusable(f'{row["id"]}: the gated scene\'s own fact is never asked')
+        file = os.path.join(project, 'scenes', f'{scene}.md')
+        if scene not in order or not os.path.isfile(file):
+            raise FactUnusable(f'{row["id"]}: scene {scene} is not in the book')
+        with open(file, encoding='utf-8') as f:
+            if not quote_in(f.read(), row['quote']):
+                raise FactUnusable(f'{row["id"]}: its quote is not in {scene}')
+    try:
+        ledger.save(project, have + [{**{c: '' for c in ledger.COLUMNS},
+                                      **{k: row[k] for k in _FACT_FIELDS},
+                                      'origin': 'author', 'status': 'binding',
+                                      'mutable': 'fixed', 'introduced_by': SET_NAME}
+                                     for row in rows], command=SET_NAME)
+    except (ValueError, ledger.LedgerError) as e:
+        raise FactUnusable(f'{rows[0]["id"]}: the book\'s ledger won\'t take the rows '
+                           f'({type(e).__name__}: an id already there?)') from e
 
 
 def _rate(hit: int, of: int) -> float:
@@ -306,6 +463,21 @@ def score(items: list[dict], outcomes: dict[str, dict]) -> tuple[dict, dict]:
         'stop_rate_control': _rate(count(ctl, 'stopped'), len(ctl)),
         'unfinished': sum(1 for i in run if not outcomes[i['id']]['finished']),
     }
+    if any('seeded' in outcomes[i['id']] for i in run):
+        # The question layer's suite: recall over the positives given their
+        # fact (`seeded`), and over those it was asked about (`seed_asked`),
+        # so "never asked" doesn't read as "asked and missed"; and the
+        # controls' false alarms over those asked
+        seeded = [i for i in pos if outcomes[i['id']].get('seeded')]
+        asked = [i for i in pos if outcomes[i['id']].get('seed_asked')]
+        ctl_asked = [i for i in ctl if outcomes[i['id']].get('seed_asked')]
+        metrics.update({
+            'seeded_positives': len(seeded),
+            'recall_seeded': _rate(count(seeded, 'caught'), len(seeded)),
+            'asked_positives': len(asked),
+            'recall_asked': _rate(count(asked, 'caught'), len(asked)),
+            'asked_controls': len(ctl_asked),
+        })
     by_code: dict[str, dict[str, int | float]] = {}
     for i in pos:
         row = by_code.setdefault(i['code'], {'positives': 0, 'caught': 0})

@@ -214,6 +214,11 @@ class QuestionResult:
     #: fact and dispute questions asked (each `ASKINGS` times, a split one
     #: a third time)
     asked: int = 0
+    #: the ledger fact ids those questions were about, in asking order (an
+    #: entering item's is its brief field): what was actually put to the
+    #: model, for an eval that seeds a fact to tell "asked and missed" from
+    #: "never asked" (#677)
+    asked_fact_ids: list[str] = field(default_factory=list)
     #: fact and dispute questions the first two askings split on (a note),
     #: each asked a third time (`TIE_ASKING`)
     split: int = 0
@@ -515,6 +520,7 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
                          what=f'{scene_id}: the questions', error=QuestionError,
                          fields=('quote', 'why'))
     result.asked = count
+    result.asked_fact_ids = [q.fact_id for q in questions]
     agreed_yes, split = yes_no.agreed(answers, count, 'yes')
     no, _ = yes_no.agreed(answers, count, 'no')
     # each yes question's answers that said yes, in asking order (`_verified`)
@@ -771,7 +777,7 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     if picked.absent:
         result.notes.append(f'{len(picked.absent)} fact(s) about people or places not in the '
                             f'scene (by its typed state, its location, or a name in its '
-                            f'prose): not asked')
+                            f'prose): not asked: ' + ', '.join(picked.absent))
     if questions:
         asked = ask_questions(scene_id, prose, questions, model=resolve_model(model),
                               log_file=log_file)
