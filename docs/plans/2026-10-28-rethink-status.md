@@ -92,9 +92,38 @@ character is in, for the Homer series.
      false alarms and far fewer control stops; without the fact in the
      ledger it catches nothing, and 9 of 39 seeded facts weren't asked. It
      doesn't match yet. Both suites' FLOORS are run 1's.
-   - Next: leave decision 5 open and look at the 7 the open checker alone
-     caught and the 9 unasked (presence and the cap), free: it reads
-     the existing recordings. The E4 half is still a follow-up.
+   - **The 7 and the 9, read (2026-11-17, free from the recordings).** The
+     30-question cap never bound (at most 15 a scene). What's left:
+     - *Names written surname first* ("Erdel, Tam", a casualty list): Tam
+       wasn't present, so his fact went unasked (governor-018, 2 items).
+       Fixed: `ledger._phrases` also matches a name of two or more words
+       surname first, and the suite was topped up ($0.02, Ben's go). Run 1
+       now: recall 0.41 (was 0.37), asked 32 (was 30) at 0.56, both newly
+       asked caught, no new false alarm.
+     - *An identity swap* (governor-024, 6 items; governor-025, 4): the
+       old victim is renamed (an Erdel), or left unnamed ("the old woman
+       on the top floor"), so a question about Sera Holdt has nothing of
+       hers to read, and answers no, correctly by its own terms. The open
+       checker caught 4 of 024's and none of 025's. In governor's registry
+       `the-old-woman` is a separate character from `sera-holdt`. Two of
+       024's asked items did find a contradiction of the seeded fact (her
+       floor; "mid-thirties"), but not the labelled one, so they don't
+       count.
+     - *A quote in another sentence* (governor-023, 1): the layer found the
+       labelled error (Sera alive) and quoted a different clause showing
+       it, so the scoring's one-evidence-sentence rule counts it a miss.
+     - *A second error in the case* (shared-dark-037, 2): the case has two
+       errors (Maren on Ostrowski's call; Duluth before it happens), and
+       facts.json seeds only the call. These two replays reintroduce the
+       Duluth one, which would need a "not yet happened" fact.
+     - *shared-dark-041* (1): Claire isn't named, so her fact wasn't asked,
+       but the layer caught the error anyway through the brief's entering
+       item.
+   - So decision 5 stays open. The open checker's real edge here is errors
+     where someone is given the wrong name, which a question about a named
+     subject can't see. Also seen: governor's ledger has 77 facts with no
+     subject, which the layer never asks about. The E4 half is still a
+     follow-up.
 4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
 5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
    (gold notes, judging, a re-score) is all that's left. Since then 5d and
