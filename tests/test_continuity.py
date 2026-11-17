@@ -518,9 +518,9 @@ class TestParseElapsed:
 
 
 class TestTime:
-    def _book(self, phrase, anchor='s1', day1='1', day2='4'):
+    def _book(self, phrase, anchor='s1', day1='1', day2='4', way='before'):
         return make_book('s2', {'s1': [], 's2': [R('elapsed', item=anchor, value=phrase,
-                                                   quote=f'it was {phrase}')]},
+                                                   detail=way, quote=f'it was {phrase}')]},
                          scenes={'s1': {'timeline_day': day1}, 's2': {'timeline_day': day2}})
 
     def test_a_span_that_fits(self):
@@ -533,20 +533,110 @@ class TestTime:
         assert 'this scene is day 9, 8 day(s) after it' in f[0].explanation
 
     def test_the_future(self):
-        b = make_book('s1', {'s1': [R('elapsed', item='s2', value='in two days')], 's2': []},
+        b = make_book('s1', {'s1': [R('elapsed', item='s2', value='in two days',
+                                      detail='after')], 's2': []},
                       scenes={'s1': {'timeline_day': '1'}, 's2': {'timeline_day': '5'}})
-        assert codes(continuity.check_time(b)[0]) == ['TIM']
+        f, _ = continuity.check_time(b)
+        assert codes(f) == ['TIM']
+        assert '"in two days" points ahead to s2, day 5; this scene is day 1, 4 day(s) ' \
+               'before it' in f[0].explanation
 
     def test_unread_unanchored_and_undated_are_notes(self):
         b = make_book('s2', {'s1': [], 's2': [
-            R('elapsed', item='s1', value='a few days ago'),
-            R('elapsed', item='', value='ten years ago'),
-            R('elapsed', item='s1', value='two days ago')]},
+            R('elapsed', item='s1', value='a few days ago', detail='before'),
+            R('elapsed', item='', value='ten years ago', detail='before'),
+            R('elapsed', item='s1', value='two days ago', detail='before')]},
             scenes={'s1': {'timeline_day': ''}, 's2': {'timeline_day': '4'}})
         f, notes = continuity.check_time(b)
         assert f == [] and len(notes) == 3
         assert 'a vague count' in notes[0] and 'no scene' in notes[1]
         assert 'without a timeline_day' in notes[2]
+
+
+class TestForwardTime:
+    """#713: a forward reference ("He'll be home in twelve days") is measured
+    to the scene where the event happens, never as time already passed."""
+
+    QUOTE = "He'll be home in twelve days."
+
+    def _book(self, day_event, *, way='after', item='return', phrase='in twelve days'):
+        return make_book('speech', {'speech': [R('elapsed', item=item, value=phrase,
+                                                 detail=way, quote=self.QUOTE)],
+                                    'return': []},
+                         scenes={'speech': {'timeline_day': '10'},
+                                 'return': {'timeline_day': day_event}})
+
+    def test_the_event_on_its_day_is_no_finding(self):
+        assert continuity.check_time(self._book('22')) == ([], [])
+
+    def test_the_event_too_soon_names_its_scene(self):
+        f, notes = continuity.check_time(self._book('15'))
+        assert codes(f) == ['TIM'] and notes == []
+        assert f[0].scene_quote == self.QUOTE and f[0].established_scene == CALENDAR
+        assert f[0].established_quote.startswith('return: day 15')
+        assert '"in twelve days" points ahead to return, day 15; this scene is day 10, ' \
+               '5 day(s) before it' in f[0].explanation
+
+    def test_counting_from_the_scene_itself_is_a_note_not_a_finding(self):
+        """The real case: item the speaking scene, read as 0 days after it."""
+        f, notes = continuity.check_time(self._book('22', item='speech'))
+        assert f == [] and len(notes) == 1
+        assert 'count from this scene itself' in notes[0] and 'in twelve days' in notes[0]
+
+    def test_counting_back_from_the_scene_itself_is_a_note_too(self):
+        f, notes = continuity.check_time(self._book('22', item='speech', way='before',
+                                                    phrase='twelve days ago'))
+        assert f == [] and 'count from this scene itself' in notes[0]
+
+    def test_unlabelled_forward_words_are_measured_forward(self):
+        f, notes = continuity.check_time(self._book('15', way=''))
+        assert codes(f) == ['TIM'] and notes == []
+        assert 'points ahead to return, day 15' in f[0].explanation
+        assert continuity.check_time(self._book('22', way='')) == ([], [])
+
+    def test_unlabelled_forward_from_the_scene_itself_is_still_a_note(self):
+        f, notes = continuity.check_time(self._book('22', way='', item='speech'))
+        assert f == [] and 'count from this scene itself' in notes[0]
+
+    @pytest.mark.parametrize('phrase', ['twelve days ago', 'twelve days since',
+                                        'twelve days before now'])
+    def test_unlabelled_back_words_are_checked_as_before(self, phrase):
+        def book(day_then):
+            return make_book('speech', {'then': [], 'speech': [
+                R('elapsed', item='then', value=phrase, quote=phrase)]},
+                scenes={'then': {'timeline_day': day_then}, 'speech': {'timeline_day': '10'}})
+        assert continuity.check_time(book('-2')) == ([], [])
+        f, notes = continuity.check_time(book('5'))
+        assert codes(f) == ['TIM'] and notes == []
+        assert f'"{phrase}" counts from then, day 5; this scene is day 10' in f[0].explanation
+
+    @pytest.mark.parametrize('phrase', ['twelve days later', 'twelve days after',
+                                        'the twelfth day'])
+    def test_unlabelled_two_way_words_are_a_note(self, phrase):
+        b = make_book('speech', {'then': [], 'speech': [
+            R('elapsed', item='then', value=phrase, quote=phrase)]},
+            scenes={'then': {'timeline_day': '5'}, 'speech': {'timeline_day': '10'}})
+        f, notes = continuity.check_time(b)
+        assert f == [] and len(notes) == 1
+        assert 'not labelled before or after this scene, whose words could count either way' \
+            in notes[0] and phrase in notes[0]
+
+    def test_a_label_against_the_words_is_a_note(self):
+        f, notes = continuity.check_time(self._book('15', way='before'))
+        assert f == [] and 'labelled against their own words' in notes[0]
+        assert 'labelled before, its words count forward' in notes[0]
+
+    def test_twelve_days_ago_is_measured_back_as_before(self):
+        def book(day_then):
+            return make_book('speech', {'then': [], 'speech': [
+                R('elapsed', item='then', value='twelve days ago', detail='before',
+                  quote='twelve days ago')]},
+                scenes={'then': {'timeline_day': day_then}, 'speech': {'timeline_day': '10'}})
+        assert continuity.check_time(book('-2')) == ([], [])
+        f, _ = continuity.check_time(book('5'))
+        assert codes(f) == ['TIM']
+        assert '"twelve days ago" counts from then, day 5; this scene is day 10, 5 day(s) ' \
+               'after it' in f[0].explanation
 
 
 # ============================================================================
@@ -824,6 +914,19 @@ class TestCheckContinuity:
                                     rec('holds', 'Pell', 'map', value='maybe', quote='map')])
         assert any('off the schema' in n and 'maybe' in n for n in r.notes)
         assert any('1 of 1 record(s) quote words not in the scene' in n for n in r.notes)
+
+    def test_an_elapsed_way_is_kept_and_a_bad_one_is_off_the_schema(self, project_dir):
+        """#713: the extractor labels which way a count runs."""
+        calls = []
+        r = self._run(project_dir, [
+            rec('elapsed', item=PREV, value='in two days', detail=' After ', quote='spoke'),
+            rec('elapsed', item=PREV, value='a day ago', detail='later', quote='map')],
+            calls=calls)
+        got = [x for x in r.records if x.type == 'elapsed']
+        assert [(x.value, x.detail) for x in got] == [('in two days', 'after')]
+        assert any('off the schema' in n and 'elapsed way "later"' in n for n in r.notes)
+        assert '`after` (it will happen that long from now' in calls[0]
+        assert 'never this scene itself' in calls[0]
 
     def test_an_earlier_scene_without_state_is_said(self, project_dir):
         _write(project_dir, PREV, PROSE_1)
@@ -1160,7 +1263,7 @@ class TestReviewElapsed:
 
     def test_a_compound_count_that_fits_is_no_finding(self):
         b = make_book('s2', {'s1': [], 's2': [R('elapsed', item='s1', value='twenty-three days ago',
-                                                quote='twenty-three days ago')]},
+                                                detail='before', quote='twenty-three days ago')]},
                       scenes={'s1': {'timeline_day': '1'}, 's2': {'timeline_day': '24'}})
         assert continuity.check_time(b) == ([], [])
 
