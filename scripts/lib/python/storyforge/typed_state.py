@@ -17,7 +17,13 @@ Record types (`RECORD_TYPES`), with `who`, `item`, `value` and `detail`:
 | `injury` | the person | the body part | `minor`, `serious`, `disabling`, `healed` | `left`, `right` or '' |
 | `uses` | the person | an injured body part | `full` (at full strength), `impaired` | `left`, `right` or '' |
 | `named` | the person | | the proper name the text calls them | |
-| `elapsed` | | the scene id the count runs from ('' if none shows it) | the phrase ("three days ago") | |
+| `elapsed` | | the scene id of the event at the count's other end, never this scene ('' if none shows it) | the phrase ("three days ago") | `before` (the event is that long before this scene's present), `after` (that long after it: "in twelve days"), '' (neither end is the present) |
+
+**An `elapsed` record's way** (`detail`, `ELAPSED_WAYS`) is the model's
+label, and code computes the days (#351's direction, #713): a phrase said of
+a future event ("He'll be home in twelve days") is `after`, and its `item` is
+the scene where that event happens, so it is measured forward to that scene,
+never as time already passed since the scene it is spoken in.
 
 The plan's other records come from data the book already has, and aren't
 extracted again: `when` is scenes.csv (`timeline_day`, `time_of_day`), a
@@ -80,6 +86,10 @@ VALUES = {
     'uses': ('full', 'impaired'),
 }
 SIDES = ('left', 'right')
+#: An `elapsed` record's `detail`: which way from the scene's present the
+#: counted event lies (`before` "three days ago", `after` "in twelve days");
+#: '' when neither end of the count is the present (#713)
+ELAPSED_WAYS = ('before', 'after')
 #: The most facts offered to `knows`, and injuries to `uses` (the rest are
 #: counted in the notes)
 MAX_OFFERED_FACTS = 40
@@ -133,7 +143,7 @@ Every record has `type`, `who`, `item`, `value`, `detail` and `quote`. `quote` i
 - `injury`: a person is hurt: `item` the body part (arm, hand, leg, eye, ribs...), `detail` `left`, `right` or '', `value` `minor`, `serious` or `disabling`; an injury that has healed: `healed`.
 - `uses`: a person uses a body part listed under "Injuries in force" above, or one injured earlier in this scene: `item` the part, `detail` the side, `value` `full` (as if unhurt: grips, swings, runs, lifts at full strength) or `impaired` (favours it, winces, uses it weakly).
 - `named`: each proper name the scene calls a person by, once per name: `who` the person, `value` the name exactly as written (a nickname or patronymic used as a name counts; a pronoun or a description doesn't).
-- `elapsed`: each phrase that counts time with a number ("three days ago", "nine nights since", "in a week", "the tenth day"): `value` the phrase exactly as written, `item` the id of the scene in the calendar above where the event it counts from happens, or '' when no scene shows it.
+- `elapsed`: each phrase that counts time with a number ("three days ago", "nine nights since", "in a week", "the tenth day"): `value` the phrase exactly as written; `detail` which way the counted event lies from this scene's present: `before` (it happened that long ago: "three days ago", "the tenth day since the plague began"), `after` (it will happen that long from now: a promise, a plan, a prophecy, "in twelve days", "within a week"), or '' when neither end of the count is this scene's present ("they marched three days before the storm"); `item` the id of the scene in the calendar above where that counted event happens (for `after`, the later scene where the promised or planned event takes place), never this scene itself, or '' when no scene shows it.
 
 Never record what happens in a memory, dream, story told, plan or simile as the scene's present; record `named` and `elapsed` wherever they are."""
 
@@ -287,10 +297,12 @@ def _call(prompt: str, model: str, log_file: str, tokens: int, label: str) -> li
 
 def _clean(rec: Record) -> str:
     """Why a record can't be used ('' when it can): a closed type's value
-    outside its set, a side that isn't one, or a type missing what it
-    needs."""
+    outside its set, a side or an elapsed way that isn't one, or a type
+    missing what it needs."""
     if rec.type in ('injury', 'uses') and rec.detail not in ('',) + SIDES:
         return f'{rec.type} side "{rec.detail}" is not left, right or blank'
+    if rec.type == 'elapsed' and rec.detail not in ('',) + ELAPSED_WAYS:
+        return f'elapsed way "{rec.detail}" is not before, after or blank'
     allowed = VALUES.get(rec.type)
     if allowed and rec.value not in allowed:
         return f'{rec.type} value "{rec.value}" is not one of {", ".join(allowed)}'
@@ -323,7 +335,8 @@ def extract(scene_id: str, prose: str, *, model: str, log_file: str = '', pov: s
         rec = Record(type=it['type'], who=it['who'].strip(), item=it['item'].strip(),
                      value=it['value'].strip().lower() if it['type'] in VALUES
                      else it['value'].strip(),
-                     detail=it['detail'].strip().lower() if it['type'] in ('injury', 'uses')
+                     detail=it['detail'].strip().lower()
+                     if it['type'] in ('injury', 'uses', 'elapsed')
                      else it['detail'].strip(),
                      quote=quote, scene_id=scene_id,
                      verified=bool(quote) and quote_in(prose, quote))
