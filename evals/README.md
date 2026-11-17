@@ -10,6 +10,7 @@ python3 evals/run.py --suite NAME  # one suite (repeatable)
 python3 evals/run.py --mode auto   # replay what exists, record the rest (spends; frozen suites replay)
 python3 evals/run.py --mode record # re-record every call (spends; frozen suites replay)
 python3 evals/run.py --mode record --suite e4-generation --runs 3   # re-record a frozen suite, on purpose
+python3 evals/run.py --mode auto --suite gate-set --runs 3   # top a stale frozen suite up
 python3 evals/run.py --over-budget "Ben approved, #NNN" ...         # spend past the monthly budget
 python3 evals/run.py --baseline    # also write evals/baseline.json
 python3 evals/run.py --list
@@ -51,14 +52,27 @@ Part E):
 - **Fixed labelled sets are the default.** A new suite measures a tool against
   fixed inputs with known answers, so a change in the number is a change in
   the tool. Deterministic checks are code: they get unit tests, not a suite.
-- **E4 and E8 are frozen** (`Suite(..., frozen=True)`). `auto` and `record`
+- **E4 and E8 are frozen** (`Suite(..., frozen=True)`), as are the private sets
+  (blocking set, gate set) and `voice-austen`. `auto` and `record`
   replay them; a miss marks them `stale` and spends nothing. They are
   re-recorded only when a decision depends on them, by name and always as
   three runs: `--mode record --suite e4-generation --runs 3` (run 1 to the
   default cassettes, runs 2 and 3 to `fixtures/e6/run2` and `run3`, so
-  `consistency.py` reads the spread). Naming one with `--runs` other than 3,
-or with `--mode auto`, is refused; `--mode record` without naming them
-replays them. At about
+  `consistency.py` reads the spread). A frozen suite gone stale by a
+  change downstream of its expensive calls (#713 changed the gate's
+  typed-state extraction, after its checker calls) can be **topped up**
+  instead: `--mode auto --suite NAME --runs 3` replays every request that
+  still matches each run's recording and records only the ones that
+  changed (for the gate set, $1.00 of extraction calls instead of about
+  $130). A change upstream of the expensive calls changes every later
+  request too, so its top-up is close to a full re-record: a top-up is
+  forecast and refused as `record` is (spend plus the three runs'
+  `usd_if_live` against the budget), and with no figure in the baseline
+  the forecast is a lower bound, not a ceiling. It names only frozen
+  suites, and refuses a run with no recordings (that would record it in
+  full; use `record`). Naming one
+  with `--runs` other than 3 is refused, in either mode; `--mode record`
+  or `auto` without naming them replays them. At about
   $25 (E4) and $55 (E8) a run, that is past the monthly budget, so it needs
   Ben's approval and `--over-budget`.
 - **A new suite that needs live generation for its inputs** (drafted scenes,
@@ -265,16 +279,13 @@ scene and a verdict on one known error, an E1 `tool-introduced` case.
 - **Two suites**: `gate-set` (the open checker, today's default) and
   `gate-set-questions` (`check --questions`), each with its own recordings
   under `gate-set/cassettes/` and outcomes in `gate-set/results/`.
-- **Not recorded yet, on purpose.** Both are frozen and recorded only when
-  the question layer is a candidate to replace the open checker (three
-  runs each; forecast from the gate's per-scene cost: about $40 a run for
-  `gate-set`, about $20 for `gate-set-questions`). The first recording has
-  no forecast in the baseline, so `run.py` refuses it without
-  `--over-budget` and Ben's approval. Until then a replay is `stale`
-  (unavailable, "not recorded yet", with the record command), not the
-  harness's no-recordings error, so a full run and `--baseline` aren't held
-  up by a suite left unrecorded deliberately. Once `FLOORS` are set, missing
-  recordings are that error again (a misplaced directory).
+- **Recorded 2026-11-16** (three runs each, with Ben's approval and
+  `--over-budget`: about $43 a run for `gate-set`, $12 for
+  `gate-set-questions`, seeded with each case's fact, #723). `gate-set` was
+  topped up after #713 changed the typed-state extraction ($1.00). `FLOORS`
+  are run 1's, so missing recordings are the harness's error (a misplaced
+  directory). Before a suite's first recording a replay is `stale`
+  (unavailable, "not recorded yet", with the record command).
 - **Fails loudly.** A gate that can't finish an item counts as a stop and
   is named in the notes, but if it finishes none the suite errors; the
   question layer without the typed state errors up front; a cassette miss

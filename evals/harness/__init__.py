@@ -24,9 +24,10 @@ while it runs, a cassette miss withholds the prompt's opening
 
 A **frozen** suite (``Suite(frozen=True)``: E4 and E8, #645) is expensive and
 end to end, so a prompt change anywhere misses its cassette. It is never
-recorded by default: ``auto`` replays it, and ``record`` replays it unless the
-caller passes ``record_frozen`` (``run.py`` does only for a suite named with
-``--suite`` and recorded as ``--runs 3``). A frozen suite replayed whose only
+recorded by default: ``auto`` and ``record`` replay it unless the caller
+passes ``record_frozen`` (``run.py`` does only for a suite named with
+``--suite`` and run as ``--runs 3``: ``record`` re-records it, ``auto`` tops it
+up, recording only the requests that changed). A frozen suite replayed whose only
 cassette failures are misses is ``stale``, not ``error`` — unless its
 cassette directory holds no recordings at all, which is a missing fixture
 (``error``). An exception the suite raised after a miss is kept on the stale
@@ -176,9 +177,11 @@ class Suite:
 
 def stale_reason(suite_name: str, misses: int) -> str:
     return (f'{misses} cassette miss(es): a request changed since this frozen suite '
-            f'was recorded, so it is stale and nothing was spent. Re-record it only '
-            f'when a decision depends on it: python3 evals/run.py --mode record '
-            f'--suite {suite_name} --runs 3')
+            f'was recorded, so it is stale and nothing was spent. When the change is '
+            f'downstream of its expensive calls, top it up (records only what changed): '
+            f'python3 evals/run.py --mode auto --suite {suite_name} --runs 3; re-record it '
+            f'only when a decision depends on fresh results: --mode record --suite '
+            f'{suite_name} --runs 3')
 
 
 def has_recordings(cassette_dir: str) -> bool:
@@ -295,10 +298,10 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
     """Run one suite with its cassette active; never raises, except on Ctrl-C.
 
     A frozen suite runs in ``replay`` whatever ``mode`` asks, unless ``mode`` is
-    ``record`` and ``record_frozen`` is set. ``run`` labels which of
+    ``record`` or ``auto`` and ``record_frozen`` is set. ``run`` labels which of
     ``--runs N``'s runs this is ('' the main one), for ``Suite.cassettes``."""
     requested = mode
-    if suite.frozen and mode != 'replay' and not (mode == 'record' and record_frozen):
+    if suite.frozen and not record_frozen:
         mode = 'replay'
     from storyforge.cassette import PRIVATE_ENV
     saved = {k: os.environ.get(k) for k in
@@ -353,6 +356,14 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
             result['cost'], failures = dict.fromkeys(COST_KEYS, 0), [f'cassette log unreadable: {e}']
         if requested != mode:
             result['notes'].insert(0, f'frozen suite: replayed, not run in {requested} mode (#645)')
+        elif suite.frozen and mode == 'auto':
+            cost = result['cost']
+            live = cost.get('calls', 0) - cost.get('replayed_calls', 0)
+            result['topped_up'] = {'recorded': live, 'replayed': cost.get('replayed_calls', 0)}
+            result['notes'].insert(0, (
+                f'frozen suite topped up: {live} of {cost.get("calls", 0)} call(s) recorded live, '
+                f'the rest replayed' if live else
+                'frozen suite topped up: nothing had changed, nothing recorded'))
         misses = [f for f in failures if f.startswith('CassetteMiss')]
         only_misses = suite.frozen and mode == 'replay' and failures \
             and len(misses) == len(failures)
@@ -392,8 +403,9 @@ def overall_status(statuses) -> Status:
 
 def run_all(suites: list[Suite], mode: Mode, cassettes_root: str,
             record_frozen: frozenset[str] | set[str] = frozenset(), run: str = '') -> dict:
-    """Run ``suites``; ``record_frozen`` names the frozen suites ``record``
-    mode may re-record (the others are replayed); ``run`` labels which of
+    """Run ``suites``; ``record_frozen`` names the frozen suites this run may
+    record: ``record`` re-records them, ``auto`` tops them up (the others are
+    replayed); ``run`` labels which of
     ``--runs N``'s runs this is ('' the main one)."""
     results = [run_suite(s, mode, cassettes_root, record_frozen=s.name in record_frozen,
                          run=run)

@@ -6,6 +6,7 @@
     python3 evals/run.py --mode auto          # replay what exists, record the rest (spends; frozen suites replay)
     python3 evals/run.py --mode record        # re-record every call (spends; frozen suites replay)
     python3 evals/run.py --mode record --suite e4-generation --runs 3   # a frozen suite
+    python3 evals/run.py --mode auto --suite gate-set --runs 3   # top a frozen suite up
     python3 evals/run.py --baseline           # also write evals/baseline.json
     python3 evals/run.py --list
 
@@ -13,7 +14,11 @@ Writes the full report to evals/results/latest.json and prints a summary; when
 evals/baseline.json exists the summary includes per-metric deltas against it.
 
 E4 and E8 are frozen (#645): auto and record replay them, and a miss makes
-them stale rather than errored (naming one with --mode auto is refused). Live calls count against a monthly eval
+them stale rather than errored. Naming one with --mode auto --runs 3 tops it
+up: each run replays the requests that still match its recording and records
+only those that changed (a prompt change downstream of calls that didn't
+change, as #713's extraction prompt was for the gate set), so a stale suite
+replays again without paying for a full re-record. Live calls count against a monthly eval
 budget (evals/config.json) kept in the eval spend ledger
 (storyforge.eval_spend); --over-budget REASON is the only way past it.
 
@@ -33,7 +38,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from harness import EVALS_DIR, compare, discover, overall_status, run_all  # noqa: E402
+from harness import (EVALS_DIR, compare, discover, has_recordings,  # noqa: E402
+                     overall_status, run_all)
 
 SUITES_DIR = os.path.join(EVALS_DIR, 'suites')
 CASSETTES_DIR = os.path.join(EVALS_DIR, 'fixtures', 'cassettes')
@@ -59,10 +65,11 @@ def parse_args(argv):
     parser.add_argument('--suite', action='append', default=[], help='Run only this suite')
     parser.add_argument('--mode', choices=('replay', 'record', 'auto'), default='replay')
     parser.add_argument('--runs', type=int, default=1,
-                        help=f'Record N independent runs (record mode only): run 1 to the '
-                             f'default cassettes, run K to evals/fixtures/e6/runK. A frozen '
-                             f'suite (E4, E8) is recorded only by name and only as '
-                             f'--runs {FROZEN_RUNS}')
+                        help=f'Record N independent runs (--mode record; or --mode auto naming '
+                             f'only frozen suites, to top them up): run 1 to the default '
+                             f'cassettes, run K to evals/fixtures/e6/runK (a private suite: its '
+                             f'own runK). A frozen suite is recorded or topped up only by name '
+                             f'and only as --runs {FROZEN_RUNS}')
     parser.add_argument('--over-budget', metavar='REASON', default='',
                         help='Spend past the monthly eval budget; REASON (who approved it '
                              'and why) is printed, put in the report and written on every '
@@ -138,16 +145,33 @@ def _plan_recording(args, suites) -> set[str]:
     run may record."""
     if args.runs < 1:
         raise Refused('--runs must be at least 1')
-    if args.runs > 1 and args.mode != 'record':
-        raise Refused('--runs records independent runs, so it needs --mode record')
+    named = {s.name for s in suites if s.frozen and s.name in args.suite}
+    topping_up = bool(named) and args.mode == 'auto'
+    if args.runs > 1 and args.mode != 'record' and not topping_up:
+        raise Refused('--runs records independent runs, so it needs --mode record (or '
+                      '--mode auto naming a frozen suite, to top it up)')
     if args.runs > 1 and args.baseline:
         raise Refused('--baseline takes one run; drop --runs')
-    named = {s.name for s in suites if s.frozen and s.name in args.suite}
-    if named and args.mode == 'auto':
-        raise Refused(f'{", ".join(sorted(named))} is frozen: auto would only replay it. '
-                      f'Replay it with the default mode, or re-record it on purpose with '
-                      f'--mode record --suite NAME --runs {FROZEN_RUNS}.')
-    if args.mode != 'record':
+    if topping_up and args.runs != FROZEN_RUNS:
+        raise Refused(f'{", ".join(sorted(named))} is frozen: topping it up (--mode auto) '
+                      f'records the changed requests of each of its {FROZEN_RUNS} runs, so it '
+                      f'needs --runs {FROZEN_RUNS}.')
+    if topping_up:
+        others = sorted(s.name for s in suites if not s.frozen)
+        if others:
+            raise Refused(f'a top-up names only frozen suites: {", ".join(others)} would '
+                          f'record every call live in {FROZEN_RUNS} runs. Run them on their own.')
+        for s in suites:
+            for k in range(1, FROZEN_RUNS + 1):
+                try:
+                    where = _cassette_dir(args, s, k)
+                except Exception as e:  # SuiteUnavailable: its private set isn't here
+                    raise Refused(f'{s.name} can\'t be topped up on this machine: {e}') from e
+                if not has_recordings(where):
+                    raise Refused(f'{s.name} run {k} has no recordings at {where}: a top-up '
+                                  f'would record it in full. Re-record on purpose with '
+                                  f'--mode record --suite {s.name} --runs {FROZEN_RUNS}.')
+    if args.mode != 'record' and not topping_up:
         return set()
     if named and args.runs != FROZEN_RUNS:
         raise Refused(f'{", ".join(sorted(named))} is frozen: it is recorded only as '
@@ -156,14 +180,28 @@ def _plan_recording(args, suites) -> set[str]:
     return named
 
 
+def _cassette_dir(args, suite, k: int) -> str:
+    """Where run ``k`` (1 the main one) of ``suite`` keeps its recordings:
+    its own directories for a private suite (``Suite.cassettes``), else
+    under ``--cassettes-dir`` / ``--runs-dir``. A private suite whose set
+    isn't on this machine raises its ``SuiteUnavailable``."""
+    run = f'run{k}' if k > 1 else ''
+    if suite.cassettes is not None:
+        return suite.cassettes(run)
+    return os.path.join(args.runs_dir, run, suite.name) if run else \
+        os.path.join(args.cassettes_dir, suite.name)
+
+
 def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
     """Refuse a run the monthly budget can't cover; the report's budget block.
 
-    ``record`` is refused when this month's spend plus the forecast (each
-    recorded suite's ``usd_if_live`` in the baseline, times ``--runs``) passes
-    the budget; ``auto`` records only misses, so it is refused only once the
-    budget is spent. Either way the cassette refuses each live call once the
-    month reaches the budget.
+    ``record``, and a top-up (``auto`` on named frozen suites), are refused
+    when this month's spend plus the forecast (each recorded suite's
+    ``usd_if_live`` in the baseline, times ``--runs``) passes the budget: a
+    top-up's worst case is a full re-record, and one the budget cuts off
+    partway leaves its runs mixed. Plain ``auto`` records only misses, so it
+    is refused only once the budget is spent. Either way the cassette
+    refuses each live call once the month reaches the budget.
 
     A suite with no baseline figure adds $0 to the forecast, so for it the
     forecast is a lower bound: named in a WARNING, and the cassette's
@@ -193,13 +231,16 @@ def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
             'forecast_usd': forecast, 'forecast_unknown': unknown,
             'over_budget': args.over_budget or None}
     spent_text = 'unknown' if spent is None else f'${spent:.2f}'
-    bound = 'at most ' if args.mode == 'auto' else ''
+    topping_up = args.mode == 'auto' and bool(record_frozen)
+    bound = 'at most ' if args.mode == 'auto' and not unknown else ''
     print(f'Eval budget: {spent_text} of ${budget:.2f} ({source}) spent this month '
           f'({ledger}); this run, {bound}${forecast:.2f} if every call goes live'
-          + (f' (no figure for {", ".join(unknown)}: not in the baseline)' if unknown else ''))
-    if unknown and args.mode == 'record':
+          + (f' (no figure for {", ".join(unknown)} in the baseline)' if unknown else ''))
+    if unknown and (args.mode == 'record' or topping_up):
         print(f'WARNING: no baseline figure for {", ".join(unknown)}, so the forecast counts '
-              f'it as $0 and is a lower bound; the per-call budget check still applies.',
+              f'it as $0 and is a lower bound, not a ceiling'
+              + (' (a top-up\'s worst case is a full re-record)' if topping_up else '')
+              + '; the per-call budget check still applies unless --over-budget is given.',
               file=sys.stderr)
     if args.over_budget:
         print(f'WARNING: --over-budget: the monthly eval budget is not enforced for this run. '
@@ -212,11 +253,12 @@ def _check_budget(args, suites, record_frozen: set[str], ledger: str) -> dict:
             f'{args.runs}-run recording can\'t be forecast, and a recording the budget cuts '
             f'off partway leaves its cassettes mixed. Ask Ben; with his approval re-run with '
             f'--over-budget "<who approved, why>".')
-    over = spent >= budget if args.mode == 'auto' else spent + forecast > budget
+    plain_auto = args.mode == 'auto' and not topping_up
+    over = spent >= budget if plain_auto else spent + forecast > budget
     if over:
         raise Refused(
             f'the monthly eval budget would be passed: {spent_text} spent of ${budget:.2f}'
-            + (f', and this run forecasts ${forecast:.2f}' if args.mode == 'record' else '')
+            + (f', and this run forecasts ${forecast:.2f}' if not plain_auto else '')
             + '. Ask Ben; with his approval re-run with --over-budget "<who approved, why>".')
     return info
 
@@ -342,12 +384,25 @@ def _main(args) -> int:
         report['status'] = overall_status([report['status']]
                                           + [r['status'] for r in extra.values()])
     if record_frozen and report['status'] == 'error':
-        dirs = [os.path.join(args.cassettes_dir, name) for name in sorted(record_frozen)]
-        dirs += [os.path.join(args.runs_dir, f'run{k}', name)
-                 for k in range(2, args.runs + 1) for name in sorted(record_frozen)]
+        dirs = []
+        for s in suites:
+            if s.name in record_frozen:
+                for k in range(1, args.runs + 1):
+                    try:
+                        dirs.append(_cassette_dir(args, s, k))
+                    except Exception as e:  # a private set gone missing mid-run
+                        dirs.append(f'{s.name} run {k} ({type(e).__name__})')
+        if args.mode == 'auto':
+            fix = (f'Re-run the top-up to finish it (what is recorded replays): python3 '
+                   f'evals/run.py --mode auto ' + ' '.join(f'--suite {n}' for n in
+                                                           sorted(record_frozen))
+                   + f' --runs {args.runs}; or restore them with git checkout in the repo '
+                   f'that holds them.')
+        else:
+            fix = (f'Re-record all {args.runs} runs, or restore them with git checkout in the '
+                   f'repo that holds them.')
         print('WARNING: a run of this frozen recording errored, so these cassettes may now '
-              'mix new and old recordings: ' + ', '.join(dirs) + '. Re-record all '
-              f'{args.runs} runs, or restore them with git checkout.', file=sys.stderr)
+              'mix new and old recordings: ' + ', '.join(dirs) + '. ' + fix, file=sys.stderr)
     if budget:
         try:
             budget['spent_after_usd'] = eval_spend.month_spend(ledger)
@@ -378,6 +433,16 @@ def _main(args) -> int:
 
     #: What this run measured; a carried-over baseline entry never changes it
     exit_code = EXIT_CODES[report['status']]
+    if record_frozen:
+        # a recording or top-up asked for by name that recorded nothing
+        # (its private set missing, or stale) is not a pass
+        unrecorded = sorted({r['suite'] for rep in [report, *report.get('extra_runs', {}).values()]
+                             for r in rep['results']
+                             if r['suite'] in record_frozen and r['status'] == 'stale'})
+        if unrecorded:
+            print(f'ERROR: {", ".join(unrecorded)} was named to record but recorded nothing '
+                  f'(stale or unavailable on this machine).', file=sys.stderr)
+            return 2
     if args.baseline:
         if report['status'] == 'error':
             print('ERROR: not writing a baseline over a suite that errored — '

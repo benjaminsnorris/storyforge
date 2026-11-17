@@ -69,9 +69,12 @@ character is in, for the Homer series.
    v1.188.0).** Recordings: storyforge-evals branch `gate-set-recording-677`.
    - Open checker (`gate-set`, $130, at 4d26a353): recall 0.57 / 0.50 /
      0.57 over 46 positives, 10-11 of 15 cases; false alarms on the 31
-     controls 5 / 3 / 3; it stops 96-98% of positives and 74-81% of
-     controls. **Stale since #713** (the typed-state extraction prompt
-     changed during the recording); re-recording is about $130.
+     controls 5 / 3 / 3; it stops 96-98% of positives and 71-77% of
+     controls (74-81% before the top-up). #713 changed the typed-state extraction prompt during the
+     recording, so it was topped up ($1.00, `--mode auto --suite gate-set
+     --runs 3`, which records only the requests that changed); run 1 is
+     unchanged, runs 2 and 3's control stops fell (0.74 to 0.71, 0.81 to
+     0.77), and both suites replay on today's prompts.
    - Question layer, unseeded (first recording, $35): 0.02-0.04. The
      corpus books' pre-pass ledgers mostly lack the cases' facts (4 of 15
      have no ledger), so it had nothing to ask.
@@ -79,21 +82,19 @@ character is in, for the Homer series.
      added to the ledger from `facts.json` (quoted from its pre-pass book;
      lantern-folk-020, thornwall-020 and thornwall-024, 7 positives, have
      none). Recall 0.37 / 0.33 / 0.37 over 46; false alarms 1 / 2 / 1;
-     control stops 48-61%. On run 1, item by item against the open
-     checker's run 3: seeded positives (39) 0.44 vs 0.59; positives whose
-     fact the question layer actually asked (30) 0.53 vs 0.63 (13 both,
-     6 open only, 3 questions only); false alarms on the asked controls
-     (24) 1 vs 3. Nine seeded positives were never asked (subject not in
+     control stops 48-61%. Run 1 against the open checker's run 1, item by
+     item: seeded positives (39) 0.44 vs 0.59; positives whose fact the
+     question layer actually asked (30) 0.53 vs 0.63 (12 both, 7 open only,
+     4 questions only); false alarms on the asked controls (24) 1 vs 5. Nine seeded positives were never asked (subject not in
      the scene by the gate's cast, or past the 30-question cap).
    - What it says for decision 5: given the fact, the question layer is
      close to the open checker but below it (0.53 vs 0.63) with fewer
      false alarms and far fewer control stops; without the fact in the
      ledger it catches nothing, and 9 of 39 seeded facts weren't asked. It
      doesn't match yet. Both suites' FLOORS are run 1's.
-   - Next (Ben's call): leave decision 5 open and look at the 6 the open
-     checker alone caught and the 9 unasked (presence and the cap), or
-     re-record `gate-set` on today's extraction (~$130) to remove the #713
-     confound. The E4 half is still a follow-up.
+   - Next: leave decision 5 open and look at the 7 the open checker alone
+     caught and the 9 unasked (presence and the cap), free: it reads
+     the existing recordings. The E4 half is still a follow-up.
 4. #690 is blocked: "never a target" stands (Ben, 2026-11-15).
 5. #440 (F-130): built (phase 5, v1.105.0); the storyforge-evals hand-off
    (gold notes, judging, a re-score) is all that's left. Since then 5d and
@@ -188,9 +189,8 @@ are far behind it, so the read stays the default.
 
 **The gate set (#677, PR #678)** measures the gate alone on E8's recorded,
 judged replays (46 positives over 15 cases), free to build, in place of a
-$240 E4/E8 re-record for decision 5. It isn't recorded: record it (about
-$40 a run open, $20 with `--questions`) once the question layer is a
-candidate to replace the open checker. The E4 half follows.
+$240 E4/E8 re-record for decision 5. Recorded 2026-11-16 (see Next, item
+3). The E4 half follows.
 
 **Ben's voice repo** (`benjaminsnorris/ben-voice`, private): bennorris.com's
 posts imported (686 pieces; 170 count toward the fingerprint, 159k words),
