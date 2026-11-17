@@ -495,11 +495,45 @@ def test_an_unreadable_old_baseline_is_named_when_carrying(tmp_path):
     assert "can't be read" in refused and 'JSONDecodeError' in refused
 
 
-def test_auto_naming_a_frozen_suite_is_refused(tmp_path, live, capsys):
-    """C2: auto would only replay it, which looks like a re-record that wasn't."""
+#: One request that never changes, then one that does (as #713 changed the
+#: gate's typed-state extraction after its checker calls)
+ONE_CHANGES = CALLS_API.replace("invoke_api('{prompt}',", "invoke_api('unchanged',").replace(
+    "invoke_api('{prompt} again',", "invoke_api('{prompt}',")
+
+
+def test_auto_naming_a_frozen_suite_needs_its_three_runs(tmp_path, live, capsys):
+    """C2: auto naming a frozen suite tops up all its runs, never one."""
     _suite(tmp_path, 'e4', frozen=True)
     assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'x') == 2
-    assert 'auto would only replay it' in capsys.readouterr().err
+    assert 'needs --runs 3' in capsys.readouterr().err
+    assert live == []
+
+
+def test_auto_tops_a_stale_frozen_suite_up_recording_only_what_changed(tmp_path, live):
+    """A frozen suite gone stale by one changed request replays again after a
+    top-up that records only that request, in each of its three runs."""
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
+    _record_frozen(tmp_path)
+    assert len(live) == 6
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='new')
+    assert _run(tmp_path, '--suite', 'e4') == 0
+    assert _result(tmp_path, 'e4')['status'] == 'stale'
+    live.clear()
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '3',
+                '--over-budget', 'test top-up') == 0
+    assert len(live) == 3   # the changed request, once per run; 'unchanged' replayed
+    assert _result(tmp_path, 'e4')['status'] == 'pass'
+    for k in (2, 3):
+        assert (tmp_path / 'e6' / f'run{k}' / 'e4').is_dir()
+    live.clear()
+    assert _run(tmp_path, '--suite', 'e4') == 0
+    assert _result(tmp_path, 'e4')['status'] == 'pass' and live == []
+
+
+def test_runs_with_auto_on_a_suite_that_is_not_frozen_is_refused(tmp_path, live, capsys):
+    _suite(tmp_path, 'e2')
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e2', '--runs', '3') == 2
+    assert 'needs --mode record' in capsys.readouterr().err
     assert live == []
 
 

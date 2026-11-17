@@ -10,6 +10,7 @@ python3 evals/run.py --suite NAME  # one suite (repeatable)
 python3 evals/run.py --mode auto   # replay what exists, record the rest (spends; frozen suites replay)
 python3 evals/run.py --mode record # re-record every call (spends; frozen suites replay)
 python3 evals/run.py --mode record --suite e4-generation --runs 3   # re-record a frozen suite, on purpose
+python3 evals/run.py --mode auto --suite gate-set --runs 3   # top a stale frozen suite up: record only what changed
 python3 evals/run.py --over-budget "Ben approved, #NNN" ...         # spend past the monthly budget
 python3 evals/run.py --baseline    # also write evals/baseline.json
 python3 evals/run.py --list
@@ -56,9 +57,14 @@ Part E):
   re-recorded only when a decision depends on them, by name and always as
   three runs: `--mode record --suite e4-generation --runs 3` (run 1 to the
   default cassettes, runs 2 and 3 to `fixtures/e6/run2` and `run3`, so
-  `consistency.py` reads the spread). Naming one with `--runs` other than 3,
-or with `--mode auto`, is refused; `--mode record` without naming them
-replays them. At about
+  `consistency.py` reads the spread). A frozen suite gone stale by a
+  change downstream of its expensive calls (#713 changed the gate's
+  typed-state extraction, after its checker calls) can be **topped up**
+  instead: `--mode auto --suite NAME --runs 3` replays every request that
+  still matches each run's recording and records only the ones that
+  changed (the gate set: about the extraction calls, not $130). Naming one
+  with `--runs` other than 3 is refused, in either mode; `--mode record`
+  or `auto` without naming them replays them. At about
   $25 (E4) and $55 (E8) a run, that is past the monthly budget, so it needs
   Ben's approval and `--over-budget`.
 - **A new suite that needs live generation for its inputs** (drafted scenes,

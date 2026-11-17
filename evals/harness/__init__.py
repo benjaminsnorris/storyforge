@@ -24,9 +24,10 @@ while it runs, a cassette miss withholds the prompt's opening
 
 A **frozen** suite (``Suite(frozen=True)``: E4 and E8, #645) is expensive and
 end to end, so a prompt change anywhere misses its cassette. It is never
-recorded by default: ``auto`` replays it, and ``record`` replays it unless the
-caller passes ``record_frozen`` (``run.py`` does only for a suite named with
-``--suite`` and recorded as ``--runs 3``). A frozen suite replayed whose only
+recorded by default: ``auto`` and ``record`` replay it unless the caller
+passes ``record_frozen`` (``run.py`` does only for a suite named with
+``--suite`` and run as ``--runs 3``: ``record`` re-records it, ``auto`` tops it
+up, recording only the requests that changed). A frozen suite replayed whose only
 cassette failures are misses is ``stale``, not ``error`` — unless its
 cassette directory holds no recordings at all, which is a missing fixture
 (``error``). An exception the suite raised after a miss is kept on the stale
@@ -295,10 +296,10 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
     """Run one suite with its cassette active; never raises, except on Ctrl-C.
 
     A frozen suite runs in ``replay`` whatever ``mode`` asks, unless ``mode`` is
-    ``record`` and ``record_frozen`` is set. ``run`` labels which of
+    ``record`` or ``auto`` and ``record_frozen`` is set. ``run`` labels which of
     ``--runs N``'s runs this is ('' the main one), for ``Suite.cassettes``."""
     requested = mode
-    if suite.frozen and mode != 'replay' and not (mode == 'record' and record_frozen):
+    if suite.frozen and mode != 'replay' and not (mode in ('record', 'auto') and record_frozen):
         mode = 'replay'
     from storyforge.cassette import PRIVATE_ENV
     saved = {k: os.environ.get(k) for k in

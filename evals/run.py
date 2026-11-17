@@ -6,6 +6,7 @@
     python3 evals/run.py --mode auto          # replay what exists, record the rest (spends; frozen suites replay)
     python3 evals/run.py --mode record        # re-record every call (spends; frozen suites replay)
     python3 evals/run.py --mode record --suite e4-generation --runs 3   # a frozen suite
+    python3 evals/run.py --mode auto --suite gate-set --runs 3   # top a frozen suite up
     python3 evals/run.py --baseline           # also write evals/baseline.json
     python3 evals/run.py --list
 
@@ -13,7 +14,11 @@ Writes the full report to evals/results/latest.json and prints a summary; when
 evals/baseline.json exists the summary includes per-metric deltas against it.
 
 E4 and E8 are frozen (#645): auto and record replay them, and a miss makes
-them stale rather than errored (naming one with --mode auto is refused). Live calls count against a monthly eval
+them stale rather than errored. Naming one with --mode auto --runs 3 tops it
+up: each run replays the requests that still match its recording and records
+only those that changed (a prompt change downstream of calls that didn't
+change, as #713's extraction prompt was for the gate set), so a stale suite
+replays again without paying for a full re-record. Live calls count against a monthly eval
 budget (evals/config.json) kept in the eval spend ledger
 (storyforge.eval_spend); --over-budget REASON is the only way past it.
 
@@ -138,16 +143,18 @@ def _plan_recording(args, suites) -> set[str]:
     run may record."""
     if args.runs < 1:
         raise Refused('--runs must be at least 1')
-    if args.runs > 1 and args.mode != 'record':
-        raise Refused('--runs records independent runs, so it needs --mode record')
+    named = {s.name for s in suites if s.frozen and s.name in args.suite}
+    topping_up = bool(named) and args.mode == 'auto'
+    if args.runs > 1 and args.mode != 'record' and not topping_up:
+        raise Refused('--runs records independent runs, so it needs --mode record (or '
+                      '--mode auto naming a frozen suite, to top it up)')
     if args.runs > 1 and args.baseline:
         raise Refused('--baseline takes one run; drop --runs')
-    named = {s.name for s in suites if s.frozen and s.name in args.suite}
-    if named and args.mode == 'auto':
-        raise Refused(f'{", ".join(sorted(named))} is frozen: auto would only replay it. '
-                      f'Replay it with the default mode, or re-record it on purpose with '
-                      f'--mode record --suite NAME --runs {FROZEN_RUNS}.')
-    if args.mode != 'record':
+    if topping_up and args.runs != FROZEN_RUNS:
+        raise Refused(f'{", ".join(sorted(named))} is frozen: topping it up (--mode auto) '
+                      f'records the changed requests of each of its {FROZEN_RUNS} runs, so it '
+                      f'needs --runs {FROZEN_RUNS}.')
+    if args.mode != 'record' and not topping_up:
         return set()
     if named and args.runs != FROZEN_RUNS:
         raise Refused(f'{", ".join(sorted(named))} is frozen: it is recorded only as '
