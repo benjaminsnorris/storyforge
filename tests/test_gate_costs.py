@@ -101,6 +101,36 @@ class TestGateLogsItsSpend:
         rows = [r for r in _ledger_rows(project_dir) if r['operation'] == 'gate-fix']
         assert [(r['target'], r['input_tokens']) for r in rows] == [(SCENE, '40')]
 
+    def test_a_session_writers_fix_is_logged_once(self, project_dir, tmp_path, monkeypatch):
+        # #716: the session's writer logged its fix and the gate's meter
+        # logged it again, so every session fix was two identical rows
+        from storyforge import session
+        from storyforge.costs import RunBudget
+        fail = gate.GateResult(SCENE)
+        monkeypatch.setattr(gate, 'problems_to_fix', lambda r: ['x'] if r is fail else [])
+        passed = gate.GateResult(SCENE)
+        monkeypatch.setattr(gate.GateResult, 'passed', property(lambda r: r is passed))
+        runs = iter([fail, passed])
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: next(runs))
+        monkeypatch.setattr(gate, '_brief_phrases', lambda *a: [])
+        monkeypatch.setattr(gate, 'build_fix_prompt', lambda *a: 'FIX')
+        reply = _text({'edits': [{'find': 'a', 'replace': 'b'}]})
+        reply['usage'] = {'input_tokens': 4, 'output_tokens': 61,
+                          'cache_creation_input_tokens': 65005}
+        sess = session.Session(project_dir, 'claude-opus-5-5', [], '', str(tmp_path / 'sess'))
+        with api.metered() as meter, \
+                patch('storyforge.api._api_request', return_value=reply):
+            out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose='a scene',
+                                    log_dir=str(tmp_path / 'logs'), fixer=sess.fixer)
+        assert out.fixed and out.prose == 'b scene'
+        cost = api.calculate_cost_from_usage(api.extract_usage(reply), 'claude-opus-5-5')
+        rows = [r for r in _ledger_rows(project_dir) if r['operation'] == 'gate-fix']
+        assert [(r['target'], r['input_tokens'], r['cache_create']) for r in rows] == [
+            (SCENE, '4', '65005')]
+        assert abs(float(rows[0]['cost_usd']) - cost) < 1e-6
+        # the run's budget reads the meter: the call counted once there too
+        assert abs(RunBudget(meter).committed() - cost) < 1e-6
+
 
 class TestWriteCountsTheGate:
     def test_summary_takes_several_operations(self, tmp_path, capsys):

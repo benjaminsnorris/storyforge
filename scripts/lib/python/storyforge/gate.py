@@ -2838,7 +2838,8 @@ class Fixer(Protocol):
     session's writer, #655): the fixed prose; the edits applied appended to
     `edits_out` only once they all applied; `GateError` on any failure.
     `log_dir` and `model` may be ignored (a session logs to its own folder
-    and fixes with its writer)."""
+    and fixes with its writer). A fixer never writes its spend to the cost
+    ledger: `gate_and_fix` meters the call and logs it as `gate-fix` (#716)."""
 
     def __call__(self, scene_id: str, prose: str, result: 'GateResult', *, log_dir: str,
                  model: str | None = None, protected: list[str] | tuple = (),
