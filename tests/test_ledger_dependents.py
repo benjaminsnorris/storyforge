@@ -133,6 +133,48 @@ def test_subject_names_keeps_a_shared_alias_for_both(project_dir):
     assert 'hayle' in names['dorren hayle'] and 'hayle' in names['ana hayle']
 
 
+@pytest.mark.parametrize('name, want', [
+    ('Tam Erdel', 'erdel, tam'),
+    ('Mara Vell Odin', 'odin, mara vell'),
+    ('Anne Smith-Jones', 'smith jones, anne'),   # the hyphen kept with the surname
+    ('Anne de Bourgh', 'bourgh, anne de'),       # a particle stays with the given names
+    ('Dorren', ''),                              # one word
+    ('Dr. Hayle', ''),                           # a title
+    ('The Old Woman', ''),                       # descriptive
+    ('', ''),
+])
+def test_surname_first(name, want):
+    assert ledger.surname_first(name) == want
+
+
+def test_subject_names_gives_a_characters_name_surname_first_only(project_dir):
+    """#677: a casualty list names Tam Erdel "Erdel, Tam". #726's review:
+    only a character's name; a place, an alias or an id reversed is
+    ordinary prose ("the road, north")."""
+    ref = os.path.join(project_dir, 'reference')
+    with open(os.path.join(ref, 'characters.csv'), 'a') as f:
+        f.write('tam-erdel|Tam Erdel|Young Tam|minor|\n')
+    with open(os.path.join(ref, 'locations.csv'), 'a') as f:
+        f.write('north-road|North Road|the old road\n')
+    names, _ = ledger.subject_names(project_dir)
+    assert 'erdel, tam' in names['tam erdel']
+    assert 'tam, young' not in names['tam erdel']                  # an alias
+    assert not any(',' in n for n in names['north road'])          # a place
+    assert 'hayle, dorren' in names['dorren hayle']
+    assert 'hayle, dr.' not in names['dorren hayle']               # a title
+
+
+def test_a_name_written_surname_first_is_a_mention():
+    """#677: the re-check set reaches a scene whose statement names the
+    subject only surname first, as the question layer's presence does."""
+    names = {'tam erdel': {'tam erdel', 'erdel, tam'}}
+    rows = [_row('f', 's1', subject='tam-erdel'),
+            _row('a', 's2', subject='claire', statement='The roll reads Erdel, Tam; Voss, Pell'),
+            _row('b', 's3', subject='claire', statement='Erdel Tam stayed'),       # no comma
+            _row('c', 's4', subject='claire', statement='Erdel, Tamsin signed')]   # longer word
+    assert _deps(rows, ['f'], names).scenes == ['s2']
+
+
 @pytest.mark.parametrize('content, fragment', [
     (None, 'missing or empty'),
     ('name|aliases\nDorren|D\n', 'no id column'),

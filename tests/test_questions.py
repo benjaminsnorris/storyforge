@@ -183,6 +183,25 @@ class TestPresent:
         assert present_subjects([], self.CHARS, self.PLACES, prose='Orenna sang.',
                                 names=names) == set()
 
+    def test_a_name_written_surname_first_counts(self, project_dir):
+        # #677: a casualty list naming Tam only as "Erdel, Tam" left his facts
+        # unasked. #726's review: a place's name reversed is ordinary prose
+        from storyforge.ledger import subject_names
+        ref = os.path.join(project_dir, 'reference')
+        with open(os.path.join(ref, 'characters.csv'), 'a') as f:
+            f.write('tam-erdel|Tam Erdel||minor|\n')
+        with open(os.path.join(ref, 'locations.csv'), 'a') as f:
+            f.write('north-road|North Road|\n')
+        names, _ = subject_names(project_dir)
+        got = present_subjects([], {}, {}, prose='Roll of the missing: Erdel, Tam; aged nine; last seen at the well.',
+                               names=names)
+        assert got == {'tam erdel'}
+        # the surname alone, the two words with no comma, a longer word, and
+        # a place's words reversed around a comma are not the name
+        assert present_subjects([], {}, {}, names=names,
+                                prose='Erdel came. Erdel Tam stayed. Erdel, Tamsin signed. '
+                                      'They took the road, north of town.') == set()
+
     def test_an_at_records_alias_resolves(self):
         # SF-2: "the old mill" is the-mill's alias
         assert present_subjects([Record('at', 'Oren Tal', 'The Old Mill')], self.CHARS,
