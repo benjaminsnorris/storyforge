@@ -1241,6 +1241,86 @@ class TestCarryNotes:
             [], f'no state carried over: {PREV} has no prose')
 
 
+class TestWritersSheetCarried:
+    """#707: with no usable extracted sheet (the default gate keeps none),
+    the previous scene's writer's sheet is carried under the same check
+    against its prose; the extracted sheet wins when both are usable."""
+
+    PROSE = 'Ann sat on the step.'
+
+    def _writer(self, project_dir, prose, value='sitting'):
+        stage_sheet.write_sheet(project_dir, {
+            'format': stage_sheet.FORMAT, 'scene_id': PREV, 'source': 'writer', 'model': 'm',
+            'prose_sha256': stage_sheet.prose_hash(prose), 'cast': [], 'opening': [],
+            'beats': [], 'end': [{'who': 'Ann', 'field': 'posture', 'item': '',
+                                  'value': value, 'quote': 'Ann sat'}]})
+
+    def _extracted(self, project_dir, prose, value='standing'):
+        r = replay([E('Ann stood', 'Ann', 'posture', value)])
+        stage_sheet.write_sheet(project_dir, stage_sheet.build_sheet(PREV, prose, r))
+
+    def test_a_writers_sheet_of_the_prose_is_carried(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        self._writer(project_dir, self.PROSE)
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.source == 'writer' and c.prev == PREV and c.note == ''
+        assert [(e.who, e.field, e.value, e.origin) for e in c.entries] == [
+            ('Ann', 'posture', 'sitting', 'carried')]
+        opening, note = stage_sheet.carried_opening(project_dir, SCENE)
+        assert opening == c.entries and note == ''
+
+    def test_a_writers_sheet_of_an_edited_scene_is_not_carried(self, project_dir):
+        self._writer(project_dir, self.PROSE)
+        _write_scene(project_dir, PREV, 'Ann sat on the step and wept.')
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.entries == [] and c.source == ''
+        assert c.note.startswith(f'no state carried over: {PREV}\'s writer\'s stage note is '
+                                 f'of its draft, which was changed after the writer wrote it')
+        assert "can't tell whether the change moved anyone" in c.note
+
+    def test_both_usable_the_extracted_sheet_wins(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        self._writer(project_dir, self.PROSE, 'sitting')
+        self._extracted(project_dir, self.PROSE, 'standing')
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.source == 'extracted' and c.note == ''
+        assert [e.value for e in c.entries] == ['standing']
+
+    def test_a_stale_extracted_sheet_gives_way_and_is_said(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        self._extracted(project_dir, 'Earlier prose.')
+        self._writer(project_dir, self.PROSE)
+        c = stage_sheet.carried_stage(project_dir, SCENE)
+        assert c.source == 'writer' and [e.value for e in c.entries] == ['sitting']
+        assert c.note == f'{PREV}\'s stage sheet is of earlier prose'
+
+    def test_neither_usable_names_both(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        self._extracted(project_dir, 'Earlier prose.')
+        self._writer(project_dir, 'Another draft.')
+        opening, note = stage_sheet.carried_opening(project_dir, SCENE)
+        assert opening == []
+        assert f'{PREV}\'s stage sheet is of earlier prose; {PREV}\'s writer\'s stage note' in note
+
+    def test_an_empty_writers_note_is_said(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        stage_sheet.write_sheet(project_dir, {
+            'format': stage_sheet.FORMAT, 'scene_id': PREV, 'source': 'writer', 'model': 'm',
+            'prose_sha256': stage_sheet.prose_hash(self.PROSE), 'cast': [], 'opening': [],
+            'beats': [], 'end': []})
+        assert stage_sheet.carried_opening(project_dir, SCENE) == (
+            [], f'no state carried over: {PREV}\'s writer\'s stage note records no state at '
+                f'its end')
+
+    def test_the_stage_sheet_check_opens_with_the_writers_sheet(self, project_dir):
+        _write_scene(project_dir, PREV, self.PROSE)
+        self._writer(project_dir, self.PROSE)
+        fake = _fake([{'cast': ['Ann'], 'events': [], 'questions': []}])
+        with patch('storyforge.api._api_request', side_effect=fake):
+            r = check_stage_sheet(project_dir, SCENE, prose='Ann stood up.', model='m')
+        assert r.notes == [] and r.sheet['opening'][0]['value'] == 'sitting'
+
+
 @pytest.mark.blocking_read
 class TestGateRecordsTheMethod:
     """CR-2, T2: gate-prose.csv records how the blocking was checked, and a
