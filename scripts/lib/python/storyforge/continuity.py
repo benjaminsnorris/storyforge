@@ -28,10 +28,13 @@ calendar and the world table, free and the same every run:
   locations.csv and distances from world.csv. Two places in one morning
   are ordinary unless they are too far apart.
 - **time** (TIM): an elapsed-time phrase ("three days ago", "the tenth
-  day") against the calendar: the days between this scene and the scene the
-  count runs from (`parse_elapsed`, a small parser that says what it can't
-  read rather than guessing: a compound, a bound and an estimate are read
-  whole, a range or two counts not at all).
+  day", "in twelve days") against the calendar: the days between this
+  scene and the scene of the counted event, back for one labelled `before`,
+  forward for one labelled `after` (a promise or plan is measured to the
+  scene where it happens, never as time passed, #713) (`parse_elapsed`, a
+  small parser that says what it can't read rather than guessing: a
+  compound, a bound and an estimate are read whole, a range or two counts
+  not at all).
 - **injury** (PHY): a body part used at full strength while a serious or
   disabling injury to it is current.
 - **names** (WLD): a name the book rules out appears: an adaptation's name
@@ -632,7 +635,12 @@ _ORD = r'(?P<o>\d+(?:st|nd|rd|th)|' + '|'.join(sorted(_ORDINALS, key=len, revers
 _UNIT = r'(?P<u>' + '|'.join(sorted(_UNITS, key=len, reverse=True)) + r')s?'
 _COUNT_RE = re.compile(rf'\b{_NUM}\s+(?:(?:full|whole|long|more)\s+)?{_UNIT}\b')
 _ORDINAL_RE = re.compile(rf'\b{_ORD}\s+{_UNIT}\b')
-_PAST = re.compile(r'\b(ago|since|later|after|past|gone|before this|earlier)\b')
+_PAST = re.compile(r'\b(ago|since|later|after|past|gone|before (?:this|now)|earlier)\b')
+#: Words that count back from the scene's present and nothing else: with no
+#: way labelled, a phrase with one is still measured back (#713). "later" and
+#: "after" are two-way ("twelve days later we sail"), and so is an ordinal
+#: with neither ("on the twelfth day")
+_ONLY_BACK = re.compile(r'\b(ago|since|past|gone|before (?:this|now)|earlier)\b')
 _FUTURE = re.compile(r'^\s*(in|within)\b|\b(from now|hence|to come|more to)\b')
 _VAGUE = re.compile(r'\b(few|several|many|countless|a couple|couple of|ages|years and)\b')
 #: Words before a count that make it a bound or an estimate, not exact
@@ -756,18 +764,40 @@ def parse_elapsed(phrase: str) -> tuple[Span | None, str]:
     return Span(low, high, direction), ''
 
 
+def _way_from_words(phrase: str, span: Span) -> str:
+    """The way a phrase's own words count when the model labelled none:
+    `after` for a future form ("in twelve days", "a week from now"),
+    `before` for words that only count back ("ago", "since", "before now"),
+    '' when they could go either way ("later", "after", a bare ordinal)."""
+    if span.direction == 'future':
+        return 'after'
+    p = ' '.join((phrase or '').lower().replace('-', ' ').split())
+    return 'before' if _ONLY_BACK.search(p) else ''
+
+
 def check_time(book: Book) -> tuple[list[Finding], list[str]]:
-    """TIM: each `elapsed` phrase (`parse_elapsed`) against the days
-    between this scene and the scene it counts from. Notes: a phrase the
-    parser can't read, one counting from no scene, and one between scenes
-    without a `timeline_day` or from a summary or off-present scene.
-    Exempt: an off-present scene."""
+    """TIM: each `elapsed` phrase (`parse_elapsed`) against the days between
+    this scene and the scene of the counted event (#713). The extractor
+    labels which way that event lies (`detail`, `typed_state.ELAPSED_WAYS`):
+    `before` is measured back from this scene ("three days ago"), `after`
+    forward to the scene where the promised or planned event happens ("in
+    twelve days"); code computes the days. A forward reference is never
+    measured as time already passed. A phrase with no way labelled is
+    measured as its own words count (`_way_from_words`: "ago" back, "in"
+    forward), as before the labels. Notes, not checked: a phrase the parser
+    can't read; one with no label whose words could count either way
+    ("twelve days later", "the tenth day"), or labelled against its own words ("ago" labelled `after`); one counting
+    from this scene itself (a span from a scene to itself can't be read);
+    one counting from no scene; one between scenes without a `timeline_day`
+    or from a summary or off-present scene. Exempt: an off-present scene."""
     sid = book.scene_id
     from storyforge.elaborate import time_mode
+    from storyforge.typed_state import ELAPSED_WAYS
     if book.off_present(sid):
         return [], []
     findings: list[Finding] = []
-    unread, no_anchor, undated = [], 0, 0
+    unread, unlabelled, crossed, itself = [], [], [], []
+    no_anchor, undated = 0, 0
     for r in book.records.get(sid, []):
         if r.type != 'elapsed' or not r.verified:
             continue
@@ -775,7 +805,20 @@ def check_time(book: Book) -> tuple[list[Finding], list[str]]:
         if span is None:
             unread.append(f'"{r.value}" ({why})')
             continue
+        way = r.detail.strip().lower()
+        if way not in ELAPSED_WAYS:
+            way = _way_from_words(r.value, span)
+            if not way:
+                unlabelled.append(f'"{r.value}"')
+                continue
+        if (way == 'after') != (span.direction == 'future'):
+            crossed.append(f'"{r.value}" (labelled {way}, its words count '
+                           f'{"forward" if span.direction == "future" else "back"})')
+            continue
         anchor = r.item.strip()
+        if anchor == sid:
+            itself.append(f'"{r.value}"')
+            continue
         if not anchor or anchor not in book.order:
             no_anchor += 1
             continue
@@ -783,19 +826,33 @@ def check_time(book: Book) -> tuple[list[Finding], list[str]]:
                 time_mode(book.row(anchor)) == 'summary' or book.off_present(anchor):
             undated += 1
             continue
-        gap = (book.day(sid) - book.day(anchor) if span.direction == 'past'
-               else book.day(anchor) - book.day(sid))
+        here, there = book.day(sid), book.day(anchor)
+        gap = here - there if way == 'before' else there - here
         if not span.low <= gap <= span.high:
             from storyforge.prompts import scene_when
+            if way == 'before':
+                said = f'counts from {anchor}, day {there}'
+            else:
+                said = f'points ahead to {anchor}, day {there}'
             findings.append(_finding(
                 'time', r.quote, CALENDAR, f'{anchor}: {scene_when(book.row(anchor))}',
-                f'"{r.value}" counts from {anchor}, day {book.day(anchor)}; this scene is '
-                f'day {book.day(sid)}, {abs(gap)} day(s) '
-                f'{"after" if gap >= 0 else "before"} it'))
+                f'"{r.value}" {said}; this scene is day {here}, {abs(here - there)} day(s) '
+                f'{"after" if here >= there else "before"} it'))
     notes = []
     if unread:
         notes.append(f'time: {len(unread)} elapsed-time phrase(s) the parser can\'t read, not '
                      f'checked: ' + '; '.join(unread[:5]))
+    if unlabelled:
+        notes.append(f'time: {len(unlabelled)} elapsed-time phrase(s) not labelled before or '
+                     f'after this scene, whose words could count either way, not checked: '
+                     + '; '.join(unlabelled[:5]))
+    if crossed:
+        notes.append(f'time: {len(crossed)} elapsed-time phrase(s) labelled against their own '
+                     f'words, not checked: ' + '; '.join(crossed[:5]))
+    if itself:
+        notes.append(f'time: {len(itself)} elapsed-time phrase(s) count from this scene '
+                     f'itself, which no span can be measured from, not checked: '
+                     + '; '.join(itself[:5]))
     if no_anchor:
         notes.append(f'time: {no_anchor} elapsed-time phrase(s) count from an event no scene '
                      f'shows, not checked')
