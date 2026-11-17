@@ -13,7 +13,8 @@ gets no rows (it reads the established scene's prose). A case whose book
 doesn't state the fact outside the gated scene gets no row and is gated
 without one (named in the notes); a seeded row is still asked only when
 `questions.facts_to_ask` selects it (its subject present, or in no
-registry, and within the cap), and the notes name the items where it
+registry) and `questions.ask_questions` keeps it within the cap, and the
+notes name the items where it
 wasn't. `recall` is over every positive, `recall_seeded` over the seeded
 cases', and `recall_asked` over those whose fact was asked: the last is
 the questions' own recall.
@@ -36,13 +37,15 @@ MIN_POSITIVES = 40   # as gate-set's
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-16, seeded (run 1; runs 2 and 3: recall 0.3261 and
-    # 0.3696, false alarms 2 and 1, control stops 0.6129 and 0.5484). Of 46
-    # positives, 39 are seeded and 30 asked about their fact
-    'recall': 0.3696, 'recall_per_case': 0.4422, 'cases_caught': 9,
-    'stop_rate_positive': 0.7391, 'false_alarm_on_fact': 1, 'stop_rate_control': 0.4839,
+    # recorded 2026-11-16, seeded; topped up 2026-11-17 after names written
+    # surname first ("Erdel, Tam") count as present (run 1; runs 2 and 3:
+    # recall 0.3696 and 0.3913, false alarms 2 and 1, control stops 0.6129
+    # and 0.5484). Of 46 positives, 39 are seeded and 32 asked about their
+    # fact (30 before the top-up; both newly asked are caught)
+    'recall': 0.413, 'recall_per_case': 0.4689, 'cases_caught': 9,
+    'stop_rate_positive': 0.7609, 'false_alarm_on_fact': 1, 'stop_rate_control': 0.4839,
     'unfinished': 0,
-    'recall_seeded': 0.4359, 'recall_asked': 0.5333, 'asked_positives': 30,
+    'recall_seeded': 0.4872, 'recall_asked': 0.5625, 'asked_positives': 32,
     'asked_controls': 24,
 }
 

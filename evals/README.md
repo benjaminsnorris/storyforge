@@ -282,7 +282,9 @@ scene and a verdict on one known error, an E1 `tool-introduced` case.
 - **Recorded 2026-11-16** (three runs each, with Ben's approval and
   `--over-budget`: about $43 a run for `gate-set`, $12 for
   `gate-set-questions`, seeded with each case's fact, #723). `gate-set` was
-  topped up after #713 changed the typed-state extraction ($1.00). `FLOORS`
+  topped up after #713 changed the typed-state extraction ($1.00), and
+  `gate-set-questions` after a name written surname first ("Erdel, Tam")
+  started to count as present (2026-11-17, $0.02). `FLOORS`
   are run 1's, so missing recordings are the harness's error (a misplaced
   directory). Before a suite's first recording a replay is `stale`
   (unavailable, "not recorded yet", with the record command).
