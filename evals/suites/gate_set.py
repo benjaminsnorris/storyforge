@@ -20,9 +20,10 @@ three runs. Needs the corpus books cloned under ``STORYFORGE_CORPUS_DIR``, as
 E8 does. First recorded 2026-11-16 (three runs, about $43 each, with
 ``--over-budget`` and Ben's approval: `gate_set.runner.record_command`);
 `FLOORS` are run 1's (the default cassettes, which a replay reads), so
-missing recordings are the harness's error. **Stale since #713** (the
-typed-state extraction prompt changed while it was being recorded): its
-replay misses every item until it is re-recorded (about $130, Ben's call).
+missing recordings are the harness's error. #713 changed the typed-state
+extraction prompt while it was being recorded, so it was topped up
+(``--mode auto --suite gate-set --runs 3``, $1.00: only the extraction calls
+went live) and replays on today's prompts.
 """
 
 from __future__ import annotations
@@ -39,8 +40,9 @@ MIN_POSITIVES = 40
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-16 at 4d26a353 (run 1; runs 2 and 3: recall 0.5 and
-    # 0.5652, false alarms 3 and 3, control stops 0.7419 and 0.8065)
+    # recorded 2026-11-16 at 4d26a353, topped up after #713 (run 1, the same
+    # after the top-up; runs 2 and 3: recall 0.5 and 0.5652, false alarms 3
+    # and 3, control stops 0.7097 and 0.7742)
     'recall': 0.5652, 'recall_per_case': 0.5411, 'cases_caught': 10,
     'stop_rate_positive': 0.9565, 'false_alarm_on_fact': 5, 'stop_rate_control': 0.7419,
     'unfinished': 0,

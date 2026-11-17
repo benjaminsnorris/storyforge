@@ -515,7 +515,8 @@ def test_auto_tops_a_stale_frozen_suite_up_recording_only_what_changed(tmp_path,
     _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
     _record_frozen(tmp_path)
     assert len(live) == 6
-    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='new')
+    # a different length: a same-size rewrite in the same second reuses the old .pyc
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='a changed prompt')
     assert _run(tmp_path, '--suite', 'e4') == 0
     assert _result(tmp_path, 'e4')['status'] == 'stale'
     live.clear()
