@@ -22,8 +22,12 @@ writer for a whole stretch:
   model-written notes: set `exclude` for those).
 - **The writer replies** with the scene, then the stage at its end
   (`STAGE_OPEN`): a list of stage-sheet entries (`stage_sheet.Entry`),
-  kept apart from the prose and saved as the writer sheet of its draft. A
-  note with any entry that can't be read is not used at all, and said.
+  kept apart from the prose and saved as the writer sheet of its draft. An
+  entry that can't be read (a `who` on a scene field such as `door`, a
+  value outside its field's words) is dropped and named in the log; the
+  rest of the note is kept (#710: a dropped person's state is unknown,
+  which the sheet already says). A note that isn't a JSON list is not
+  used at all, and said.
 - **After each scene**, in order:
   1. the free tense check (`voice_book.check_tense`): a mismatch goes back
      to the writer once, for the whole scene again;
@@ -101,7 +105,10 @@ Reply to each plan with the scene, then the stage at its end, in exactly this fo
 (the scene's prose, and nothing else: no title, no notes)
 {scene_close}
 {stage_open}
-(a JSON list of the stage at the scene's very end, one object per fact: {{"who": "<name>", "field": "<field>", "item": "<thing, for worn, light or door>", "value": "<value>", "quote": "<the scene's words that set it, or \"\">"}}. Fields: posture (standing, sitting, kneeling, lying, crouching, mounted, down), hand_left and hand_right (what the hand holds, or the word "empty" for an empty hand: never ""), worn (on or off, with the item), present (here or gone), position, facing. Only what the scene shows.)
+(a JSON list of the stage at the scene's very end, one object per fact: {{"who": "<name, or \"\">", "field": "<field>", "item": "<thing, for worn, light or door; else \"\">", "value": "<value>", "quote": "<the scene's words that set it, or \"\">"}}.
+Fields of a person, "who" their name: posture (standing, sitting, kneeling, lying, crouching, mounted, down), hand_left and hand_right (what the hand holds, or the word "empty" for an empty hand: never ""), worn (on or off, with the item), present (here or gone), position, facing.
+Fields of the scene, "who" always "" (never a person or a place: the place goes in the item): light (lit or out, with the item: the lamp, the fire), door (open or shut, with the item: the door, the gate, the curtain), time (the time of day: dawn, morning, noon, afternoon, evening, dusk, night), sun (where the sun is: a compass direction, or the landmark it stands over).
+Where a field lists its values, the value is one of those words and nothing more ("open", never "open, empty"). An entry that breaks these is dropped. Only what the scene shows.)
 {stage_close}
 
 Some turns are notes on a scene you wrote: a check found something wrong. Answer them exactly as the note asks."""
@@ -410,11 +417,13 @@ def scene_plan(project_dir: str, scene_id: str, *, notes: bool, anchors=(),
 @dataclass
 class Draft:
     """A scene the writer wrote: its prose, the stage at its end as the
-    writer gave it (entry dicts), and why the stage note couldn't be used
-    ('' when it could)."""
+    writer gave it (the entries that could be read, as entry dicts), why
+    the stage note as a whole couldn't be read ('' when it could), and why
+    each entry that couldn't be read was dropped (#710)."""
     prose: str
     stage: list[dict] = field(default_factory=list)
     stage_problem: str = ''
+    stage_dropped: list[str] = field(default_factory=list)
 
 
 def parse_reply(text: str, scene_id: str) -> Draft:
@@ -445,16 +454,13 @@ def parse_reply(text: str, scene_id: str) -> Draft:
         draft.stage_problem = f'the stage note is not a JSON list ({e})'
         return draft
     from storyforge.stage_sheet import Entry
-    stage, problems = [], []
+    # entry by entry (#710): an entry that can't be read is dropped and
+    # named, the rest kept; a state with no entry is unknown, as on any sheet
     for item in items:
         try:
-            stage.append(Entry.from_json(item, 'the writer\'s stage note').to_json())
+            draft.stage.append(Entry.from_json(item, 'the writer\'s stage note').to_json())
         except ValueError as e:
-            problems.append(str(e))
-    if problems:   # all or nothing: a half-read stage would be carried as whole
-        draft.stage_problem = '; '.join(problems)
-    else:
-        draft.stage = stage
+            draft.stage_dropped.append(str(e))
     return draft
 
 

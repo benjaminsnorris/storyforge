@@ -1988,10 +1988,16 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
     if not checks:
         log(f'NOTE: {voice_book.CHECKS_FILE} has no checks yet, so no scene gets a voice '
             f'review')
-    opening, why = stage_sheet.carried_opening(project_dir, pending_ids[0])
-    carried = stage_sheet.render(opening) if opening else ''
-    if why:
-        log(f'Session: {why}')
+    # the stage the scene before the first left: its extracted sheet, else
+    # the writer's note from the session that drafted it (#707)
+    carry = stage_sheet.carried_stage(project_dir, pending_ids[0])
+    carried = stage_sheet.render(carry.entries) if carry.entries else ''
+    if carry.entries:
+        log(f'Session: the stage {carry.prev} left is carried from its '
+            f'{stage_sheet.SOURCE_LABELS[carry.source]} ({len(carry.entries)} state(s))'
+            + (f'; {carry.note}' if carry.note else ''))
+    elif carry.note:
+        log(f'Session: {carry.note}')
     # the scenes between the first and the last to draft that this run
     # won't write: drafted ones go in the conversation; others are gaps
     span = [s for s in sorted(order, key=order.get)
@@ -2080,6 +2086,11 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
         if draft.stage_problem:
             log(f'  WARNING: {sid}: the writer\'s stage note can\'t be used '
                 f'({draft.stage_problem}); none of it is carried to the next scene')
+        for why in draft.stage_dropped:
+            log(f'  WARNING: {sid}: dropped from the writer\'s stage note, not carried: {why}')
+        if draft.stage_dropped:
+            log(f'  NOTE: {sid}: {len(draft.stage)} entry(ies) of the writer\'s stage note '
+                f'kept, {len(draft.stage_dropped)} dropped')
         prose = draft.prose
         if checks:
             rev, revision, review_note = None, None, ''

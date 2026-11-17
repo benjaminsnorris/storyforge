@@ -4,6 +4,7 @@ loop in `write --session`."""
 
 import json
 import os
+import re
 
 import pytest
 
@@ -67,11 +68,17 @@ def test_a_reply_without_a_scene_stops_the_session():
 @pytest.mark.parametrize('stage, problem', [
     ('', 'no stage note'),
     ('<stage>\nnot json\n</stage>', 'not a JSON list'),
-    ('<stage>\n[{"who": "D", "field": "wings", "value": "up"}]\n</stage>', 'wings'),
 ])
 def test_a_stage_note_that_cant_be_used_is_said(stage, problem):
     d = session.parse_reply('<scene>\nShe sat.\n</scene>\n' + stage, SCENE)
     assert d.prose == 'She sat.\n' and problem in d.stage_problem and d.stage == []
+
+
+def test_a_note_whose_only_entry_cant_be_read_carries_nothing_and_names_it():
+    d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
+                            '[{"who": "D", "field": "wings", "value": "up"}]\n</stage>', SCENE)
+    assert d.stage == [] and d.stage_problem == ''
+    assert len(d.stage_dropped) == 1 and 'wings' in d.stage_dropped[0]
 
 
 @pytest.mark.parametrize('value', ['', None])
@@ -83,8 +90,8 @@ def test_a_blank_hand_is_not_read_as_empty_and_the_note_says_why(value):
     blank = {'who': 'D', 'field': 'hand_left', 'item': '', 'value': value, 'quote': ''}
     d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
                             + json.dumps([blank]) + '\n</stage>', SCENE)
-    assert d.stage == []
-    assert "value ''" in d.stage_problem and 'the word "empty"' in d.stage_problem
+    assert d.stage == [] and len(d.stage_dropped) == 1
+    assert "value ''" in d.stage_dropped[0] and 'the word "empty"' in d.stage_dropped[0]
     assert 'or the word "empty" for an empty hand: never ""' in session.INSTRUCTIONS
 
 
@@ -112,12 +119,60 @@ def test_the_writers_scene_is_laid_out_a_sentence_per_line():
     assert d.prose == 'She sat.\nHe stood.\n\n"Who?" she asks.\n'
 
 
-def test_a_half_good_stage_note_is_not_used_at_all():
-    good = {'who': 'D', 'field': 'posture', 'item': '', 'value': 'sitting', 'quote': ''}
-    bad = {'who': 'D', 'field': 'wings', 'item': '', 'value': 'up', 'quote': ''}
+# the two door entries a real session wrote (#710): a place in `who`, and
+# a value with more than the word
+BAD_DOORS = [
+    {'who': 'briseis-hut', 'field': 'door', 'item': "doorway of Briseis's hut",
+     'value': 'open, empty', 'quote': 'a dark square in the sunlit wall, with nobody in it'},
+    {'who': 'achilles-courtyard', 'field': 'door', 'item': 'gate in the fence',
+     'value': 'shut', 'quote': 'The gate is shut.'}]
+PEOPLE = [
+    {'who': 'Briseis', 'field': 'posture', 'item': '', 'value': 'standing', 'quote': ''},
+    {'who': 'Briseis', 'field': 'hand_right', 'item': '', 'value': 'empty', 'quote': ''},
+    {'who': 'Briseis', 'field': 'worn', 'item': 'cloak', 'value': 'on', 'quote': ''},
+    {'who': '', 'field': 'door', 'item': 'gate in the fence', 'value': 'shut',
+     'quote': 'The gate is shut.'}]
+
+
+def test_entries_that_cant_be_read_are_dropped_and_the_rest_kept():
+    """#710: a `who` on a door cost the whole note. Now only those entries
+    go, each named with its reason; the person entries (and a door written
+    right) are kept as they were."""
     d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
-                            + json.dumps([good, bad]) + '\n</stage>', SCENE)
-    assert d.stage == [] and 'wings' in d.stage_problem
+                            + json.dumps(BAD_DOORS[:1] + PEOPLE + BAD_DOORS[1:])
+                            + '\n</stage>', SCENE)
+    assert d.stage_problem == ''
+    assert [(e['who'], e['field']) for e in d.stage] == [(e['who'], e['field'])
+                                                          for e in PEOPLE]
+    assert len(d.stage_dropped) == 2
+    assert 'names someone on door' in d.stage_dropped[0] and 'briseis-hut' in d.stage_dropped[0]
+    assert 'names someone on door' in d.stage_dropped[1]
+    assert 'achilles-courtyard' in d.stage_dropped[1]
+
+
+def test_a_note_whose_entries_all_read_is_kept_unchanged():
+    d = session.parse_reply('<scene>\nShe sat.\n</scene>\n<stage>\n'
+                            + json.dumps(PEOPLE) + '\n</stage>', SCENE)
+    assert d.stage == PEOPLE and d.stage_dropped == [] and d.stage_problem == ''
+
+
+def test_the_writer_is_told_which_fields_take_a_who_and_their_words():
+    """#710: the instructions name every field the note can hold, as a
+    person's or the scene's (no `who`), with each closed field's words, so
+    they and `Entry.from_json` can't drift apart."""
+    from storyforge import stage_sheet
+    text = session.INSTRUCTIONS
+    person = text[text.index('Fields of a person'):text.index('Fields of the scene')]
+    scene = text[text.index('Fields of the scene'):text.index('Where a field lists')]
+    assert '"who" always ""' in scene
+    for f in stage_sheet.STATE_FIELDS:
+        where = person if f in stage_sheet.PERSON_FIELDS else scene
+        assert re.search(rf'\b{f}\b', where), f
+    for f, words in stage_sheet.VALUES.items():
+        where = person if f in stage_sheet.PERSON_FIELDS else scene
+        line = where[where.index(f):]
+        assert all(w in line[:line.index(')')] for w in words), f
+    assert all(p in person for p in stage_sheet.POSTURES if p != 'other')
 
 
 # --- the writer's context ---
@@ -574,6 +629,64 @@ def test_the_stage_is_carried_only_when_it_is_of_the_committed_prose(project_dir
     loop['run'](['act2-sc01', 'act2-sc02'])
     writes = [r for r in requests if not r.get('output_config')]
     assert '## The stage as the last scene left it' not in writes[1]['messages'][-1]['content']
+
+
+def test_a_note_with_bad_door_entries_carries_its_person_entries(project_dir, loop,
+                                                                 requests, capsys):
+    """#710, in the loop: the two door entries are named as dropped, and the
+    person entries reach the next scene's plan."""
+    note = json.dumps(BAD_DOORS[:1] + PEOPLE[:3] + BAD_DOORS[1:])
+
+    def route(body):   # no review flag: the committed prose is the draft
+        if body.get('output_config'):
+            return _reply(json.dumps({'flags': []}))
+        return _reply(f'<scene>\n{LONG}\n</scene>\n<stage>\n{note}\n</stage>')
+    requests.replies = route
+    loop['run'](['act1-sc01', 'act1-sc02'])
+    out = capsys.readouterr().out
+    dropped = [ln for ln in out.splitlines()
+               if 'act1-sc01: dropped from the writer\'s stage note' in ln]
+    assert len(dropped) == 2
+    assert 'briseis-hut' in dropped[0] and 'achilles-courtyard' in dropped[1]
+    assert '3 entry(ies) of the writer\'s stage note kept, 2 dropped' in out
+    assert "can't be used" not in out
+    plan = [r for r in requests if not r.get('output_config')][1]['messages'][-1]['content']
+    assert '## The stage as the last scene left it' in plan and 'cloak' in plan
+
+
+def test_a_resumed_session_carries_the_writers_note(project_dir, loop, requests, capsys):
+    """#707: with the default gate there's no extracted sheet; a session
+    that resumes after a stop opens with the writer's note of the scene
+    before, when that is of the prose as committed."""
+    def route(body):
+        if body.get('output_config'):
+            return _reply(json.dumps({'flags': []}))
+        return _reply(scene_reply(LONG))
+    requests.replies = route
+    loop['run'](['act1-sc01'])
+    capsys.readouterr()
+    requests.clear()
+    loop['run'](['act1-sc02'])
+    assert ('the stage act1-sc01 left is carried from its writer\'s stage note (1 state(s))'
+            in capsys.readouterr().out)
+    plan = [r for r in requests if not r.get('output_config')][0]['messages'][-1]['content']
+    assert '## The stage as the last scene left it' in plan and 'Dorren Hayle' in plan
+
+
+def test_a_resumed_session_says_why_an_edited_scenes_note_isnt_carried(project_dir, loop,
+                                                                        requests, capsys):
+    """#707: the reviser changed the scene after the writer's note, so the
+    note is of other prose: not carried, and the log says why."""
+    requests.replies = _route
+    loop['run'](['act1-sc01'])
+    capsys.readouterr()
+    requests.clear()
+    loop['run'](['act1-sc02'])
+    out = capsys.readouterr().out
+    assert ("no state carried over: act1-sc01's writer's stage note is of its draft, which "
+            "was changed after the writer wrote it" in out)
+    plan = [r for r in requests if not r.get('output_config')][0]['messages'][-1]['content']
+    assert '## The stage as the last scene left it' not in plan
 
 
 def test_the_spend_reaches_the_cost_ledger(project_dir, loop, requests):
