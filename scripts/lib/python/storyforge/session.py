@@ -531,8 +531,9 @@ class Session:
     """One writer's conversation. `messages` holds the story so far, then
     each settled scene as [plan, the scene as committed]: turns always
     alternate user and assistant (`_ask` adds a pair or nothing; `settle`
-    and `insert` add pairs). Every reply is logged to `log_dir` and its
-    spend to the cost ledger (`draft` for writing, `gate-fix` for fixes)."""
+    and `insert` add pairs). Every reply is logged to `log_dir`; a writing
+    turn's spend goes to the cost ledger as `draft`, and a fix's is logged
+    by the gate that asked for it (`gate-fix`, #716)."""
 
     def __init__(self, project_dir: str, model: str, system: list[dict], story: str,
                  log_dir: str):
@@ -549,8 +550,11 @@ class Session:
         self._turn = 0
 
     def _ask(self, content: str, label: str, tokens: int,
-             output_schema: dict | None = None, operation: str = 'draft',
+             output_schema: dict | None = None, operation: str | None = 'draft',
              target: str = '') -> dict:
+        """One turn. Its spend goes to the cost ledger as `operation`;
+        None logs nothing, for a caller that meters the call and logs it
+        itself (the gate, around `fixer`)."""
         from storyforge.api import RefusalError, chat, is_truncated, log_reply
         self._turn += 1
         log_file = os.path.join(self.log_dir, f'{self._turn:03d}-{label}.json')
@@ -564,7 +568,8 @@ class Session:
         except RuntimeError as e:
             self.messages.pop()
             raise SessionError(f'{label}: the request failed ({e})') from e
-        log_reply(self.project_dir, response, operation, target or label, self.model)
+        if operation is not None:
+            log_reply(self.project_dir, response, operation, target or label, self.model)
         if is_truncated(response):
             self.messages.pop()
             raise SessionError(f'{label}: the reply hit its token limit ({log_file})')
@@ -602,7 +607,10 @@ class Session:
         goes to this writer, which answers with edits (`gate.FIX_SCHEMA`),
         applied by `gate.apply_edits`. `model` is ignored (the writer
         fixes its own scene); the reply is logged in the session's log
-        folder and, when given, copied to the gate's `log_dir`."""
+        folder and, when given, copied to the gate's `log_dir`. Its spend
+        is not written to the cost ledger here: `gate_and_fix` meters the
+        fixer and logs one `gate-fix` row for it (#716: both did, so every
+        session fix was in the ledger twice)."""
         from storyforge import gate
         from storyforge.api import extract_text
         problems = gate.problems_to_fix(result)
@@ -612,7 +620,7 @@ class Session:
                   + gate.build_fix_prompt(scene_id, prose, problems, protected, earlier))
         try:
             response = self._ask(prompt, f'fix-{scene_id}', 8000, output_schema=gate.FIX_SCHEMA,
-                                 operation='gate-fix', target=scene_id)
+                                 operation=None)
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True)
                 with open(os.path.join(log_dir, f'gate-fix-{scene_id}.json'), 'w') as f:
