@@ -30,14 +30,17 @@ class Unfinished:
     reason: str
 
 
-def gate_one(item: dict, work_dir: str):
+def gate_one(item: dict, work_dir: str, facts: list[dict] | None = None):
     """Gate one item's prose in its pre-pass book, as revise gates a pass's
-    prose: `before` is the book before the prose is written. Returns the
-    `GateResult`, or `Unfinished` on a `GateError`. Anything else raises."""
+    prose: `before` is the book before the prose is written. `facts`: ledger
+    rows added to the book first (`gate_set.seed_facts`), so they're in
+    `before` as well. Returns the `GateResult`, or `Unfinished` on a
+    `GateError`. Anything else raises."""
     from e8 import prepare
     from storyforge import gate
     case = e1_case(item['case'])
     project, scene_id = prepare(case, os.path.join(work_dir, item['id']))
+    gate_set.seed_facts(project, scene_id, facts or [])
     before = gate.snapshot(project)
     with open(os.path.join(project, 'scenes', f'{scene_id}.md'), 'w', encoding='utf-8') as f:
         f.write(item['prose'])
@@ -72,7 +75,9 @@ def record_command(name: str) -> str:
             f'in the baseline; later ones drop --over-budget while the budget allows)')
 
 
-def run(ctx, method: str, floors: dict, min_positives: int) -> SuiteOutput:
+def run(ctx, method: str, floors: dict, min_positives: int, *, seeded: bool = False) -> SuiteOutput:
+    """`seeded`: gate each case with its own fact in the ledger
+    (`gate_set.FACTS_FILE`)."""
     from storyforge import gate
     from storyforge.gate import GateResult
     from storyforge.runner import run_parallel
@@ -99,11 +104,23 @@ def run(ctx, method: str, floors: dict, min_positives: int) -> SuiteOutput:
     if problems:
         raise RuntimeError(f'the gate set has {len(problems)} problem(s), e.g. {problems[0]}')
     run_items = {i['id']: i for i in items if i['role'] in ('positive', 'control')}
+    facts: dict[str, dict] = {}
+    if seeded:
+        facts = gate_set.load_facts(path)
+        problems = gate_set.facts_problems(facts, items)
+        if problems:
+            raise RuntimeError(f'{gate_set.FACTS_FILE} has {len(problems)} problem(s), e.g. '
+                               f'{problems[0]}')
+
+    def gate_item(iid: str):
+        item = run_items[iid]
+        if not seeded:
+            return gate_one(item, ctx.work_dir)
+        return gate_one(item, ctx.work_dir, facts=facts[item['case']].get('rows') or [])
     saved = gate.GATE_CHECK_METHOD
     gate.GATE_CHECK_METHOD = method
     try:
-        results = run_parallel(sorted(run_items), lambda iid: gate_one(run_items[iid], ctx.work_dir),
-                               label='item')
+        results = run_parallel(sorted(run_items), gate_item, label='item')
     finally:
         gate.GATE_CHECK_METHOD = saved
     failed = sorted(k for k in run_items
@@ -154,6 +171,12 @@ def run(ctx, method: str, floors: dict, min_positives: int) -> SuiteOutput:
     notes.append('labels are E8\'s Opus judge on one known error per item: a stop for another '
                  'reason is not scored (stopped_* counts it), and recall_per_case weighs each '
                  'case the same')
+    if seeded:
+        unseeded = sorted(c for c in {i['case'] for i in run_items.values()}
+                          if not facts[c].get('rows'))
+        notes.append(f'each case gated with its own fact in the ledger ({gate_set.FACTS_FILE}); '
+                     f'no fact outside the gated scene, so never asked: '
+                     f'{", ".join(unseeded) or "none"}')
     notes.append(f'per-item outcomes (private): {gate_set.SET_NAME}/results/{OUTCOMES[method]} '
                  f'in the storyforge-evals repo')
     return SuiteOutput(metrics=metrics, by_code=by_code, gates=gates, notes=notes)

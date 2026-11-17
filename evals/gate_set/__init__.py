@@ -265,6 +265,95 @@ def outcome(item: dict, result) -> dict:
                     findings=len(result.findings))
 
 
+#: Each case's own fact as a ledger row (#677's second recording, the
+#: question layer's suite only): the question layer asks only about ledger
+#: rows, and the corpus books' pre-pass ledgers mostly don't hold the
+#: cases' facts (4 of the 15 have no ledger), so without them it had
+#: nothing to ask about the error (2026-11-16: 1-2 of 46 caught). Private,
+#: beside `cases.json`: ``{"cases": {"<E1 case id>": {"rows": [<row>],
+#: "why_none": ""}}}``, a row being ``{"id", "scene_id", "type",
+#: "subject", "statement", "quote"}``: the case's first established quote
+#: outside the gated scene (verbatim, in that scene of the pre-pass book)
+#: and what it establishes, never naming the wrong value. A case whose fact
+#: is only in the gated scene has no row and says why (`why_none`): the
+#: question layer never asks a scene about its own facts
+FACTS_FILE = 'facts.json'
+_FACT_FIELDS = ('id', 'scene_id', 'type', 'subject', 'statement', 'quote')
+
+
+def load_facts(path: str) -> dict[str, dict]:
+    """`facts.json`'s cases. Raises `ValueError` when it isn't there or has
+    no `cases` object: the seeded suite never runs unseeded."""
+    file = os.path.join(path, FACTS_FILE)
+    if not os.path.isfile(file):
+        raise ValueError(f'{SET_NAME}/{FACTS_FILE} is not there: the question layer\'s suite '
+                         f'gates each case with its fact in the ledger')
+    with open(file, encoding='utf-8') as f:
+        data = json.load(f)
+    cases = data.get('cases') if isinstance(data, dict) else None
+    if not isinstance(cases, dict):
+        raise ValueError(f'{SET_NAME}/{FACTS_FILE}: no "cases" object')
+    return cases
+
+
+def facts_problems(facts: dict[str, dict], items: list[dict]) -> list[str]:
+    """What makes the facts unusable, by case id (never quoting them): a run
+    case with no entry, a row missing a field or of a type the question
+    layer doesn't ask, two rows with one id, a case with no rows and no
+    `why_none`."""
+    from storyforge.questions import QUESTION_TYPES
+    problems = []
+    run_cases = sorted({i['case'] for i in items if i['role'] in ('positive', 'control')})
+    ids: set[str] = set()
+    for cid in run_cases:
+        entry = facts.get(cid)
+        if not isinstance(entry, dict):
+            problems.append(f'{cid}: no entry in {FACTS_FILE}')
+            continue
+        rows = entry.get('rows') or []
+        if not rows and not (entry.get('why_none') or '').strip():
+            problems.append(f'{cid}: no rows and no why_none')
+        for n, row in enumerate(rows):
+            missing = [k for k in _FACT_FIELDS if not str(row.get(k) or '').strip()]
+            if missing:
+                problems.append(f'{cid} row {n + 1}: no {", ".join(missing)}')
+            elif row['type'] not in QUESTION_TYPES:
+                problems.append(f'{cid} row {n + 1}: type {row["type"]!r} is not asked about')
+            elif row['id'] in ids:
+                problems.append(f'{cid} row {n + 1}: id {row["id"]!r} is used twice')
+            ids.add(str(row.get('id')))
+    return problems
+
+
+def seed_facts(project: str, scene_id: str, rows: list[dict]) -> None:
+    """Add `rows` to the book's ledger as binding, fixed author facts (a
+    ledger is made when the book has none). Raises `ValueError`, naming the
+    row's id, when a row is the gated scene's own (never asked), its scene
+    isn't in the book, or its quote isn't in that scene's prose: a seeded
+    fact the prose doesn't hold would test something else."""
+    from storyforge import ledger
+    from storyforge.quotes import quote_in
+    if not rows:
+        return
+    have = ledger.load(project)
+    order = ledger.scene_order(project)
+    for row in rows:
+        scene = row['scene_id']
+        if scene == scene_id:
+            raise ValueError(f'{row["id"]}: the gated scene\'s own fact is never asked')
+        file = os.path.join(project, 'scenes', f'{scene}.md')
+        if scene not in order or not os.path.isfile(file):
+            raise ValueError(f'{row["id"]}: scene {scene} is not in the book')
+        with open(file, encoding='utf-8') as f:
+            if not quote_in(f.read(), row['quote']):
+                raise ValueError(f'{row["id"]}: its quote is not in {scene}')
+    ledger.save(project, have + [{**{c: '' for c in ledger.COLUMNS},
+                                  **{k: row[k] for k in _FACT_FIELDS},
+                                  'origin': 'author', 'status': 'binding', 'mutable': 'fixed',
+                                  'introduced_by': SET_NAME} for row in rows],
+                command=SET_NAME)
+
+
 def _rate(hit: int, of: int) -> float:
     return round(hit / of, 4) if of else 0.0
 

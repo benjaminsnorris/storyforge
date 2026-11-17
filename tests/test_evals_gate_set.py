@@ -35,6 +35,10 @@ WRONG = 'They landed after a week at sea. Tom tied the boat to the post.'
 WRONG_2 = 'A week at sea had worn them thin. The island was green.'
 RIGHT = 'They landed after three days at sea. Tom tied the boat to the post.'
 SILENT = 'They landed. Tom tied the boat to the post.'
+#: tale-001's fact as the question layer's suite seeds it
+FACT = {'id': 'gate-set-tale-001', 'scene_id': 'harbour', 'type': 'timeline', 'subject': 'Tom',
+        'statement': 'The voyage to the island takes three days.',
+        'quote': 'three days to the island'}
 
 
 def _item(prose, verdict, evidence, case='tale-001', **kw):
@@ -269,6 +273,7 @@ def _write_set(root, items, recorded=('gate-set', 'gate-set-questions')):
         (path / 'prose' / f'{i["id"]}.md').write_text(i['prose'])
     (path / 'cases.json').write_text(json.dumps(
         {'items': [{k: v for k, v in i.items() if k != 'prose'} for i in items]}))
+    (path / gate_set.FACTS_FILE).write_text(json.dumps({'cases': {'tale-001': {'rows': [FACT]}}}))
     return path
 
 
@@ -299,8 +304,11 @@ class TestSuite:
         monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
         seen = []
 
-        def fake_gate(item, work_dir):
+        def fake_gate(item, work_dir, **kw):
             seen.append((item['role'], gate.GATE_CHECK_METHOD))
+            # the question layer's suite seeds each case's fact; the open
+            # checker's gets none
+            assert kw == ({'facts': [FACT]} if method == 'questions' else {})
             return _gate_catching_wrong(item, work_dir)
         monkeypatch.setattr(runner, 'gate_one', fake_gate)
         before = gate.GATE_CHECK_METHOD
@@ -445,6 +453,92 @@ class TestSuite:
             assert not (PLUGIN_DIR / 'evals' / 'fixtures' / 'cassettes' / name).exists()
 
 
+class TestFacts:
+    """#677's second recording: the question layer's suite gates each case
+    with its own fact in the ledger."""
+
+    def test_sound_facts_have_no_problems(self):
+        assert gate_set.facts_problems({'tale-001': {'rows': [FACT]}}, _items()) == []
+
+    @pytest.mark.parametrize('facts,expected', [
+        ({}, 'tale-001: no entry in facts.json'),
+        ({'tale-001': {'rows': []}}, 'tale-001: no rows and no why_none'),
+        ({'tale-001': {'rows': [{**FACT, 'quote': ' '}]}}, 'tale-001 row 1: no quote'),
+        ({'tale-001': {'rows': [{**FACT, 'type': 'promise'}]}},
+         "tale-001 row 1: type 'promise' is not asked about"),
+        ({'tale-001': {'rows': [FACT, FACT]}},
+         "tale-001 row 2: id 'gate-set-tale-001' is used twice"),
+    ])
+    def test_a_problem_is_named_by_case(self, facts, expected):
+        assert expected in gate_set.facts_problems(facts, _items())
+
+    def test_a_case_with_no_row_says_why(self):
+        facts = {'tale-001': {'rows': [], 'why_none': 'only in the gated scene'}}
+        assert gate_set.facts_problems(facts, _items()) == []
+
+    def test_no_facts_file_errors_never_runs_unseeded(self, tmp_path):
+        with pytest.raises(ValueError, match='facts.json is not there'):
+            gate_set.load_facts(str(tmp_path))
+
+    @pytest.fixture
+    def book(self, tmp_path):
+        project = tmp_path / 'book'
+        (project / 'reference').mkdir(parents=True)
+        (project / 'scenes').mkdir()
+        (project / 'reference' / 'scenes.csv').write_text(
+            'id|seq|title\nharbour|1|Harbour\nisland|2|Island\n')
+        (project / 'scenes' / 'harbour.md').write_text('It was three days to the island.\n')
+        (project / 'scenes' / 'island.md').write_text('The pre-pass prose.\n')
+        return project
+
+    def test_seeds_a_binding_fixed_author_fact_into_a_book_with_no_ledger(self, book):
+        from storyforge import ledger
+        gate_set.seed_facts(str(book), 'island', [FACT])
+        [row] = ledger.load(str(book))
+        assert {k: row[k] for k in FACT} == FACT
+        assert (row['origin'], row['status'], row['mutable']) == ('author', 'binding', 'fixed')
+
+    def test_keeps_the_ledger_it_adds_to(self, book):
+        from storyforge import ledger
+        ledger.save(str(book), [{**{c: '' for c in ledger.COLUMNS}, 'id': 'old',
+                                 'scene_id': 'harbour', 'type': 'trait', 'subject': 'Tom',
+                                 'statement': 'Tom is tall.', 'origin': 'author',
+                                 'status': 'binding', 'mutable': 'fixed'}], command='test')
+        gate_set.seed_facts(str(book), 'island', [FACT])
+        assert [r['id'] for r in ledger.load(str(book))] == ['old', FACT['id']]
+
+    @pytest.mark.parametrize('change,expected', [
+        ({'scene_id': 'island'}, "the gated scene's own fact is never asked"),
+        ({'scene_id': 'reef'}, 'scene reef is not in the book'),
+        ({'quote': 'a week to the island'}, 'its quote is not in harbour'),
+    ])
+    def test_a_fact_the_book_does_not_hold_raises_and_writes_nothing(self, book, change,
+                                                                      expected):
+        with pytest.raises(ValueError, match=expected):
+            gate_set.seed_facts(str(book), 'island', [{**FACT, **change}])
+        assert not (book / 'reference' / 'commitments.csv').exists()
+
+    def test_the_suite_names_the_cases_never_asked(self, private_set, tmp_path, monkeypatch):
+        from storyforge import gate
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
+        (private_set / gate_set.FACTS_FILE).write_text(json.dumps(
+            {'cases': {'tale-001': {'rows': [], 'why_none': 'only in the gated scene'}}}))
+        monkeypatch.setattr(runner, 'gate_one', lambda item, wd, facts: (
+            _gate_catching_wrong(item, wd) if facts == [] else pytest.fail(facts)))
+        result = harness.run_suite(_suite('gate-set-questions'), 'replay', str(tmp_path / 'c'))
+        assert any('never asked: tale-001' in n for n in result['notes'])
+
+    def test_facts_with_a_problem_error_the_suite_before_gating(self, private_set, tmp_path,
+                                                              monkeypatch):
+        from storyforge import gate
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
+        (private_set / gate_set.FACTS_FILE).write_text(json.dumps({'cases': {}}))
+        monkeypatch.setattr(runner, 'gate_one', lambda *a, **kw: pytest.fail('gated'))
+        result = harness.run_suite(_suite('gate-set-questions'), 'replay', str(tmp_path / 'c'))
+        assert result['status'] == 'error'
+        assert 'tale-001: no entry in facts.json' in result['error']
+
+
 class TestGateOne:
     """T-1: gate_one gates as revise does, with e8.prepare and the gate stubbed."""
 
@@ -467,6 +561,8 @@ class TestGateOne:
         calls = {}
         monkeypatch.setattr(gate, 'snapshot', lambda p: (
             calls.setdefault('snapshot_saw', (book / 'scenes' / 'island.md').read_text())))
+        monkeypatch.setattr(gate_set, 'seed_facts', lambda p, s, rows: (
+            calls.setdefault('seeded', rows), calls.setdefault('order', []).append('seed')))
 
         def gate_scene(project, scene_id, **kw):
             calls.update(kw, file=(book / 'scenes' / 'island.md').read_text())
@@ -474,10 +570,22 @@ class TestGateOne:
         monkeypatch.setattr(gate, 'gate_scene', gate_scene)
         item = _item(WRONG, 'reintroduced', 'a week at sea', family=family)
         assert isinstance(runner.gate_one(item, str(tmp_path / 'w')), gate.GateResult)
+        assert calls['seeded'] == []
         assert calls['snapshot_saw'] == 'The pre-pass prose.'
         assert calls['before'] == 'The pre-pass prose.'
         assert calls['file'] == WRONG and calls['prose'] == WRONG
         assert calls['command'] == command
+
+    def test_seeds_the_facts_before_the_snapshot(self, book, tmp_path, monkeypatch):
+        """The seeded facts are the book's before the prose: in `before` too."""
+        from storyforge import gate
+        order = []
+        monkeypatch.setattr(gate_set, 'seed_facts',
+                            lambda p, s, rows: order.append(('seed', s, rows)))
+        monkeypatch.setattr(gate, 'snapshot', lambda p: order.append('snapshot'))
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **kw: _result())
+        runner.gate_one(_item(WRONG, 'reintroduced', 'a week'), str(tmp_path / 'w'), facts=[FACT])
+        assert order == [('seed', 'island', [FACT]), 'snapshot']
 
     def test_a_gate_error_is_unfinished_with_its_reason(self, book, tmp_path, monkeypatch):
         from storyforge import gate
