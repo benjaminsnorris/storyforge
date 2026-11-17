@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+from illustration_helpers import fixture_anchors, remove_canon
 from storyforge import canon
 from storyforge.cmd_cleanup import report_canon_files
 
@@ -61,13 +62,14 @@ def _set_medium(project_dir, medium):
 
 
 def test_novel_project_canon_is_validated_not_skipped(project_dir):
-    """A novel project with valid canon produces no findings at all."""
+    """A novel project with valid canon produces no findings at all — the
+    fixture's own canon tree included."""
     _set_medium(project_dir, 'novel')
-    # characters.csv must carry a matching row or canon_missing_registry_entry fires
+    # characters.csv must carry a matching row or canon_missing_registry_entry
+    # fires. Appended: the fixture's canon names the rows already there.
     reg = os.path.join(project_dir, 'reference', 'characters.csv')
-    os.makedirs(os.path.dirname(reg), exist_ok=True)
-    with open(reg, 'w', encoding='utf-8') as f:
-        f.write('id|name\nnora|Nora\n')
+    with open(reg, 'a', encoding='utf-8') as f:
+        f.write('nora|Nora|||\n')
     _write_canon(project_dir, os.path.join('characters', 'nora.md'))
 
     findings = report_canon_files(project_dir)
@@ -146,7 +148,7 @@ def test_anchor_texts_returns_entity_anchors_verbatim(project_dir):
 
     anchors = anchor_texts(project_dir)
 
-    assert set(anchors) == {'nora'}
+    assert set(anchors) == {'nora', *fixture_anchors()}
     assert anchors['nora'] == (
         'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
         'grey-green eyes.'
@@ -174,7 +176,8 @@ def test_anchor_texts_excludes_non_entity_types(project_dir):
                  .replace('canon_id: nora', 'canon_id: visual-foundation')
                  .replace('canon_type: character', 'canon_type: foundation'))
 
-    assert anchor_texts(project_dir) == {}
+    # The fixture's entity anchors, and nothing from the foundation file.
+    assert anchor_texts(project_dir) == fixture_anchors()
 
 
 def test_resolve_canon_path_finds_root_and_subdir(project_dir):
@@ -218,7 +221,7 @@ def test_anchor_texts_excludes_starter_templates(project_dir, plugin_dir):
 
     anchors = anchor_texts(project_dir)
 
-    assert set(anchors) == {'nora'}
+    assert set(anchors) == {'nora', *fixture_anchors()}
     assert '<character-slug>' not in anchors
 
 
@@ -827,6 +830,7 @@ def test_direction_strict_makes_no_api_call(project_dir, monkeypatch):
 # ============================================================================
 
 def test_has_reference_tier_requires_all_three(project_dir):
+    remove_canon(project_dir)   # the fixture carries a complete canon tier
     from storyforge.illustrations import has_reference_tier
     _set_medium(project_dir, 'novel')
     assert has_reference_tier(project_dir) is False
@@ -844,6 +848,7 @@ def test_has_reference_tier_requires_all_three(project_dir):
 
 
 def test_missing_reference_sections_reports_placeholders(project_dir):
+    remove_canon(project_dir)   # the fixture carries a complete canon tier
     from storyforge.illustrations import missing_reference_sections
     _set_medium(project_dir, 'novel')
     _write_canon(project_dir, 'visual-foundation.md',
@@ -1163,6 +1168,7 @@ def test_iso_date_or_empty_accepts_a_date_and_a_timestamp():
 
 
 def test_newest_canon_updated_takes_the_latest_date(project_dir):
+    remove_canon(project_dir)   # the fixture carries a complete canon tier
     from storyforge.canon import newest_canon_updated
     _write_canon(project_dir, os.path.join('characters', 'nora.md'),
                  CANON_BODY.replace('canon_updated: 2026-07-28',
@@ -1175,6 +1181,7 @@ def test_newest_canon_updated_takes_the_latest_date(project_dir):
 
 
 def test_newest_canon_updated_is_empty_without_canon(project_dir):
+    remove_canon(project_dir)   # the fixture carries a complete canon tier
     from storyforge.canon import newest_canon_updated
     assert newest_canon_updated(project_dir) == ''
 
@@ -1182,6 +1189,7 @@ def test_newest_canon_updated_is_empty_without_canon(project_dir):
 def test_newest_canon_updated_reports_an_unparseable_date(project_dir, capsys):
     """A date it cannot read cannot raise the cutoff, so a canon edit can look
     older than it is. That has to be said out loud, not skipped."""
+    remove_canon(project_dir)   # the fixture carries a complete canon tier
     from storyforge.canon import newest_canon_updated
     _write_canon(project_dir, os.path.join('characters', 'nora.md'),
                  CANON_BODY.replace('canon_updated: 2026-07-28',

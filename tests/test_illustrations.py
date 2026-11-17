@@ -13,7 +13,8 @@ from illustration_helpers import (
     scene_split,
     SAMPLE_DIRECTION, SCENE, SCENE_ADVERSARIAL, SCENE_WITH_FRONTMATTER,
     make_jpeg, make_png, make_webp, make_webp_vp8, make_webp_vp8l, pandoc_html,
-    plan_row, truncated_png, write_csv, write_direction_file,
+    plan_row, remove_canon, remove_plan, truncated_png, write_csv,
+    write_direction_file,
     write_scene,
 )
 from storyforge import illustrations as ill
@@ -38,6 +39,7 @@ def test_plan_round_trips(project_dir):
 
 
 def test_read_plan_missing_file_is_empty(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     assert ill.read_plan(project_dir) == []
     assert ill.read_plan_as_map(project_dir) == {}
 
@@ -945,6 +947,7 @@ def test_resolve_for_local_drops_markers_with_no_plan_row(project_dir):
 
 
 def test_resolve_for_local_with_no_plan_strips_markers(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     resolved = ill.resolve_for_local(project_dir, 'a\n\n![[illus:x]]\n\nb\n')
     assert resolved == 'a\n\nb\n'
 
@@ -1133,6 +1136,9 @@ def test_is_supported_image(name, supported):
 # ============================================================================
 
 def test_plan_report_counts_by_status_and_embedding(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_scene(project_dir, 'vigil',
                 ill.insert_marker(SCENE, plan_row())['text'])
     write_scene(project_dir, 'other', SCENE)
@@ -1153,6 +1159,7 @@ def test_plan_report_counts_by_status_and_embedding(project_dir):
 
 
 def test_plan_report_on_empty_plan(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     report = ill.plan_report(project_dir)
     assert report['total'] == 0
     assert report['next_unrendered'] == ''
@@ -1163,6 +1170,9 @@ def test_plan_report_on_empty_plan(project_dir):
 # ============================================================================
 
 def test_validate_clean_plan_has_no_findings(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_scene(project_dir, 'vigil',
                 ill.insert_marker(SCENE, plan_row())['text'])
     make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
@@ -1671,6 +1681,7 @@ def test_render_order_skips_superseded(project_dir):
 
 
 def test_render_order_is_empty_without_a_plan(project_dir):
+    remove_plan(project_dir)   # the fixture carries a plan
     assert ill.render_order(project_dir) == []
     assert ill.next_to_render(project_dir) == ''
 
@@ -1689,6 +1700,9 @@ def test_next_to_render_follows_the_render_order(project_dir):
 
 
 def test_next_to_render_is_empty_when_all_are_ingested(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1'])
     ill.write_plan(project_dir, [plan_row(scene_id='s1', status='ingested')])
     assert ill.next_to_render(project_dir) == ''
@@ -2085,6 +2099,9 @@ def test_validate_reports_an_ingested_illustration_with_no_marker(project_dir):
 
 
 def test_an_embedded_ingested_illustration_is_not_flagged(project_dir):
+    # An `ingested` row with no `ingested_at` predates canon; on the fixture's
+    # canon tier that is `canon_stale_render`. This is the pre-canon case.
+    remove_canon(project_dir)
     write_scene(project_dir, 'vigil',
                 ill.insert_marker(SCENE, plan_row())['text'])
     make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
@@ -2152,8 +2169,7 @@ def test_truncated_book_level_canon_is_a_blocking_finding(project_dir):
 
 
 def test_clean_canon_produces_no_truncation_finding(project_dir):
-    from illustration_helpers import seed_canon
-    seed_canon(project_dir)
+    # The fixture's canon tier is the clean case.
     ill.write_plan(project_dir, [plan_row(canon_refs='dorren-hayle')])
     assert [f for f in ill.validate_plan(project_dir)
             if f['kind'] == 'canon_anchor_truncated'] == []

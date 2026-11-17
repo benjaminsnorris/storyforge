@@ -4,8 +4,8 @@ The packet is assembly: it must make no API call, produce identical bytes on a
 re-run over unchanged sources, carry every continuity anchor byte-identically,
 and state its own gaps rather than reading as coverage it does not have.
 
-`in_project` seeds canon files, a plan, and state transitions into a copy of the
-fixture — the shared fixture has none of those (checked, not assumed).
+`in_project` is a copy of the shared fixture, which is an illustrated project:
+canon files, a two-row plan, and state transitions (#288).
 """
 
 import os
@@ -17,7 +17,7 @@ from storyforge import canon, cmd_illustrate, packet
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge import prompts_packet as pp
-from illustration_helpers import scene_split, seed_packet_project
+from illustration_helpers import remove_plan, scene_split, unstate_entity
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,6 @@ def _clean_env(monkeypatch):
 
 @pytest.fixture
 def in_project(project_dir, monkeypatch):
-    seed_packet_project(project_dir)
     monkeypatch.chdir(project_dir)
     return project_dir
 
@@ -1461,6 +1460,7 @@ def test_sequence_without_a_key_is_an_error(in_project, capsys):
 
 
 def test_sequence_on_an_empty_plan_says_so(project_dir, monkeypatch, capsys):
+    remove_plan(project_dir)
     monkeypatch.chdir(project_dir)
     assert cmd_illustrate.main(['--sequence']) == 0
     assert 'No illustration plan rows to stage' in capsys.readouterr().out
@@ -1767,8 +1767,9 @@ def test_the_absent_block_disappears_when_the_cell_is_cleared(in_project,
 def test_prompts_reports_an_entity_with_no_stated_visual_state(in_project,
                                                                captured,
                                                                capsys):
-    """`cartography-office` is deliberately unstated in the seeded matrix, and
-    the free moment to hear about it is before 20 calls go out."""
+    """An entity a row names with nothing stated for it: the free moment to
+    hear about it is before 20 calls go out."""
+    unstate_entity(in_project, 'cartography-office')
     captured()
     out = capsys.readouterr().out
     assert 'cartography-office' in out
