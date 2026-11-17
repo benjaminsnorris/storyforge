@@ -46,7 +46,8 @@ format a writer can produce too (#655: the writer keeps the sheet while
 drafting and returns its end state after each scene; the code then compares
 the two). See `write_sheet` / `load_sheet` / `states`. The opening is
 carried over from the previous scene's sheet when that sheet was made from
-the previous scene's current prose (`carried_opening`). A carried state is
+the previous scene's current prose (`carried_stage`): its extracted sheet,
+else its writer's sheet (#707). A carried state is
 shown to the yes/no asker but never makes a finding (a slip against one is
 counted): a scene break allows any change, and only the writer's note
 (#655) will say what carries.
@@ -1136,37 +1137,96 @@ def states(sheet: dict) -> list[list[Entry]]:
     return out
 
 
-def carried_opening(project_dir: str, scene_id: str) -> tuple[list[Entry], str]:
-    """The previous scene's end state, carried (`origin` `carried`), from
-    its extracted sheet, and a note when there is a previous scene but its
-    sheet can't be used ('' when carried, or when this is the first scene).
-    A writer's sheet (#655) isn't read here yet."""
+#: How the log names each source's sheet
+SOURCE_LABELS = {'extracted': 'stage sheet', 'writer': 'writer\'s stage note'}
+
+
+@dataclass
+class Carried:
+    """The previous scene's end state as a scene opens (`carried_stage`):
+    its entries (`origin` `carried`), the sheet they came from (`SOURCES`;
+    '' when none was carried), the previous scene, and a note: why nothing
+    was carried, or why the extracted sheet wasn't the one ('' when there's
+    nothing to say)."""
+    entries: list[Entry]
+    source: str = ''
+    prev: str = ''
+    note: str = ''
+
+
+def carried_stage(project_dir: str, scene_id: str) -> Carried:
+    """The previous scene's end state, carried, from its extracted sheet
+    when that is of the previous scene's prose as it stands, else from its
+    writer's sheet (#655's stage note, saved by `write --session`) under the
+    same check (#707). The gate's default blocking method keeps no
+    extracted sheet, so on it the writer's sheet is the only one.
+
+    Each sheet is checked against the prose it was made from: the
+    extracted sheet against the file's bytes (what the gate read), the
+    writer's against its prose without illustration markers (what the
+    writer wrote). A sheet of other prose is never carried: a voice
+    review, a gate fix or the author's own edit may have moved someone,
+    and code can't tell whether it did. A sheet that records no state at
+    its end gives way to the next one. What wasn't carried, and why, is
+    in `note`."""
     from storyforge import ledger
     try:
         order = ledger.scene_order(project_dir)
     except (OSError, ValueError, UnicodeDecodeError) as e:
-        return [], f'no state carried over (the reading order could not be read: {e})'
+        return Carried([], note=f'no state carried over (the reading order could not be '
+                                f'read: {e})')
     if scene_id not in order:
-        return [], ''
+        return Carried([])
     before = [s for s, n in order.items() if n < order[scene_id]]
     if not before:
-        return [], ''
+        return Carried([])
     prev = max(before, key=lambda s: order[s])
-    path = sheet_path(project_dir, prev)
-    if not os.path.isfile(path):
-        return [], f'no state carried over: {prev} has no stage sheet yet'
+    paths = {src: sheet_path(project_dir, prev, src) for src in SOURCES}
+    if not any(os.path.isfile(p) for p in paths.values()):
+        return Carried([], prev=prev, note=f'no state carried over: {prev} has no stage sheet '
+                                           f'yet')
+    from storyforge.illustrations import read_scene_raw, strip_markers
+    # the bytes the gate read (the gate exception, docs/history.md)
     try:
-        sheet = load_sheet(path)
-        from storyforge.illustrations import read_scene_raw
-        # the bytes the gate read (the gate exception, docs/history.md)
-        prev_prose = read_scene_raw(project_dir, prev)
-        if prev_prose is None:
-            return [], f'no state carried over: {prev} has no prose'
+        raw = read_scene_raw(project_dir, prev)
     except (OSError, ValueError) as e:
-        return [], f'no state carried over: {prev}\'s stage sheet could not be used ({e})'
-    if sheet.get('prose_sha256') != prose_hash(prev_prose):
-        return [], f'no state carried over: {prev}\'s stage sheet is of earlier prose'
-    return [replace(e, origin='carried', seq=-1) for e in _entries(sheet.get('end', []), 'end')], ''
+        return Carried([], prev=prev, note=f'no state carried over: {prev}\'s prose could not '
+                                           f'be read ({e})')
+    if raw is None:
+        return Carried([], prev=prev, note=f'no state carried over: {prev} has no prose')
+    digests = {'extracted': prose_hash(raw), 'writer': prose_hash(strip_markers(raw))}
+    passed = []   # why a sheet there is wasn't used (a missing one goes unsaid)
+    for src in SOURCES:
+        label = SOURCE_LABELS[src]
+        if not os.path.isfile(paths[src]):
+            continue   # on the default gate there's never an extracted sheet
+        try:
+            sheet = load_sheet(paths[src])
+        except (OSError, ValueError) as e:
+            passed.append(f'{prev}\'s {label} could not be used ({e})')
+            continue
+        if sheet.get('prose_sha256') != digests[src]:
+            passed.append(f'{prev}\'s {label} is of earlier prose' if src == 'extracted' else
+                          f'{prev}\'s {label} is of its draft, which was changed after the '
+                          f'writer wrote it (by the voice review, the gate or the author); '
+                          f'code can\'t tell whether the change moved anyone, so none of it '
+                          f'is carried')
+            continue
+        entries = _entries(sheet.get('end', []), 'end')
+        if not entries:
+            passed.append(f'{prev}\'s {label} records no state at its end')
+            continue
+        return Carried([replace(e, origin='carried', seq=-1) for e in entries], src, prev,
+                       '; '.join(passed))
+    return Carried([], prev=prev, note='no state carried over: ' + '; '.join(passed))
+
+
+def carried_opening(project_dir: str, scene_id: str) -> tuple[list[Entry], str]:
+    """`carried_stage` as (entries, a note when there is a previous scene
+    but nothing of it was carried; '' when carried, or when this is the
+    first scene)."""
+    c = carried_stage(project_dir, scene_id)
+    return c.entries, ('' if c.entries else c.note)
 
 
 # ============================================================================
