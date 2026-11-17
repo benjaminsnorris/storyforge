@@ -1861,7 +1861,7 @@ SCENE_READ_ERRORS = (OSError, UnicodeDecodeError)
 
 
 def scene_unchecked_finding(scene_id: str, check: str,
-                            exc: BaseException) -> IllustrationFinding:
+                            exc: BaseException) -> 'IllustrationFinding':
     """A `scene_unchecked` finding: *check* did not run for *scene_id*
     because its file could not be read (#288's review, SF-1/CR-1).
 
@@ -1885,14 +1885,14 @@ def _unchecked_detail(scene_id: str, error: str, checks: list[str]) -> str:
 
 
 def merge_unchecked(
-        findings: list[IllustrationFinding]) -> list[IllustrationFinding]:
+        findings: list['IllustrationFinding']) -> list['IllustrationFinding']:
     """One `scene_unchecked` finding per scene, naming every check skipped.
 
     The first such finding for a scene keeps its place; later ones for the
     same scene are folded into it. Other findings pass through in order.
     """
-    merged: list[IllustrationFinding] = []
-    by_scene: dict[str, IllustrationFinding] = {}
+    merged: list['IllustrationFinding'] = []
+    by_scene: dict[str, 'IllustrationFinding'] = {}
     checks: dict[str, list[str]] = {}
     for finding in findings:
         if finding['kind'] != 'scene_unchecked':
