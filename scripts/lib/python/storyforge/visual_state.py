@@ -556,7 +556,12 @@ def prepass(project_dir: str) -> PrepassResult:
 
         if not transition['evidence']:
             continue
-        text = ill.read_scene_raw(project_dir, from_scene)
+        try:
+            text = ill.read_scene_raw(project_dir, from_scene)
+        except ill.SCENE_READ_ERRORS as exc:
+            findings.append(ill.scene_unchecked_finding(
+                from_scene, 'the visual-state evidence check', exc))
+            continue
         if text is None:
             # Undrafted is valid in-flight state, not a finding — the same
             # posture as an unrendered illustration. Say so rather than
@@ -687,14 +692,16 @@ def prepass(project_dir: str) -> PrepassResult:
                 })
 
     candidates, undrafted, terms = _candidate_scenes(project_dir, order,
-                                                     resolved)
+                                                     resolved, findings)
     # Drafted and active, but with no reading position — so the narrowing, which
     # walks `order`, never looks at it. Its prose is neither read nor reported as
-    # unread unless this is surfaced.
-    unmapped = sorted(sid for sid in missing_from_map
-                      if ill.read_scene_raw(project_dir, sid) is not None)
+    # unread unless this is surfaced. Existence is what counts here, so a file
+    # that cannot be decoded is still drafted.
+    unmapped = sorted(
+        sid for sid in missing_from_map
+        if os.path.isfile(os.path.join(project_dir, 'scenes', f'{sid}.md')))
     return {
-        'findings': findings,
+        'findings': ill.merge_unchecked(findings),
         'candidate_scenes': candidates,
         'scene_count': len(order),
         'tracked_entities': sorted(resolved),
@@ -709,6 +716,7 @@ def _candidate_scenes(
     project_dir: str,
     order: dict[str, int],
     resolved: dict[str, set[int]],
+    findings: list['IllustrationFinding'],
 ) -> tuple[list[str], list[str], dict[str, set[str]]]:
     """Scenes whose prose could contradict the log, and scenes with no prose.
 
@@ -722,7 +730,9 @@ def _candidate_scenes(
     order. Silent by design — the caller reports the narrowing, because `prepass`
     is also called from `validate_plan` and neither `validate` nor `cleanup` is
     auditing anything. The term sets come back so the caller can log *why* a
-    narrowing was wide or empty, which is otherwise undiagnosable.
+    narrowing was wide or empty, which is otherwise undiagnosable. A scene that
+    cannot be read is the exception: it appends a `scene_unchecked` finding to
+    *findings*, since it is neither a candidate nor undrafted.
     """
     from storyforge import illustrations as ill
 
@@ -737,7 +747,14 @@ def _candidate_scenes(
     candidates: list[str] = []
     undrafted: list[str] = []
     for scene_id, position in sorted(order.items(), key=lambda kv: (kv[1], kv[0])):
-        text = ill.read_scene_raw(project_dir, scene_id)
+        try:
+            text = ill.read_scene_raw(project_dir, scene_id)
+        except ill.SCENE_READ_ERRORS as exc:
+            # Neither a candidate nor undrafted: say the audit cannot read it,
+            # rather than let it look like a scene with nothing to contradict.
+            findings.append(ill.scene_unchecked_finding(
+                scene_id, "the contradiction audit's narrowing", exc))
+            continue
         if text is None:
             undrafted.append(scene_id)
             continue
@@ -835,7 +852,12 @@ def digest_drift(project_dir: str) -> list['IllustrationFinding']:
 
     for record in read_provenance(project_dir):
         scene_id = record['scene_id']
-        current = ill.scene_prose_digest(project_dir, scene_id)
+        try:
+            current = ill.scene_prose_digest(project_dir, scene_id)
+        except ill.SCENE_READ_ERRORS as exc:
+            findings.append(ill.scene_unchecked_finding(
+                scene_id, "the audit's staleness check", exc))
+            continue
         if not current:
             log(f'WARNING: {PROVENANCE_FILE} names {scene_id}, which has no '
                 f'file in scenes/ — staleness for it cannot be determined')
@@ -859,7 +881,13 @@ def digest_drift(project_dir: str) -> list['IllustrationFinding']:
         if not recorded:
             continue
         scene_id = (row.get('scene_id') or '').strip()
-        current = ill.scene_prose_digest(project_dir, scene_id)
+        try:
+            current = ill.scene_prose_digest(project_dir, scene_id)
+        except ill.SCENE_READ_ERRORS as exc:
+            findings.append(ill.scene_unchecked_finding(
+                scene_id, f'the prose-changed check for '
+                          f'{(row.get("id") or "").strip()!r}', exc))
+            continue
         if not current or current == recorded:
             continue
         findings.append({

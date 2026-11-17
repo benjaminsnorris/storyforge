@@ -754,6 +754,39 @@ class TestAnUnreadableSceneFileIsSurvivable:
         assert 'bad.md' in findings[0]['detail']
         assert '|' not in findings[0]['detail'], 'must go through csv_safe'
 
+    def test_an_illustrated_project_reports_the_skipped_marker_checks(
+            self, project_dir):
+        """The fixture has an illustration plan (#288), so the illustration
+        checks read every scene too. The report must finish, and must say
+        that those checks — not only the artifact check — skipped the file."""
+        from storyforge import illustrations as ill
+        assert ill.read_plan(project_dir), 'the fixture carries a plan'
+        self._bad_scene(project_dir)
+
+        report = build_cleanup_report(project_dir)
+
+        unchecked = [f for f in report['findings']
+                     if f['type'] == 'illus_scene_unchecked']
+        assert len(unchecked) == 1
+        assert unchecked[0]['file'] == 'scenes/bad.md'
+        assert 'marker checks' in unchecked[0]['detail']
+        assert any(f['type'] == 'unreadable_scene' and 'bad.md' in f['detail']
+                   for f in report['findings'])
+
+    def test_an_undecodable_planned_scene_does_not_end_the_report(
+            self, project_dir):
+        """act1-sc01 is named by a plan row and by the visual-state log, which
+        reach it through reads the marker scan's guard did not cover."""
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(path, 'wb') as f:
+            f.write('Dorren held her breath. Malm\xf6.\n'.encode('latin-1'))
+
+        report = build_cleanup_report(project_dir)
+
+        assert any(f['type'] == 'illus_scene_unchecked'
+                   and f['file'] == 'scenes/act1-sc01.md'
+                   for f in report['findings'])
+
 
 class TestCreateMissingDirs:
     """Test directory creation for expected directories."""

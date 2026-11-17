@@ -1819,7 +1819,13 @@ def plan_report(project_dir: str, *,
         if (row.get('status') or '').strip() == 'superseded':
             continue
         rid = row['id'].strip()
-        scene_text = read_scene_raw(project_dir, (row.get('scene_id') or '').strip())
+        try:
+            scene_text = read_scene_raw(project_dir,
+                                        (row.get('scene_id') or '').strip())
+        except SCENE_READ_ERRORS:
+            # Neither embedded nor unembedded: unknown. validate_plan's
+            # `scene_unchecked` finding is what reports it.
+            continue
         if scene_text is not None and has_marker(scene_text, rid):
             embedded.append(rid)
         else:
@@ -1847,6 +1853,66 @@ def read_scene_raw(project_dir: str, scene_id: str) -> str | None:
         return None
     with open(path, encoding='utf-8') as f:
         return f.read()
+
+
+#: Scene reads that fail: a file saved in another encoding, or one the process
+#: cannot open. `UnicodeDecodeError` is a `ValueError`, not an `OSError`.
+SCENE_READ_ERRORS = (OSError, UnicodeDecodeError)
+
+
+def scene_unchecked_finding(scene_id: str, check: str,
+                            exc: BaseException) -> IllustrationFinding:
+    """A `scene_unchecked` finding: *check* did not run for *scene_id*
+    because its file could not be read (#288's review, SF-1/CR-1).
+
+    Every illustration check that reads a scene reports this rather than
+    raising (one bad file used to kill `validate` and the whole `cleanup`
+    report) or skipping silently (which read as "checked and clean").
+    `merge_unchecked` folds several for one scene into one finding.
+    """
+    return {
+        'kind': 'scene_unchecked', 'id': '', 'scene_id': scene_id,
+        'file': f'scenes/{scene_id}.md', 'skipped': check,
+        'detail': _unchecked_detail(scene_id, type(exc).__name__, [check]),
+    }
+
+
+def _unchecked_detail(scene_id: str, error: str, checks: list[str]) -> str:
+    return _csv_safe(
+        f'scenes/{scene_id}.md could not be read ({error}), so '
+        f'{"; ".join(checks)} did not run for it — Storyforge reads scenes as '
+        f'UTF-8')
+
+
+def merge_unchecked(
+        findings: list[IllustrationFinding]) -> list[IllustrationFinding]:
+    """One `scene_unchecked` finding per scene, naming every check skipped.
+
+    The first such finding for a scene keeps its place; later ones for the
+    same scene are folded into it. Other findings pass through in order.
+    """
+    merged: list[IllustrationFinding] = []
+    by_scene: dict[str, IllustrationFinding] = {}
+    checks: dict[str, list[str]] = {}
+    for finding in findings:
+        if finding['kind'] != 'scene_unchecked':
+            merged.append(finding)
+            continue
+        scene_id = finding.get('scene_id', '')
+        skipped = finding.get('skipped', '')
+        if scene_id not in by_scene:
+            by_scene[scene_id] = dict(finding)  # type: ignore[assignment]
+            checks[scene_id] = []
+            merged.append(by_scene[scene_id])
+        if skipped and skipped not in checks[scene_id]:
+            checks[scene_id].append(skipped)
+    for scene_id, finding in by_scene.items():
+        error = re.search(r'could not be read \(([^)]*)\)', finding['detail'])
+        finding['skipped'] = '; '.join(checks[scene_id])
+        finding['detail'] = _unchecked_detail(
+            scene_id, error.group(1) if error else 'unreadable',
+            checks[scene_id])
+    return merged
 
 
 # ============================================================================
@@ -2263,6 +2329,11 @@ IllustrationFindingKind = Literal[
     # stripped from the prose analysis reads nor rendered as art, so it is
     # printed in the book. Blocking.
     'malformed_marker',
+    # A scene file that could not be read, so the checks that read it did not
+    # run for it (#288's review, SF-1/CR-1). Before, one undecodable scene
+    # raised out of `validate_plan` — or, in the marker scans, was skipped
+    # silently, so `validate` said "valid" over checks that never ran.
+    'scene_unchecked',
 ]
 
 
@@ -2281,6 +2352,8 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
     #: visual-state kinds, whose fix is an edit to reference/visual-state.csv
     #: even though the finding is *about* a scene.
     file: str
+    #: scene_unchecked only: the check(s) that could not run, `; `-joined
+    skipped: str
 
 
 # Findings that make the plan incoherent — the book cannot be published or
@@ -2354,6 +2427,11 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # author to delete a correct cell.
     'state_override_unparsed', 'state_override_prose_key',
     'state_override_unmatched_entity',
+    # A gap in what was checked, not a broken plan — the
+    # `canon_staleness_unchecked` precedent. It must not read as clean, and it
+    # must not block a book whose plan may be fine: the file is the problem,
+    # and cleanup's `unreadable_scene` names it too.
+    'scene_unchecked',
 })
 
 Severity = Literal['error', 'warning']
@@ -2383,8 +2461,10 @@ def malformed_marker_findings(project_dir: str) -> list[IllustrationFinding]:
             continue
         try:
             text = read_scene_raw(project_dir, name[:-3]) or ''
-        except (OSError, UnicodeDecodeError):
-            # cleanup's scene check reports the file itself; nothing to add
+        except SCENE_READ_ERRORS as exc:
+            # Said, not skipped: silence here read as "no malformed markers"
+            findings.append(scene_unchecked_finding(
+                name[:-3], 'the malformed-marker check', exc))
             continue
         for bad in malformed_markers(text):
             findings.append({
@@ -2627,7 +2707,7 @@ def validate_plan(project_dir: str, *,
         # needs to run: a direction document can exist (and drift from
         # canon) before a single illustration has ever been planned.
         findings.extend(_direction_anchor_mismatches(project_dir))
-        return findings
+        return merge_unchecked(findings)
 
     seen_ids: set[str] = set()
     referenced_files: set[str] = set()
@@ -2690,7 +2770,16 @@ def validate_plan(project_dir: str, *,
                              'detail': 'no scene_id — the illustration has nowhere to land'})
             continue
 
-        scene_text = read_scene_raw(project_dir, scene_id)
+        # An unreadable scene skips only the checks that read it; the row's
+        # own cells and files are still checked below.
+        unreadable = False
+        try:
+            scene_text = read_scene_raw(project_dir, scene_id)
+        except SCENE_READ_ERRORS as exc:
+            findings.append(scene_unchecked_finding(
+                scene_id, f'the marker, anchor and spoiler checks for {rid!r}',
+                exc))
+            scene_text, unreadable = '', True
         if scene_text is None:
             findings.append({'kind': 'unknown_scene', 'id': rid, 'scene_id': scene_id,
                              'detail': f'scene {scene_id!r} has no file in scenes/'})
@@ -2726,7 +2815,8 @@ def validate_plan(project_dir: str, *,
         # state: the art exists and the plan points at it, so the marker was
         # either never embedded or was dropped by a rewrite. Either way the
         # illustration will not appear in the book.
-        if status == 'ingested' and rel and not has_marker(scene_text, rid):
+        if (status == 'ingested' and rel and not unreadable
+                and not has_marker(scene_text, rid)):
             findings.append({
                 'kind': 'unembedded_ingested', 'id': rid, 'scene_id': scene_id,
                 'detail': f'{rid!r} is ingested but has no marker in '
@@ -2754,7 +2844,7 @@ def validate_plan(project_dir: str, *,
                           f'{_csv_safe(scene_id)}, or use scene_open / '
                           f'scene_close',
             })
-        if placement not in ANCHORLESS_PLACEMENTS and anchor:
+        if placement not in ANCHORLESS_PLACEMENTS and anchor and not unreadable:
             match = find_anchor(scene_text, anchor)
             if match is None:
                 findings.append({'kind': 'anchor_drift', 'id': rid, 'scene_id': scene_id,
@@ -2769,7 +2859,8 @@ def validate_plan(project_dir: str, *,
         # row's own prompt file, so it covers prompts written before the scene
         # was split at the illustration's position — which is every prompt on
         # every project that predates this check.
-        findings.extend(spoiler_findings(project_dir, row, scene_text))
+        if not unreadable:
+            findings.extend(spoiler_findings(project_dir, row, scene_text))
 
     # Markers with no plan row, and repeated markers within one scene.
     scenes_dir = os.path.join(project_dir, 'scenes')
@@ -2781,11 +2872,14 @@ def validate_plan(project_dir: str, *,
                 with open(os.path.join(scenes_dir, name),
                           encoding='utf-8') as f:
                     text = f.read()
-            except (OSError, UnicodeDecodeError):
-                # As in malformed_marker_findings: cleanup's scene check
-                # reports the file itself. Raising here killed the whole
-                # cleanup report (and validate) on any project with a plan
-                # (#288 — the first fixture with a plan found it).
+            except SCENE_READ_ERRORS as exc:
+                # Raising here killed the whole cleanup report (and validate)
+                # on any project with a plan or an illustrations directory
+                # (#288 — the first fixture with a plan found it); skipping
+                # silently let `validate` call checks that never ran "valid".
+                findings.append(scene_unchecked_finding(
+                    name[:-3], 'the inline, duplicate and orphan marker checks',
+                    exc))
                 continue
             for mid in sorted(set(inline_marker_ids(text))):
                 findings.append({
@@ -2828,7 +2922,7 @@ def validate_plan(project_dir: str, *,
 
     findings.extend(_direction_anchor_mismatches(project_dir))
 
-    return findings
+    return merge_unchecked(findings)
 
 
 def _direction_anchor_mismatches(project_dir: str) -> list[IllustrationFinding]:

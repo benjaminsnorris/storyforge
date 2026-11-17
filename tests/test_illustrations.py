@@ -879,16 +879,115 @@ def test_an_undecodable_prompt_file_does_not_escape_validate_plan(project_dir):
     assert 'prompt_spoiler_unchecked' in kinds
 
 
-def test_an_undecodable_scene_file_does_not_escape_validate_plan(project_dir):
-    """The marker scan read every scene file as UTF-8 unguarded. Before the
-    fixture had a plan (#288), `validate_plan` returned early and nothing
-    reached it; on a project with a plan, one latin-1 scene file killed
-    `validate` and the whole `cleanup` report, which reports the file itself."""
-    ill.write_plan(project_dir, [plan_row()])
-    with open(os.path.join(project_dir, 'scenes', 'bad.md'), 'wb') as f:
-        f.write(b'# Malm\xf6\n\nThe prose.\n')
+def _latin1(project_dir, scene_id, text='# Malm\xf6\n\nThe prose.\n'):
+    """Write a scene file that is not UTF-8 — what a hand edit in another
+    editor leaves behind."""
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    with open(path, 'wb') as f:
+        f.write(text.encode('latin-1'))
+    return path
 
-    ill.validate_plan(project_dir)   # must not raise
+
+def _unchecked(findings, scene_id):
+    return [f for f in findings
+            if f['kind'] == 'scene_unchecked' and f['scene_id'] == scene_id]
+
+
+def test_an_undecodable_scene_is_reported_and_the_scan_goes_on(project_dir):
+    """The marker scan read every scene file as UTF-8 unguarded: on a project
+    with a plan or an illustrations directory, one latin-1 scene file killed
+    `validate` and the whole `cleanup` report (#288). Skipping it silently is
+    no better — `validate` then said "valid" over checks that never ran — so
+    the file gets a finding, and the scan carries on past it: `zz` sorts after
+    `bad` and its orphan marker is still found, and the plan's own findings
+    still come back."""
+    ill.write_plan(project_dir, [plan_row(scene_id='act1-sc01',
+                                          layout='poster')])
+    _latin1(project_dir, 'bad')
+    write_scene(project_dir, 'zz', 'Prose.\n\n![[illus:nobody-planned-this]]\n')
+
+    findings = ill.validate_plan(project_dir)
+    kinds = {f['kind'] for f in findings}
+
+    unchecked = _unchecked(findings, 'bad')
+    assert len(unchecked) == 1
+    assert 'UnicodeDecodeError' in unchecked[0]['detail']
+    assert 'marker checks' in unchecked[0]['detail']
+    assert ill.severity_of('scene_unchecked') == 'warning'
+    assert any(f['kind'] == 'orphan_marker' and f['scene_id'] == 'zz'
+               for f in findings)
+    assert 'invalid_layout' in kinds
+
+
+def test_the_malformed_marker_scan_reports_an_undecodable_scene(project_dir):
+    _latin1(project_dir, 'bad')
+    write_scene(project_dir, 'zz', 'Prose.\n\n![[illus:bad id!]]\n')
+
+    findings = ill.malformed_marker_findings(project_dir)
+
+    assert len(_unchecked(findings, 'bad')) == 1
+    assert any(f['kind'] == 'malformed_marker' and f['scene_id'] == 'zz'
+               for f in findings)
+
+
+def test_an_undecodable_planned_scene_is_a_finding_not_a_crash(project_dir):
+    """The fixture's plan and log both name act1-sc01, so the per-row read, the
+    evidence check, and the audit narrowing all reach it. One merged finding
+    names every check that did not run, and the row's own cells and files are
+    still checked."""
+    _latin1(project_dir, 'act1-sc01', 'Dorren held her breath. Malm\xf6.\n')
+    rows = ill.read_plan(project_dir)
+    rows[0].update({'status': 'ingested',
+                    'asset_file': ill.default_asset_rel(rows[0]['id'])})
+    ill.write_plan(project_dir, rows)
+
+    findings = ill.validate_plan(project_dir)
+
+    unchecked = _unchecked(findings, 'act1-sc01')
+    assert len(unchecked) == 1, unchecked
+    detail = unchecked[0]['detail']
+    assert 'evidence check' in detail
+    assert 'audit' in detail
+    assert rows[0]['id'] in detail
+    assert '|' not in detail
+    # The row's file check does not need the scene, so it still runs.
+    assert any(f['kind'] == 'missing_file' and f['id'] == rows[0]['id']
+               for f in findings)
+
+
+def test_the_prepass_reports_an_undecodable_scene(project_dir):
+    from storyforge import visual_state as vs
+    _latin1(project_dir, 'act1-sc02', 'Blank parchment. Malm\xf6.\n')
+
+    result = vs.prepass(project_dir)
+
+    assert len(_unchecked(result['findings'], 'act1-sc02')) == 1
+    assert 'act1-sc02' not in result['candidate_scenes']
+    assert 'act1-sc02' not in result['undrafted_scenes']
+
+
+def test_digest_drift_reports_an_undecodable_audited_scene(project_dir):
+    from storyforge import visual_state as vs
+    vs.write_provenance(project_dir, [
+        {'scene_id': 'act1-sc02', 'digest': 'x' * 64, 'audited_at': '2026-11-01'}])
+    _latin1(project_dir, 'act1-sc02')
+
+    assert len(_unchecked(vs.digest_drift(project_dir), 'act1-sc02')) == 1
+
+
+def test_plan_report_survives_an_undecodable_scene(project_dir):
+    _latin1(project_dir, 'act1-sc01')
+    report = ill.plan_report(project_dir)
+    first = ill.read_plan(project_dir)[0]['id']
+    assert first not in report['embedded'] + report['unembedded']
+
+
+def test_schema_validation_warns_on_an_undecodable_scene(project_dir):
+    from storyforge.schema import validate_illustration_plan
+    _latin1(project_dir, 'act1-sc01')
+    result = validate_illustration_plan(project_dir)
+    assert result['errors'] == []
+    assert any('scene_unchecked' in w['message'] for w in result['warnings'])
 
 
 def test_the_spoiler_finding_reaches_validate_plan(project_dir):
