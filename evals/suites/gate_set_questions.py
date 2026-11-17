@@ -36,9 +36,14 @@ MIN_POSITIVES = 40   # as gate-set's
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    'recall': None, 'recall_per_case': None, 'cases_caught': None,
-    'stop_rate_positive': None, 'false_alarm_on_fact': None, 'stop_rate_control': None,
-    'unfinished': None,
+    # recorded 2026-11-16, seeded (run 1; runs 2 and 3: recall 0.3261 and
+    # 0.3696, false alarms 2 and 1, control stops 0.6129 and 0.5484). Of 46
+    # positives, 39 are seeded and 30 asked about their fact
+    'recall': 0.3696, 'recall_per_case': 0.4422, 'cases_caught': 9,
+    'stop_rate_positive': 0.7391, 'false_alarm_on_fact': 1, 'stop_rate_control': 0.4839,
+    'unfinished': 0,
+    'recall_seeded': 0.4359, 'recall_asked': 0.5333, 'asked_positives': 30,
+    'asked_controls': 24,
 }
 
 

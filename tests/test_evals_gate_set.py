@@ -315,7 +315,11 @@ class TestSuite:
             return _gate_catching_wrong(item, work_dir)
         monkeypatch.setattr(runner, 'gate_one', fake_gate)
         before = gate.GATE_CHECK_METHOD
-        result = harness.run_suite(_suite(name), 'replay', str(tmp_path / 'c'))
+        suite = _suite(name)
+        # as before the first recording: no floor set
+        monkeypatch.setitem(suite.run.__globals__, 'FLOORS',
+                            dict.fromkeys(suite.run.__globals__['FLOORS']))
+        result = harness.run_suite(suite, 'replay', str(tmp_path / 'c'))
         assert gate.GATE_CHECK_METHOD == before
         assert sorted(seen) == [('control', method), ('positive', method), ('positive', method)]
         assert result['metrics']['recall'] == 0.5
@@ -406,8 +410,12 @@ class TestSuite:
         _write_set(tmp_path, _items(), recorded=())
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
         monkeypatch.setattr(runner, 'gate_one', lambda *a: pytest.fail('gated'))
+        suite = _suite()
+        # as before the first recording: no floor set
+        monkeypatch.setitem(suite.run.__globals__, 'FLOORS',
+                            dict.fromkeys(suite.run.__globals__['FLOORS']))
         for mode in ('replay', 'auto', 'record'):   # frozen: all three replay
-            result = harness.run_suite(_suite(), mode, str(tmp_path / 'c'))
+            result = harness.run_suite(suite, mode, str(tmp_path / 'c'))
             assert result['status'] == 'stale' and result['unavailable'] is True, result
             assert 'not recorded yet' in result['stale']
             assert '--mode record --suite gate-set --runs 3 --over-budget' in result['stale']
