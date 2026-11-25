@@ -1640,11 +1640,45 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             r['resolves'] = ''
 
     result = GateResult(scene_id, problems={k: [] for k in COMMITMENT_PROBLEMS + ('rejected',)})
-    result.proposed = _extract(project_dir, scene_id, prose, rows, order,
-                               introduced_by or command,
-                               extract_model or select_model('evaluation'), log_dir,
-                               result.problems, result.dropped,
-                               reserved=_reserved_ids(old, loaded, briefs_name))
+    if GATE_CHECK_METHOD not in CHECK_METHODS:
+        raise GateError(f'GATE_CHECK_METHOD is {GATE_CHECK_METHOD!r}, not one of '
+                        f'{", ".join(CHECK_METHODS)}')
+    if GATE_CHECK_METHOD == 'questions' and not GATE_CONTINUITY:
+        raise GateError(f'{scene_id}: the question layer asks about who is in the scene, '
+                        f'from its typed state, so it needs the continuity checks '
+                        f'(GATE_CONTINUITY)')
+    skip, why_not = (blocking_read_before(project_dir, scene_id, prose)
+                     if GATE_BLOCKING and command == 'recheck' else (False, ''))
+    what = 'stage sheet' if GATE_BLOCKING_METHOD == 'stage-sheet' else 'blocking read'
+    read_blocking = GATE_BLOCKING and not skip
+
+    # Extraction (and its persistence check), the blocking read and the
+    # typed state read the prose independently: their model calls run at
+    # once (`runner.together`; one after the other, they were most of a
+    # gate run's time: iliad-adult, 2026-11-17). Each writes only its own
+    # part of `result`; what they find is merged below in the order the
+    # steps ran one after the other, so a finding is kept or left out as
+    # it was. The question layer (or the open checker) needs extraction's
+    # disputes and the typed state's cast, so it comes after
+    def extract():
+        return _extract(project_dir, scene_id, prose, rows, order, introduced_by or command,
+                        extract_model or select_model('evaluation'), log_dir,
+                        result.problems, result.dropped,
+                        reserved=_reserved_ids(old, loaded, briefs_name))
+    calls = [extract]
+    if read_blocking:
+        calls.append(lambda: _read_blocking(project_dir, scene_id, prose, check_model, log_dir,
+                                            result))
+    if GATE_CONTINUITY:
+        # its own copy: extraction reads `rows` while this one does
+        state_rows = copy.deepcopy(rows)
+        calls.append(lambda: _read_continuity(project_dir, scene_id, prose, state_rows,
+                                              log_dir))
+    from storyforge.runner import together
+    got = together(*calls)
+    result.proposed = got.pop(0)
+    blocked = got.pop(0) if read_blocking else None
+    state = got.pop(0) if GATE_CONTINUITY else None
     # A fact the author rejected may not come back as binding
     for r in result.proposed:
         rid = rejected_here.get(ledger.fact_key(r))
@@ -1654,14 +1688,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 f'which the author rejected')
         result.halts = audit.halting_conditions(result.proposed, rows)
     disputes = _disputes(result, rows)
-    if GATE_CHECK_METHOD not in CHECK_METHODS:
-        raise GateError(f'GATE_CHECK_METHOD is {GATE_CHECK_METHOD!r}, not one of '
-                        f'{", ".join(CHECK_METHODS)}')
     if GATE_CHECK_METHOD == 'questions':
-        if not GATE_CONTINUITY:
-            raise GateError(f'{scene_id}: the question layer asks about who is in the scene, '
-                            f'from its typed state, so it needs the continuity checks '
-                            f'(GATE_CONTINUITY)')
         # filled after the typed state is read (`_ask_questions`)
         result.check = CheckResult(scene_id)
     else:
@@ -1674,9 +1701,6 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             error = GateError(str(e))
             error.run = getattr(e, 'run', None)
             raise error from e
-    skip, why_not = (blocking_read_before(project_dir, scene_id, prose)
-                     if GATE_BLOCKING and command == 'recheck' else (False, ''))
-    what = 'stage sheet' if GATE_BLOCKING_METHOD == 'stage-sheet' else 'blocking read'
     if skip:
         # #631: a re-check runs because an earlier scene changed; the
         # blocking check takes the scene alone, so on the gated prose it can
@@ -1692,7 +1716,6 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         # The scene against itself (#626): the checker reads it against the
         # book; this reads its blocking alone. Its findings join the check's,
         # so they are sorted, reported, fixed and accepted the same way
-        blocked = _read_blocking(project_dir, scene_id, prose, check_model, log_dir, result)
         result.check.findings.extend(blocked.findings)
         result.check.unverified.extend(blocked.unverified)
         result.blocking_method = GATE_BLOCKING_METHOD
@@ -1700,7 +1723,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         from storyforge.common import log
         log(f'  {scene_id}: {result.blocking_note}')
     if GATE_CONTINUITY:
-        records = _check_continuity(project_dir, scene_id, prose, rows, log_dir, result)
+        records = _merge_continuity(scene_id, state, result)
         if GATE_CHECK_METHOD == 'questions':
             _ask_questions(project_dir, scene_id, prose, rows, records, disputes, log_dir,
                            result)
@@ -3660,24 +3683,31 @@ def _read_blocking(project_dir: str, scene_id: str, prose: str, check_model: str
         raise GateError(str(e)) from e
 
 
-def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
-                      log_dir: str, result: 'GateResult') -> list:
-    """The continuity checks (#648): their findings join the check's (a
-    finding on the same words with the same code as one the check or the
-    blocking read already made is left out, so one slip isn't two;
-    for the sun, also a stage sheet's BLK on those words), their
-    notes go to `result.state_notes`, logged and reported. The scene's
-    typed state is read against the ledger without its earlier commitments
-    (`rows`, as the checker reads it) and saved; its records are returned
-    (the question layer's cast, #649). A failure is a `GateError`: the
-    scene can't be checked."""
-    from storyforge.common import log
-    from storyforge.continuity import ContinuityError, check_continuity, overlaps
+def _read_continuity(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
+                     log_dir: str):
+    """The continuity checks' model call (#648): the scene's typed state,
+    read against the ledger without its earlier commitments (`rows`, as the
+    checker reads it), and saved. It writes nothing of the gate's result,
+    so it can run beside extraction and the blocking read; `_merge_continuity`
+    takes in what it found. A failure is a `GateError`: the scene can't be
+    checked."""
+    from storyforge.continuity import ContinuityError, check_continuity
     try:
-        got = check_continuity(project_dir, scene_id, prose=prose, rows=rows,
-                               log_file=os.path.join(log_dir, f'gate-state-{scene_id}.json'))
+        return check_continuity(project_dir, scene_id, prose=prose, rows=rows,
+                                log_file=os.path.join(log_dir, f'gate-state-{scene_id}.json'))
     except ContinuityError as e:
         raise GateError(str(e)) from e
+
+
+def _merge_continuity(scene_id: str, got, result: 'GateResult') -> list:
+    """The continuity checks' findings join the check's (a finding on the
+    same words with the same code as one the check or the blocking read
+    already made is left out, so one slip isn't two; for the sun, also a
+    stage sheet's BLK on those words), their notes go to
+    `result.state_notes`, logged and reported. Returns the typed state's
+    records (the question layer's cast, #649)."""
+    from storyforge.common import log
+    from storyforge.continuity import overlaps
     have = result.check.findings + result.check.unverified
     for f in got.findings:
         # the stage sheet checks the sun too (#647): its BLK on these words is this slip
@@ -3689,6 +3719,13 @@ def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[di
     if got.notes:
         log(f'  {scene_id}: continuity, not checked or advisory: {"; ".join(got.notes)}')
     return got.records
+
+
+def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
+                      log_dir: str, result: 'GateResult') -> list:
+    """`_read_continuity` then `_merge_continuity`, one after the other."""
+    return _merge_continuity(scene_id, _read_continuity(project_dir, scene_id, prose, rows,
+                                                        log_dir), result)
 
 
 #: What the question layer doesn't do that the open checker did (#649): a

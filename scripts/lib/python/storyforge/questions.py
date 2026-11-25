@@ -778,20 +778,29 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         result.notes.append(f'{len(picked.absent)} fact(s) about people or places not in the '
                             f'scene (by its typed state, its location, or a name in its '
                             f'prose): not asked: ' + ', '.join(picked.absent))
+    # the facts' questions and the promises' are independent: asked at once
+    from storyforge.runner import together
+    wanted = promises_for(brief) if promises else []
+    stem, ext = os.path.splitext(log_file)
+    calls = []
     if questions:
-        asked = ask_questions(scene_id, prose, questions, model=resolve_model(model),
-                              log_file=log_file)
+        calls.append(lambda: ask_questions(scene_id, prose, questions,
+                                           model=resolve_model(model), log_file=log_file))
+    if wanted:
+        calls.append(lambda: ask_promises(scene_id, prose, wanted, model=resolve_model(model),
+                                          log_file=f'{stem}-promises{ext}' if log_file
+                                          else ''))
+    answered = together(*calls)
+    if questions:
+        asked = answered.pop(0)
         asked.present, asked.notes = result.present, result.notes + asked.notes
         asked.unruled = result.unruled + asked.unruled
         result = asked
     if promises:
         result.unknown_brief_items = list(brief.unknown)
         result.stale_brief_items = list(brief.stale)
-        wanted = promises_for(brief)
         if wanted:
-            stem, ext = os.path.splitext(log_file)
-            got = ask_promises(scene_id, prose, wanted, model=resolve_model(model),
-                               log_file=f'{stem}-promises{ext}' if log_file else '')
+            got = answered.pop(0)
             result.findings += got.findings
             result.unverified += got.unverified
             result.kept += got.kept

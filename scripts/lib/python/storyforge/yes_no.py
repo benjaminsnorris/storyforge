@@ -105,15 +105,20 @@ def ask(build_prompt: Callable[[int], str], count: int, *, model: str, log_file:
         tokens: int, schema: dict, label: str, what: str, error: type[Exception],
         fields: tuple[str, ...] = ('why',), askings: int = ASKINGS
         ) -> list[dict[int, dict[str, str]]]:
-    """Ask `count` questions `askings` times, one call per asking
-    (`build_prompt(asking)` makes its prompt). Returns each asking's answers
+    """Ask `count` questions `askings` times, one call per asking, all at
+    once (`build_prompt(asking)` makes its prompt). Returns each asking's answers
     (`parse_answers`), in asking order; [] when there are no questions.
     Raises `error` when an asking fails (`structured_call`)."""
     if not count:
         return []
-    return [structured_call(build_prompt(n), model, asking_log(log_file, n), tokens, schema,
-                            label, lambda t: parse_answers(t, count, fields), what, error)
-            for n in range(1, askings + 1)]
+    from storyforge.runner import together
+
+    def asking(n: int):
+        return lambda: structured_call(build_prompt(n), model, asking_log(log_file, n), tokens,
+                                       schema, label, lambda t: parse_answers(t, count, fields),
+                                       what, error)
+    # the askings are independent (each its own call): at once
+    return together(*(asking(n) for n in range(1, askings + 1)))
 
 
 def agreed(answers: list[dict[int, dict[str, str]]], count: int, answer: str
