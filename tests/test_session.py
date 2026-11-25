@@ -184,7 +184,9 @@ def test_the_context_holds_the_voice_and_the_cast_never_the_checks(project_dir):
     assert 'Measures before it feels' in text              # book.md
     assert 'Her heart pounded' not in text                 # checks.md
     assert '## The cast' in text and '- Dorren Hayle' in text
-    assert session.system_blocks(project_dir)[-1]['cache_control'] == {'type': 'ephemeral'}
+    # the conversation's TTL: a shorter marker can't come before a longer one
+    assert session.system_blocks(project_dir)[-1]['cache_control'] == {
+        'type': 'ephemeral', 'ttl': session.CACHE_TTL}
 
 
 def test_no_voice_no_session(project_dir):
@@ -260,7 +262,7 @@ def test_settle_keeps_the_committed_scene_in_place_of_its_turns(project_dir, req
     assert 'FINAL PROSE' in s.messages[-1]['content'] and s.messages[-2]['content'] == 'PLAN 1'
     # each request carried the system context and asked for caching
     assert requests[0]['system'][0]['text'] == 'sys'
-    assert requests[0]['cache_control'] == {'type': 'ephemeral'}
+    assert requests[0]['cache_control'] == {'type': 'ephemeral', 'ttl': '1h'}
 
 
 def test_a_cut_off_reply_is_an_error_and_leaves_no_turn(project_dir, requests):
@@ -283,8 +285,62 @@ def test_the_writer_fixes_the_gates_problems_with_edits(project_dir, requests):
     out = []
     fixed = s.fixer(SCENE, 'It took eight days.', result, edits_out=out)
     assert fixed == 'It took five days.' and out == edits
-    assert requests[0]['output_config']['format']['schema'] == gate.FIX_SCHEMA
     assert 'eight days' in requests[0]['messages'][-1]['content']
+
+
+def test_a_fix_turn_is_shaped_like_a_writing_turn_so_both_share_the_cache(project_dir,
+                                                                          requests):
+    # iliad-adult, 2026-11-17: the fix asked for its edits by `output_schema`,
+    # which changes the request ahead of the conversation, so every first fix
+    # wrote the whole story to the cache again, and the next draft the same
+    from storyforge.checker import CheckResult, Finding
+    s = session.Session(project_dir, 'claude-opus-5-5', [{'type': 'text', 'text': 'sys'}],
+                        'STORY', str(project_dir))
+    f = Finding('contradiction', 'TIM', 'eight days', SCENE, 'five days', 'ledger', 'why')
+    result = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[f]))
+    requests.replies = [_reply(scene_reply('It took eight days.')),
+                        _reply('```json\n{"edits": [{"problem": 1, "find": "eight days", '
+                               '"replace": "five days"}]}\n```'),
+                        _reply(scene_reply('Then it rained.'))]
+    s.write(SCENE, 'PLAN 1')
+    assert s.fixer(SCENE, 'It took eight days.', result) == 'It took five days.'
+    s.settle('PLAN 1', 'It took five days.', [])
+    s.write('next', 'PLAN 2')
+    shape = [{k: v for k, v in r.items() if k not in ('messages', 'max_tokens')}
+             for r in requests]
+    assert shape[0] == shape[1] == shape[2]
+    assert 'output_config' not in requests[1]
+    # each turn's conversation starts with the one before it
+    for a, b in zip(requests, requests[1:]):
+        assert b['messages'][:2] == a['messages'][:2]
+
+
+def test_a_fix_reply_that_cant_be_read_is_asked_for_once_more(project_dir, requests):
+    from storyforge.checker import CheckResult, Finding
+    s = session.Session(project_dir, 'claude-opus-5-5', [], '', str(project_dir))
+    f = Finding('contradiction', 'TIM', 'eight days', SCENE, 'five days', 'ledger', 'why')
+    result = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[f]))
+    requests.replies = [_reply('I changed it to five days.'),
+                        _reply('{"edits": [{"problem": 1, "find": "eight days", '
+                               '"replace": "five days"}]}')]
+    assert s.fixer(SCENE, 'It took eight days.', result) == 'It took five days.'
+    assert len(requests) == 2 and 'could not be read' in requests[1]['messages'][-1]['content']
+
+
+@pytest.mark.parametrize('text', [
+    '{"edits": [{"find": "a"}]}',                          # no replace
+    '{"edits": [{"find": "a", "replace": "b", "x": 1}]}',  # an unknown key
+    '{"edits": [{"problem": "1", "find": "a", "replace": "b"}]}',
+    '{"edits": {}}', '{"changes": []}', '[]', 'edits: none'])
+def test_a_fix_reply_off_its_shape_is_refused(text):
+    with pytest.raises(ValueError):
+        session.parse_fix_reply(text)
+
+
+def test_a_fix_reply_may_come_fenced_and_may_have_no_edit():
+    assert session.parse_fix_reply('```\n{"edits": []}\n```') == []
+    assert session.parse_fix_reply(' {"edits": [{"find": "a", "replace": "b"}]} ') == [
+        {'find': 'a', 'replace': 'b'}]
 
 
 def test_a_fix_the_writer_cant_make_is_a_gate_error(project_dir, requests):
@@ -292,7 +348,7 @@ def test_a_fix_the_writer_cant_make_is_a_gate_error(project_dir, requests):
     s = session.Session(project_dir, 'claude-opus-5-5', [], '', str(project_dir))
     f = Finding('contradiction', 'TIM', 'eight days', SCENE, 'five days', 'ledger', 'why')
     result = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[f]))
-    requests.replies = [_reply('not json')]
+    requests.replies = [_reply('not json'), _reply('still not json')]
     with pytest.raises(gate.GateError, match='could not be read'):
         s.fixer(SCENE, 'It took eight days.', result, edits_out=[])
 
