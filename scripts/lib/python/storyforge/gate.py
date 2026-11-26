@@ -140,7 +140,8 @@ _REPORTED_LABEL = {
     UNOFFERED: 'a link named a fact in force that extraction was not offered (past the '
                'cap); read as that fact, by its id or the nearest id of the same scene',
     ENDS_HERE: 'a state the plan sets up in this scene, with no end given, ends in this '
-               'scene too; its end is recorded here',
+               'scene too (the check confirmed it); recorded as a commitment of the scene '
+               'that supersedes it, never on the plan\'s row',
     'cap': 'facts in force left out of what extraction was offered, over the cap '
            '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
 }
@@ -186,6 +187,13 @@ class GateResult:
     #: (statement, why) for each extracted fact the persistence check judged
     #: not to last beyond the scene: not proposed, so never committed
     dropped: list[tuple[str, str]] = field(default_factory=list)
+    #: the ends extraction read (`extract.Ending`; #734's review CR-5),
+    #: applied on commit (`_apply_ends`), never during the run: an offered
+    #: state's end sets its `resolves`; an `ENDS_HERE` claim is a dispute
+    #: the check rules on, recorded only when it confirms it
+    ends: list = field(default_factory=list)
+    #: `ENDS_HERE` claims not recorded on commit, `state id: why`, reported
+    ends_held: list[str] = field(default_factory=list)
     #: on commit (Phase 4): the scene's earlier commitments this version
     #: dropped or changed, and the earlier states whose end in this scene
     #: came or went
@@ -381,10 +389,13 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
              problems: dict[str, list[str]],
              dropped: list[tuple[str, str]], *,
-             reserved: Set[str]) -> list[dict[str, str]]:
+             reserved: Set[str], ends: list | None = None) -> list[dict[str, str]]:
     """The scene's commitments read from `prose` against `rows`, each with an
     id no row of `rows` and none of `reserved` has (#599; required, #599's
-    review TD-2: `_reserved_ids`)."""
+    review TD-2: `_reserved_ids`). The ends read go to `ends`
+    (`extract.Ending`), none applied to `rows`; an `ENDS_HERE` claim on a
+    state a later scene leans on is `ends registry` instead
+    (`_route_leaned_on`)."""
     from storyforge.api import extract_text, invoke_to_file, is_truncated
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
@@ -431,9 +442,46 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     except persistence.PersistenceError as e:
         raise GateError(str(e)) from e
     dropped.extend((e['statement'], why) for e, why in verdict.dropped)
-    return commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
-                           introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
-                           registry_is_plan=True, reserved=reserved, order=order)
+    ends = [] if ends is None else ends
+    out = commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
+                          introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
+                          registry_is_plan=True, reserved=reserved, order=order,
+                          ends_out=ends)
+    _route_leaned_on(project_dir, scene_id, rows, order, ends, problems)
+    return out
+
+
+def _route_leaned_on(project_dir: str, scene_id: str, rows: list[dict[str, str]],
+                     order: dict[str, int], ends: list,
+                     problems: dict[str, list[str]]) -> None:
+    """#734's review CR-1: an `ENDS_HERE` claim on a state a later scene
+    leans on (its brief names it, `audit.leaning_scenes`, or a later binding
+    row supersedes it or names it in `depends_on`) is taken off `ends` and
+    reported `ends registry` for the checker: ending it here would
+    contradict the plan. One that can't be checked (scene-briefs.csv
+    unreadable) is routed the same way, and says why."""
+    from storyforge.extract import ENDS_HERE
+    here = [e for e in ends if e.kind == ENDS_HERE]
+    if not here:
+        return
+    at = order[scene_id]
+    try:
+        leaning = audit.leaning_scenes(project_dir, [e.state_id for e in here])
+        why_not = ''
+    except (OSError, UnicodeDecodeError, ValueError) as err:
+        leaning, why_not = {}, f'scene-briefs.csv not read: {err}'
+    for e in here:
+        later = [s for s in leaning.get(e.state_id, []) if order.get(s, -1) > at]
+        later += [r['id'] for r in rows if r.get('status') == 'binding'
+                  and order.get((r.get('scene_id') or '').strip(), -1) > at
+                  and e.state_id in (ledger._split(r.get('supersedes', ''))
+                                     + ledger._split(r.get('depends_on', '')))]
+        if not later and not why_not:
+            continue
+        ends.remove(e)
+        because = (f'later scenes lean on it: {", ".join(later)}' if later else why_not)
+        problems['ends registry'].append(
+            f'{scene_id}: {e.state_id} (resolves: blank; {_one_line(because)})')
 
 
 def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
@@ -459,6 +507,15 @@ def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
         out.setdefault(m.group(1), Dispute(
             m.group(1), _statement(rows, m.group(1)),
             f'the state ends in this scene (the plan says it ends at {m.group(2)})'))
+    # #734's review SF-1: a state the plan sets up here, ended here too, is
+    # recorded only when the check confirms the scene shows it ending
+    from storyforge.extract import ENDS_HERE
+    for e in result.ends:
+        if e.kind == ENDS_HERE:
+            said = _one_line(e.carrier.get('quote') or e.carrier.get('statement', ''))
+            out.setdefault(e.state_id, Dispute(
+                e.state_id, _statement(rows, e.state_id),
+                f'the state ends in this scene, where the plan sets it up: "{said}"'))
     return list(out.values())
 
 
@@ -1581,12 +1638,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     A redraft is extracted and checked against the ledger without its
     earlier version's commitments, and the `resolves` that version set on
     earlier commitments are cleared (this version's `ends` set them again).
-    A `resolves` on a registry state isn't touched: the gate sets one there
-    only on a state the plan sets up in this scene and the prose ends in it
-    too (`ENDS_HERE`, #734), which the author's plan could equally say, so a
-    re-gate whose reading no longer ends it leaves it ended. `introduced_by`
-    (default `command`) is what the new rows record; a re-check keeps the
-    prose's writer.
+    A `resolves` on a registry state is never touched: a state the plan sets
+    up in this scene and the prose ends in it too is ended by a commitment
+    of the scene that supersedes it (`ENDS_HERE`, `_apply_ends`; #734), so
+    replacing the scene's commitments clears it like any other.
+    `introduced_by` (default `command`) is what the new rows record; a
+    re-check keeps the prose's writer.
 
     `standing` (#734) is an earlier run of the same prose whose blocking
     findings still stand: each one this run's check didn't make again
@@ -1697,7 +1754,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         return _extract(project_dir, scene_id, prose, rows, order, introduced_by or command,
                         extract_model or select_model('evaluation'), log_dir,
                         result.problems, result.dropped,
-                        reserved=_reserved_ids(old, loaded, briefs_name))
+                        reserved=_reserved_ids(old, loaded, briefs_name), ends=result.ends)
     calls = [extract]
     if read_blocking:
         calls.append(lambda: _read_blocking(project_dir, scene_id, prose, check_model, log_dir,
@@ -1764,7 +1821,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check,
                                                     short_lines=result.short_must))
     if standing is not None:   # after the code's own, which it makes again
-        _carry_standing(result.check, standing)
+        _carry_standing(result.check, standing, disputes)
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
@@ -1899,6 +1956,7 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     # which keeps them and reports them (#632)
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
+    _apply_ends(project_dir, result, rows, old_rows, prose, loaded)
     _carry_ids(result.proposed, old_rows, result.steady)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
@@ -1909,6 +1967,12 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     result.changed = [r['id'] for r in old_rows if ledger._fact_key(r) not in new_keys]
     _keep_steady_ends(project_dir, result, new, ended_before, loaded, prose)
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
+    # #734's review CR-3: a state the plan sets up here that this version
+    # ends, or no longer ends, changes what the later scenes have in force
+    here_ids = _here_registry_ids(rows, scene_id)
+    result.changed += [i for i in sorted(_ended_here(old_rows, here_ids)
+                                         ^ _ended_here(result.proposed, here_ids))
+                       if i not in result.changed]
     result.changed += [i for i in revised_rejection if i not in result.changed]
     if result.changed:
         # #632: the narrower rule (a compatible type, mentions only in
@@ -2551,6 +2615,88 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
                 f'{_one_line(p.get("statement") or "")[:160]}"')
     result.proposed = kept + fresh
     result.steady = [o['id'] for o in kept]
+
+
+def _here_registry_ids(rows: list[dict[str, str]], scene_id: str) -> set[str]:
+    """The registry (plan) facts recorded for `scene_id`."""
+    return {r['id'] for r in rows if not ledger.is_commitment(r)
+            and (r.get('scene_id') or '').strip() == scene_id}
+
+
+def _ended_here(commitments: list[dict[str, str]], here_ids: set[str]) -> set[str]:
+    """The plan facts of the scene its commitments end (#734): an end of a
+    state set up in the scene is recorded as a commitment that supersedes it
+    (`_apply_ends`)."""
+    return {old for r in commitments for old in ledger._split(r.get('supersedes', ''))
+            if old in here_ids}
+
+
+def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]],
+                old_rows: list[dict[str, str]], prose: str, loaded=()) -> None:
+    """The ends extraction read (`result.ends`; #734's review CR-5), applied
+    on commit. An offered state's end sets its `resolves` to the scene. An
+    `ENDS_HERE` claim, on a state the plan sets up in the scene, is never
+    written on the plan's row (the author's; #734's review CR-2): it is a
+    commitment of the scene, the plan fact's subject, type and statement
+    with the carrying fact's quote, that supersedes the plan fact and
+    resolves here, so the state isn't in force after the scene and a
+    re-gate, which replaces the scene's commitments, reads it afresh. One is
+    recorded only when the check cleared its dispute (it confirms the scene
+    shows the state ending; SF-1), the fact that ends it is committed (not
+    held back, not dropped as a reading again) with its quote in the scene,
+    and, on prose with every paragraph unchanged, the earlier version ended
+    it too (`_keep_steady_ends`' rule). One already recorded by a kept
+    (steady) commitment stays. Each not recorded is in `ends_held`, with
+    why; each recorded in `problems[ENDS_HERE]`."""
+    from storyforge.extract import ENDS_HERE, commitment_id
+    from storyforge.quotes import quote_in
+    scene_id = result.scene_id
+    by_id = {r['id']: r for r in rows}
+    for e in result.ends:
+        if e.kind != ENDS_HERE and e.state_id in by_id:
+            by_id[e.state_id]['resolves'] = scene_id
+    claims = [e for e in result.ends if e.kind == ENDS_HERE]
+    if not claims:
+        return
+    here_ids = _here_registry_ids(rows, scene_id)
+    already = _ended_here(result.proposed, here_ids)
+    before = _ended_here(old_rows, here_ids)
+    confirmed = {d.fact_id for d in result.check.cleared} if result.check else set()
+    earlier, _ = gated_prose(project_dir, scene_id)
+    unchanged = earlier is not None and _paragraphs(earlier) == _paragraphs(prose)
+    taken = ({r['id'] for r in rows} | {r['id'] for r in result.proposed}
+             | {r['id'] for r in old_rows} | {r['id'] for r in loaded}
+             | ledger.linked_ids(list(loaded)))
+    for e in claims:
+        if e.state_id in already:
+            continue
+        quote = e.carrier.get('quote', '')
+        if e.state_id not in confirmed:
+            why = 'the check did not confirm the scene shows it ending (see its finding)'
+        elif unchanged and e.state_id not in before:
+            why = 'unchanged prose, and the earlier version did not end it'
+        elif not any(r is e.carrier for r in result.proposed):
+            why = ('the fact that ends it was not recorded (held back, or a reading again '
+                   'of unchanged prose)')
+        elif not quote or not quote_in(prose, quote):
+            why = 'the quote of the fact that ends it is not in the scene'
+        else:
+            why = ''
+        if why:
+            result.ends_held.append(f'{e.state_id}: {why}')
+            continue
+        state = by_id[e.state_id]
+        end = {c: '' for c in ledger.COLUMNS}
+        end.update(id=commitment_id(scene_id, state.get('statement', ''), taken),
+                   scene_id=scene_id, type=state.get('type', ''),
+                   subject=state.get('subject', ''), statement=state.get('statement', ''),
+                   quote=quote, origin='prose', status='binding', mutable='state',
+                   supersedes=e.state_id, resolves=scene_id,
+                   introduced_by=e.carrier.get('introduced_by', ''))
+        taken.add(end['id'])
+        result.proposed.append(end)
+        result.problems.setdefault(ENDS_HERE, []).append(
+            f'{scene_id}: {e.state_id} (by {e.carrier.get("id", "")})')
 
 
 def _keep_steady_ends(project_dir: str, result: GateResult, new: list[dict[str, str]],
@@ -3613,14 +3759,25 @@ def _slips_beside_findings(result: GateResult) -> list[str]:
     return [f'{k}: {item}' for k in _EXTRACTOR_SLIPS for item in result.problems.get(k, [])]
 
 
-def _carry_standing(check: CheckResult, run: GateResult) -> None:
+def _carry_standing(check: CheckResult, run: GateResult,
+                    disputes: list[Dispute] = ()) -> None:
     """#734: `run`'s blocking findings, verified and unverified, added to
     `check` (a run of the same prose) unless it made one again
     (`_persists`): a re-extraction re-reads the facts, and a re-roll of the
-    check that missed a finding must not pass the prose."""
+    check that missed a finding must not pass the prose. A finding that was
+    the ruling on one of `run`'s disputes (a plan fact extraction said the
+    scene changes) stands only while this run's extraction still raises
+    that dispute (`disputes`; #734's review CR-4): the reading it ruled on
+    is gone."""
+    gone = ({d.fact_id for d in _disputes(run, [])}
+            - {d.fact_id for d in disputes})
+
+    def stands(f: Finding) -> bool:
+        return not (f.fact_id in gone and not f.established_scene)
     have = check.findings + check.unverified
-    check.findings.extend(f for f in run.findings if not _persists(f, have))
-    check.unverified.extend(f for f in run.unverified if not _persists(f, have))
+    check.findings.extend(f for f in run.findings if stands(f) and not _persists(f, have))
+    check.unverified.extend(f for f in run.unverified
+                            if stands(f) and not _persists(f, have))
 
 
 #: How much of a misquoted quote a log line or pending reason shows
@@ -4063,10 +4220,21 @@ def report_lines(result: GateResult) -> list[str]:
                         'a contradiction already in the scene') + '): '
                      + '; '.join(_one_line(st) for st, _ in result.kept_stating))
     if result.check:
+        from storyforge.extract import ENDS_HERE
+        claims = {e.state_id for e in result.ends if e.kind == ENDS_HERE}
         for d in result.check.cleared:
+            if d.fact_id in claims:
+                if not result.committed:
+                    lines.append(f'NOTE (the check confirmed the scene ends a state the plan '
+                                 f'sets up in it; recorded when the scene commits): '
+                                 f'{d.fact_id} ("{_one_line(d.statement)}")')
+                continue
             lines.append(f'NOTE (plan fact kept, link not applied; the check found no '
                          f'contradiction): {d.fact_id} ("{_one_line(d.statement)}") vs '
                          f'"{_one_line(d.claim)}"')
+    if result.ends_held:
+        lines.append('NOTE (not recorded: the end of a state the plan sets up in this scene): '
+                     + '; '.join(_one_line(h) for h in result.ends_held))
     for kind in REPORTED:
         if kind in ('disagrees', 'ends registry'):
             continue    # every one is a dispute: a finding, UNRULED or the note above

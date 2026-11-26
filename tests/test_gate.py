@@ -4205,11 +4205,12 @@ class TestEndsAStateSetUpHere:
     the healing row ended `ares-wounded-by-diomedes`, a plan fact recorded
     for the same scene. It was reported as an `ends` naming nothing (a
     blocking slip), and with a possession finding beside it the session
-    halted."""
+    halted. #734's review: the end is the checker's to confirm, and it is
+    recorded as a commitment of the scene, never on the plan's row."""
 
     PLAN = 'ares-wounded-by-diomedes'
 
-    def _add_plan_state(self, project_dir, **over):
+    def _add_plan_state(self, project_dir, *extra, **over):
         rows = ledger.load(project_dir)
         row = {c: '' for c in ledger.COLUMNS}
         row.update(id=self.PLAN, scene_id=SCENE, type='knowledge',
@@ -4217,11 +4218,15 @@ class TestEndsAStateSetUpHere:
                    status='binding', mutable='state', introduced_by='briefs',
                    category='state-change')
         row.update(over)
-        ledger.save(project_dir, rows + [row], command='briefs')
+        ledger.save(project_dir, rows + [row, *extra], command='briefs')
 
     def _healing(self):
         return _commitment(type='physical', statement='Paeon heals Ares', mutable='state',
                            ends=[self.PLAN])
+
+    def _later(self, project_dir):
+        order = ledger.scene_order(project_dir)
+        return next(s for s, i in order.items() if i == order[SCENE] + 1)
 
     def test_no_blocking_problem_and_the_wound_is_not_carried_forward(self, project_dir,
                                                                        tmp_path):
@@ -4229,14 +4234,88 @@ class TestEndsAStateSetUpHere:
         self._add_plan_state(project_dir)
         result = _gate(project_dir, tmp_path, [self._healing()])
         assert result.unresolved == [] and result.passed and result.committed
-        assert result.problems[ENDS_HERE] == [f'{SCENE}: {self.PLAN}']
+        assert result.problems[ENDS_HERE] == [
+            f'{SCENE}: {self.PLAN} (by {SCENE}--paeon-heals-ares)']
+        # T-3: the NOTE a re-check cascade logs
         assert any(line.startswith('NOTE (a state the plan sets up in this scene')
-                   for line in gate.report_lines(result))
+                   for line in gate.applied_lines(result))
         rows = ledger.load(project_dir)
-        assert next(r for r in rows if r['id'] == self.PLAN)['resolves'] == SCENE
+        assert next(r for r in rows if r['id'] == self.PLAN)['resolves'] == ''   # CR-2
+        ends = [r for r in rows if r.get('supersedes') == self.PLAN]
+        assert [(r['scene_id'], r['resolves'], r['introduced_by'], r['quote'])
+                for r in ends] == [(SCENE, SCENE, 'draft', HERE)]
         order = ledger.scene_order(project_dir)
-        later = next(s for s, i in order.items() if i == order[SCENE] + 1)
+        later = self._later(project_dir)
         assert self.PLAN not in {r['id'] for r in facts_in_force(rows, later, order)}
+        assert self.PLAN not in {r['id'] for r in ledger.active_states(rows, later, order)}
+
+    def test_the_check_is_asked_to_confirm_it(self, project_dir, tmp_path):
+        """SF-1: an end the check doesn't confirm is never recorded, and
+        stops the scene where it can be seen."""
+        self._add_plan_state(project_dir)
+        result = _gate(project_dir, tmp_path, [self._healing()], cleared=())
+        assert not result.committed
+        assert [d.fact_id for d in result.unruled] == [self.PLAN]
+        assert 'where the plan sets it up' in result.unruled[0].claim
+        rows = ledger.load(project_dir)
+        assert not any(r.get('supersedes') == self.PLAN for r in rows)
+
+    def test_a_contradiction_ruled_on_it_is_a_finding_and_no_end(self, project_dir,
+                                                                 tmp_path):
+        from storyforge import extract
+        self._add_plan_state(project_dir)
+        finding = dict(_contradiction(), fact_id=self.PLAN, established_scene='',
+                       established_quote='Diomedes wounded Ares')
+        result = _gate(project_dir, tmp_path, [self._healing()], findings=[finding],
+                       cleared=())
+        assert not result.passed and [f.fact_id for f in result.findings] == [self.PLAN]
+        assert [e.state_id for e in result.ends if e.kind == extract.ENDS_HERE] == [self.PLAN]
+        gate.commit_provisional(project_dir, result, 'provisional: test')
+        assert result.ends_held == [f'{self.PLAN}: the check did not confirm the scene shows '
+                                    f'it ending (see its finding)']
+        assert not any(r.get('supersedes') == self.PLAN for r in ledger.load(project_dir))
+        assert any(line.startswith('NOTE (not recorded: the end of a state the plan sets up')
+                   for line in gate.report_lines(result))
+
+    def test_a_later_row_leaning_on_it_sends_it_to_the_checker(self, project_dir, tmp_path):
+        """CR-1: a later plan row depends on the wound: ending it here would
+        contradict the plan."""
+        later = self._later(project_dir)
+        lean = {c: '' for c in ledger.COLUMNS}
+        lean.update(id='ares-limps', scene_id=later, type='physical', statement='Ares limps',
+                    origin='plan', status='binding', mutable='state', introduced_by='briefs',
+                    depends_on=self.PLAN)
+        self._add_plan_state(project_dir, lean)
+        result = _gate(project_dir, tmp_path, [self._healing()])
+        assert result.ends == []
+        assert result.problems['ends registry'] == [
+            f'{SCENE}: {self.PLAN} (resolves: blank; later scenes lean on it: ares-limps)']
+        assert not any(r.get('supersedes') == self.PLAN for r in ledger.load(project_dir))
+
+    def test_a_later_brief_leaning_on_it_sends_it_to_the_checker(self, project_dir,
+                                                                 tmp_path):
+        later = self._later(project_dir)
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        with open(path, encoding='utf-8') as f:
+            lines = f.read().split('\n')
+        header = lines[0].split('|')
+        col = header.index('physical_state_in')
+        for n, line in enumerate(lines[1:], start=1):
+            cells = line.split('|')
+            if cells and cells[0] == later:
+                cells[col] = self.PLAN
+                lines[n] = '|'.join(cells)
+                break
+        else:
+            lines.append('|'.join(later if h == 'id' else self.PLAN
+                                  if h == 'physical_state_in' else '' for h in header))
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write('\n'.join(lines))
+        self._add_plan_state(project_dir)
+        result = _gate(project_dir, tmp_path, [self._healing()])
+        assert result.ends == []
+        assert result.problems['ends registry'] == [
+            f'{SCENE}: {self.PLAN} (resolves: blank; later scenes lean on it: {later})']
 
     def test_a_plan_end_elsewhere_is_a_dispute_not_a_slip(self, project_dir, tmp_path):
         self._add_plan_state(project_dir, resolves='act2-sc02')
@@ -4246,6 +4325,22 @@ class TestEndsAStateSetUpHere:
             f'{SCENE}: {self.PLAN} (resolves: act2-sc02)']
         rows = ledger.load(project_dir)
         assert next(r for r in rows if r['id'] == self.PLAN)['resolves'] == 'act2-sc02'
+
+    def test_a_redraft_that_no_longer_ends_it_puts_it_back_and_lists_it(self, project_dir,
+                                                                       tmp_path):
+        """CR-2/SF-3 and CR-3: the end is a commitment of the scene, so a
+        redraft replaces it; the change is listed for the later scenes."""
+        from storyforge.extract import facts_in_force
+        self._add_plan_state(project_dir)
+        assert _gate(project_dir, tmp_path, [self._healing()]).committed
+        again = _gate(project_dir, tmp_path,
+                      [_commitment(type='physical', statement='Paeon tends Ares',
+                                   mutable='state')], command='redraft')
+        assert again.committed and self.PLAN in again.changed
+        rows = ledger.load(project_dir)
+        order = ledger.scene_order(project_dir)
+        assert self.PLAN in {r['id'] for r in facts_in_force(rows, self._later(project_dir),
+                                                             order)}
 
 
 class TestStandingFindings:

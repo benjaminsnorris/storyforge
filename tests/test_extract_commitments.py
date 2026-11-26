@@ -732,7 +732,7 @@ class TestEndsAFactSetUpHere:
         row.update(over)
         return row
 
-    def _rows(self, plan, registry_is_plan=True):
+    def _rows(self, plan, registry_is_plan=True, ends_out=None):
         from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
         problems = {k: [] for k in COMMITMENT_PROBLEMS}
         found = [{'type': 'physical', 'subject': '', 'quote': 'q', 'mutable': 'state',
@@ -741,19 +741,35 @@ class TestEndsAFactSetUpHere:
         out = commitment_rows(found, 'b', 'q', [plan], [], [plan], {}, 'draft', problems,
                               own_writers=ledger.COMMITMENT_WRITERS,
                               registry_is_plan=registry_is_plan, reserved=set(),
-                              order=self.ORDER)
+                              order=self.ORDER, ends_out=ends_out)
         return out, problems
 
-    def test_an_open_plan_state_set_up_here_ends_here(self):
-        from storyforge.extract import ENDS_HERE, facts_in_force
+    def test_an_open_plan_state_set_up_here_is_a_claim_not_a_slip(self):
+        """The gate's call: a claim for it to have the checker confirm;
+        the plan's row is never changed (#734's review CR-2)."""
+        from storyforge.extract import ENDS_HERE
         plan = self._plan()
-        out, problems = self._rows(plan)
-        assert problems['ends'] == []
-        assert problems[ENDS_HERE] == ['b: ares-wounded-by-diomedes']
-        assert plan['resolves'] == 'b'
-        # the wound is not carried forward
-        assert plan['id'] not in {r['id'] for r in facts_in_force([plan] + out, 'c',
-                                                                   self.ORDER)}
+        ends = []
+        out, problems = self._rows(plan, ends_out=ends)
+        assert not any(problems.values())
+        assert [(e.kind, e.state_id) for e in ends] == [(ENDS_HERE, plan['id'])]
+        assert ends[0].carrier is out[0]
+        assert plan['resolves'] == ''
+
+    def test_an_offered_end_is_returned_not_applied(self):
+        """CR-5: with `ends_out`, no row is changed in place."""
+        from storyforge.extract import COMMITMENT_PROBLEMS, OFFERED_END, commitment_rows
+        old = _ledger_row('a--bleeding', scene_id='a', introduced_by='draft', origin='prose')
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        ends = []
+        found = [{'type': 'physical', 'subject': '', 'quote': 'q', 'mutable': 'state',
+                  'statement': 'It healed', 'supersedes': '', 'ends': [old['id'], old['id']]}]
+        out = commitment_rows(found, 'b', 'q', [old], [old], [], {}, 'draft', problems,
+                              own_writers=ledger.COMMITMENT_WRITERS, registry_is_plan=True,
+                              reserved=set(), order=self.ORDER, ends_out=ends)
+        assert old['resolves'] == '' and not any(problems.values())
+        assert [(e.kind, e.state_id, e.carrier is out[0]) for e in ends] == [
+            (OFFERED_END, old['id'], True)]   # named twice, ended once
 
     def test_one_already_ending_here_is_left(self):
         plan = self._plan(resolves='b')
