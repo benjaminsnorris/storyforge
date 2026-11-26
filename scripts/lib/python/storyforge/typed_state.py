@@ -140,7 +140,7 @@ Every record has `type`, `who`, `item`, `value`, `detail` and `quote`. `quote` i
 - `at`: each living person who acts, speaks or is spoken to as present in the scene, once per place they are in: `item` where they are, as the scene names it ('' if it doesn't). Never a corpse, and never someone only remembered, mentioned, dreamed or imagined.
 - `holds`: a particular object a later scene could track (a named weapon, the ring, the letter, Hector's helmet; not "a spear" among many): `who` the holder (a person, or the place it lies), `item` the object, named the same way every time (when it is one listed under "Objects other scenes track", that name exactly), `value` `gets` (takes it, is given it, picks it up), `has` (holds, carries, uses or wears it, with no taking shown), `gives` (hands it over; `detail` who to), `loses` (drops it for good, has it taken) or `destroyed` (broken, burned, sunk).
 - `knows`: only for the facts listed under "Facts {pov_name} may not know yet" above: when {pov_name} learns one in this scene, `value` `learns`; when {pov_name} acts on one, says it, or the narration gives it as {pov_name}'s thought, `value` `uses`. `item` the fact's id exactly as listed.
-- `injury`: a person is hurt: `item` the body part (arm, hand, leg, eye, ribs...), `detail` `left`, `right` or '', `value` `minor`, `serious` or `disabling`; an injury that has healed: `healed`.
+- `injury`: a person is hurt: `item` the body part (arm, hand, leg, eye, ribs...), `detail` `left`, `right` or '', `value` `minor`, `serious` or `disabling`; an injury that has healed (with time, by care, or by a god or magic): `healed`. A part that fails for a moment in a fight (an arm that will not come up, a leg that buckles) is `minor` unless the scene shows it lasting.
 - `uses`: a person uses a body part listed under "Injuries in force" above, or one injured earlier in this scene: `item` the part, `detail` the side, `value` `full` (as if unhurt: grips, swings, runs, lifts at full strength) or `impaired` (favours it, winces, uses it weakly).
 - `named`: each proper name the scene calls a person by, once per name: `who` the person, `value` the name exactly as written (a nickname or patronymic used as a name counts; a pronoun or a description doesn't).
 - `elapsed`: each phrase that counts time with a number ("three days ago", "nine nights since", "in a week", "the tenth day"): `value` the phrase exactly as written; `detail` which way the counted event lies from this scene's present: `before` (it happened that long ago: "three days ago", "the tenth day since the plague began"), `after` (it will happen that long from now: a promise, a plan, a prophecy, "in twelve days", "within a week"), or '' when neither end of the count is this scene's present ("they marched three days before the storm"); `item` the id of the scene in the calendar above where that counted event happens (for `after`, the later scene where the promised or planned event takes place), never this scene itself, or '' when no scene shows it.
@@ -253,6 +253,12 @@ def place_in_prose(prose: str, records: list[Record]) -> list[Record]:
         last = p
         out.append(r.replace(index=p * _TIE + min(n, _TIE - 1)))
     return sorted(out, key=lambda r: r.index)
+
+
+def prose_offset(index: int) -> int:
+    """Where in the normalized prose a record placed by `place_in_prose`
+    stands (its quote's first character)."""
+    return index // _TIE
 
 
 def parse(text: str) -> list[dict]:

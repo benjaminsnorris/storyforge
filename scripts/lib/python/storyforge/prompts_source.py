@@ -547,11 +547,13 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
     cat = source.catalogue(project_dir, cfg)
     budget = DRAFT_SOURCE_MAX_WORDS
     missing, left_out = [], []
+    hits = []
     for ref in refs:
         hit = source.resolve_source_id(ref, cat)
         if hit is None:
             missing.append(ref)
             continue
+        hits.append(hit)
         text = source.source_prose(project_dir, *hit) or ''
         words = len(text.split())
         if not text.strip():
@@ -572,4 +574,51 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
         parts.append(f'Source prose left out to keep this prompt under '
                      f'{DRAFT_SOURCE_MAX_WORDS:,} words of source text: '
                      f'{", ".join(left_out)}; they are in the Source Bible.')
+    entering = entering_section(project_dir, scene_id, hits)
+    if entering:
+        parts.append(entering)
     return '\n\n'.join(parts) + rules_block(project_dir, cfg)
+
+
+def entering_lines(facts: list, *, quotes: bool = False) -> list[str]:
+    """A line per `source.SourceFact`, oldest first: its source scene, its
+    kind, its statement, and where its state ends (with `quotes`, its
+    source quote)."""
+    out = []
+    for f in facts:
+        line = f'- {f.scene_id} ({f.kind}): {" ".join(f.statement.split())}'
+        if f.ends:
+            line += f' [until {f.ends}]'
+        if quotes and f.quote:
+            line += f' (the source: "{" ".join(f.quote.split())}")'
+        out.append(line)
+    return out
+
+
+def entering_section(project_dir: str, scene_id: str, refs: list[tuple[str, str]]) -> str:
+    """The `#### Entering state` of a drafting prompt (#747): what the
+    source's ledger tells, before the source scenes `refs` this scene
+    adapts, of its people's deaths, wounds and healings, and armour and
+    weapons (`source.entering_state`). '' when it tells none. Logs a
+    WARNING for a source with no ledger and for facts left out; raises
+    SourceError as `source.read_table` does."""
+    cast = source.scene_cast(project_dir, scene_id, refs)
+    state = source.entering_state(project_dir, refs, cast)
+    for note in state.notes:
+        log(f'WARNING: {scene_id}: {note}')
+    if not state.facts:
+        return ''
+    if state.left_out:
+        log(f'WARNING: {scene_id}: {state.left_out} older source facts about its people left '
+            f'out of its entering state (the latest {len(state.facts)} are given)')
+    more = (f' The latest {len(state.facts)} are given; {state.left_out} older ones are left '
+            f'out.' if state.left_out else '')
+    return ('#### Entering state\n\n'
+            'What the source has told before this scene\'s passage of its people\'s deaths, '
+            'wounds and healings, and armour and weapons, oldest first, from the source\'s '
+            'fact ledger (a source scene each; [until …] names the source scene that state '
+            'ends in). Enter the scene with it: a wound not yet healed is still there, a '
+            'healed one is gone, the dead stay dead, and armour is worn by whoever last '
+            'took it. The ledger was read from the translation and can miss or misread a '
+            'fact: the passage above, the brief and the version rules win over it.'
+            + more + '\n\n' + '\n'.join(entering_lines(state.facts)))
