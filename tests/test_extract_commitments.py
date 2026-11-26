@@ -716,6 +716,87 @@ class TestLinksToOfferedFacts:
         assert problems['ends again'] == ['b: a--father-dead-2 (resolves: c)']
 
 
+class TestEndsAFactSetUpHere:
+    """#734 (diomedes-spears-ares, iliad-adult, 2026-11-16): the extractor
+    ended `ares-wounded-by-diomedes`, a plan fact recorded for the same
+    scene (Ares wounded and healed in one scene). It isn't offered (not in
+    force entering the scene), so the `ends` was reported as naming nothing,
+    a blocking slip, and the session stopped with 73 scenes not attempted."""
+
+    ORDER = {'a': 0, 'b': 1, 'c': 2}
+
+    def _plan(self, **over):
+        row = _ledger_row('ares-wounded-by-diomedes', scene_id='b', type='knowledge',
+                          statement='Diomedes wounded Ares', origin='plan',
+                          introduced_by='briefs', category='state-change')
+        row.update(over)
+        return row
+
+    def _rows(self, plan, registry_is_plan=True, ends_out=None):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        found = [{'type': 'physical', 'subject': '', 'quote': 'q', 'mutable': 'state',
+                  'statement': 'Paeon heals Ares', 'supersedes': '',
+                  'ends': ['ares-wounded-by-diomedes']}]
+        out = commitment_rows(found, 'b', 'q', [plan], [], [plan], {}, 'draft', problems,
+                              own_writers=ledger.COMMITMENT_WRITERS,
+                              registry_is_plan=registry_is_plan, reserved=set(),
+                              order=self.ORDER, ends_out=ends_out)
+        return out, problems
+
+    def test_an_open_plan_state_set_up_here_is_a_claim_not_a_slip(self):
+        """The gate's call: a claim for it to have the checker confirm;
+        the plan's row is never changed (#734's review CR-2)."""
+        from storyforge.extract import ENDS_HERE
+        plan = self._plan()
+        ends = []
+        out, problems = self._rows(plan, ends_out=ends)
+        assert not any(problems.values())
+        assert [(e.kind, e.state_id) for e in ends] == [(ENDS_HERE, plan['id'])]
+        assert ends[0].carrier is out[0]
+        assert plan['resolves'] == ''
+
+    def test_an_offered_end_is_returned_not_applied(self):
+        """CR-5: with `ends_out`, no row is changed in place."""
+        from storyforge.extract import COMMITMENT_PROBLEMS, OFFERED_END, commitment_rows
+        old = _ledger_row('a--bleeding', scene_id='a', introduced_by='draft', origin='prose')
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        ends = []
+        found = [{'type': 'physical', 'subject': '', 'quote': 'q', 'mutable': 'state',
+                  'statement': 'It healed', 'supersedes': '', 'ends': [old['id'], old['id']]}]
+        out = commitment_rows(found, 'b', 'q', [old], [old], [], {}, 'draft', problems,
+                              own_writers=ledger.COMMITMENT_WRITERS, registry_is_plan=True,
+                              reserved=set(), order=self.ORDER, ends_out=ends)
+        assert old['resolves'] == '' and not any(problems.values())
+        assert [(e.kind, e.state_id, e.carrier is out[0]) for e in ends] == [
+            (OFFERED_END, old['id'], True)]   # named twice, ended once
+
+    def test_one_already_ending_here_is_left(self):
+        plan = self._plan(resolves='b')
+        _, problems = self._rows(plan)
+        assert plan['resolves'] == 'b'
+        assert not any(problems.values())
+
+    def test_one_the_plan_ends_elsewhere_goes_to_the_checker(self):
+        plan = self._plan(resolves='c')
+        _, problems = self._rows(plan)
+        assert plan['resolves'] == 'c' and problems['ends'] == []
+        assert problems['ends registry'] == ['b: ares-wounded-by-diomedes (resolves: c)']
+
+    def test_a_fixed_fact_set_up_here_is_ends_fixed(self):
+        plan = self._plan(mutable='fixed')
+        _, problems = self._rows(plan)
+        assert plan['resolves'] == '' and problems['ends'] == []
+        assert problems['ends fixed'] == ['b: ares-wounded-by-diomedes']
+
+    def test_phase_4_reports_it_and_leaves_the_row(self):
+        """Phase 4 edits only its own rows."""
+        plan = self._plan()
+        _, problems = self._rows(plan, registry_is_plan=False)
+        assert plan['resolves'] == '' and problems['ends'] == []
+        assert problems['ends registry'] == ['b: ares-wounded-by-diomedes (resolves: blank)']
+
+
 class TestLinksPastTheOfferCap:
     """#634 (iliad-teen): with `order`, a link naming no offered fact is
     looked up among every fact in force entering the scene: the offer holds
