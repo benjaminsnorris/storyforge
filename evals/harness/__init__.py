@@ -88,6 +88,23 @@ def migrate_tree(project_dir: str, label: str) -> None:
             f'ledger migration stopped for {label} (its old registries are kept): '
             + '; '.join(result.problems[:5])
             + (f' (and {len(result.problems) - 5} more)' if len(result.problems) > 5 else ''))
+
+
+def _rekey(cassette_dir: str) -> None:
+    """Rename a cassette directory's recordings to the current key scheme
+    (`cassette.rekey`, #741) before the suite replays them: free, and done
+    once (the directory is marked). What it renamed, and any recording it
+    couldn't, go in the suite's notes; the renames are for the repo that
+    holds the recordings to commit."""
+    from storyforge import cassette
+    if not cassette.needs_rekey(cassette_dir):
+        return
+    n, problems = cassette.rekey(cassette_dir)
+    _MIGRATION_NOTES.append(f'{n} recording(s) in {cassette_dir} re-keyed to key scheme '
+                            f'{cassette.KEY_SCHEME} (commit them in the repo that holds them)')
+    _MIGRATION_NOTES.extend(f'WARNING: {p}' for p in problems)
+
+
 ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
 
 class SuiteUnavailable(RuntimeError):
@@ -326,6 +343,7 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str,
             os.environ['STORYFORGE_CASSETTE'] = cassette_dir
             os.environ['STORYFORGE_CASSETTE_MODE'] = mode
             os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
+            _rekey(cassette_dir)
             output = suite.run(SuiteContext(suite.name, mode, cassette_dir, work_dir))
             if not isinstance(output, SuiteOutput):
                 raise TypeError(f'run() returned {type(output).__name__}, not SuiteOutput')
