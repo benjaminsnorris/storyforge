@@ -31,13 +31,15 @@ NAME = 'typed-state-set'
 #: The gates: today's values, each held exactly (#488). A fall in a
 #: findings, false or unlabelled count is a gain, as is a rise in a real
 #: count; a gain moves the value here in the same commit, a loss is a
-#: decision. Measured 2026-11-26 on main before #732 (possession) and #733
-#: (injury decay, deaths by id): every finding the replay makes is one the
-#: review labelled, and none is real.
+#: decision. Measured 2026-11-26 on main before #732 (possession: 14
+#: findings, all false) and #733 (injury decay, deaths by id): every finding
+#: the replay makes is one the review labelled, and none is real. Measured
+#: again with #732 (owner-scoped objects; an unowned name held again in a
+#: later scene a note): possession makes none.
 FLOORS: dict[str, float | None] = {
-    'findings': 17, 'false_alarms': 16, 'debatable_found': 1, 'real_kept': 0,
+    'findings': 3, 'false_alarms': 2, 'debatable_found': 1, 'real_kept': 0,
     'unlabelled': 0,
-    'possession_findings': 14, 'possession_false': 14,
+    'possession_findings': 0, 'possession_false': 0,
     'injury_findings': 2, 'injury_false': 1, 'injury_debatable': 1,
     'life_findings': 1, 'life_false': 1,
     'time_findings': 0, 'travel_findings': 0, 'knowledge_findings': 0,
