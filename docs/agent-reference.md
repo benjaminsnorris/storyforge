@@ -215,4 +215,23 @@ Plugin work: `Add` / `Update` / `Fix` / `Remove`, and `Bump version to X.Y.Z`. B
 
 ## PR Review Workflow
 
-When asked for "the 5-agent review", or after creating a PR, launch all five in parallel in the background: `pr-review-toolkit:code-reviewer`, `pr-test-analyzer`, `silent-failure-hunter`, `type-design-analyzer`, `comment-analyzer`. Give each a substantive prompt naming the PR's risk areas and relevant conventions. When all report, consolidate one deduplicated punch list (CRITICAL / HIGH / IMPORTANT / SUGGESTIONS), verify each finding against the code, note false positives, and wait for "fix all of them in logical commits". Fix in ~4–6 commits (critical bugs, types, silent failures + comments, test gaps, version bump), each with regression tests, finding IDs (CR-/SF-/TD-/T-/C-N) in the message, and an immediate push.
+After creating a PR, review it with reviewers sized to the change, launched in parallel in the background. Each reviewer covers one lens and gets a substantive prompt naming the PR's risk areas, the linked issue's acceptance criteria and the relevant conventions:
+
+- **CR (code):** correctness, CLAUDE.md rules, whether the PR meets the issue. Also covers comments and docs (wrong, stale, or missing a `docs/history.md` / agent-reference / skill update) unless a C reviewer runs.
+- **T (tests):** missing regression tests, tests that don't exercise the fix, tests pinning API facts.
+- **SF (silent failures):** swallowed exceptions, warn-and-continue past wrong output, unchecked `run_parallel` exceptions, a path that can't check something and stays silent, a fact dropped without a finding.
+- **TD (type design):** invariants of dataclasses, enums and typed records; illegal states; producer/consumer shape drift.
+- **C (comments):** comments and docs on their own.
+
+Pick the tier by what the change can break:
+
+| Tier | Lenses | Use for |
+|---|---|---|
+| Light | one reviewer covering CR + T + SF | Small, contained changes: a cache key, a flag, a prompt setting, evals-only or docs-only PRs |
+| Standard (default) | CR, T, SF | Behavior changes to a command, the gate or a checker |
+| Standard + types | CR, T, SF, TD | PRs that add or reshape typed records (typed state, ledger rows, finding kinds) |
+| Full ("the 5-agent review") | CR, T, SF, TD, C | When asked for it, and for large cross-cutting PRs or new subsystems |
+
+The `pr-review-toolkit` agents (`code-reviewer`, `pr-test-analyzer`, `silent-failure-hunter`, `type-design-analyzer`, `comment-analyzer`) fit these lenses when installed; otherwise a general-purpose agent per lens, told to stay read-only, does the same job. Ask each for a short list of verified findings (`ID-n | severity | path:line | problem. fix.`), not prose.
+
+When all report, consolidate one deduplicated punch list (CRITICAL / HIGH / IMPORTANT / SUGGESTIONS), verify each finding against the code, and note false positives. In an interactive session, wait for "fix all of them in logical commits"; when the author has handed off the run (an orchestrated batch), fix them without waiting. Fix in logical commits (critical bugs, types, silent failures + comments, test gaps, version bump), each with regression tests, finding IDs (CR-/SF-/TD-/T-/C-N) in the message, and an immediate push.
