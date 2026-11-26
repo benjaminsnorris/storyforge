@@ -230,7 +230,7 @@ class TestFactsToAsk:
                 row('tl', 'timeline'), row('pr', 'promise'),
                 row('inj', 'physical', category='injury'),
                 row('eq', 'physical', category='Equipment')]
-        assert self.ask(rows)[0] == ['t', 'r', 'eq', 'inj', 'p', 'w', 'k', 'tl']
+        assert sorted(self.ask(rows)[0]) == ['eq', 'inj', 'k', 'p', 'r', 't', 'tl', 'w']
 
     def test_only_subjects_present(self):
         rows = [row('a', subject='mara'), row('b', subject='oren-tal'),
@@ -273,10 +273,92 @@ class TestFactsToAsk:
                 row('rej', status='rejected')]
         assert self.ask(rows)[0] == ['new']
 
-    def test_type_order_then_reading_order(self):
+    def test_within_a_tier_by_salience_then_the_nearest_scene(self):
+        # #739: physical and timeline before traits; the nearest scene first
         rows = [row('w1', 'world', scene='s1'), row('t4', scene='s4'), row('t1', scene='s1'),
-                row('r2', 'relationship', scene='s2')]
-        assert self.ask(rows)[0] == ['t1', 't4', 'r2', 'w1']
+                row('r2', 'relationship', scene='s2'), row('p1', 'physical', scene='s1'),
+                row('tl2', 'timeline', scene='s2'), row('p2', 'physical', scene='s2')]
+        assert self.ask(rows)[0] == ['p2', 'p1', 'tl2', 'r2', 'w1', 't1', 't4']
+
+
+#: a longer book, for the recent-scenes tier (`questions.RECENT_SCENES`)
+LONG = {f'L{n}': n for n in range(1, 21)}
+
+
+class TestQuestionOrder:
+    """#739: the cap of 30 kept old traits and cut recent physical facts
+    (889 of 936 traits asked on *Wrath Like Smoke*, 192 of 2,246 physical
+    facts): the on-stage cast's physical states first, then the last five
+    scenes' facts, then the rest by salience."""
+
+    def order(self, rows, on_stage=('mara',), present=('mara', 'oren tal'), scene='L20'):
+        got = facts_to_ask(rows, scene, LONG, set(present), registry=REGISTRY, chars=CHARS,
+                           on_stage=set(on_stage))
+        return [r['id'] for r in got.facts]
+
+    def test_the_on_stage_casts_physical_states_come_first(self):
+        rows = [row('old-trait', 'trait', scene='L1'),
+                row('recent-trait', 'trait', scene='L19'),
+                row('wound', 'physical', scene='L2', mutable='state'),
+                row('scar', 'physical', scene='L2'),
+                row('oren-wound', 'physical', subject='oren-tal', scene='L3', mutable='state')]
+        got = self.order(rows)
+        assert got[0] == 'wound'
+        # off stage (only named) or a fixed physical fact: not the first tier
+        assert got.index('recent-trait') < got.index('oren-wound')
+        assert got.index('recent-trait') < got.index('scar')
+
+    def test_then_the_last_five_scenes_then_the_rest(self):
+        rows = [row('t1', 'trait', scene='L1'), row('p3', 'physical', scene='L3'),
+                row('t15', 'trait', scene='L15'), row('t16', 'trait', scene='L16'),
+                row('t19', 'trait', scene='L19'), row('backstory', 'physical', scene='')]
+        assert self.order(rows) == ['t19', 't16', 't15', 'p3', 'backstory', 't1']
+
+    def test_an_on_stage_subject_before_one_only_named(self):
+        rows = [row('oren-scar', 'physical', subject='oren-tal', scene='L2'),
+                row('mara-trait', 'trait', scene='L1')]
+        assert self.order(rows) == ['mara-trait', 'oren-scar']
+        assert self.order(rows, on_stage=('mara', 'oren tal')) == ['oren-scar', 'mara-trait']
+
+    def test_a_later_scenes_fact_is_not_recent(self):
+        # a re-check of an early scene after later ones: "the last five" are before it
+        rows = [row('later', 'trait', scene='L12'), row('before', 'trait', scene='L9')]
+        assert self.order(rows, scene='L10') == ['before', 'later']
+
+
+class TestStaleStates:
+    """#739: two of the four false fact findings on *Wrath Like Smoke* were
+    a mood or attire set days before and never ended in the ledger."""
+    DAYS = {'s1': 1, 's2': 1, 's3': 2}
+
+    def pick(self, rows, days=DAYS):
+        return facts_to_ask(rows, 's3', ORDER, {'mara'}, registry=REGISTRY, chars=CHARS,
+                            days=days)
+
+    def test_a_state_trait_from_an_earlier_day_is_stale(self):
+        rows = [row('mood', 'trait', scene='s1', mutable='state'),
+                row('kind', 'trait', scene='s1'),
+                row('wound', 'physical', scene='s1', mutable='state')]
+        got = self.pick(rows)
+        assert got.stale == ['mood']
+        assert sorted(r['id'] for r in got.facts) == ['kind', 'wound']
+
+    def test_the_same_day_or_no_day_is_asked(self):
+        rows = [row('mood', 'trait', scene='s3', mutable='state'),
+                row('mood2', 'trait', scene='s2', mutable='state')]
+        same_day = {'s2': 2, 's3': 2}
+        assert self.pick(rows[1:], days=same_day).stale == []
+        assert self.pick(rows[1:], days={'s3': 2}).stale == []
+        assert self.pick(rows[1:], days={}).stale == []
+
+    def test_an_absent_subjects_stale_trait_is_absent(self):
+        got = self.pick([row('mood', 'trait', subject='oren-tal', scene='s1',
+                             mutable='state')])
+        assert got.absent == ['mood'] and got.stale == []
+
+    def test_scene_days(self):
+        assert questions.scene_days({'a': {'timeline_day': ' 3 '}, 'b': {'timeline_day': ''},
+                                     'c': {'timeline_day': 'Day 2'}, 'd': {}}) == {'a': 3}
 
 
 class TestQuestionFor:
@@ -400,6 +482,34 @@ class TestAskQuestions:
         assert r.asked == 1 and asked[0].count('   Question: ') == 1
         # SF-7: the skipped facts are named
         assert r.notes == ['2 question(s) past the 1 a scene gets: not asked: b, c']
+
+    def test_questions_past_a_batch_are_a_second_call(self, tmp_path):
+        """#739: the cap rose to 60, asked 30 to a call."""
+        assert questions.MAX_QUESTIONS == 2 * questions.BATCH
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 2)]
+        log = str(tmp_path / 'q.json')
+        r, asked = self._ask(qs, lambda a, n: [ans(k, 'no') for k in range(1, n + 1)],
+                             log_file=log)
+        assert sorted(p.count('   Question: ') for p in asked) == [2, 2, 30, 30]
+        assert r.asked == len(qs) and r.asked_fact_ids == [q.fact_id for q in qs]
+        for name in ('q.json', 'q.a2.json', 'q-b2.json', 'q-b2.a2.json'):
+            assert os.path.isfile(tmp_path / name)
+
+    def test_each_batch_rules_its_own_findings_and_notes(self):
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
+        # the last question (alone in batch 2) is yes twice with no quote;
+        # the first is a finding
+        r, _ = self._ask(qs, lambda a, n: (
+            [ans(1, 'yes', 'not in the scene')] if n == 1
+            else [ans(1, 'yes', 'Oren laughed')] + [ans(k, 'no') for k in range(2, n + 1)]))
+        assert [f.fact_id for f in r.findings] == ['f0'] and r.misquoted == 1
+        assert r.notes == ['batch 2 of 2: 1 question(s) answered yes twice with no quote in '
+                           'the scene: not findings']
+
+    def test_batch_log(self):
+        assert questions.batch_log('/l/q.json', 1) == '/l/q.json'
+        assert questions.batch_log('/l/q.json', 2) == '/l/q-b2.json'
+        assert questions.batch_log('', 2) == ''
 
     def test_a_bad_reply_twice_is_a_question_error(self):
         def fake(path, body, **k):
@@ -664,7 +774,7 @@ class TestPromises:
         assert r.misquoted == 1
 
     def test_past_the_cap_is_named_and_a_must_beat_blocks(self, monkeypatch):
-        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
+        monkeypatch.setattr(questions, 'MAX_PROMISES', 1)
         r, _ = self._ask([P_PLAIN, P_ITEM], lambda a, n: [ans(1, 'yes', 'Oren laughed')])
         assert any('past the 1' in n and 'Mara slams the door' in n for n in r.notes)
         assert [f.problem for f in r.unverified] == ['past the cap: not asked']
@@ -797,6 +907,37 @@ class TestCheckQuestions:
         rows = _add_rows(project_dir)
         r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
         assert 'Tessa wears a borrowed coat' in asked[0]
+
+    def test_the_briefs_entering_items_come_before_the_facts(self, project_dir):
+        # #739: the cap cuts from the end; what the brief has holding as the
+        # scene opens used to come last
+        from storyforge.elaborate import _read_csv, _write_csv
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        briefs = _read_csv(path)
+        for b in briefs:
+            if b['id'] == SCENE:
+                b['physical_state_in'] = 'Tessa wears a borrowed coat'
+        _write_csv(path, briefs, list(briefs[0].keys()))
+        rows = _add_rows(project_dir, TESSA_KIND)
+        _, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert asked[0].index('Tessa wears a borrowed coat') \
+            < asked[0].index('Tessa is never cruel to Dorren')
+
+    def test_a_stale_state_trait_is_said(self, project_dir):
+        # #739: a mood set on an earlier day isn't asked, and the notes say so
+        from storyforge.elaborate import _read_csv, _write_csv
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        scenes = _read_csv(path)
+        for sc in scenes:
+            if sc['id'] == SCENE:
+                sc['timeline_day'] = '2'
+        _write_csv(path, scenes, list(scenes[0].keys()))
+        rows = _add_rows(project_dir, {**TESSA_KIND, 'id': 'tessa-sulks', 'mutable': 'state',
+                                       'statement': 'Tessa is sulking'})
+        r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert 'Tessa is sulking' not in ''.join(asked)
+        assert any(n.startswith('1 state trait(s)') and n.endswith('not asked: tessa-sulks')
+                   for n in r.notes)
 
     def test_the_model_is_configurable(self, monkeypatch):
         monkeypatch.setenv(questions.MODEL_ENV, 'claude-sonnet-5-5')
