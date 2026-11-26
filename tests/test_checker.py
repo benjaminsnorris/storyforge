@@ -712,8 +712,10 @@ class TestReadings:
         brief = checker._brief(book, project_dir, SCENE)
         assert head['text'] + note['text'] == checker.build_prompt(
             book, SCENE, brief.text, None, 2)
-        # the API's limit of four, and a longer TTL never after a shorter
-        assert json.dumps(bodies[1]).count('"cache_control"') <= 4
+        # the API's limit of four, all used: the bibles, the story so far,
+        # before the note, and the automatic one; a longer TTL never after a shorter
+        assert sum('cache_control' in b for b in bodies[1]['system']) == 2
+        assert json.dumps(bodies[1]).count('"cache_control"') == 4
         ttls = [b['cache_control'].get('ttl', '5m') for b in bodies[1]['system']
                 if 'cache_control' in b] + ['5m']
         assert ttls == sorted(ttls, key=lambda t: t != '1h')
