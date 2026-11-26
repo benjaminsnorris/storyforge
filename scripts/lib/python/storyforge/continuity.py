@@ -15,8 +15,10 @@ calendar and the world table, free and the same every run:
   destroyed, or held again by the person who gave it away or lost it,
   unless a fact between moves it (`gets`). An object in other hands than an
   earlier scene left it is a note (an offstage handover is ordinary). A
-  current stage sheet's hands (#647) count for the objects tracked, placed
-  by their quotes on the prose's scale.
+  bare kind ("shield") is its holder's own object, a name with an owner
+  ("Teucer's bow") the owner's (#732). A current stage sheet's hands (#647)
+  count for the objects tracked, placed by their quotes on the prose's
+  scale.
 - **knowledge** (KNO): the POV character acts on, says or thinks a fact
   before a scene or brief shows them learning it (`knows learns`, the
   briefs' `knowledge_in`/`knowledge_out` for their POV). The ledger's
@@ -262,56 +264,158 @@ def check_life(book: Book) -> tuple[list[Finding], list[str]]:
 # Possession
 # ============================================================================
 
-def _slot(state: dict, key: str) -> str:
-    """The state key `key` names: itself, else the one tracked object it is
-    `stage_sheet.same_object` with ("sword" and "Hector's sword"), else
-    itself when none or several are."""
+def _name_parts(book: Book, name: str) -> tuple[str, list[str]]:
+    """An object's name as (owner, words): the owner is the canonical id of
+    the person a possessive names ("Teucer's bow", "Achilles' armour"; ''
+    for none), the words the rest of the name, lower case, without
+    articles, possessive pronouns or "own" (`stage_sheet._ARTICLES`)."""
+    from storyforge.stage_sheet import _ARTICLES
+    raw = re.findall(r"[\w']+", (name or '').lower())
+    for n, w in enumerate(raw):
+        if not w.endswith(("'s", "'")):
+            continue
+        stem = w[:-2] if w.endswith("'s") else w[:-1]
+        before = [x for x in raw[:n] if x not in _ARTICLES]
+        for cand in (' '.join(before + [stem]), stem):
+            if cand and book.is_person(cand):
+                rest = [x.strip("'") for x in raw[n + 1:] if x not in _ARTICLES]
+                return book.who(cand), [x for x in rest if x]
+        break
+    words = [w[:-2] if w.endswith("'s") else w.strip("'") for w in raw]
+    return '', [w for w in words if w and w not in _ARTICLES]
+
+
+def _kind_words(key: str) -> set[str]:
+    """The words of a state key's name (after its owner, if any)."""
+    return set(key.split(':', 1)[-1].split())
+
+
+def _held_by(state: dict, holder: str, kind: str) -> list[str]:
+    """The objects of `kind` (a word of their name) `holder` holds now."""
+    return [k for k, (h, status, _r, _b) in state.items()
+            if status == 'held' and h == holder and kind in _kind_words(k)]
+
+
+def _object(book: Book, state: dict, r: Record) -> tuple[str, bool]:
+    """The object a `holds` record names, as a state key, and whether its
+    name is a bare kind (#732). A name with an owner is that person's:
+    "Teucer's bow" is `teucer:bow`, whoever holds it. A bare kind ("shield",
+    "his spear": one word once articles and pronouns are gone) is the
+    holder's own (`holder:kind`), unless the holder holds exactly one object
+    of that kind now, which it then is ("the sword" in the hand that took
+    Achilles' sword). Any other name ("the brass key") is one object
+    book-wide, matched to a tracked unowned one by `stage_sheet.same_object`
+    ("the small brass key"). A bare kind never merges into another person's
+    object: two people's own shields are two shields."""
     from storyforge.stage_sheet import same_object
-    if not key or key in state:
-        return key
-    matches = [k for k in state if same_object(k, key)]
-    return matches[0] if len(matches) == 1 else key
+    owner, words = _name_parts(book, r.item)
+    if not words:
+        return '', False
+    name = ' '.join(words)
+    if owner:
+        key = f'{owner}:{name}'
+        if key in state:
+            return key, False
+        mine = [k for k in state if k.startswith(f'{owner}:')
+                and same_object(k.split(':', 1)[1], name)]
+        return (mine[0] if len(mine) == 1 else key), False
+    if len(words) == 1:
+        holder = book.who(r.who)
+        held = _held_by(state, holder, name)
+        return (held[0] if len(held) == 1 else f'{holder}:{name}'), True
+    if name in state:
+        return name, False
+    matches = [k for k in state if ':' not in k and same_object(k, name)]
+    return (matches[0] if len(matches) == 1 else name), False
+
+
+def pair_handovers(book: Book, records: list[Record]) -> list[Record]:
+    """`records` with each handover recorded twice made one (#732): a
+    `gets` by one person and a `gives` or `loses` of the same object
+    (`stage_sheet.same_object`) by another, in the same scene on the same
+    or overlapping words (`overlaps`), whatever their order, become one
+    `gives` to the taker, placed at the earlier of the two."""
+    from storyforge.stage_sheet import same_object
+    out: list[Record | None] = list(records)
+    used: set[int] = set()
+    for gi, g in enumerate(records):
+        if g.value != 'gets' or not g.verified or gi in used:
+            continue
+        taker = book.who(g.who)
+        for xi, x in enumerate(records):
+            if (xi in used or x.scene_id != g.scene_id or x.value not in ('gives', 'loses')
+                    or not x.verified or book.who(x.who) == taker
+                    or not same_object(x.item, g.item) or not overlaps(x.quote, g.quote)):
+                continue
+            if x.value == 'gives' and x.detail.strip() and book.who(x.detail) != taker:
+                continue
+            used.update((gi, xi))
+            out[xi] = x.replace(value='gives', detail=g.who, index=min(x.index, g.index))
+            out[gi] = None
+            break
+    kept = [r for r in out if r is not None]
+    return sorted(kept, key=lambda r: (book.key.get(r.scene_id, (0, 0)), r.index))
 
 
 def check_possession(book: Book, sheet_records: list[Record] | None = None
                      ) -> tuple[list[Finding], list[str]]:
     """PHY: fold every `holds` record (and a current stage sheet's hands), in
-    story order, per object (`object_key`, names matched by
-    `stage_sheet.same_object`); check this scene's against the state before
-    each. Blocking: within this scene, an object in another person's hands
-    with nothing between; in any scene, an object used after it was
-    destroyed, or held again by the person who gave it away or lost it.
-    A different holder than an earlier scene left it with is a note (an
-    offstage handover is ordinary, #648's review CR-3), and so is anything
-    that a scene between without typed state might explain (CR-5). Exempt:
-    an off-present scene. A holder not in characters.csv is read as a place
-    (an object lying there) and said."""
+    story order, per object (`_object`: a bare kind is its holder's own, a
+    name with an owner the owner's, #732), each handover recorded twice
+    made one (`pair_handovers`); check this scene's against the state
+    before each. Blocking: within this scene, an object in another person's
+    hands with nothing between; in any scene, an object held or taken whole
+    (`has`, `gets`) after it was destroyed (its remains discarded, or a
+    second `destroyed`, is not), or held again by the person who gave it
+    away or lost it. A different holder than an earlier scene left it with
+    is a note (an offstage handover is ordinary, #648's review CR-3), and
+    so is anything that a scene between without typed state might explain
+    (CR-5). A misquoted record makes the state of every object it could
+    name unknown from there, and a record of this scene that state left
+    uncompared is a note. Exempt: an off-present scene. A holder not in
+    characters.csv is read as a place (an object lying there) and said."""
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
-    records = book.present_records(('holds',)) + list(sheet_records or [])
-    records.sort(key=lambda r: (book.key.get(r.scene_id, (0, 0)), r.index))
+    misquoted = [r for s, recs in book.records.items() if not book.off_present(s)
+                 for r in recs if r.type == 'holds' and not r.verified]
+    records = pair_handovers(book, book.present_records(('holds',))
+                             + list(sheet_records or []) + misquoted)
     findings: list[Finding] = []
     # object key → (holder canonical or place, status, record, by)
     state: dict[str, tuple[str, str, Record, str]] = {}
     flagged: set[str] = set()
-    offstage, gapped, places = [], [], set()
+    offstage, gapped, places, unknown = [], [], set(), []
     for r in records:
-        obj = _slot(state, object_key(r.item))
+        obj, bare = _object(book, state, r)
         if not obj:
             continue
         holder = book.who(r.who)
+        if not r.verified:
+            # unknown from here: what it names, and when it is a bare kind
+            # its holder holds none of, anyone's of that kind
+            kind = obj.split(':', 1)[-1]
+            touched = {obj} | ({k for k, (_h, st, _r, _b) in state.items()
+                                if st == 'held' and kind in _kind_words(k)}
+                               if bare and not _held_by(state, holder, kind) else set())
+            for k in touched:
+                state[k] = ('', 'unknown', r, '')
+            continue
         person = book.is_person(r.who) or r.origin == 'stage-sheet'
         if r.scene_id == sid and not person and r.value in ('gets', 'has'):
             places.add(r.who)
         prev = state.get(obj)
         problem = ''
-        if r.scene_id == sid and prev is not None and obj not in flagged:
+        if r.scene_id == sid and prev is not None and prev[1] == 'unknown':
+            unknown.append(f'{r.who} {r.value} {r.item} (after "{prev[2].quote}", '
+                           f'{prev[2].scene_id})')
+        elif r.scene_id == sid and prev is not None and obj not in flagged:
             p_holder, status, p_rec, by = prev
             here = p_rec.scene_id == sid
             p_where = 'earlier in this scene' if here else _where(book, p_rec.scene_id)
-            if r.value != 'gets' and status == 'destroyed':
-                problem = f'{r.item} was destroyed {p_where}'
+            if status == 'destroyed':
+                if r.value in ('has', 'gets'):
+                    problem = f'{r.item} was destroyed {p_where}'
             elif r.value in ('has', 'gives', 'loses', 'destroyed') and person:
                 if status == 'held' and p_holder != holder and p_rec.origin != 'place':
                     if here:
@@ -332,6 +436,9 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
                 findings.append(_finding('possession', r.quote, p_rec.scene_id, p_rec.quote,
                                          f'{r.who} {verb} {r.item}, but {problem}'))
         # the state after the record
+        if prev is not None and prev[1] == 'destroyed' and r.value in (
+                'gives', 'loses', 'destroyed'):
+            continue   # its remains, discarded: still destroyed
         if r.value in ('gets', 'has'):
             rec = r if person else r.replace(origin='place')
             state[obj] = (holder, 'held', rec, '')
@@ -354,6 +461,9 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
         notes.append(f'possession: {len(gapped)} object(s) used after being given away, lost '
                      f'or destroyed, with a scene between whose typed state wasn\'t read, not '
                      f'compared: ' + '; '.join(gapped[:5]))
+    if unknown:
+        notes.append(f'possession: {len(unknown)} record(s) on an object whose state is unknown '
+                     f'after a misquoted record, not compared: ' + '; '.join(unknown[:5]))
     if places:
         notes.append(f'possession: {len(places)} holder(s) characters.csv doesn\'t name, read as '
                      f'places (an object lying there), not compared as people: '
