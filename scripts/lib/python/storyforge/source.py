@@ -173,6 +173,7 @@ class SourceProject:
     path: str            # as written: relative to the project, or absolute
     name_map: str = ''   # a per-source override of SourceConfig.name_map
     range: SourceRange | None = None   # the part adapted; None: the whole source
+    errata: str = ''     # a per-source override of SourceConfig.errata
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,9 @@ class SourceConfig:
     name_map: str = ''
     mode: str = DEFAULT_MODE
     rules: str = ''
+    #: known slips of the source's text against its original (#742): a
+    #: pipe CSV, `read_errata`
+    errata: str = ''
 
     def slugs(self) -> list[str]:
         return [p.slug for p in self.projects]
@@ -209,6 +213,9 @@ class SourceConfig:
 
     def map_path(self, project: SourceProject) -> str:
         return project.name_map or self.name_map
+
+    def errata_path(self, project: SourceProject) -> str:
+        return project.errata or self.errata
 
     @property
     def gap_severity(self) -> str:
@@ -286,8 +293,8 @@ def _parse_projects(block: list[str]) -> list[dict[str, str]]:
 # The keys a `source.projects` entry and the `source:` block take; any other
 # is refused, so a misspelled or misplaced `range:` can't silently mean the
 # whole source
-PROJECT_KEYS = ('slug', 'path', 'name_map', 'range')
-BLOCK_KEYS = ('projects', 'name_map', 'mode', 'rules')
+PROJECT_KEYS = ('slug', 'path', 'name_map', 'range', 'errata')
+BLOCK_KEYS = ('projects', 'name_map', 'mode', 'rules', 'errata')
 
 
 def _unknown_key(where: str, key: str, allowed: tuple[str, ...]) -> SourceError:
@@ -306,7 +313,7 @@ def read_config(project_dir: str) -> SourceConfig | None:
     key either level doesn't take (or a project gives twice), or a `range:`
     that is empty, malformed, or an inverted chapter range (an inverted
     scenes range needs the source: `resolve_range`).
-    `mode` defaults to faithful; `name_map` and `rules` to nothing.
+    `mode` defaults to faithful; `name_map`, `rules` and `errata` to nothing.
     """
     block = _source_block(project_dir)
     if block is None:
@@ -328,7 +335,8 @@ def read_config(project_dir: str) -> SourceConfig | None:
         for key in item:
             if key not in PROJECT_KEYS:
                 raise _unknown_key(f'source project {slug}', key, PROJECT_KEYS)
-        projects.append(SourceProject(slug, path, item.get('name_map', '').strip(), rng))
+        projects.append(SourceProject(slug, path, item.get('name_map', '').strip(), rng,
+                                      item.get('errata', '').strip()))
     keys = _direct_keys(block)
     for key in keys:
         if key not in BLOCK_KEYS:
@@ -339,6 +347,7 @@ def read_config(project_dir: str) -> SourceConfig | None:
         name_map=keys.get('name_map', ''),
         mode=keys.get('mode') or DEFAULT_MODE,
         rules=keys.get('rules', ''),
+        errata=keys.get('errata', ''),
     )
 
 
@@ -405,6 +414,63 @@ def read_rules(project_dir: str, cfg: SourceConfig) -> str:
                 out.append(nxt)
             return '\n'.join(out).strip()
     raise SourceError(f'source.rules: {rel} has no heading matching #{anchor}')
+
+
+class Erratum(NamedTuple):
+    """A known slip of a source's text against its original (#742): one
+    row of the `errata` file."""
+    ref: str            # where, in the original (`7.471`)
+    source_scene: str   # the source scene id the slip is in
+    has: str            # the source text's words
+    original: str       # what the original says
+    checked: str        # how it was checked
+    has_label: str      # the file's name for the source text (its header)
+    original_label: str  # and for the original
+
+
+#: An errata file's header: `ref|source_scene|<text>|<original>|checked`,
+#: the middle two named for the translation and the original
+#: (`butler|homer`), the names used in the source check's prompt
+ERRATA_FIXED = ('ref', 'source_scene', 'checked')
+
+
+def read_errata(project_dir: str, cfg: SourceConfig) -> dict[tuple[str, str], list[Erratum]]:
+    """(source slug, source scene id) → the known slips of that source
+    scene, from each project's `errata` file (`SourceConfig.errata_path`).
+    Empty when none is set. Raises SourceError for a file that can't be
+    read, a header that isn't `ref|source_scene|<text>|<original>|checked`,
+    a row with the wrong cell count or with no source scene, text or
+    original: a slip is never silently left out."""
+    out: dict[tuple[str, str], list[Erratum]] = {}
+    for project in cfg.projects:
+        rel = cfg.errata_path(project)
+        if not rel:
+            continue
+        path = resolve(project_dir, rel)
+        try:
+            header, rows, problem = _read_rows(path)
+        except (OSError, UnicodeDecodeError) as e:
+            raise SourceError(f'source.errata: {rel} could not be read ({e})') from e
+        if problem == 'empty':
+            raise SourceError(f'source.errata: {rel} is empty (its header is '
+                              f'ref|source_scene|<text>|<original>|checked)')
+        if problem:
+            raise SourceError(f'source.errata: {rel}: {problem}')
+        header = [h.strip() for h in header]
+        if (len(header) != 5 or (header[0], header[1], header[4]) != ERRATA_FIXED
+                or not header[2] or not header[3]):
+            raise SourceError(f'source.errata: {rel}: the header must be '
+                              f'ref|source_scene|<text>|<original>|checked '
+                              f'(e.g. ref|source_scene|butler|homer|checked), not '
+                              f'{"|".join(header)}')
+        for n, cells in enumerate(rows, 2):
+            ref, sid, has, original, checked = (c.strip() for c in cells)
+            if not (sid and has and original):
+                raise SourceError(f'source.errata: {rel} line {n} needs a source_scene, '
+                                  f'{header[2]} and {header[3]}')
+            out.setdefault((project.slug, sid), []).append(
+                Erratum(ref, sid, has, original, checked, header[2], header[3]))
+    return out
 
 
 def _heading_slug(heading: str) -> str:

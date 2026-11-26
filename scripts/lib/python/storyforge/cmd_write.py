@@ -1558,6 +1558,11 @@ def gate_source_fix_path() -> str:
     return gate.SOURCE_FIX_PATH
 
 
+def gate_source_notes_path() -> str:
+    from storyforge import gate
+    return gate.SOURCE_NOTES_PATH
+
+
 def gate_pending_path() -> str:
     from storyforge.gate import PENDING_PATH
     return PENDING_PATH
@@ -1713,7 +1718,7 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
             paths = [f'scenes/{scene_id}.md', 'reference/', 'working/logs/',
                      'working/audit-log.csv', 'working/.audit-snapshot.csv',
                      gate_pending_path(), gate_prose_path(), gate_source_fix_path(),
-                     gate_advisory_path(), *gate_state_paths()]
+                     gate_source_notes_path(), gate_advisory_path(), *gate_state_paths()]
             msg = f'Draft scene {scene_id}'
         if written_by:
             msg += f' (refusal fallback: written by {written_by})'
@@ -1729,7 +1734,8 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         _commit(project_dir, f'Gate scene {scene_id}',
                 [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
                  'working/.audit-snapshot.csv', gate_pending_path(), gate_prose_path(),
-                 gate_source_fix_path(), gate_advisory_path(), *gate_state_paths()])
+                 gate_source_fix_path(), gate_source_notes_path(), gate_advisory_path(),
+                 *gate_state_paths()])
 
     # Push
     from storyforge.git import _push
@@ -2344,7 +2350,8 @@ def _run_session_mode(pending_ids, project_dir, scenes_dir, log_dir, metadata_cs
                             ['reference/', 'working/audit-log.csv',
                              'working/.audit-snapshot.csv', gate_pending_path(),
                              gate_prose_path(), gate_source_fix_path(),
-                             gate_advisory_path(), *gate_state_paths()])
+                             gate_source_notes_path(), gate_advisory_path(),
+                             *gate_state_paths()])
                 except CommitError as e:
                     log(f'ERROR: the re-checks after {sid} ran, but {e}.')
                     uncommitted.append(f'the re-checks after {sid} ({e})')
@@ -2649,7 +2656,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                             ['reference/', 'working/logs/', 'working/audit-log.csv',
                              'working/.audit-snapshot.csv', gate_pending_path(),
                              gate_prose_path(), gate_source_fix_path(),
-                             gate_advisory_path(), *gate_state_paths()])
+                             gate_source_notes_path(), gate_advisory_path(),
+                             *gate_state_paths()])
                 except CommitError as e:
                     log(f'ERROR: the re-checks after {scene_id} ran, but {e}.')
                     log('Stopping: commit them by hand, then run again.')
