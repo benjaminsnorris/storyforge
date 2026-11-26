@@ -47,9 +47,10 @@ FLOORS: dict[str, float | None] = {
     # 0.413/0.3696/0.3913, false alarms 1/2/1, control stops
     # 0.4839/0.6129/0.5484: recall held, false alarms rose (4 to 7 over the
     # three runs). Of 46 positives, 39 are seeded and 32 asked about their
-    # fact
+    # fact. Merged with #756 (ending questions; replays, no new calls): one
+    # control fewer stops, 0.5161 to 0.4839
     'recall': 0.413, 'recall_per_case': 0.4689, 'cases_caught': 9,
-    'stop_rate_positive': 0.7391, 'false_alarm_on_fact': 2, 'stop_rate_control': 0.5161,
+    'stop_rate_positive': 0.7391, 'false_alarm_on_fact': 2, 'stop_rate_control': 0.4839,
     'unfinished': 0,
     'recall_seeded': 0.4872, 'recall_asked': 0.5625, 'asked_positives': 32,
     'asked_controls': 23,
