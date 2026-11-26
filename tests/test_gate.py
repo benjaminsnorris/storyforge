@@ -18,6 +18,12 @@ HERE = 'population four hundred and twelve at last census'
 
 
 
+def _prompt_text(content) -> str:
+    """A user message's text, whether sent as a string or as blocks (the
+    checker's reading 2 sends its note as a block of its own, #741)."""
+    return content if isinstance(content, str) else ''.join(b.get('text', '') for b in content)
+
+
 @pytest.fixture(autouse=True)
 def _pure_prose_scenes(request):
     """Scene files are pure prose (the gate refuses frontmatter); the shared
@@ -57,7 +63,7 @@ def _persistence_reply(body, drop=()):
     """The persistence check's answer: every numbered fact lasts, except the
     statements in `drop`."""
     import re
-    prompt = body['messages'][0]['content']
+    prompt = _prompt_text(body['messages'][0]['content'])
     items = re.findall(r'^(\d+)\. \[[^\]]*\] [^:]*: (.*?)(?: — "|$)', prompt, re.M)
     return _text({'verdicts': [{'n': int(n), 'persists': st not in drop, 'why': 'w'}
                                for n, st in items]})
@@ -88,7 +94,7 @@ def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=N
             reply = {'findings': list(findings), 'kept': list(kept)}
             schema = body['output_config']['format']['schema']
             if 'cleared' in schema['properties']:
-                prompt = body['messages'][0]['content']
+                prompt = _prompt_text(body['messages'][0]['content'])
                 asked = [line.split(':')[0][2:] for line in prompt.split(
                     'may change\n\n')[1].split('\n\n')[1].split('\n') if line.startswith('- ')]
                 reply['cleared'] = asked if cleared is None else list(cleared)
@@ -2145,7 +2151,7 @@ def test_a_misquote_after_a_fix_no_longer_stops_write(project_dir, tmp_path, cap
     calls = []
 
     def fake(path, body, **k):
-        prompt = body['messages'][0]['content']
+        prompt = _prompt_text(body['messages'][0]['content'])
         if 'tools' in body:
             calls.append('check')
             return _text({'findings': [_contradiction()] if HERE in prompt else [],
@@ -2194,7 +2200,7 @@ def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
     calls = []
 
     def fake(path, body, **k):
-        prompt = body['messages'][0]['content']
+        prompt = _prompt_text(body['messages'][0]['content'])
         calls.append('check' if 'tools' in body else 'fix' if 'edits' in json.dumps(
             body.get('output_config', {})) else 'extract')
         if 'tools' in body:
@@ -2232,7 +2238,7 @@ def test_a_reextraction_that_crashes_keeps_the_fixed_prose_and_says_so(project_d
                    'Blank vellum. Not even a contour line.'])
 
     def fake(path, body, **k):
-        prompt = body['messages'][0]['content']
+        prompt = _prompt_text(body['messages'][0]['content'])
         if 'tools' in body:
             return _text({'findings': [_contradiction()] if HERE in prompt else [],
                           'kept': []})
@@ -2817,7 +2823,7 @@ class TestTwoReadings:
 
         def fake(path, body, **k):
             if 'tools' in body:
-                prompt = body['messages'][0]['content']
+                prompt = _prompt_text(body['messages'][0]['content'])
                 n = 2 if 'Reading 2:' in prompt else 1
                 checks.append(n)
                 return _text({'findings': by_reading.get(n, []), 'kept': []})
@@ -2885,7 +2891,7 @@ def test_a_finding_only_the_second_reading_makes_is_fixed_and_rechecked(project_
     calls = []
 
     def fake(path, body, **k):
-        prompt = body['messages'][0]['content']
+        prompt = _prompt_text(body['messages'][0]['content'])
         if 'tools' in body:
             n = 2 if 'Reading 2:' in prompt else 1
             calls.append(('check', n))

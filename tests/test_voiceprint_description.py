@@ -334,7 +334,7 @@ def _recordings():
     from storyforge import api
     out = {}
     for root, _, files in os.walk(CASSETTE):
-        for name in files:
+        for name in (f for f in files if f.endswith(".json.gz")):
             with gzip.open(os.path.join(root, name), 'rt', encoding='utf-8') as f:
                 rec = json.load(f)
             body = rec['request']['body']
