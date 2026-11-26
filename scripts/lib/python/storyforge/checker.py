@@ -81,6 +81,8 @@ from storyforge import ledger
 from storyforge.illustrations import read_scene_raw
 from storyforge.prompts import THIS_SCENE, is_dated
 from storyforge.quotes import normalize, quote_in, word_count
+#: the checker's system prompt lives as long as the writer's (#741)
+from storyforge.session import CACHE_TTL
 from storyforge.api import ToolInputError, ToolRun, converse, extract_text, is_truncated
 
 #: Ledger type → the error code a contradiction of it carries (E1/E2's codes)
@@ -401,21 +403,24 @@ def _system(book: Book) -> list[dict] | None:
     own cache breakpoint lets each scene's check read them from cache; the
     last earlier scene has another, so each scene's check extends the last
     one's (the request's automatic breakpoint, at the end, only serves the
-    turns of one scene)."""
+    turns of one scene). Both live `CACHE_TTL`, as the writer's do: drafting,
+    voice review and the gate's other layers come between one check and the
+    next, often more than five minutes (#741: 10 of 21 runs on Wrath, Nov
+    15-16, started cold)."""
     blocks = []
     if book.reference:
         parts = [f'<reference file="{name}">\n{text.strip()}\n</reference>'
                  for name, text in book.reference.items()]
         blocks.append({'type': 'text', 'text': "The book's reference material, which every "
                        'scene must agree with:\n\n' + '\n\n'.join(parts),
-                       'cache_control': {'type': 'ephemeral'}})
+                       'cache_control': {'type': 'ephemeral', 'ttl': CACHE_TTL}})
     if book.earlier:
         blocks.append({'type': 'text', 'text': (
             '=== THE STORY SO FAR ===\n\nThe prose of the scenes before the one being '
             'checked, in reading order. The scene must agree with what they establish.')})
         blocks += [{'type': 'text', 'text': f'<scene id="{sid}"{_when_attr(book, sid)}>\n'
                     f'{book.prose[sid].strip()}\n</scene>'} for sid in book.earlier]
-        blocks[-1]['cache_control'] = {'type': 'ephemeral'}
+        blocks[-1]['cache_control'] = {'type': 'ephemeral', 'ttl': CACHE_TTL}
     return blocks or None
 
 
@@ -774,6 +779,25 @@ def _reading_note(reading: int) -> str:
             f'\n\n(Reading {reading}: an independent check of this scene; read it afresh.)')
 
 
+def prompt_content(book: Book, at: str, brief_text: str,
+                   disputes: list[Dispute] | None = None,
+                   reading: int = 1) -> str | list[dict]:
+    """The user message of a reading: `build_prompt`'s text. Reading 1 sends
+    it whole, as it always has. A later reading sends the same text with its
+    reading note as a block of its own, after a cache breakpoint: the rest is
+    what reading 1 just sent, so it is read from cache and only the note is
+    written (#741: on Wrath reading 2 wrote all 33k tokens of the message
+    again, about $0.16 a reading). The breakpoint is the request's fourth,
+    with the two in the system prompt and the automatic one at its end."""
+    note = _reading_note(reading)
+    text = build_prompt(book, at, brief_text, disputes, reading)
+    if not note:
+        return text
+    head = text[:-len(note)]
+    return [{'type': 'text', 'text': head, 'cache_control': {'type': 'ephemeral'}},
+            {'type': 'text', 'text': note}]
+
+
 def build_prompt(book: Book, at: str, brief_text: str,
                  disputes: list[Dispute] | None = None, reading: int = 1) -> str:
     s = book.scenes.get(at, {})
@@ -941,7 +965,7 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
     }
     where = f'{scene_id}' + (f' (reading {reading})' if reading > 1 else '')
     try:
-        run = converse(build_prompt(book, scene_id, brief.text, disputes, reading),
+        run = converse(prompt_content(book, scene_id, brief.text, disputes, reading),
                        model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
                        label=f'check {where}', system=_system(book),

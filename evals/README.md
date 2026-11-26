@@ -81,7 +81,8 @@ Part E):
   re-records only the cheap part. If the suite itself has to generate end to
   end, mark it `frozen=True`.
 - **The continuity checks (#648) are code**, tested in
-  `tests/test_continuity.py`, not a suite. The gate now reads each scene's
+  `tests/test_continuity.py`; their precision on a real book is measured,
+  free, by `typed-state-set` (#744, below). The gate now reads each scene's
   typed state (one more call), so E4's and E8's gate runs miss on it and stay
   `stale` until Ben re-measures them for recall on KNO, PHY, TIM and WLD
   (three runs, over the monthly budget: his decision).
@@ -296,6 +297,56 @@ scene and a verdict on one known error, an E1 `tool-introduced` case.
 - **Labels.** E8's judge is one Opus reading, tied to a known error, so
   these labels are firmer than E4's (an Opus judge against an Opus checker).
   The E4 half (shared-dark Act 1 drafts gated in order) is a follow-up.
+
+## The typed-state set (#744)
+
+`typed-state-set` replays the gate's typed-state checks (possession,
+injury, life, time, travel, knowledge, names, sky: `storyforge.continuity`)
+on *Wrath Like Smoke*'s overnight gate run of 2026-11-16/17 and scores
+every finding against the checker review's verdict
+(`docs/plans/2026-11-26-checker-review/`, report A section 2: real,
+debatable or false). It measures the checks before and after a change to
+them (#732 possession, #733 injury and life), at no cost in any mode.
+
+- **A run** is one scene's gate run: the book's repo at the commit before
+  the scene's (what the gate read), with the scene's prose, stage sheet and
+  typed state from its own commit, run through `continuity.check_continuity`
+  with the extraction call answered from the saved typed state
+  (`typed_state_set.replay`). Everything but the model's reply is today's
+  code, so a change to the checks needs nothing re-recorded; a change to
+  what extraction returns (#748) needs new replies.
+- **Which runs.** The book commits each scene once, so the set holds each
+  scene's final gate run: 43 runs (`aphrodite-drives-helen-to-bed` is left
+  out: its saved state is of a fix the gate discarded). The other 57 runs'
+  replies are only in the gate logs (gitignored), so 17 of the review's 65
+  typed-state verdicts are on a run in the set: 14 possession, 2 injury, 1
+  life. `set.json` lists every run left out and why.
+- **Reports**, per check and overall: `findings`, `_false`, `_debatable`,
+  `_real` (labelled findings by verdict), `_unlabelled` (a finding no label
+  covers: a new kind, to read in the private results), `_precision` (real
+  over findings, when there are any), `real_missed` and `cleared` (labels no
+  finding is on any more). Gated on today's values (`FLOORS`, exact, #488):
+  a fall in a findings, false or unlabelled count is a gain to move the
+  floor to in the same commit.
+- **Baseline, 2026-11-26 (main at 1.191.0, before #732 and #733):** 17
+  findings, all labelled: possession 14 (all false), injury 2 (1 false, 1
+  debatable), life 1 (false); precision 0. `cleared` 0.
+- **With #732 (1.192.2):** 3 findings: possession 0 (14 false cleared;
+  owner-scoped objects, and an unowned name held again by its loser in a
+  later scene is a note: Agamemnon's and Ares's spears), injury and life
+  unchanged. Nothing real lost, nothing unlabelled.
+- **Not measured.** Recall: the only real typed-state catch (a time
+  finding, Q80) is on a first run. Seeded errors in clean scenes (a wrong
+  holder, a dead man acting, a healed wound) are the follow-up that
+  measures it. The names check runs without the book's name map (it lives
+  in another repo, `../homer`), and says so in every run's notes.
+- **Private**, like the blocking set: the set (`typed-state-set/` in
+  storyforge-evals, with its files stored once each, gzipped, by hash) and
+  the per-run results stay there; notes carry label ids, scene ids and
+  counts. `RECORDED_SET` in the suite pins the set's fingerprint. Rebuild
+  with `python3 evals/typed_state_set/build.py --book-repo
+  ~/Developer/iliad-adult` (free; it reads the branch
+  `storyforge/write-20261116-2234` and report A).
 
 ## The question set (#649)
 
@@ -532,9 +583,16 @@ Every Anthropic call goes through `api._api_request`, which consults
 `storyforge.cassette` when `STORYFORGE_CASSETTE` is set. The harness sets it to
 `evals/fixtures/cassettes/<suite>/` for each suite. Replay mode never goes live:
 a call with no recording raises `CassetteMiss` and the suite errors (a frozen
-suite is `stale` instead). Recordings are keyed by a hash of the request, so
-any prompt change is a miss — re-record that suite with `--mode auto` (a
-frozen one only as above). A prompt that embeds a temp path, date, or id
+suite is `stale` instead). Recordings are keyed by a hash of the request as
+the model reads it (`cassette.normal_body`: `cache_control` left out wherever
+it sits, adjacent text blocks joined, #741), so any prompt change is a miss —
+re-record that suite with `--mode auto` (a frozen one only as above) — but a
+change to where a request is cached, or for how long, is not. Each cassette
+directory names its key scheme in `KEY_SCHEME`; a directory without it holds
+recordings keyed by the raw body, and the harness renames them before the
+suite runs (free; the suite's notes say how many, for the repo that holds
+them to commit). By hand: `python3 -m storyforge.cassette rekey DIR...` from
+`scripts/lib/python`. A prompt that embeds a temp path, date, or id
 changes every run and can never replay; keep those out of what a suite sends.
 The Batch API is refused under a cassette; run commands in direct mode.
 In `record` mode a request already recorded earlier in the same run replays

@@ -565,11 +565,12 @@ class ToolRun:
         return calculate_cost_from_usage(extract_usage({'usage': self.usage}), model)
 
 
-def converse(prompt: str, model: str, tools: list[dict], handlers: dict,
+def converse(prompt: str | list[dict], model: str, tools: list[dict], handlers: dict,
              max_tokens: int = 4096, max_turns: int = 20, label: str = '',
              timeout: int = API_TIMEOUT, system: list[dict] | None = None,
              output_schema: dict | None = None, log_file: str = '') -> ToolRun:
-    """A tool-using exchange: send ``prompt`` with ``tools``, run each tool
+    """A tool-using exchange: send ``prompt`` (text, or content blocks, which
+    may carry their own cache breakpoints) with ``tools``, run each tool
     call through ``handlers`` (name → function of the call's input returning
     a string), send the results back, and repeat until the model answers.
 
