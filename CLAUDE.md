@@ -1,7 +1,7 @@
 # Storyforge Plugin Development
 
 Read before working in an area:
-- `docs/agent-reference.md` — shared-module table, project data files, commands and skills, skill standards, graphic-novel mode, **interior-illustration invariants (must not break)**, commit prefixes, and the **5-agent PR review workflow** (follow it when asked for "the 5-agent review" or after creating a PR).
+- `docs/agent-reference.md` — shared-module table, project data files, commands and skills, skill standards, graphic-novel mode, **interior-illustration invariants (must not break)**, commit prefixes, and the **tiered PR review workflow** (follow it after creating a PR; "the 5-agent review" is its full tier).
 - `docs/history.md` — rationale and bug history. Read the matching section before changing cleanup's planner, the YAML helpers, graphic-novel mode, or interior illustrations.
 - `docs/plans/2026-10-28-rethink-status.md` — current rethink status and how to resume; read first when working on the rethink.
 
