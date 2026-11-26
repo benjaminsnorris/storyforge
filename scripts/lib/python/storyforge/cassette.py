@@ -2,7 +2,11 @@
 
 Inert unless ``STORYFORGE_CASSETTE`` names a directory. When it does, every
 request through ``api._api_request`` is keyed by a hash of its method, path,
-and body, and ``STORYFORGE_CASSETTE_MODE`` decides what happens:
+and body, and ``STORYFORGE_CASSETTE_MODE`` decides what happens. The body is
+keyed as the model reads it (``normal_body``): cache breakpoints and their
+TTLs are left out and adjacent text blocks joined, so a change to how a
+request is cached replays (#741). Recordings named by the older scheme (the
+raw body) are renamed by ``rekey``, which ``evals/run.py`` runs itself:
 
 - ``replay`` (default): return the recorded response. A request with no
   recording raises ``CassetteMiss`` — a replay that quietly went live would
@@ -123,10 +127,166 @@ def mode() -> str:
     return value
 
 
+#: The key scheme recordings are named by (`request_key`). A cassette
+#: directory says which in its `KEY_SCHEME_FILE`; one without it holds
+#: recordings named by scheme 1 (the raw body), which `rekey` renames
+KEY_SCHEME = 2
+KEY_SCHEME_FILE = 'KEY_SCHEME'
+#: Appended to a recording `rekey` found a different reply for: no longer a
+#: recording to any scan (each counts `.json.gz` / `.json`)
+SUPERSEDED = '.superseded'
+
+
+def _plain_text(block) -> bool:
+    return (isinstance(block, dict) and block.get('type') == 'text'
+            and set(block) <= {'type', 'text'} and isinstance(block.get('text'), str))
+
+
+def _normal_blocks(content):
+    """A system prompt or message content as the model reads it: no cache
+    markers, and adjacent text blocks joined into one, a string when that is
+    all there is. Where a request puts its cache breakpoints, and whether a
+    stretch of text is one block or several, changes what it costs, not
+    what the model reads."""
+    if not isinstance(content, list):
+        return content
+    out: list = []
+    for block in content:
+        if isinstance(block, dict):
+            block = {k: v for k, v in block.items() if k != 'cache_control'}
+        if _plain_text(block) and out and _plain_text(out[-1]):
+            out[-1] = {'type': 'text', 'text': out[-1]['text'] + block['text']}
+        else:
+            out.append(block)
+    if len(out) == 1 and _plain_text(out[0]):
+        return out[0]['text']
+    return out
+
+
+def normal_body(body: dict | None) -> dict | None:
+    """``body`` as `request_key` keys it: `cache_control` dropped wherever a
+    request may carry it (the request, its tools, system and message
+    blocks), and the system prompt and each message's content joined as
+    `_normal_blocks` does. Two requests that differ only in caching are one
+    recording, so moving a breakpoint or changing its TTL replays."""
+    if not isinstance(body, dict):
+        return body
+    out = {k: v for k, v in body.items() if k != 'cache_control'}
+    if 'system' in out:
+        out['system'] = _normal_blocks(out['system'])
+    if isinstance(out.get('tools'), list):
+        out['tools'] = [{k: v for k, v in t.items() if k != 'cache_control'}
+                        if isinstance(t, dict) else t for t in out['tools']]
+    if isinstance(out.get('messages'), list):
+        out['messages'] = [{**m, 'content': _normal_blocks(m['content'])}
+                           if isinstance(m, dict) and 'content' in m else m
+                           for m in out['messages']]
+    return out
+
+
 def request_key(method: str, path: str, body: dict | None) -> str:
-    canonical = json.dumps({'method': method, 'path': path, 'body': body},
+    canonical = json.dumps({'method': method, 'path': path, 'body': normal_body(body)},
                            sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _scheme(cassette_dir: str) -> int:
+    try:
+        with open(os.path.join(cassette_dir, KEY_SCHEME_FILE)) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 1
+
+
+def _recordings(cassette_dir: str):
+    """Every recording file in ``cassette_dir`` (its two-character shards)."""
+    if not os.path.isdir(cassette_dir):
+        return
+    for shard in sorted(os.listdir(cassette_dir)):
+        sub = os.path.join(cassette_dir, shard)
+        if len(shard) != 2 or not os.path.isdir(sub):
+            continue
+        for name in sorted(os.listdir(sub)):
+            if name.endswith(('.json.gz', '.json')):
+                yield os.path.join(sub, name)
+
+
+def _write_scheme(cassette_dir: str) -> None:
+    with open(os.path.join(cassette_dir, KEY_SCHEME_FILE), 'w', newline='\n') as f:
+        f.write(f'{KEY_SCHEME}\n')
+
+
+def needs_rekey(cassette_dir: str) -> bool:
+    """Whether ``cassette_dir`` holds recordings named by an older key scheme."""
+    return _scheme(cassette_dir) < KEY_SCHEME and next(_recordings(cassette_dir), None) is not None
+
+
+def rekey(cassette_dir: str) -> tuple[int, list[str]]:
+    """Rename every recording in ``cassette_dir`` to its key under
+    `KEY_SCHEME`, from the request it holds, and mark the directory. Free:
+    nothing is called. Returns how many were renamed and the problems:
+
+    - a recording that can't be read (nor one already at its new key, to
+      compare with): left as it is, and the directory is not marked, so a
+      miss there still says to re-key, and the next re-key reports it again,
+      rather than reading as a stale prompt that a paid re-record would fix;
+    - two that are now one key with different replies: the first, by file
+      name, is kept; the other is renamed with `SUPERSEDED` appended, which
+      no scan counts as a recording, for the author to look at.
+
+    A directory with no recordings is left alone."""
+    renamed, problems, unread = 0, [], False
+    files = list(_recordings(cassette_dir))
+    if not files:
+        return 0, []
+    for path in files:
+        try:
+            data = _read_recording(path)
+            req = data['request']
+            key = request_key(req['method'], req['path'], req['body'])
+        except (OSError, EOFError, ValueError, KeyError, TypeError) as e:
+            problems.append(f'{path}: unreadable ({e}); not re-keyed')
+            unread = True
+            continue
+        target = recording_path(cassette_dir, key)
+        if not path.endswith('.gz'):
+            target = target[:-len('.gz')]
+        if os.path.abspath(target) == os.path.abspath(path):
+            continue
+        existing = _existing_recording(cassette_dir, key)
+        if existing:
+            try:
+                same = _read_recording(existing).get('response') == data.get('response')
+            except (OSError, EOFError, ValueError, AttributeError) as e:
+                problems.append(f'{existing}: unreadable ({e}), so {path}, the same request '
+                                f'once caching is set aside, was not re-keyed')
+                unread = True
+                continue
+            if same:
+                os.remove(path)
+            else:
+                os.replace(path, path + SUPERSEDED)
+                problems.append(f'{path}: the same request as {existing} once caching is '
+                                f'set aside, with a different reply; kept {existing}, this one '
+                                f'renamed to {os.path.basename(path)}{SUPERSEDED}')
+            continue
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        os.replace(path, target)
+        renamed += 1
+    for shard in {os.path.dirname(p) for p in files}:
+        try:
+            os.rmdir(shard)   # only if the renames emptied it
+        except OSError:
+            pass
+    if not unread:
+        _write_scheme(cassette_dir)
+    return renamed, problems
+
+
+def _read_recording(path: str) -> dict:
+    opener = gzip.open if path.endswith('.gz') else open
+    with opener(path, 'rt', encoding='utf-8') as f:
+        return json.load(f)
 
 
 def recording_path(cassette_dir: str, key: str) -> str:
@@ -243,6 +403,13 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
         _log_call(key, body, response, replayed=True)
         return response
 
+    if not existing and needs_rekey(cassette_dir):
+        raise _fail(CassetteError(
+            f'No recording for {method} {path} (key {key[:12]}) in {cassette_dir}, whose '
+            f'recordings are named by an older key scheme (no {KEY_SCHEME_FILE} '
+            f'{KEY_SCHEME}), or a re-key couldn\'t read one of them. Re-key them first, '
+            f'which is free and names any it can\'t read: python3 -m storyforge.cassette '
+            f'rekey {cassette_dir} (evals/run.py does it itself).'))
     if current == 'replay':
         raise _fail(CassetteMiss(
             f'No recording for {method} {path} (key {key[:12]}) in {cassette_dir}. '
@@ -271,6 +438,8 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
             f.write(json.dumps({'request': {'method': method, 'path': path, 'body': body},
                                 'response': response}, indent=1).encode('utf-8'))
         os.replace(tmp, target)
+        if _scheme(cassette_dir) < KEY_SCHEME:
+            _write_scheme(cassette_dir)
     except OSError as e:
         # The call was paid for: log it, and the failure, where the harness
         # sees both (command code may swallow the raise)
@@ -284,3 +453,28 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
     _log_call(key, body, response, replayed=False)
     _recorded_here.add(_run_id(cassette_dir, key))
     return response
+
+
+def main(argv=None) -> int:
+    """``python3 -m storyforge.cassette rekey DIR...``: re-key each cassette
+    directory's recordings (`rekey`)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) < 2 or args[0] != 'rekey':
+        print('usage: python3 -m storyforge.cassette rekey DIR...', file=sys.stderr)
+        return 2
+    failed = False
+    for d in args[1:]:
+        if not os.path.isdir(d):
+            print(f'ERROR: {d} is not a directory', file=sys.stderr)
+            failed = True
+            continue
+        n, problems = rekey(d)
+        print(f'{d}: {n} recording(s) re-keyed')
+        for p in problems:
+            print(f'WARNING: {p}', file=sys.stderr)
+        failed = failed or bool(problems)
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
