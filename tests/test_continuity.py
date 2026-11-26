@@ -226,7 +226,8 @@ class TestPossession:
 
     def test_a_gap_between_turns_a_finding_into_a_note(self):
         # CR-5: a scene between without typed state may hold the `gets`
-        b = make_book('s3', {'s1': [R('holds', 'Mara', 'brass key', 'gives', 'a stranger')],
+        b = make_book('s3', {'s1': [R('holds', 'Mara', "Mara's brass key", 'gives',
+                                      'a stranger')],
                              's2': [], 's3': [R('holds', 'Mara', 'brass key', 'has')]})
         b.gaps = {'s2'}
         f, notes = continuity.check_possession(b)
@@ -239,9 +240,9 @@ class TestPossession:
         assert f == [] and any('read as places' in n and 'Captain Ash' in n for n in notes)
 
     def test_lost_then_held_again_by_the_loser(self):
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'loses')],
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Mara's brass key", 'loses')],
                              's2': [R('holds', 'Mara', 'brass key', 'has')]})
-        assert 'Mara lost brass key' in continuity.check_possession(b)[0][0].explanation
+        assert "Mara lost brass key" in continuity.check_possession(b)[0][0].explanation
 
     def test_given_to_no_one_then_held_by_another_is_fine(self):
         b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'gives', '')],
@@ -260,10 +261,37 @@ class TestPossession:
         assert continuity.check_possession(b)[0] == []
 
     def test_held_after_giving_it_away(self):
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'gives', 'a stranger')],
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Mara's brass key", 'gives',
+                                      'a stranger')],
                              's2': [R('holds', 'Mara', 'brass key', 'has')]})
         f, _ = continuity.check_possession(b)
         assert 'Mara gave away brass key s1' in f[0].explanation
+
+    @pytest.mark.parametrize('value', ['loses', 'gives'])
+    def test_an_unowned_name_held_again_in_a_later_scene_is_a_note(self, value):
+        # #732, the typed-state set: Agamemnon loses a spear in one scene and
+        # has "two spears" later; Ares gives away a spear he lost scenes ago.
+        # An unowned spear across scenes may be another, so it is said, with
+        # both scenes, not blocked
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'spear', value, 'a stranger')],
+                             's2': [R('holds', 'Mara', 'the spear', 'has')]})
+        f, notes = continuity.check_possession(b)
+        assert f == []
+        assert any('held again by the person who lost or gave one away in an earlier scene'
+                   in n and 'Mara has the spear in s2' in n and ' in s1' in n for n in notes)
+
+    def test_an_unowned_name_held_again_in_the_same_scene_blocks(self):
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'spear', 'loses', quote='throws'),
+                                    R('holds', 'Mara', 'the spear', 'has', quote='again')]})
+        assert 'Mara lost the spear' in continuity.check_possession(b)[0][0].explanation
+
+    @pytest.mark.parametrize('first,then', [("Mara's spear", 'the spear'),
+                                            ('spear', "Mara's spear")])
+    def test_an_owned_name_held_again_in_a_later_scene_blocks(self, first, then):
+        b = make_book('s2', {'s1': [R('holds', 'Mara', first, 'loses')],
+                             's2': [R('holds', 'Mara', then, 'has', quote='Mara spear')]})
+        f, _ = continuity.check_possession(b)
+        assert f[0].scene_quote == 'Mara spear' and 'Mara lost' in f[0].explanation
 
     def test_used_after_it_was_destroyed(self):
         b = make_book('s2', {'s1': [R('holds', 'Mara', 'the letter', 'destroyed')],
@@ -328,7 +356,8 @@ class TestPossession:
         b = make_book('s1', {'s1': [R('holds', 'Mara', 'brass key', 'has', quote='Mara key'),
                                     R('holds', 'Oren', "Mara's brass key", 'gets',
                                       quote='Oren took it'),
-                                    R('holds', 'Mara', 'brass key', 'loses', quote='Mara lost it')]})
+                                    R('holds', 'Mara', 'brass key', 'loses',
+                                      quote='Mara lost it')]})
         assert 'Oren holds' in continuity.check_possession(b)[0][0].explanation
 
     def test_a_gives_naming_another_recipient_is_not_paired(self):

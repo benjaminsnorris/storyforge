@@ -14,7 +14,8 @@ calendar and the world table, free and the same every run:
   with nothing between; in any scene, an object held or taken whole after
   it was destroyed (a holder's unowned "spear" taken after theirs broke is
   another spear), or held again by the person who gave it away or lost
-  it, unless a fact between moves it to someone else (`gets`). An object
+  it (across scenes, only a name with an owner), unless a fact between
+  moves it to someone else (`gets`). An object
   in other hands than an earlier scene left it is a note (an offstage
   handover is ordinary). A name without an owner ("shield", "the round
   shield") is its holder's own object, a name with one ("Teucer's bow")
@@ -499,7 +500,9 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
     name has an owner (a holder's unowned "spear" taken after theirs broke
     is another spear; discarding the remains or a second `destroyed` is
     not a use); an object held again by the person who gave it away or
-    lost it. Notes, never findings: a different holder than an earlier
+    lost it (across scenes only when either name has an owner; an unowned
+    "spear" lost in one scene and held in a later one is a note). Notes,
+    never findings: a different holder than an earlier
     scene left it with (an offstage handover is ordinary, #648's review
     CR-3); anything a scene between without typed state might explain
     (CR-5); a record on an object whose state a misquoted record made
@@ -520,6 +523,7 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
     flagged: set[ObjectId] = set()
     offstage, gapped, places, unknown, apart, unheld = [], [], set(), [], [], []
     parted: list[tuple[Record, ObjectId]] = []
+    again: list[str] = []
     for r in records:
         oid = object_id(book, state, r)
         if oid is None:
@@ -568,8 +572,16 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
                         offstage.append(f'{r.who} has {r.item}, which {p_rec.who} held in '
                                         f'{p_rec.scene_id}')
                 elif prev.status in ('given', 'lost') and prev.by == holder:
-                    problem = (f'{r.who} {"gave away" if prev.status == "given" else "lost"} '
-                               f'{r.item} {p_where}, with nothing between')
+                    parted_how = 'gave away' if prev.status == 'given' else 'lost'
+                    if here or object_ref(book, r.item).owner or \
+                            object_ref(book, p_rec.item).owner:
+                        problem = (f'{r.who} {parted_how} {r.item} {p_where}, with nothing '
+                                   f'between')
+                    else:
+                        # an unowned "spear" across scenes may be another
+                        # spear (the typed-state set's eval, #732)
+                        again.append(f'{r.who} {r.value} {r.item} in {sid}, '
+                                     f'{parted_how} in {p_rec.scene_id}')
             gap = [] if here else book.gap_between(p_rec.scene_id, sid)
             if problem and gap:
                 gapped.append(f'{r.item} ({", ".join(gap[:3])})')
@@ -604,6 +616,11 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
         notes.append(f'possession: {len(gapped)} object(s) used after being given away, lost '
                      f'or destroyed, with a scene between whose typed state wasn\'t read, not '
                      f'compared: ' + '; '.join(gapped[:5]))
+    if again:
+        notes.append(f'possession: {len(again)} object(s) named without an owner held again by '
+                     f'the person who lost or gave one away in an earlier scene (it may be '
+                     f'another; not a finding, name the owner to compare): '
+                     + '; '.join(again[:5]))
     if unknown:
         notes.append(f'possession: {len(unknown)} record(s) on an object whose state is unknown '
                      f'after a misquoted record, not compared: ' + '; '.join(unknown[:5]))

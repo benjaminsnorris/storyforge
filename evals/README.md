@@ -331,6 +331,10 @@ them (#732 possession, #733 injury and life), at no cost in any mode.
 - **Baseline, 2026-11-26 (main at 1.191.0, before #732 and #733):** 17
   findings, all labelled: possession 14 (all false), injury 2 (1 false, 1
   debatable), life 1 (false); precision 0. `cleared` 0.
+- **With #732 (1.192.2):** 3 findings: possession 0 (14 false cleared;
+  owner-scoped objects, and an unowned name held again by its loser in a
+  later scene is a note: Agamemnon's and Ares's spears), injury and life
+  unchanged. Nothing real lost, nothing unlabelled.
 - **Not measured.** Recall: the only real typed-state catch (a time
   finding, Q80) is on a first run. Seeded errors in clean scenes (a wrong
   holder, a dead man acting, a healed wound) are the follow-up that
