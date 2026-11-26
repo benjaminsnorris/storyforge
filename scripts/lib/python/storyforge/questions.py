@@ -25,7 +25,7 @@ by asking about each one narrowly:
 - **Likeliest slips first** (#739): disputes, the brief's entering items,
   then the facts: the on-stage cast's physical states, then the last
   `RECENT_SCENES` scenes' facts, then the rest, each by `TYPE_SALIENCE`
-  and the nearest scene. At most `MAX_QUESTIONS` (60), asked `BATCH` (30)
+  and the nearest scene. At most `MAX_QUESTIONS` (30), asked `BATCH` (30)
   to a call; the cap cuts from the end.
 - **Only about who is there** (`present_subjects`): a fact is asked when
   its subject (an id, name or alias, through the registries) is present by
@@ -107,12 +107,13 @@ RECENT_SCENES = 5
 MODEL_ENV = 'STORYFORGE_QUESTIONS_MODEL'
 ASKINGS = yes_no.ASKINGS
 #: The most questions asked per scene, disputes first (the rest are named
-#: in the notes; a dispute past it is unruled), asked in calls of `BATCH`
-#: (#739: 30 cut 84% of the qualifying facts; uncapped, the 0.37% of
-#: questions that give a false two-yes would stop a run 1-2 times, so the
-#: cap rose only once the order put the likeliest slips first). The brief's
-#: promises are their own call with their own cap (`MAX_PROMISES`)
-MAX_QUESTIONS = 60
+#: in the notes; a dispute past it is unruled), asked in calls of `BATCH`.
+#: #739 put the likeliest slips first and tried 60 (two calls): on
+#: `gate-set-questions` (2026-11-26) 60 had the same run-1 recall, one more
+#: catch in run 2, and one more false alarm on a correct fact over three
+#: runs (8 to 7), so it stays 30 (docs/history.md). The brief's promises are their own call with
+#: their own cap (`MAX_PROMISES`)
+MAX_QUESTIONS = 30
 #: Questions per call: a scene's questions past it are a second call (each
 #: asked twice, its splits a third time, as the first)
 BATCH = 30

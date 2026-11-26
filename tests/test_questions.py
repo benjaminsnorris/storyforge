@@ -574,9 +574,9 @@ class TestAskQuestions:
         # SF-7: the skipped facts are named
         assert r.notes == ['2 question(s) past the 1 a scene gets: not asked: b, c']
 
-    def test_questions_past_a_batch_are_a_second_call(self, tmp_path):
-        """#739: the cap rose to 60, asked 30 to a call."""
-        assert questions.MAX_QUESTIONS == 2 * questions.BATCH
+    def test_questions_past_a_batch_are_a_second_call(self, tmp_path, monkeypatch):
+        """#739: a cap above `BATCH` is asked in more than one call."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
         qs = [Q(f'f{i}') for i in range(questions.BATCH + 2)]
         log = str(tmp_path / 'q.json')
         r, asked = self._ask(qs, lambda a, n: [ans(k, 'no') for k in range(1, n + 1)],
@@ -586,7 +586,8 @@ class TestAskQuestions:
         for name in ('q.json', 'q.a2.json', 'q-b2.json', 'q-b2.a2.json'):
             assert os.path.isfile(tmp_path / name)
 
-    def test_each_batch_rules_its_own_findings_and_notes(self):
+    def test_each_batch_rules_its_own_findings_and_notes(self, monkeypatch):
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
         qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
         # the last question (alone in batch 2) is yes twice with no quote;
         # the first is a finding
@@ -597,8 +598,9 @@ class TestAskQuestions:
         assert r.notes == ['batch 2 of 2: 1 question(s) answered yes twice with no quote in '
                            'the scene: not findings']
 
-    def test_a_failed_batch_fails_the_check(self):
+    def test_a_failed_batch_fails_the_check(self, monkeypatch):
         """T-2: a bad reply twice in batch 2 is a QuestionError, as in batch 1."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
         qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
 
         def fake(path, body, **k):
@@ -608,8 +610,10 @@ class TestAskQuestions:
             with pytest.raises(QuestionError, match='failed twice'):
                 questions.ask_questions(SCENE, PROSE, qs, model='m')
 
-    def test_a_split_in_batch_two_is_asked_a_third_time_beside_its_log(self, tmp_path):
+    def test_a_split_in_batch_two_is_asked_a_third_time_beside_its_log(self, tmp_path,
+                                                                        monkeypatch):
         """T-3: batch 2's third asking logs at -b2.a3, and its note says so."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
         qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
         log = str(tmp_path / 'q.json')
         r, asked = self._ask(qs, lambda a, n: (
