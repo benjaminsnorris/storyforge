@@ -5,11 +5,16 @@ are compared with every other scene's, the ledger, the briefs, scenes.csv's
 calendar and the world table, free and the same every run:
 
 - **life** (PHY): a dead character present, acting or spoken to as present,
-  in a later scene of the story's present. Deaths come from `alive` records
-  and characters.csv's `death_scene`. A scene off the present (scenes.csv
-  `time_mode` frame, vision, memory, dream or ghost: `elaborate.off_present`)
-  is exempt, and so is a flashback, whose `timeline_day` comes before the
-  death. An unmarked scene is reported, never assumed to be a memory.
+  later in the story's present. Deaths come from `alive` records and
+  characters.csv's `death_scene`. A death and a presence bind one
+  characters.csv id (`Book.character`, #733): a description ("the boy") or
+  a name several characters share ("Pisander") binds none, and a presence
+  it would have matched is a note. A presence in the paragraph of the
+  death, after it, is the death itself (the dying man's heels, his name
+  said). A scene off the present (scenes.csv `time_mode` frame, vision,
+  memory, dream or ghost: `elaborate.off_present`) is exempt, and so is a
+  flashback, whose `timeline_day` comes before the death. An unmarked
+  scene is reported, never assumed to be a memory.
 - **possession** (PHY): within a scene, an object in two people's hands
   with nothing between; in any scene, an object held or taken whole after
   it was destroyed (a holder's unowned "spear" taken after theirs broke is
@@ -41,7 +46,11 @@ calendar and the world table, free and the same every run:
   compound, a bound and an estimate are read whole, a range or two counts
   not at all).
 - **injury** (PHY): a body part used at full strength while a serious or
-  disabling injury to it is current.
+  disabling injury to it is current. A serious one is current through its
+  own scene, and after it only when that scene shows it lasting (an
+  `impaired` use of the part on other words than the injury's, #733), then
+  until `SERIOUS_DAYS` pass with no scene showing it again; a disabling
+  one until healed.
 - **names** (WLD): a name the book rules out appears: an adaptation's name
   map's replaced source names (`source.NameMap.changed`) and the author's
   `continuity.forbidden_names` in storyforge.yaml. A name no registry,
@@ -61,6 +70,7 @@ join the check's and block like any continuity error.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 from dataclasses import dataclass, field
@@ -69,14 +79,18 @@ from typing import Literal, NamedTuple
 from storyforge.checker import CALENDAR, Finding
 from storyforge.quotes import normalize, quote_in
 from storyforge.typed_state import (END, MAX_OFFERED_FACTS, MAX_OFFERED_INJURIES,
-                                    MAX_OFFERED_OBJECTS, START, Record, object_kind, part_key)
+                                    MAX_OFFERED_OBJECTS, START, Record, object_kind, part_key,
+                                    prose_offset)
 
 #: The block and key in storyforge.yaml holding names the book rules out,
 #: `;`-separated (`continuity:` / `  forbidden_names: Jupiter; Juno`)
 FORBIDDEN_BLOCK, FORBIDDEN_KEY = 'continuity', 'forbidden_names'
-#: A serious injury is current this many story days at most, unless a
-#: `healed` record ends it sooner (a disabling one lasts until healed)
-SERIOUS_DAYS = 42
+#: A serious injury its scene shows lasting stays current this many story
+#: days past the last scene that shows it (the injury, or an `impaired` use
+#: of the part), unless a `healed` record ends it sooner; one its scene
+#: doesn't show lasting ends with that scene, and a disabling one lasts
+#: until healed (#733: a wound a fight shows for a moment is not carried)
+SERIOUS_DAYS = 7
 #: Where in its day each time of day falls, for travel
 _DAY_FRACTION = {'dawn': 0.2, 'morning': 0.35, 'afternoon': 0.6, 'evening': 0.75,
                  'dusk': 0.8, 'night': 0.9}
@@ -118,6 +132,9 @@ class Book:
     deaths: list[Record] = field(default_factory=list)
     #: lower-case name, alias or id → canonical character id
     chars: dict[str, str] = field(default_factory=dict)
+    #: lower-case name or alias characters.csv gives more than one character
+    #: → their ids (`namesakes`): it binds none of them (`character`)
+    namesakes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     places: dict[str, str] = field(default_factory=dict)
     place_names: dict[str, str] = field(default_factory=dict)
     world: object = None
@@ -179,6 +196,13 @@ class Book:
     def is_person(self, name: str) -> bool:
         return ' '.join((name or '').split()).lower() in self.chars
 
+    def character(self, name: str) -> str:
+        """The one characters.csv id `name` binds ('' for none: a name the
+        registry doesn't give, such as a description, or one it gives
+        several characters, #733)."""
+        n = ' '.join((name or '').split()).lower()
+        return '' if n in self.namesakes else self.chars.get(n, '')
+
     def place(self, name: str) -> str:
         n = ' '.join((name or '').split()).lower()
         n = re.sub(r'^(?:the|a|an)\s+', '', n)
@@ -221,25 +245,71 @@ def _where(book: Book, sid: str) -> str:
 # Life and death
 # ============================================================================
 
-def check_life(book: Book) -> tuple[list[Finding], list[str]]:
+def namesakes(rows: list[dict]) -> dict[str, tuple[str, ...]]:
+    """The names and aliases characters.csv gives more than one character
+    (lower case), each with their ids: Homer's two Pisanders are two ids
+    under one name."""
+    ids: dict[str, set[str]] = {}
+    for row in rows:
+        cid = (row.get('id') or row.get('name') or '').strip()
+        if not cid:
+            continue
+        for n in [row.get('name') or ''] + (row.get('aliases') or '').split(';'):
+            n = ' '.join(n.split()).lower()
+            if n:
+                ids.setdefault(n, set()).add(cid)
+    return {n: tuple(sorted(c)) for n, c in ids.items() if len(c) > 1}
+
+
+def paragraph_starts(prose: str) -> list[int]:
+    """Where each paragraph (blank-line separated) begins in the normalized
+    prose, the scale `place_in_prose` places records on."""
+    starts, pos = [], 0
+    for para in re.split(r'\n[ \t]*\n', prose or ''):
+        text = normalize(para)
+        if text:
+            starts.append(pos)
+            pos += len(text) + 1
+    return starts
+
+
+def _paragraph(starts: list[int], r: Record) -> int:
+    from bisect import bisect_right
+    return bisect_right(starts, prose_offset(r.index)) - 1
+
+
+def check_life(book: Book, prose: str = '') -> tuple[list[Finding], list[str]]:
     """PHY: a person this scene puts present (`at`) after their death in
     story order (`alive dead` records, characters.csv's `death_scene`) with
-    no `alive alive` between. Exempt: an off-present scene, and a death in
-    one."""
+    no `alive alive` between. Both bind one characters.csv id
+    (`Book.character`, #733); a presence by a name a death names but that
+    binds no one (a description, a name several characters share) is a
+    note. With `prose`, a presence in the paragraph of a death in this
+    scene, after it, is the death itself (#733). Exempt: an off-present
+    scene, and a death in one."""
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
-    events = book.present_records(('alive',)) + [
-        d for d in book.deaths if not book.off_present(d.scene_id)]
-    findings, notes = [], []
+    events = [(e, book.character(e.who)) for e in book.present_records(('alive',)) + [
+        d for d in book.deaths if not book.off_present(d.scene_id)]]
+    unbound = {' '.join(e.who.split()).lower() for e, cid in events
+               if not cid and e.value == 'dead'}
+    dead_ids = {cid for e, cid in events if cid and e.value == 'dead'}
+    starts = paragraph_starts(prose) if prose else []
+    findings, unmatched = [], []
     seen: set[str] = set()
     for r in book.records.get(sid, []):
         if r.type != 'at' or not r.verified:
             continue
-        who = book.who(r.who)
+        who = book.character(r.who)
+        if not who:
+            name = ' '.join(r.who.split()).lower()
+            if name in unbound or dead_ids & set(book.namesakes.get(name, ())):
+                unmatched.append(r.who)
+            continue
         if who in seen:
             continue
-        mine = [e for e in events if book.who(e.who) == who
+        mine = [e for e, cid in events if cid == who
                 and book.before((e.scene_id, e.index), (sid, r.index))]
         deaths = [e for e in mine if e.value == 'dead']
         death = next((d for d in deaths if not any(
@@ -247,6 +317,9 @@ def check_life(book: Book) -> tuple[list[Finding], list[str]]:
             for e in mine)), None)
         if death is None:
             continue
+        if (starts and death.scene_id == sid and death.origin == 'prose'
+                and _paragraph(starts, death) == _paragraph(starts, r)):
+            continue   # the dying itself: the heels drumming, the name said (#733)
         seen.add(who)
         where = 'earlier in this scene' if death.scene_id == sid else _where(book, death.scene_id)
         hint = ('; if this scene is a memory, dream, vision or ghost scene, set its '
@@ -260,6 +333,12 @@ def check_life(book: Book) -> tuple[list[Finding], list[str]]:
         else:
             findings.append(_finding('life', r.quote, death.scene_id, death.quote,
                                      f'{r.who} is present here, but died {where}{hint}'))
+    notes = []
+    if unmatched:
+        names = sorted(set(unmatched), key=str.lower)
+        notes.append(f'life: {len(unmatched)} presence record(s) by a name that binds no one '
+                     f'character in characters.csv (a description, or a name several share) '
+                     f'while a death names it, not compared: ' + ', '.join(names[:5]))
     return findings, notes
 
 
@@ -1150,33 +1229,75 @@ def _side(r: Record) -> str:
     return 'left' if 'left' in words else 'right' if 'right' in words else ''
 
 
+@dataclass(frozen=True)
+class Wound:
+    """A serious or disabling injury in the fold (`current_injuries`): `rec`
+    the injury record (the worst, the first of its grade), `last` the latest
+    record showing it (the injury, a re-record, an `impaired` use), and
+    `lasting`, whether its own scene shows it lasting: an `impaired` use of
+    the part after it, on other words than the injury's (#733: "his shield
+    arm will not come up" said once is a moment of the fight)."""
+    rec: Record
+    last: Record
+    lasting: bool = False
+
+    def shown(self, r: Record) -> 'Wound':
+        """This wound as `r`, a later record of it, shows it."""
+        own = (r.type == 'uses' and r.scene_id == self.rec.scene_id
+               and not overlaps(r.quote, self.rec.quote))
+        return dataclasses.replace(self, last=r, lasting=self.lasting or own)
+
+
+def _in_force(book: Book, w: Wound, at: tuple[str, int]) -> bool:
+    """Whether `w` is current at (scene, index): a disabling one always; a
+    serious one in its own scene, and after it only when shown lasting and
+    within `SERIOUS_DAYS` of the last scene showing it (when both have a
+    day)."""
+    if w.rec.value == 'disabling' or at[0] == w.rec.scene_id:
+        return True
+    if not w.lasting:
+        return False
+    d0, d1 = book.day(w.last.scene_id), book.day(at[0])
+    return d0 is None or d1 is None or d1 - d0 <= SERIOUS_DAYS
+
+
+def _sides_meet(a: str, b: str) -> bool:
+    return not a or not b or a == b
+
+
 def current_injuries(book: Book, at: tuple[str, int]) -> list[Record]:
-    """The serious or disabling injuries in force at (scene, index): from
-    present-time scenes before it, less those healed since, and a serious
-    one past `SERIOUS_DAYS` story days (when both scenes have a day). Only
-    `healed` or the lapse ends one: a later `minor` injury to the same part
-    doesn't, and a `serious` one doesn't replace a `disabling` one."""
-    live: dict[tuple[str, str, str], Record] = {}
-    for r in book.present_records(('injury',)):
+    """The serious or disabling injuries in force at (scene, index), from
+    present-time scenes before it (`Wound`, `_in_force`): less those healed
+    since, and a serious one its scene didn't show lasting once that scene
+    is over, or one shown lasting once `SERIOUS_DAYS` pass with no scene
+    showing it again. An `impaired` use renews only an injury still in
+    force: one that has lapsed isn't brought back. A later `minor` injury to
+    the same part doesn't end one, and a `serious` one doesn't replace a
+    `disabling` one."""
+    live: dict[tuple[str, str, str], Wound] = {}
+    for r in book.present_records(('injury', 'uses')):
         if not book.before((r.scene_id, r.index), at):
             continue
+        for key in [k for k, w in live.items() if not _in_force(book, w, (r.scene_id, r.index))]:
+            live.pop(key)
         k = (book.who(r.who), part_key(r.item), _side(r))
-        if r.value == 'healed':
+        if r.type == 'uses':
+            if r.value == 'impaired':
+                for key, w in live.items():
+                    if key[:2] == k[:2] and _sides_meet(key[2], k[2]):
+                        live[key] = w.shown(r)
+        elif r.value == 'healed':
             for key in list(live):
                 if key[:2] == k[:2] and (not k[2] or key[2] == k[2]):
                     live.pop(key)
         elif r.value in ('serious', 'disabling'):
-            if not (r.value == 'serious' and k in live and live[k].value == 'disabling'):
-                live[k] = r
+            w = live.get(k)
+            if w is None or (r.value == 'disabling' and w.rec.value == 'serious'):
+                live[k] = Wound(r, r)
+            else:
+                live[k] = w.shown(r)
         # a minor injury never ends a worse one (#648's review, C4)
-    out = []
-    for r in live.values():
-        d0, d1 = book.day(r.scene_id), book.day(at[0])
-        if r.value == 'serious' and d0 is not None and d1 is not None \
-                and d1 - d0 > SERIOUS_DAYS:
-            continue
-        out.append(r)
-    return out
+    return [w.rec for w in live.values() if _in_force(book, w, at)]
 
 
 def offered_injuries(book: Book) -> tuple[list[str], int]:
@@ -1468,6 +1589,7 @@ def load_book(project_dir: str, scene_id: str, *, rows: list[dict] | None = None
                      f'not checked: ' + ', '.join(f'{d.who} ({d.scene_id})' for d in unplaced[:5]))
     chars_path = os.path.join(ref, 'characters.csv')
     book = Book(scene_id, order, scenes, deaths=deaths, chars=load_alias_map(chars_path),
+                namesakes=namesakes(_read_csv(chars_path)),
                 places=places, place_names=place_names, world=world, rows=rows,
                 briefs=_read_csv_as_map(os.path.join(ref, 'scene-briefs.csv')),
                 has_time_mode=bool(header) and 'time_mode' in header[0],
@@ -1516,9 +1638,9 @@ def run_checks(book: Book, prose: str, sheet_records: list[Record] | None = None
         from storyforge.elaborate import time_mode
         notes.append(f'the scene is marked {time_mode(book.row(book.scene_id))} (not the story\'s '
                      f'present): only names were checked')
-    for check in (check_life, check_knowledge, lambda b: check_possession(b, sheet_records),
-                  check_place, check_time, check_injury, lambda b: check_names(b, prose),
-                  lambda b: check_sky(b, prose)):
+    for check in (lambda b: check_life(b, prose), check_knowledge,
+                  lambda b: check_possession(b, sheet_records), check_place, check_time,
+                  check_injury, lambda b: check_names(b, prose), lambda b: check_sky(b, prose)):
         f, n = check(book)
         findings += f
         notes += n
