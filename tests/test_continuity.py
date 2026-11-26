@@ -35,11 +35,17 @@ def R(type_, who='', item='', value='', detail='', quote=None, verified=True, or
                   verified=verified, origin=origin)
 
 
+#: The place between two records `make_book` numbers: a thousand
+#: characters of prose apart (`typed_state.prose_offset`), so a record's
+#: quote ends before the next one starts
+STEP = 10 ** 6
+
+
 def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, world=None,
               time_mode_column=True, forbidden=None, known=None, chars=None):
     """`scenes`: id → overrides of a row (`timeline_day`, `time_of_day`,
     `pov`, `time_mode`, `location`); reading order is the dict's.
-    `recs`: id → records, numbered in order."""
+    `recs`: id → records, placed in order `STEP` apart."""
     scenes = scenes or {s: {} for s in recs}
     rows_ = {}
     for n, (sid, over) in enumerate(scenes.items()):
@@ -53,7 +59,11 @@ def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, 
                 has_time_mode=time_mode_column, forbidden=dict(forbidden or {}),
                 known_names=known)
     for sid, rs in recs.items():
-        book.records[sid] = [r.replace(scene_id=sid, index=n) for n, r in enumerate(rs)]
+        # a quote said again stands where it first does, as `place_in_prose`
+        # places it (an injury and its use on one clause are one moment)
+        at: dict[str, int] = {}
+        book.records[sid] = [r.replace(scene_id=sid, index=at.setdefault(r.quote, n) * STEP + n)
+                             for n, r in enumerate(rs)]
     return book
 
 
@@ -318,7 +328,7 @@ class TestPossession:
         b = make_book('s2', {'s1': [], 's2': [R('holds', 'Mara', "Oren's brass key", 'has',
                                                 quote='a')]})
         sheet = [Record('holds', 'Oren', 'brass key', 'has', quote='Oren gripped the key',
-                        scene_id='s2', origin='stage-sheet', index=5)]
+                        scene_id='s2', origin='stage-sheet', index=5 * STEP)]
         f, _ = continuity.check_possession(b, sheet)
         assert f[0].scene_quote == 'Oren gripped the key'
 
@@ -348,7 +358,7 @@ class TestPossession:
                                         R('holds', 'Oren', 'brass key', 'has', quote='Oren key')]})
             assert continuity.check_possession(b) == ([], [])
             b.records['s1'].append(R('holds', 'Mara', 'brass key', 'has', quote='Mara again')
-                                   .replace(scene_id='s1', index=9))
+                                   .replace(scene_id='s1', index=9 * STEP))
             f, _ = continuity.check_possession(b)
             assert f[0].scene_quote == 'Mara again' and 'Oren holds' in f[0].explanation
 
@@ -402,9 +412,9 @@ class TestPossession:
                    and 'Oren has brass key' in n for n in notes)
         # and from there on: the next record sets it again
         b.records['s1'] += [R('holds', 'Mara', 'brass key', 'has', quote='Mara again')
-                            .replace(scene_id='s1', index=9),
+                            .replace(scene_id='s1', index=9 * STEP),
                             R('holds', 'Jory', "Mara's brass key", 'has', quote='Jory')
-                            .replace(scene_id='s1', index=10)]
+                            .replace(scene_id='s1', index=10 * STEP)]
         f, _ = continuity.check_possession(b)
         assert [x.scene_quote for x in f] == ['Jory'] and 'Mara holds' in f[0].explanation
 
@@ -2043,6 +2053,7 @@ def iliad_book(scene, recs, days, *, deaths=None):
     b = make_book(scene, recs, scenes={s: {'timeline_day': days[s]} for s in recs},
                   chars=LIFE_CHARS, deaths=deaths)
     b.namesakes = continuity.namesakes(LIFE_ROWS)
+    b.ids = continuity.registry_ids(LIFE_ROWS)
     return b
 
 
@@ -2320,4 +2331,245 @@ class TestLifeReportA:
                         + '\n')
         book, _ = continuity.load_book(project_dir, SCENE)
         assert book.namesakes['pell ash'] == ('pell-elder', 'pell-younger')
-        assert book.character('Pell Ash') == '' and book.character('pell-elder') == 'pell-elder'
+        assert book.person('Pell Ash') is None
+        assert book.person('pell-elder') == continuity.CharacterId('pell-elder')
+
+
+class TestCharacterIdentity:
+    """#733's review (TD-1, TD-2, CR-1, SF-3): one rule binds a name to a
+    character, for life, injury and possession."""
+
+    def _book(self):
+        return iliad_book('s1', {'s1': []}, {'s1': '1'})
+
+    def test_a_registry_id_binds_exactly_even_when_a_name_shares_its_spelling(self):
+        b = self._book()
+        assert b.person('dolops', by_id=True) == continuity.CharacterId('dolops')
+        assert b.person('Dolops') is None and b.shared('Dolops')
+        assert b.person('dolops-son-of-clytius') == continuity.CharacterId('dolops-son-of-clytius')
+        assert b.person('Hector') == continuity.CharacterId('hector')
+        assert b.person('the boy') is None and b.person('nobody', by_id=True) is None
+
+    def test_who_keys_a_shared_name_as_none_of_them(self):
+        b = self._book()
+        assert b.who('Pisander') == 'pisander'
+        assert b.who('pisander-son-of-maemalus') == 'pisander-son-of-maemalus'
+
+    def test_a_character_id_is_trimmed_and_non_empty(self):
+        with pytest.raises(ValueError):
+            continuity.CharacterId(' dolops')
+        with pytest.raises(ValueError):
+            continuity.CharacterId('')
+
+    def test_a_registry_death_by_an_id_spelled_like_a_shared_name_binds(self):
+        # CR-1: death_scene for `dolops` binds that id; the prose's bare
+        # "Dolops" may be either Dolops, so it is a note, never silent; the
+        # other Dolops by id is alive
+        death = Record('alive', 'dolops', value='dead', scene_id='a', quote='death_scene a',
+                       origin='registry', index=typed_state.END)
+        b = iliad_book('b', {'a': [], 'b': [R('at', 'dolops-son-of-clytius', quote='x'),
+                                             R('at', 'Dolops', quote='Dolops shouts')]},
+                       {'a': '1', 'b': '2'}, deaths=[death])
+        assert b.bind(death) == continuity.CharacterId('dolops')
+        f, notes = continuity.check_life(b)
+        assert f == [] and len(notes) == 1 and 'Dolops' in notes[0]
+
+    def test_two_pisanders_wounds_never_merge(self):
+        b = iliad_book('s2', {
+            's1': [I('pisander-slain-by-menelaus', 'arm', 'serious', 'the spear takes his arm'),
+                   U('pisander-slain-by-menelaus', 'arm', 'impaired', 'he cradles the arm')],
+            's2': [U('pisander-son-of-maemalus', 'arm', 'full', 'he hurls the spear')]},
+            {'s1': '1', 's2': '2'})
+        assert continuity.check_injury(b) == ([], [])
+        # by the bare shared name: not compared, and said
+        b.records['s2'] = [U('Pisander', 'arm', 'full', 'he hurls the spear')
+                           .replace(scene_id='s2')]
+        f, notes = continuity.check_injury(b)
+        assert f == [] and any('name several characters share' in n for n in notes)
+        # the same Pisander, by id: a finding
+        b.records['s2'] = [U('pisander-slain-by-menelaus', 'arm', 'full', 'he hurls the spear')
+                           .replace(scene_id='s2')]
+        assert codes(continuity.check_injury(b)[0]) == ['PHY']
+
+    def test_possession_keys_a_shared_name_as_none_of_them(self):
+        b = iliad_book('s1', {'s1': [H('pisander-slain-by-menelaus', 'shield'),
+                                     H('Pisander', 'shield', quote='Pisander has the shield')]},
+                       {'s1': '1'})
+        oids = {continuity.object_id(b, {}, r) for r in b.records['s1']}
+        assert {o.owner for o in oids} == {'pisander-slain-by-menelaus', 'pisander'}
+
+    def test_a_death_scene_on_a_row_with_no_name_is_said(self, project_dir):
+        path = os.path.join(project_dir, 'reference', 'characters.csv')
+        with open(path) as f:
+            header = f.readline().strip().split('|')
+        with open(path, 'a') as f:
+            f.write('|'.join({'id': 'nameless', 'death_scene': PREV}.get(c, '') for c in header)
+                    + '\n')
+        book, notes = continuity.load_book(project_dir, SCENE)
+        assert not any(d.who == 'nameless' for d in book.deaths)
+        assert any('no name' in n and 'nameless' in n for n in notes)
+
+
+class TestLifeReviewNotes:
+    """#733's review: what the life check can't compare is said."""
+
+    def test_a_shared_name_death_then_one_of_its_ids_present_is_a_note(self):
+        # SF-2
+        b = iliad_book('b', {'a': [R('alive', 'Pisander', value='dead', quote='He spears Pisander')],
+                             'b': [R('at', 'pisander-son-of-maemalus', quote='Pisander rides')]},
+                       {'a': '1', 'b': '2'})
+        f, notes = continuity.check_life(b)
+        assert f == [] and len(notes) == 1 and 'which one died is unknown' in notes[0]
+
+    def test_an_id_bound_death_then_the_shared_name_present_is_one_note(self):
+        # T-4
+        death = Record('alive', 'pisander-slain-by-menelaus', value='dead', scene_id='a',
+                       quote='death_scene a', origin='registry', index=typed_state.END)
+        b = iliad_book('b', {'a': [], 'b': [R('at', 'Pisander', quote='Pisander rides'),
+                                             R('at', 'Pisander', quote='Pisander rides on')]},
+                       {'a': '1', 'b': '2'}, deaths=[death])
+        f, notes = continuity.check_life(b)
+        assert f == [] and len(notes) == 1 and 'binds no one character' in notes[0]
+
+    def test_a_description_with_no_matching_death_is_not_said(self):
+        # T-4: no over-noting
+        b = iliad_book('b', {'a': [R('alive', 'Sarpedon', value='dead', quote='Sarpedon falls')],
+                             'b': [R('at', 'the boy', quote='the boy runs')]},
+                       {'a': '1', 'b': '2'})
+        assert continuity.check_life(b) == ([], [])
+
+    def test_no_usable_registry_is_said(self):
+        # SF-4
+        b = make_book('s2', {'s1': [R('alive', 'Oren', value='dead')], 's2': [R('at', 'Oren')]})
+        b.chars, b.ids = {}, {}
+        f, notes = continuity.check_life(b)
+        assert f == [] and 'no usable characters.csv' in notes[0]
+
+    def test_the_death_itself_is_counted(self):
+        # SF-7
+        b, prose = _life_case('Q55')
+        f, notes = continuity.check_life(b, prose)
+        assert f == [] and any('read as the death itself: Rhesus' in n for n in notes)
+
+    def test_a_registry_death_in_this_scene_is_after_every_presence(self):
+        # T-5: a death_scene stands at the scene's end, so no presence in
+        # its scene, last paragraph included, is after it
+        prose = 'Sarpedon falls.\n\nSarpedon calls out.'
+        death = Record('alive', 'sarpedon', value='dead', scene_id='s1', quote='death_scene s1',
+                       origin='registry', index=typed_state.END)
+        b = iliad_book('s1', {'s1': []}, {'s1': '1'}, deaths=[death])
+        b.records['s1'] = placed('s1', prose, [R('at', 'Sarpedon', quote='Sarpedon calls out')])
+        assert continuity.check_life(b, prose) == ([], [])
+
+
+class TestInjuryReview:
+    """#733's review: the decay rule pinned, and its silences said."""
+
+    def _book(self, s1, s2=(), days=('1', '2', '3')):
+        return make_book('s3', {'s1': [I('Oren', 'leg', 'serious', 'the blade opened his leg')]
+                                + list(s1), 's2': list(s2),
+                                's3': [U('Oren', 'leg', 'full', 'Oren sprinted for the gate')]},
+                         scenes={'s1': {'timeline_day': days[0]}, 's2': {'timeline_day': days[1]},
+                                 's3': {'timeline_day': days[2]}})
+
+    LIMP = [U('Oren', 'leg', 'impaired', 'he limped off')]
+
+    def test_a_partly_shared_quote_does_not_show_it_lasting(self):
+        # CR-2: the use starts inside the injury's words
+        prose = 'His shield arm will not come up, and the stone rings on it.'
+        recs = placed('s1', prose, [
+            I('Hector', 'arm', 'serious', 'His shield arm will not come up'),
+            U('Hector', 'arm', 'impaired', 'will not come up, and the stone rings')])
+        b = iliad_book('s2', {'s1': recs, 's2': [U('Hector', 'arm', 'full', 'Hector throws')]},
+                       {'s1': '1', 's2': '2'})
+        b.records['s1'] = recs
+        assert continuity.check_injury(b)[0] == []
+        # a use after the injury's words end does
+        prose2 = prose + ' He cannot lift it.'
+        recs2 = placed('s1', prose2, [
+            I('Hector', 'arm', 'serious', 'His shield arm will not come up'),
+            U('Hector', 'arm', 'impaired', 'He cannot lift it')])
+        b.records['s1'] = recs2
+        assert codes(continuity.check_injury(b)[0]) == ['PHY']
+
+    def test_a_lapsed_lasting_wound_is_not_brought_back(self):
+        # T-1: shown lasting, lapsed by day 20, then an impaired use
+        b = self._book(self.LIMP, [U('Oren', 'leg', 'impaired', 'Oren favoured the leg')],
+                       days=('1', '20', '21'))
+        assert continuity.check_injury(b)[0] == []
+
+    @pytest.mark.parametrize('last,fires', [('8', True), ('9', False)])
+    def test_seven_days_after_the_last_showing(self, last, fires):
+        # T-2: day 1 to day 8 is 7 days, in force; day 9 is past
+        b = self._book(self.LIMP, days=('1', '1', last))
+        assert bool(continuity.check_injury(b)[0]) is fires
+
+    def test_a_re_record_renews_it(self):
+        # T-3: re-recorded on day 5, used on day 10 (9 days after the injury)
+        b = self._book(self.LIMP, [I('Oren', 'leg', 'serious', 'the wound in his leg')],
+                       days=('1', '5', '10'))
+        assert codes(continuity.check_injury(b)[0]) == ['PHY']
+
+    def test_two_injury_records_in_its_scene_are_not_a_lasting_showing(self):
+        # T-6
+        b = self._book([I('Oren', 'leg', 'serious', 'blood ran down the leg')])
+        assert continuity.check_injury(b)[0] == []
+
+    def test_an_unsided_impaired_use_renews_a_sided_wound(self):
+        # T-7
+        b = make_book('s3', {'s1': [I('Oren', 'leg', 'serious', 'the blade opened his left leg',
+                                      'left'), U('Oren', 'leg', 'impaired', 'he limped', 'left')],
+                             's2': [U('Oren', 'leg', 'impaired', 'Oren favoured the leg')],
+                             's3': [U('Oren', 'leg', 'full', 'Oren sprinted', 'left')]},
+                      scenes={'s1': {'timeline_day': '1'}, 's2': {'timeline_day': '7'},
+                              's3': {'timeline_day': '12'}})
+        assert codes(continuity.check_injury(b)[0]) == ['PHY']
+
+    def test_an_undated_scene_takes_the_day_before_it(self):
+        # SF-5, T-7: the last showing's scene has no day: it is day 1's
+        b = self._book(self.LIMP, [U('Oren', 'leg', 'impaired', 'Oren favoured the leg')],
+                       days=('1', '', '30'))
+        assert continuity.check_injury(b)[0] == []
+
+    def test_no_story_day_at_all_is_said(self):
+        # SF-5
+        b = self._book(self.LIMP, days=('', '', ''))
+        f, notes = continuity.check_injury(b)
+        assert codes(f) == ['PHY'] and any('no story day can lapse' in n for n in notes)
+
+    def test_a_lapse_across_an_unread_scene_is_said(self):
+        # SF-1
+        b = self._book(self.LIMP, days=('1', '5', '10'))
+        b.gaps = {'s2'}
+        f, notes = continuity.check_injury(b)
+        assert f == [] and any('may show it again' in n and 's2' in n for n in notes)
+
+    def test_a_wound_never_shown_lasting_is_said_when_used(self):
+        # SF-6
+        f, notes = continuity.check_injury(self._book([]))
+        assert f == [] and any("didn't show lasting" in n and "Oren's leg (s1)" in n
+                               for n in notes)
+
+    def test_a_wound_s_invariants(self):
+        # TD-4
+        key = continuity.WoundKey('oren', 'leg')
+        with pytest.raises(ValueError):
+            continuity.Wound.inflicted(key, I('Oren', 'leg', 'minor', 'a scratch'))
+        bad = I('Oren', 'leg', 'disabling', 'the bone snapped')
+        with pytest.raises(ValueError):
+            continuity.Wound(key, bad, bad, lasting=True)
+        assert continuity.Wound.inflicted(key, bad).grade == 'disabling'
+
+    def test_a_key_meets_on_sides_that_can_be_one(self):
+        # TD-3
+        k = continuity.WoundKey
+        assert k('oren', 'leg', 'left').meets(k('oren', 'leg'))
+        assert not k('oren', 'leg', 'left').meets(k('oren', 'leg', 'right'))
+        assert not k('oren', 'leg').meets(k('mara', 'leg'))
+
+    def test_current_injuries_are_wounds(self):
+        # TD-5
+        b = self._book(self.LIMP)
+        (w,) = continuity.current_injuries(b, ('s3', 0))
+        assert w.rec.quote == 'the blade opened his leg' and w.last.quote == 'he limped off'
+        assert w.lasting
