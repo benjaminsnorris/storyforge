@@ -130,6 +130,7 @@ These can't be automated:
 | `orphan_meta` | "Scene {id} has metadata but no file. Should I remove the metadata rows, or create the scene file?" |
 | `bad_chapter_ref` | "Chapter map references scene {id} which doesn't exist. Should I remove it from the chapter map?" |
 | `extra_column` | "CSV has unexpected column {col}. Is this intentional?" |
+| `source_death` | "The source kills {who} in {source scene}, but {what the detail says: the map cuts that scene, or your `death_scene` names another scene}. Where does {who} die in this book?" Set `death_scene` in `reference/characters.csv` to the scene after which they're dead (blank if they live in this version), or fix the source map. In a faithful adaptation `storyforge cleanup` (not `--csv`) fills a *blank* `death_scene` from the source itself, listing each fill in `--dry-run`, and never overwrites the author's (#745) |
 | `old_voice_file` | "{file} is no longer read: the voice is `reference/voice/` (`references/voice-folder.md`). Do you want to move any of it into `reference/voice/book.md` or an anchor first?" Move only what the author picks, word for word, then delete the file only with their yes. Never delete it unasked (prose books only) |
 
 Wait for the author's answer, then act and update status.
