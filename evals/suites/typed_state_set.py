@@ -35,13 +35,16 @@ NAME = 'typed-state-set'
 #: findings, all false) and #733 (injury decay, deaths by id): every finding
 #: the replay makes is one the review labelled, and none is real. Measured
 #: again with #732 (owner-scoped objects; an unowned name held again in a
-#: later scene a note): possession makes none.
+#: later scene a note): possession makes none. Measured again with #733 (a
+#: serious injury carried only when its scene shows it lasting; a death and
+#: a presence bind one character id; a presence in the death's paragraph is
+#: the death): injury keeps the one debatable finding, life makes none.
 FLOORS: dict[str, float | None] = {
-    'findings': 3, 'false_alarms': 2, 'debatable_found': 1, 'real_kept': 0,
+    'findings': 1, 'false_alarms': 0, 'debatable_found': 1, 'real_kept': 0,
     'unlabelled': 0,
     'possession_findings': 0, 'possession_false': 0,
-    'injury_findings': 2, 'injury_false': 1, 'injury_debatable': 1,
-    'life_findings': 1, 'life_false': 1,
+    'injury_findings': 1, 'injury_false': 0, 'injury_debatable': 1,
+    'life_findings': 0, 'life_false': 0,
     'time_findings': 0, 'travel_findings': 0, 'knowledge_findings': 0,
     'names_findings': 0, 'sky_findings': 0,
 }
