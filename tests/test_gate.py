@@ -2196,6 +2196,63 @@ class TestReextractAMisquote(_FixRounds):
         r.problems[kind] = ['x']
         assert gate._slips_beside_findings(r) == []
 
+    def test_a_slip_beside_unverified_findings_only_keeps_them_standing(
+            self, monkeypatch, tmp_path):
+        """T-1 (#734's review): unverified findings count as standing too;
+        without them a re-roll could pass the prose."""
+        from storyforge.checker import Finding
+        r2 = self._misquote()
+        r2.check.unverified = [Finding('contradiction', 'TIM', 'c', 'act1-sc01',
+                                       'Dorren Hayle pressed the brass calipers', '', 'why',
+                                       problem='its quote is not in the scene')]
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a', 'x'), self._misquote('b'), r2,
+                                  self._result()],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  ('v2', [{'find': 'b', 'replace': 'c'}])])
+        assert dirs[-1] == os.path.join(out.log_dir, 'reextract')
+        assert self.gate_kwargs[-1]['standing'] is r2
+        assert out.reextraction.standing == len(r2.unverified) == 1
+
+    def test_a_discarded_round_then_a_slip_beside_a_finding_extracts_once(
+            self, monkeypatch, tmp_path):
+        """T-2 (#734's review): round 2's fix is discarded; the run kept has
+        a slip beside a finding, so it is extracted again, its findings
+        standing, after the blocked list was put back to it."""
+        kept = self._misquote('b')
+        monkeypatch.setattr(gate, '_worse', lambda n, *a: 'fix round 2 made it worse'
+                            if n == 2 else '')
+        monkeypatch.setattr(gate, '_partial_fix', lambda *a, **k: None)
+        done = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a', 'x'), kept, self._result('c', 'd', 'e'),
+                                  done],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  ('v2', [{'find': 'b', 'replace': 'c'}])])
+        logs = out.log_dir
+        assert out.discarded == 2 and out.prose == 'v1'
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'recheck-2'),
+                        os.path.join(logs, 'reextract')]
+        assert self.blocked == [kept]            # put back before the re-extraction
+        assert self.gate_kwargs[-1]['standing'] is kept
+        assert self.gate_kwargs[-1]['prose'] == 'v1'
+        assert out.result is done and out.reextraction.standing == 1
+
+    def test_a_ruling_on_a_dispute_no_longer_raised_does_not_stand(self):
+        """CR-4 (#734's review): the finding ruled on a dispute the new
+        extraction doesn't raise ruled on a reading that is gone."""
+        from storyforge.checker import CheckResult, Dispute, Finding
+        ruled = Finding('contradiction', 'KNO', 'q', '', 'Diomedes wounded Ares',
+                        'ares-wounded', 'why')
+        run = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[ruled]))
+        run.problems = {'ends registry': [f'{SCENE}: ares-wounded (resolves: blank)']}
+        dropped = CheckResult(SCENE)
+        gate._carry_standing(dropped, run, [])
+        assert dropped.findings == []
+        raised = CheckResult(SCENE)
+        gate._carry_standing(raised, run, [Dispute('ares-wounded', 's', 'c')])
+        assert raised.findings == [ruled]
+
     def test_standing_findings_join_the_runs_own(self):
         from storyforge.checker import CheckResult, Finding
 
