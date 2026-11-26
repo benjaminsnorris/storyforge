@@ -532,9 +532,16 @@ Every Anthropic call goes through `api._api_request`, which consults
 `storyforge.cassette` when `STORYFORGE_CASSETTE` is set. The harness sets it to
 `evals/fixtures/cassettes/<suite>/` for each suite. Replay mode never goes live:
 a call with no recording raises `CassetteMiss` and the suite errors (a frozen
-suite is `stale` instead). Recordings are keyed by a hash of the request, so
-any prompt change is a miss — re-record that suite with `--mode auto` (a
-frozen one only as above). A prompt that embeds a temp path, date, or id
+suite is `stale` instead). Recordings are keyed by a hash of the request as
+the model reads it (`cassette.normal_body`: `cache_control` left out wherever
+it sits, adjacent text blocks joined, #741), so any prompt change is a miss —
+re-record that suite with `--mode auto` (a frozen one only as above) — but a
+change to where a request is cached, or for how long, is not. Each cassette
+directory names its key scheme in `KEY_SCHEME`; a directory without it holds
+recordings keyed by the raw body, and the harness renames them before the
+suite runs (free; the suite's notes say how many, for the repo that holds
+them to commit). By hand: `python3 -m storyforge.cassette rekey DIR...` from
+`scripts/lib/python`. A prompt that embeds a temp path, date, or id
 changes every run and can never replay; keep those out of what a suite sends.
 The Batch API is refused under a cassette; run commands in direct mode.
 In `record` mode a request already recorded earlier in the same run replays
