@@ -80,7 +80,7 @@ from storyforge import audit, ledger, persistence
 from storyforge.blocking import BLOCKING_CODE, BlockingError, check_blocking
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
                                check_scene)
-from storyforge.extract import ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE, UNOFFERED
+from storyforge.extract import ENDS_HERE, ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE, UNOFFERED
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
@@ -127,10 +127,10 @@ UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected'
 #: scene id that isn't a scene, an `ends` naming a fixed fact (one can't
 #: end, so the link is never applied and the row is right without it:
 #: G-028, #556, an extraction slip that stopped an unattended run)
-#: `ENDS_MOVED` (#621), `ID_PREFIX` (#620) and `UNOFFERED` (#634) are
-#: links applied, and reported as a NOTE
+#: `ENDS_MOVED` (#621), `ID_PREFIX` (#620), `UNOFFERED` (#634) and
+#: `ENDS_HERE` (#734) are links applied, and reported as a NOTE
 REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced', 'ends fixed',
-            ENDS_MOVED, ID_PREFIX, UNOFFERED)
+            ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE)
 #: What a report line says each `REPORTED` kind means, where its name alone
 #: doesn't (#564: `NOTE (cap): scene (62)` said nothing of what was cut)
 _REPORTED_LABEL = {
@@ -139,6 +139,8 @@ _REPORTED_LABEL = {
     ID_PREFIX: 'a link named a fact\'s id without its scene prefix; read as that fact',
     UNOFFERED: 'a link named a fact in force that extraction was not offered (past the '
                'cap); read as that fact, by its id or the nearest id of the same scene',
+    ENDS_HERE: 'a state the plan sets up in this scene, with no end given, ends in this '
+               'scene too; its end is recorded here',
     'cap': 'facts in force left out of what extraction was offered, over the cap '
            '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
 }
@@ -362,6 +364,19 @@ def _subjects(project_dir: str) -> dict[str, str]:
     return {**maps.get('locations', {}), **maps.get('characters', {})}
 
 
+#: The answer budget of the gate's extraction call (`api.THINKING_ALLOWANCE`
+#: is added for thinking). It is part of the recorded request, so a change
+#: re-keys every recording of the call: the largest answer logged on
+#: iliad-adult (2026-11-16/17, 117 calls) was 5,796 tokens, with 17,314
+#: output in all of the 24,000 sent
+EXTRACT_ANSWER_TOKENS = 8000
+#: #734: the budget of the one retry after a reply cut off at
+#: `EXTRACT_ANSWER_TOKENS` (the model's own limit caps it): a cut-off raised
+#: `GateError` and stopped the session, on the densest scenes. Only a
+#: cut-off sends it, so recordings of whole replies replay as they were
+EXTRACT_RETRY_TOKENS = 24000
+
+
 def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
              problems: dict[str, list[str]],
@@ -394,10 +409,18 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
         known=known, recorded=recorded)
     log_file = os.path.join(log_dir, f'gate-extract-{scene_id}.json')
     try:
-        response = invoke_to_file(prompt, model, log_file, 8000,
+        response = invoke_to_file(prompt, model, log_file, EXTRACT_ANSWER_TOKENS,
                                   output_schema=COMMITMENTS_SCHEMA, label=f'extract {scene_id}')
         if is_truncated(response):
-            raise ValueError('the reply hit its token limit')
+            from storyforge.common import log
+            log(f'  {scene_id}: the extraction reply was cut off at its token limit; asking '
+                f'again with a larger one')
+            response = invoke_to_file(prompt, model,
+                                      os.path.join(log_dir, f'gate-extract-{scene_id}.retry.json'),
+                                      EXTRACT_RETRY_TOKENS, output_schema=COMMITMENTS_SCHEMA,
+                                      label=f'extract {scene_id} (retry)')
+        if is_truncated(response):
+            raise ValueError('the reply hit its token limit, twice')
         found = parse_commitments_response(extract_text(response), scene_id)
     except (RuntimeError, ValueError) as e:   # RefusalError, an API failure, a bad reply
         raise GateError(f'{scene_id}: extraction failed: {e}') from e
@@ -1518,7 +1541,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                log_dir: str, extract_model: str | None = None,
                check_model: str | None = None,
                introduced_by: str | None = None,
-               before: Snapshot | None = None) -> GateResult:
+               before: Snapshot | None = None,
+               standing: 'GateResult | None' = None) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -1528,7 +1552,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
             return _gate_scene(project_dir, scene_id, command=command, prose=prose,
                                log_dir=log_dir, extract_model=extract_model,
                                check_model=check_model, introduced_by=introduced_by,
-                               before=before)
+                               before=before, standing=standing)
         finally:
             _log_spend(meter, project_dir, 'gate', scene_id)
 
@@ -1547,7 +1571,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 log_dir: str, extract_model: str | None = None,
                 check_model: str | None = None,
                 introduced_by: str | None = None,
-                before: Snapshot | None = None) -> GateResult:
+                before: Snapshot | None = None,
+                standing: 'GateResult | None' = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -1556,9 +1581,17 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     A redraft is extracted and checked against the ledger without its
     earlier version's commitments, and the `resolves` that version set on
     earlier commitments are cleared (this version's `ends` set them again).
-    A `resolves` it set on a registry state isn't touched: the gate never
-    sets one there. `introduced_by` (default `command`) is what the new rows
-    record; a re-check keeps the prose's writer.
+    A `resolves` on a registry state isn't touched: the gate sets one there
+    only on a state the plan sets up in this scene and the prose ends in it
+    too (`ENDS_HERE`, #734), which the author's plan could equally say, so a
+    re-gate whose reading no longer ends it leaves it ended. `introduced_by`
+    (default `command`) is what the new rows record; a re-check keeps the
+    prose's writer.
+
+    `standing` (#734) is an earlier run of the same prose whose blocking
+    findings still stand: each one this run's check didn't make again
+    (`_persists`) is added to its own, so a re-extraction beside findings
+    re-reads the facts without a re-roll of the check passing the prose.
 
     `before` is the book before the pass that wrote `prose` (`snapshot`;
     None: a new scene or advisor mode; a re-check through `gate_unchanged`
@@ -1730,6 +1763,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     # #642: a `must` line's words, checked by code
     result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check,
                                                     short_lines=result.short_must))
+    if standing is not None:   # after the code's own, which it makes again
+        _carry_standing(result.check, standing)
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
@@ -2957,6 +2992,9 @@ class Reextraction:
     again: list[str] = field(default_factory=list)
     others: bool = False
     error: str = ''             # REGATE_ERROR: why the run couldn't finish
+    #: #734: how many of the run before it's findings stood in it (its slips
+    #: were beside them; `_reextract(standing=True)`)
+    standing: int = 0
 
     @classmethod
     def of(cls, run: GateResult, again: GateResult | None = None,
@@ -2971,7 +3009,9 @@ class Reextraction:
 
     def summary(self) -> str:
         said = (f'the extractor {_slipped(self.slips)} ({_slip_text(self.slips)}), so the same '
-                f'prose was gated again (extraction and the check)')
+                f'prose was gated again (extraction and the check'
+                + (f', the {self.standing} finding(s) before it standing' if self.standing
+                   else '') + ')')
         if self.outcome == REGATE_PASSED:
             return f'{said}: it passed'
         if self.outcome == REGATE_ERROR:
@@ -3316,6 +3356,13 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
       keeps the run before it.
     - A run with real problems beside slips goes to the fix, not a
       re-extraction: the fix's re-check extracts the edited prose anyway.
+      The run the loop ends on, though, is extracted again when its slips
+      stand beside the check's findings alone (`_slips_beside_findings`:
+      no halt, other extraction problem, plan conflict or unruled dispute;
+      #734, diomedes-spears-ares: a slip beside a possession finding
+      stopped a provisional commit, and the session), once, as above, with
+      those findings standing in the new run (`_reextract(standing=True)`),
+      so a re-roll of the check can't pass the prose.
     - A run with plan conflicts and nothing for the fix (extraction problems
       or not) is neither fixed nor re-gated: they are the author's (the brief
       disagrees with the book), and a re-roll that missed one would pass
@@ -3493,14 +3540,15 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             if fixed != current:
                 rounds.append(FixRound(to_fix, edits))
             current, result, run_dir = fixed, again, next_dir
-        # the last round's re-check failed only on the extractor's slips. A
-        # discard needs no guard: the run it keeps had problems for the fix
-        # (it was fixed), so never slips only
-        if _only_extractor_slips(result) and regate.take():
+        # the run kept failed on the extractor's slips, alone or beside the
+        # check's findings (#734: no fix repairs a slip, and one stops a
+        # provisional commit): extract the same prose again, its findings
+        # standing
+        if _slips_beside_findings(result) and regate.take():
             result, run_dir, reextraction = _reextract(
                 project_dir, scene_id, command, current, result, logs,
                 extract_model=extract_model, check_model=check_model, before=before,
-                fallback_dir=run_dir)
+                fallback_dir=run_dir, standing=True)
     except GateError as e:
         e.first, e.log_dir = first, logs
         raise
@@ -3545,6 +3593,34 @@ def _only_extractor_slips(result: GateResult) -> list[str]:
     if any(result.problems.get(k) for k in UNRESOLVED if k not in _EXTRACTOR_SLIPS):
         return []
     return [f'{k}: {item}' for k in _EXTRACTOR_SLIPS for item in result.problems.get(k, [])]
+
+
+def _slips_beside_findings(result: GateResult) -> list[str]:
+    """#734: the extractor's slips (as `_only_extractor_slips` lists them)
+    when the rest of what stopped `result` is the check's findings,
+    verified or not, none a plan conflict; [] when it passed or has no slip,
+    or a halt, another extraction problem, a plan conflict or an unruled
+    dispute stopped it. No prose edit repairs a slip, and a slip stops a
+    provisional commit (`can_commit_provisionally`), so a run ending a fix
+    loop with findings and a slip is extracted again (`gate_and_fix`), the
+    findings standing (`_carry_standing`). diomedes-spears-ares (iliad-adult,
+    2026-11-16): an `ends` slip beside a possession finding halted the
+    session with 73 scenes not attempted."""
+    if result.passed or result.halts or result.unruled or result.plan_conflicts:
+        return []
+    if any(result.problems.get(k) for k in UNRESOLVED if k not in _EXTRACTOR_SLIPS):
+        return []
+    return [f'{k}: {item}' for k in _EXTRACTOR_SLIPS for item in result.problems.get(k, [])]
+
+
+def _carry_standing(check: CheckResult, run: GateResult) -> None:
+    """#734: `run`'s blocking findings, verified and unverified, added to
+    `check` (a run of the same prose) unless it made one again
+    (`_persists`): a re-extraction re-reads the facts, and a re-roll of the
+    check that missed a finding must not pass the prose."""
+    have = check.findings + check.unverified
+    check.findings.extend(f for f in run.findings if not _persists(f, have))
+    check.unverified.extend(f for f in run.unverified if not _persists(f, have))
 
 
 #: How much of a misquoted quote a log line or pending reason shows
@@ -3606,7 +3682,8 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
                run: GateResult, logs: str, *, extract_model: str | None,
                check_model: str | None, before: Snapshot | None,
                fallback_dir: str, introduced_by: str | None = None,
-               catch_all: bool = True) -> tuple[GateResult, str, Reextraction]:
+               catch_all: bool = True,
+               standing: bool = False) -> tuple[GateResult, str, Reextraction]:
     """#598 (Telemachy, 2026-11-05): a re-check after a fix failed only on a
     quote the extractor changed ("she would sit" for the prose's "he would
     sit"); the fix edits prose, so it had nothing to do, and `write
@@ -3635,21 +3712,30 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
     `prose` is None (the scene file), `introduced_by` is passed on, the run
     that comes back is the verdict, and `catch_all` is off: no edits are at
     stake, so an exception other than `GateError` (a bug, not the
-    extractor's) propagates with its traceback."""
+    extractor's) propagates with its traceback.
+
+    With `standing` (#734: `gate_and_fix`'s last run, whose slips stood
+    beside the check's findings), `run`'s findings stand in the new run
+    (`gate_scene(standing=)`): it can't pass on a re-roll of the check that
+    missed one, and the `Reextraction` counts them."""
     _say_misquoted(scene_id, run)
     run_dir = os.path.join(logs, 'reextract')
+    kept = len(run.findings) + len(run.unverified) if standing else 0
     try:
         again = gate_scene(project_dir, scene_id, command=command, prose=prose,
                            log_dir=run_dir, extract_model=extract_model,
                            check_model=check_model, before=before,
-                           introduced_by=introduced_by)
+                           introduced_by=introduced_by,
+                           standing=run if kept else None)
     except GateError as e:
         return run, fallback_dir, Reextraction.of(run, error=str(e))
     except Exception as e:   # a bug or an I/O failure: say it, keep the fixes
         if not catch_all:
             raise
         return run, fallback_dir, Reextraction.of(run, error=f'{type(e).__name__}: {e}')
-    return again, run_dir, Reextraction.of(run, again)
+    reextraction = Reextraction.of(run, again)
+    reextraction.standing = kept
+    return again, run_dir, reextraction
 
 
 def _read_blocking(project_dir: str, scene_id: str, prose: str, check_model: str | None,
@@ -3867,10 +3953,12 @@ def _from_reading(f: Finding) -> str:
 
 def applied_lines(result: GateResult) -> list[str]:
     """The NOTE lines for the links extraction applied in its own way
-    (`ENDS_MOVED`, `ID_PREFIX`, `UNOFFERED`), as `report_lines` words them."""
+    (`ENDS_MOVED`, `ID_PREFIX`, `UNOFFERED`, `ENDS_HERE`), as `report_lines`
+    words them."""
     return [f'NOTE ({_REPORTED_LABEL[kind]}): '
             + '; '.join(_one_line(i) for i in result.problems.get(kind, []))
-            for kind in (ENDS_MOVED, ID_PREFIX, UNOFFERED) if result.problems.get(kind)]
+            for kind in (ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE)
+            if result.problems.get(kind)]
 
 
 def reread_lines(result: GateResult) -> list[str]:

@@ -1648,8 +1648,11 @@ class _FixRounds:
         dirs, seen = [], []
         self.fix_dirs = []
 
+        self.gate_kwargs = []
+
         def gate_run(*a, **k):
             dirs.append(k['log_dir'])
+            self.gate_kwargs.append(k)
             r = next(runs)
             if isinstance(r, Exception):
                 raise r
@@ -2123,6 +2126,91 @@ class TestReextractAMisquote(_FixRounds):
         slips = gate._describe_slips(r)
         assert gate._slipped(slips) == 'misquoted the prose or named a fact not in force'
         assert gate._slipped(slips[:1]) == 'misquoted the prose'
+
+    # #734 (diomedes-spears-ares, iliad-adult, 2026-11-16): both re-checks
+    # failed on an `ends` slip beside a (false) possession finding; slips
+    # earned the re-extraction only alone, so the last run couldn't be
+    # committed provisionally and the session halted, 73 scenes not attempted
+
+    def test_a_slip_beside_a_finding_after_the_last_round_extracts_again(
+            self, monkeypatch, tmp_path):
+        r2 = self._misquote('c')
+        done = self._result('c')
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a', 'x'), self._misquote('b'), r2, done],
+                                    [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                     ('v2', [{'find': 'b', 'replace': 'c'}])])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'recheck-2'),
+                        os.path.join(logs, 'reextract')]
+        assert len(seen) == 2 and out.prose == 'v2'
+        assert out.result is done and not out.result.unresolved   # no slip left
+        # the findings before it stand in the new run
+        assert self.gate_kwargs[-1]['standing'] is r2
+        assert self.gate_kwargs[-1]['prose'] == 'v2'
+        assert out.reextraction.standing == 1
+        assert out.reextraction.summary().startswith(
+            f'the extractor misquoted the prose ({SCENE}--a-fact: "{self.SAID}" is not in the '
+            f'scene), so the same prose was gated again (extraction and the check, the 1 '
+            f'finding(s) before it standing)')
+
+    def test_a_slip_beside_a_finding_is_extracted_again_once(self, monkeypatch, tmp_path):
+        """Round 1's re-roll took the one regate: none at the end."""
+        first = self._result()
+        first.problems = {'ends again': ['x']}
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [first, self._result('a'), self._misquote('b')],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert len(dirs) == 3 and out.reextraction is None
+
+    def test_slips_beside_findings(self):
+        assert gate._slips_beside_findings(self._misquote('a')) == [
+            f'quote: {SCENE}: {SCENE}--a-fact']
+        assert gate._slips_beside_findings(self._misquote()) == [   # alone, too
+            f'quote: {SCENE}: {SCENE}--a-fact']
+        assert gate._slips_beside_findings(self._result('a')) == []    # no slip
+        assert gate._slips_beside_findings(self._result()) == []       # passed
+
+    def test_a_halt_beside_a_slip_and_a_finding_stops_the_reextraction(self):
+        from storyforge.audit import Halt
+        r = self._misquote('a')
+        r.halts = [Halt('fixed', 'some-fact', 'it changes')]
+        assert gate._slips_beside_findings(r) == []
+
+    def test_a_plan_conflict_beside_a_slip_stops_the_reextraction(self):
+        """A re-roll of the check that missed it would pass prose that has it."""
+        r = self._misquote('a', 'b')
+        r.plan_conflicts = r.findings[:1]
+        assert gate._slips_beside_findings(r) == []
+
+    def test_an_unruled_dispute_beside_a_slip_stops_the_reextraction(self):
+        from storyforge.checker import Dispute
+        r = self._misquote('a')
+        r.check.unruled = [Dispute('plan-fact', 'the plan says', 'the scene says')]
+        assert gate._slips_beside_findings(r) == []
+
+    @pytest.mark.parametrize('kind', [k for k in gate.UNRESOLVED
+                                      if k not in gate._EXTRACTOR_SLIPS])
+    def test_another_extraction_problem_stops_the_reextraction(self, kind):
+        r = self._misquote('a')
+        r.problems[kind] = ['x']
+        assert gate._slips_beside_findings(r) == []
+
+    def test_standing_findings_join_the_runs_own(self):
+        from storyforge.checker import CheckResult, Finding
+
+        def finding(words, **k):
+            return Finding('contradiction', 'TIM', 'q', 'act1-sc01', words, '', 'why', **k)
+        same = 'Dorren Hayle pressed the brass calipers'
+        other = 'The archive door was locked at dusk'
+        unsure = 'Tessa walked four hours along the eastern ridge'
+        run = gate.GateResult(SCENE, check=CheckResult(
+            SCENE, findings=[finding(same), finding(other)],
+            unverified=[finding(unsure, problem='p')]))
+        check = CheckResult(SCENE, findings=[finding(same)])
+        gate._carry_standing(check, run)
+        assert [f.established_quote for f in check.findings] == [same, other]
+        assert [f.established_quote for f in check.unverified] == [unsure]
 
     def test_one_regate_per_call(self):
         once = gate._OneRegate()
@@ -4109,3 +4197,117 @@ class TestVerbatimIn:
 
     def test_a_word_changed(self):
         assert not gate._verbatim_in('Left hand on the box, right hand free.', self.PROSE)
+
+
+class TestEndsAStateSetUpHere:
+    """#734, the regression from diomedes-spears-ares (iliad-adult,
+    2026-11-16, `recheck/` and `recheck-2/` of run 20261116-235310-17167):
+    the healing row ended `ares-wounded-by-diomedes`, a plan fact recorded
+    for the same scene. It was reported as an `ends` naming nothing (a
+    blocking slip), and with a possession finding beside it the session
+    halted."""
+
+    PLAN = 'ares-wounded-by-diomedes'
+
+    def _add_plan_state(self, project_dir, **over):
+        rows = ledger.load(project_dir)
+        row = {c: '' for c in ledger.COLUMNS}
+        row.update(id=self.PLAN, scene_id=SCENE, type='knowledge',
+                   statement='Diomedes wounded Ares', quote=HERE, origin='plan',
+                   status='binding', mutable='state', introduced_by='briefs',
+                   category='state-change')
+        row.update(over)
+        ledger.save(project_dir, rows + [row], command='briefs')
+
+    def _healing(self):
+        return _commitment(type='physical', statement='Paeon heals Ares', mutable='state',
+                           ends=[self.PLAN])
+
+    def test_no_blocking_problem_and_the_wound_is_not_carried_forward(self, project_dir,
+                                                                       tmp_path):
+        from storyforge.extract import ENDS_HERE, facts_in_force
+        self._add_plan_state(project_dir)
+        result = _gate(project_dir, tmp_path, [self._healing()])
+        assert result.unresolved == [] and result.passed and result.committed
+        assert result.problems[ENDS_HERE] == [f'{SCENE}: {self.PLAN}']
+        assert any(line.startswith('NOTE (a state the plan sets up in this scene')
+                   for line in gate.report_lines(result))
+        rows = ledger.load(project_dir)
+        assert next(r for r in rows if r['id'] == self.PLAN)['resolves'] == SCENE
+        order = ledger.scene_order(project_dir)
+        later = next(s for s, i in order.items() if i == order[SCENE] + 1)
+        assert self.PLAN not in {r['id'] for r in facts_in_force(rows, later, order)}
+
+    def test_a_plan_end_elsewhere_is_a_dispute_not_a_slip(self, project_dir, tmp_path):
+        self._add_plan_state(project_dir, resolves='act2-sc02')
+        result = _gate(project_dir, tmp_path, [self._healing()])
+        assert result.unresolved == []
+        assert result.problems['ends registry'] == [
+            f'{SCENE}: {self.PLAN} (resolves: act2-sc02)']
+        rows = ledger.load(project_dir)
+        assert next(r for r in rows if r['id'] == self.PLAN)['resolves'] == 'act2-sc02'
+
+
+class TestStandingFindings:
+    """#734: a re-extraction beside findings gates the same prose again; the
+    run before it's findings stand, so a re-roll of the check that missed
+    one can't pass the prose."""
+
+    def test_a_finding_the_check_did_not_make_again_still_blocks(self, project_dir,
+                                                                  tmp_path):
+        before = ledger.load(project_dir)
+        first = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+        assert len(first.findings) == 1
+        again = _gate(project_dir, tmp_path, [_commitment()], standing=first)
+        assert not again.passed and not again.committed
+        assert [f.established_quote for f in again.findings] == [
+            f.established_quote for f in first.findings]
+        assert ledger.load(project_dir) == before
+
+    def test_one_it_made_again_is_not_doubled(self, project_dir, tmp_path):
+        first = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+        again = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                      standing=first)
+        assert len(again.findings) == 1
+
+    def test_without_standing_a_clean_reroll_passes(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+        assert _gate(project_dir, tmp_path, [_commitment()]).passed
+
+
+class TestExtractionCutOff:
+    """#734: a reply cut off at its token limit raised `GateError` and
+    stopped the session; it is asked again once with a larger budget."""
+
+    def _run(self, project_dir, tmp_path, stops):
+        stops = iter(stops)
+        budgets = []
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            budgets.append(body['max_tokens'])
+            return _text({'commitments': [_commitment()]}, stop=next(stops))
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            try:
+                return gate_scene(project_dir, SCENE, command='draft',
+                                  log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                  check_model='m'), budgets
+            except GateError as e:
+                return e, budgets
+
+    def test_a_cut_off_reply_is_asked_again_with_a_larger_budget(self, project_dir,
+                                                                 tmp_path):
+        result, budgets = self._run(project_dir, tmp_path, ['max_tokens', 'end_turn'])
+        assert result.passed and len(budgets) == 2 and budgets[1] > budgets[0]
+        assert os.path.isfile(os.path.join(str(tmp_path / 'logs'),
+                                           f'gate-extract-{SCENE}.retry.json'))
+
+    def test_a_whole_reply_is_asked_once(self, project_dir, tmp_path):
+        result, budgets = self._run(project_dir, tmp_path, ['end_turn'])
+        assert result.passed and len(budgets) == 1
+
+    def test_cut_off_twice_is_a_gate_error(self, project_dir, tmp_path):
+        error, budgets = self._run(project_dir, tmp_path, ['max_tokens', 'max_tokens'])
+        assert isinstance(error, GateError) and 'token limit, twice' in str(error)
+        assert len(budgets) == 2
