@@ -209,6 +209,81 @@ class TestPresent:
                                 self.PLACES) == {'oren tal', 'the mill'}
 
 
+#: #746: Homer's namesakes. Two Pisanders (one told apart by his father),
+#: and a patronymic two brothers share
+HOMER = {'pisander 1': {'pisander', 'son of antimachus'}, 'pisander 2': {'pisander'},
+         'achilles': {'achilles', 'son of peleus'},
+         'agamemnon': {'agamemnon', 'son of atreus'}, 'menelaus': {'menelaus', 'son of atreus'}}
+
+
+class TestNamesakes:
+    """#746: a bare shared name marked every namesake present, so facts
+    about the wrong man were asked (one of the question checker's four
+    false fact findings on *Wrath Like Smoke*: two Dolops)."""
+
+    def seen(self, prose='', records=(), tied=()):
+        return questions.presence(list(records), {}, {}, prose=prose, names=HOMER,
+                                  tied=set(tied))
+
+    def test_a_shared_name_places_only_the_bearer_the_cast_holds(self):
+        got = self.seen('Pisander fell at the ford.', tied={'pisander 2'})
+        assert got.present == {'pisander 2'}
+        assert got.notes == ['"pisander" in the prose names 2 people (pisander 1, pisander 2): '
+                             'placed pisander 2, tied to the scene by its cast, a recent fact '
+                             'or a name only they have; not placed: pisander 1']
+
+    def test_a_shared_name_nothing_ties_places_no_one_and_says_so(self):
+        got = self.seen('Pisander fell at the ford.')
+        assert got.present == set()
+        assert got.notes == ['"pisander" in the prose names 2 people (pisander 1, pisander 2): '
+                             'none is tied to the scene by its cast, a recent fact or a name '
+                             'only one has, so none is placed: pisander 1, pisander 2']
+
+    def test_a_name_only_one_has_tells_them_apart(self):
+        got = self.seen('Pisander, the son of Antimachus, begged for his life.')
+        assert got.present == {'pisander 1'}
+        assert any('not placed: pisander 2' in n for n in got.notes)
+
+    def test_the_son_of_peleus_places_achilles(self):
+        assert self.seen('The son of Peleus sulked by the ships.').present == {'achilles'}
+
+    def test_a_patronymic_two_share_is_ambiguous(self):
+        assert self.seen('The son of Atreus spoke.').present == set()
+        assert self.seen('The son of Atreus spoke.', tied={'menelaus'}).present == {'menelaus'}
+        # named outright, the other brother isn't placed by the patronymic
+        got = self.seen('Agamemnon, son of Atreus, spoke.')
+        assert got.present == {'agamemnon'}
+
+    def test_an_at_record_with_a_shared_name(self):
+        got = self.seen(records=[Record('at', 'Pisander', '')], tied={'pisander 1'})
+        assert got.present == got.on_stage == {'pisander 1'}
+        got = self.seen(records=[Record('at', 'Pisander', '')])
+        assert got.present == set() and 'in the typed state' in got.notes[0]
+
+    def test_a_name_no_one_shares_is_as_before(self):
+        got = self.seen('Achilles wept.', records=[Record('at', 'Achilles', '')])
+        assert got.present == got.on_stage == {'achilles'} and got.notes == []
+
+    def test_name_index_and_named_by(self):
+        from storyforge.ledger import name_index, named_by
+        index = name_index(HOMER)
+        assert index['pisander'] == {'pisander 1', 'pisander 2'}
+        assert index['son of atreus'] == {'agamemnon', 'menelaus'}
+        assert named_by('The Son of  Peleus', index) == {'achilles'}
+        assert named_by('pisander-2', index) == {'pisander 2'}
+        assert named_by('Hector', index) == set()
+
+    def test_tied_subjects(self):
+        rows = [row('f1', subject='pisander-1', scene='L18'),
+                row('f2', subject='menelaus', scene='L3'),
+                row('f3', subject='pisander-2', scene='L19', status='pending')]
+        # the cast by name or id (a shared name ties neither); a binding fact
+        # of the last five scenes ties its subject
+        got = questions.tied_subjects(['Achilles', 'Pisander', 'agamemnon'], rows, 'L20', LONG,
+                                      HOMER)
+        assert got == {'achilles', 'agamemnon', 'pisander 1'}
+
+
 REGISTRY = {'mara', 'oren tal', 'the mill'}
 CHARS = {'mara': 'mara', 'mara vell': 'mara', 'oren': 'oren-tal', 'oren tal': 'oren-tal'}
 
@@ -973,6 +1048,32 @@ class TestCheckQuestions:
         assert 'Tessa is sulking' not in ''.join(asked)
         assert any(n.startswith('1 state trait(s)') and n.endswith('not asked: tessa-sulks')
                    for n in r.notes)
+
+    def test_a_shared_name_asks_only_the_casts_bearer(self, project_dir):
+        """#746's acceptance: "Pisander" in a scene whose cast holds one
+        Pisander asks only his facts."""
+        from storyforge.elaborate import _read_csv, _write_csv
+        ref = os.path.join(project_dir, 'reference')
+        with open(os.path.join(ref, 'characters.csv'), 'a') as f:
+            f.write('pisander-a|Pisander||minor|\npisander-b|Pisander||minor|\n')
+        path = os.path.join(ref, 'scene-intent.csv')
+        intents = _read_csv(path)
+        for i in intents:
+            if i['id'] == SCENE:
+                i['characters'] = 'Dorren Hayle;pisander-b'
+        _write_csv(path, intents, list(intents[0].keys()))
+        rows = _add_rows(project_dir,
+                         # from before the book: a recent fact would tie him too
+                         {**TESSA_KIND, 'id': 'pa-trait', 'subject': 'pisander-a',
+                          'scene_id': '', 'statement': 'Pisander the elder never retreats'},
+                         {**TESSA_KIND, 'id': 'pb-trait', 'subject': 'pisander-b',
+                          'scene_id': '',
+                          'statement': 'Pisander the younger fights from a chariot'})
+        r, asked = self._check(project_dir, rows, [], prose='Pisander fell at the ford.')
+        assert 'fights from a chariot' in asked[0] and 'never retreats' not in asked[0]
+        assert 'pisander b' in r.present and 'pisander a' not in r.present
+        assert any(n.startswith('"pisander" in the prose names 2 people')
+                   and n.endswith('not placed: pisander a') for n in r.notes)
 
     def test_the_model_is_configurable(self, monkeypatch):
         monkeypatch.setenv(questions.MODEL_ENV, 'claude-sonnet-5-5')

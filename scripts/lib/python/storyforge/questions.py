@@ -36,6 +36,8 @@ by asking about each one narrowly:
   its facts are asked in every scene; a fact with no subject, or about a
   registry entry the scene doesn't have, isn't asked, and the notes count
   both. So the number of questions scales with the scene, not the ledger.
+  A name several subjects share places only those the brief's cast, a
+  recent fact or a name only one has ties to the scene (#746, `presence`).
 - **Storyforge writes the questions** (`question_for`), from the fact's
   type, subject and statement; no model writes them.
 - **Each is asked twice** (`yes_no.ask`, the stage sheet's machinery, #647):
@@ -305,33 +307,136 @@ def _lookup(name: str, *maps: dict[str, str]) -> str:
     return _norm(key)
 
 
+@dataclass
+class Presence:
+    """Who and what is in the scene (`presence`), normalized ids."""
+    #: present: asked about
+    present: set[str] = field(default_factory=set)
+    #: of `present`, the people the typed state puts there (`at` records):
+    #: their physical states are asked first (#739)
+    on_stage: set[str] = field(default_factory=set)
+    #: a shared name whose bearers weren't all placed, and why (#746)
+    notes: list[str] = field(default_factory=list)
+
+
 def present_subjects(records, chars: dict[str, str], places: dict[str, str],
                      location: str = '', *, prose: str = '',
-                     names: dict[str, set[str]] | None = None) -> set[str]:
+                     names: dict[str, set[str]] | None = None,
+                     tied: set[str] | frozenset = frozenset()) -> set[str]:
+    """`presence(...).present`."""
+    return presence(records, chars, places, location, prose=prose, names=names,
+                    tied=tied).present
+
+
+def presence(records, chars: dict[str, str], places: dict[str, str],
+             location: str = '', *, prose: str = '',
+             names: dict[str, set[str]] | None = None,
+             tied: set[str] | frozenset = frozenset()) -> Presence:
     """The subjects present in the scene, normalized (`ledger._norm`): each
     `at` record's person (a registry id through `chars`, a lower-case name
     or alias → id; else the name itself), each place an `at` record names
     that `places` knows, each of the scene's own `location`s (scenes.csv's
     `;` array), and each registry subject its `prose` names as a whole word
     (`names`: `ledger.subject_names`, id → its names and aliases), so a
-    character only talked about, remembered or dead is asked about too."""
-    from storyforge.ledger import _mentions
-    out = set()
+    character only talked about, remembered or dead is asked about too.
+
+    A name `names` gives two or more subjects (#746: Homer's two Ajaxes,
+    several Pisanders; `ledger.name_index`) places only those of them that
+    something else ties to the scene: `tied` (normalized ids: the brief's
+    cast, the subjects of the last few scenes' facts) or a name only that
+    one has in the prose ("son of Oileus"). An `at` record or the prose
+    naming one with nothing tying any of them places none, and the notes
+    say so: a bare "Pisander" used to mark every Pisander present, and a
+    fact about the wrong man was asked."""
+    from storyforge.ledger import _norm as norm
+    from storyforge.ledger import _phrases, name_index, named_by, phrase_pattern
+    out = Presence()
+    names = names or {}
+    index = name_index(names)
+    shared = {p: ids for p, ids in index.items() if len(ids) > 1}
+    text = norm(prose) if prose else ''
+    # a subject the prose names by a phrase no other subject has
+    own: set[str] = set()
+    if text:
+        for sid in names:
+            pattern = phrase_pattern(_phrases(sid, names) - shared.keys())
+            if pattern and pattern.search(text):
+                own.add(sid)
+    ties = set(tied) | own
+    held: dict[str, tuple[set[str], str]] = {}
+
+    def namesakes(phrase: str, ids: set[str], where: str) -> set[str]:
+        placed = ids & ties
+        if ids - placed - own:
+            held.setdefault(phrase, (ids, where))
+        return placed
+
     for r in records or []:
         if getattr(r, 'type', '') != 'at':
             continue
-        if ' '.join((r.who or '').split()):
-            out.add(_lookup(r.who, chars))
+        who = ' '.join((r.who or '').split())
+        if who:
+            ids = named_by(who, index)
+            if len(ids) > 1:
+                placed = namesakes(norm(who).removeprefix('the '), ids, 'the typed state')
+                out.present |= placed
+                out.on_stage |= placed
+            else:
+                key = _lookup(who, chars)
+                out.present.add(key)
+                out.on_stage.add(key)
         where = ' '.join((r.item or '').split()).lower()
         if where and (where in places or where.removeprefix('the ') in places):
-            out.add(_lookup(where, places))
+            out.present.add(_lookup(where, places))
     for loc in (location or '').split(';'):
         if loc.strip():
-            out.add(_lookup(loc, places))
-    if prose and names:
-        cache: dict = {}
-        out |= {sid for sid in names if sid not in out and _mentions(prose, sid, names, cache)}
-    return out - {''}
+            out.present.add(_lookup(loc, places))
+    if text:
+        out.present |= own
+        for phrase, ids in shared.items():
+            pattern = phrase_pattern([phrase])
+            if pattern and pattern.search(text):
+                out.present |= namesakes(phrase, ids, 'the prose')
+    for phrase, (ids, where) in sorted(held.items()):
+        placed = sorted(ids & out.present)
+        left = sorted(ids - out.present)
+        if not left:
+            continue
+        out.notes.append(
+            f'"{phrase}" in {where} names {len(ids)} people ({", ".join(sorted(ids))}): '
+            + (f'placed {", ".join(placed)}, tied to the scene by its cast, a recent fact or '
+               f'a name only they have; not ' if placed else
+               'none is tied to the scene by its cast, a recent fact or a name only one has, '
+               'so none is ')
+            + f'placed: {", ".join(left)}')
+    out.present -= {''}
+    out.on_stage -= {''}
+    return out
+
+
+def tied_subjects(cast: list[str], rows: list[dict], scene_id: str, order: dict[str, int],
+                  names: dict[str, set[str]]) -> set[str]:
+    """The subjects tied to `scene_id` other than by a name in its prose
+    (#746), normalized ids: each of the brief's `cast` (ids or names; a name
+    two people share ties neither) and the subject of each binding fact of
+    the `RECENT_SCENES` scenes before it (by id or a name only it has)."""
+    from storyforge.ledger import name_index, named_by
+    index = name_index(names)
+
+    def one(name: str) -> set[str]:
+        ids = named_by(name, index)
+        return ids if len(ids) == 1 else set()
+    out: set[str] = set()
+    for name in cast:
+        out |= one(name)
+    at = order.get(scene_id)
+    if at is not None:
+        for r in rows:
+            pos = order.get((r.get('scene_id') or '').strip())
+            if (r.get('status') or '') == 'binding' and pos is not None \
+                    and at - RECENT_SCENES <= pos < at:
+                out |= one((r.get('subject') or '').strip())
+    return out
 
 
 def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
@@ -881,7 +986,7 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     """
     from storyforge import ledger
     from storyforge.checker import brief_from
-    from storyforge.elaborate import _read_csv, _read_csv_as_map
+    from storyforge.elaborate import _read_csv, _read_csv_as_map, get_scene
     from storyforge.enrich import load_alias_map
     ref = os.path.join(project_dir, 'reference')
     try:
@@ -893,11 +998,13 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     places = load_alias_map(os.path.join(ref, 'locations.csv'))
     scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
     location = scenes.get(scene_id, {}).get('location') or ''
-    present = present_subjects(records, chars, places, location, prose=prose,
-                               names=subject_names)
-    # the typed state's cast: their physical states are asked first (#739)
-    on_stage = {_lookup(r.who, chars) for r in records or []
-                if getattr(r, 'type', '') == 'at' and ' '.join((r.who or '').split())}
+    # a shared name places only a bearer tied to the scene otherwise (#746)
+    scene = get_scene(scene_id, ref) or {}
+    cast = [c.strip() for col in ('characters', 'on_stage', 'pov')
+            for c in (scene.get(col) or '').split(';') if c.strip()]
+    seen = presence(records, chars, places, location, prose=prose, names=subject_names,
+                    tied=tied_subjects(cast, rows, scene_id, order, subject_names))
+    present, on_stage = seen.present, seen.on_stage
     names, registry = {}, set()
     for reg in ('characters.csv', 'locations.csv'):
         for r in _read_csv(os.path.join(ref, reg)):
@@ -910,6 +1017,7 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     by_id = {r.get('id'): r for r in rows}
     result = QuestionResult(scene_id, present=sorted(present))
     result.notes += [f'{n} (who is in the scene)' for n in name_notes]
+    result.notes += seen.notes
     questions, ruled = [], set()
     for d in disputes or []:
         row = by_id.get(d.fact_id)
