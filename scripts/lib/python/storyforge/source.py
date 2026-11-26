@@ -921,7 +921,9 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> tuple[list[Seeded], 
     with any row is the author's and is never touched. The project's header
     is kept (a column the source lacks, such as `pronouns`, is left empty;
     one only the source has is dropped); with no project file, the source's
-    header is used. With several sources the first to give an id wins; a
+    header is used. A source's `death_scene` names a source scene, so it is
+    left empty (and said; cleanup fills it through the map, #745). With
+    several sources the first to give an id wins; a
     source not imported yet is passed over. Returns the registries seeded and
     notes for the author (a registry or source copy that couldn't be read, a
     range that can't be checked or uses none of a registry's rows, cast names
@@ -978,7 +980,17 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> tuple[list[Seeded], 
         if not merged:
             continue
         header = header or src_header
-        out = [[row.get(col, '') for col in header] for row in merged.values()]
+        # A source's death_scene names a scene of the source, not of this
+        # book: `storyforge cleanup` places it once the map exists (#745)
+        own_cols = {'death_scene'} if name == 'characters.csv' else set()
+        dropped = sum(1 for row in merged.values()
+                      if any(row.get(c, '').strip() for c in own_cols))
+        if dropped:
+            notes.append(f'NOTE: {dropped} death_scene(s) in the sources\' characters.csv '
+                         f'name source scenes, so they weren\'t seeded; `storyforge cleanup` '
+                         f'fills them from the source map once it exists')
+        out = [['' if col in own_cols else row.get(col, '') for col in header]
+               for row in merged.values()]
         os.makedirs(ref, exist_ok=True)
         with open(own, 'w', encoding='utf-8', newline='') as f:
             f.write(_render_csv(header, out))
