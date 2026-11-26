@@ -56,6 +56,12 @@ def _answering(answers, asked=None):
     return fake
 
 
+def first_asking(asked):
+    """Of the prompts sent, the first asking's (T-1: the askings run on
+    threads, so `asked[0]` may be the second, which lists them reversed)."""
+    return next(p for p in asked if 'independent asking' not in p)
+
+
 def ans(n, answer, quote='', why='because'):
     return {'n': n, 'answer': answer, 'quote': quote, 'why': why}
 
@@ -209,6 +215,87 @@ class TestPresent:
                                 self.PLACES) == {'oren tal', 'the mill'}
 
 
+#: #746: Homer's namesakes. Two Pisanders (one told apart by his father),
+#: and a patronymic two brothers share
+HOMER = {'pisander 1': {'pisander', 'son of antimachus'}, 'pisander 2': {'pisander'},
+         'achilles': {'achilles', 'son of peleus'},
+         'agamemnon': {'agamemnon', 'son of atreus'}, 'menelaus': {'menelaus', 'son of atreus'}}
+
+
+class TestNamesakes:
+    """#746: a bare shared name marked every namesake present, so facts
+    about the wrong man were asked (one of the question checker's four
+    false fact findings on *Wrath Like Smoke*: two Dolops)."""
+
+    def seen(self, prose='', records=(), tied=()):
+        return questions.presence(list(records), {}, {}, prose=prose, names=HOMER,
+                                  tied=set(tied))
+
+    def test_a_shared_name_places_only_the_bearer_the_cast_holds(self):
+        got = self.seen('Pisander fell at the ford.', tied={'pisander 2'})
+        assert got.present == {'pisander 2'}
+        assert got.notes == ['"pisander" in the prose names 2 people (pisander 1, pisander 2): '
+                             'placed pisander 2, tied to the scene by its cast, a recent fact '
+                             'or a name only they have; not placed: pisander 1']
+
+    def test_a_shared_name_nothing_ties_places_no_one_and_says_so(self):
+        got = self.seen('Pisander fell at the ford.')
+        assert got.present == set()
+        assert got.notes == ['"pisander" in the prose names 2 people (pisander 1, pisander 2): '
+                             'none is tied to the scene by its cast, a recent fact or a name '
+                             'only one has, so none is placed: pisander 1, pisander 2']
+
+    def test_a_name_only_one_has_tells_them_apart(self):
+        got = self.seen('Pisander, the son of Antimachus, begged for his life.')
+        assert got.present == {'pisander 1'}
+        assert any('not placed: pisander 2' in n for n in got.notes)
+
+    def test_the_son_of_peleus_places_achilles(self):
+        assert self.seen('The son of Peleus sulked by the ships.').present == {'achilles'}
+
+    def test_a_patronymic_two_share_is_ambiguous(self):
+        assert self.seen('The son of Atreus spoke.').present == set()
+        assert self.seen('The son of Atreus spoke.', tied={'menelaus'}).present == {'menelaus'}
+        # named outright, the other brother isn't placed by the patronymic
+        got = self.seen('Agamemnon, son of Atreus, spoke.')
+        assert got.present == {'agamemnon'}
+
+    def test_an_at_record_with_a_shared_name(self):
+        got = self.seen(records=[Record('at', 'Pisander', '')], tied={'pisander 1'})
+        assert got.present == got.on_stage == {'pisander 1'}
+        got = self.seen(records=[Record('at', 'Pisander', '')])
+        assert got.present == set() and 'in the typed state' in got.notes[0]
+
+    def test_a_name_no_one_shares_is_as_before(self):
+        got = self.seen('Achilles wept.', records=[Record('at', 'Achilles', '')])
+        assert got.present == got.on_stage == {'achilles'} and got.notes == []
+
+    def test_name_index_and_named_by(self):
+        from storyforge.ledger import name_index, named_by
+        index = name_index(HOMER)
+        assert index['pisander'] == {'pisander 1', 'pisander 2'}
+        assert index['son of atreus'] == {'agamemnon', 'menelaus'}
+        assert named_by('The Son of  Peleus', index) == {'achilles'}
+        assert named_by('pisander-2', index) == {'pisander 2'}
+        assert named_by('Hector', index) == set()
+
+    def test_tied_subjects(self):
+        rows = [row('f1', subject='pisander-1', scene='L18'),
+                row('f2', subject='menelaus', scene='L3'),
+                row('f3', subject='pisander-2', scene='L19', status='pending')]
+        # the cast by name or id (a shared name ties neither); a binding fact
+        # of the last five scenes ties its subject
+        got = questions.tied_subjects(['Achilles', 'Pisander', 'agamemnon'], rows, 'L20', LONG,
+                                      HOMER)
+        assert got == {'achilles', 'agamemnon', 'pisander 1'}
+
+    def test_tied_subjects_reach_back_five_scenes(self):
+        # T-4: L15 is five scenes before L20, L14 six
+        rows = [row('in', subject='pisander-1', scene='L15'),
+                row('out', subject='pisander-2', scene='L14')]
+        assert questions.tied_subjects([], rows, 'L20', LONG, HOMER) == {'pisander 1'}
+
+
 REGISTRY = {'mara', 'oren tal', 'the mill'}
 CHARS = {'mara': 'mara', 'mara vell': 'mara', 'oren': 'oren-tal', 'oren tal': 'oren-tal'}
 
@@ -230,7 +317,7 @@ class TestFactsToAsk:
                 row('tl', 'timeline'), row('pr', 'promise'),
                 row('inj', 'physical', category='injury'),
                 row('eq', 'physical', category='Equipment')]
-        assert self.ask(rows)[0] == ['t', 'r', 'eq', 'inj', 'p', 'w', 'k', 'tl']
+        assert sorted(self.ask(rows)[0]) == ['eq', 'inj', 'k', 'p', 'r', 't', 'tl', 'w']
 
     def test_only_subjects_present(self):
         rows = [row('a', subject='mara'), row('b', subject='oren-tal'),
@@ -273,10 +360,95 @@ class TestFactsToAsk:
                 row('rej', status='rejected')]
         assert self.ask(rows)[0] == ['new']
 
-    def test_type_order_then_reading_order(self):
+    def test_within_a_tier_by_salience_then_the_nearest_scene(self):
+        # #739: physical and timeline before traits; the nearest scene first
         rows = [row('w1', 'world', scene='s1'), row('t4', scene='s4'), row('t1', scene='s1'),
-                row('r2', 'relationship', scene='s2')]
-        assert self.ask(rows)[0] == ['t1', 't4', 'r2', 'w1']
+                row('r2', 'relationship', scene='s2'), row('p1', 'physical', scene='s1'),
+                row('tl2', 'timeline', scene='s2'), row('p2', 'physical', scene='s2')]
+        assert self.ask(rows)[0] == ['p2', 'p1', 'tl2', 'r2', 'w1', 't1', 't4']
+
+
+#: a longer book, for the recent-scenes tier (`questions.RECENT_SCENES`)
+LONG = {f'L{n}': n for n in range(1, 21)}
+
+
+class TestQuestionOrder:
+    """#739: the cap of 30 kept old traits and cut recent physical facts
+    (889 of 936 traits asked on *Wrath Like Smoke*, 192 of 2,246 physical
+    facts): the on-stage cast's physical states first, then the last five
+    scenes' facts, then the rest by salience."""
+
+    def order(self, rows, on_stage=('mara',), present=('mara', 'oren tal'), scene='L20'):
+        got = facts_to_ask(rows, scene, LONG, set(present), registry=REGISTRY, chars=CHARS,
+                           on_stage=set(on_stage))
+        return [r['id'] for r in got.facts]
+
+    def test_the_on_stage_casts_physical_states_come_first(self):
+        rows = [row('old-trait', 'trait', scene='L1'),
+                row('recent-trait', 'trait', scene='L19'),
+                row('wound', 'physical', scene='L2', mutable='state'),
+                row('scar', 'physical', scene='L2'),
+                row('oren-wound', 'physical', subject='oren-tal', scene='L3', mutable='state')]
+        got = self.order(rows)
+        assert got[0] == 'wound'
+        # off stage (only named) or a fixed physical fact: not the first tier
+        assert got.index('recent-trait') < got.index('oren-wound')
+        assert got.index('recent-trait') < got.index('scar')
+
+    def test_then_the_last_five_scenes_then_the_rest(self):
+        rows = [row('t1', 'trait', scene='L1'), row('p3', 'physical', scene='L3'),
+                row('t15', 'trait', scene='L15'), row('t16', 'trait', scene='L16'),
+                row('t19', 'trait', scene='L19'), row('backstory', 'physical', scene='')]
+        assert self.order(rows) == ['t19', 't16', 't15', 'p3', 'backstory', 't1']
+
+    def test_an_on_stage_subject_before_one_only_named(self):
+        rows = [row('oren-scar', 'physical', subject='oren-tal', scene='L2'),
+                row('mara-trait', 'trait', scene='L1')]
+        assert self.order(rows) == ['mara-trait', 'oren-scar']
+        assert self.order(rows, on_stage=('mara', 'oren tal')) == ['oren-scar', 'mara-trait']
+
+    def test_a_later_scenes_fact_is_not_recent(self):
+        # a re-check of an early scene after later ones: "the last five" are before it
+        rows = [row('later', 'trait', scene='L12'), row('before', 'trait', scene='L9')]
+        assert self.order(rows, scene='L10') == ['before', 'later']
+
+
+class TestStaleStates:
+    """#739: two of the four false fact findings on *Wrath Like Smoke* were
+    a mood or attire set days before and never ended in the ledger. CR-3:
+    a vow or a grudge is a state trait too and still holds, so they are
+    asked last, not dropped."""
+    DAYS = {'s1': 1, 's2': 1, 's3': 2}
+
+    def pick(self, rows, days=DAYS):
+        return facts_to_ask(rows, 's3', ORDER, {'mara'}, registry=REGISTRY, chars=CHARS,
+                            days=days)
+
+    def test_a_state_trait_from_an_earlier_day_is_asked_last(self):
+        rows = [row('mood', 'trait', scene='s1', mutable='state'),
+                row('kind', 'trait', scene='s1'),
+                row('backstory', 'world', scene=''),
+                row('wound', 'physical', scene='s1', mutable='state')]
+        got = self.pick(rows)
+        assert got.stale == ['mood']
+        assert [r['id'] for r in got.facts][-1] == 'mood' and len(got.facts) == 4
+
+    def test_the_same_day_or_no_day_is_asked(self):
+        rows = [row('mood', 'trait', scene='s3', mutable='state'),
+                row('mood2', 'trait', scene='s2', mutable='state')]
+        same_day = {'s2': 2, 's3': 2}
+        assert self.pick(rows[1:], days=same_day).stale == []
+        assert self.pick(rows[1:], days={'s3': 2}).stale == []
+        assert self.pick(rows[1:], days={}).stale == []
+
+    def test_an_absent_subjects_stale_trait_is_absent(self):
+        got = self.pick([row('mood', 'trait', subject='oren-tal', scene='s1',
+                             mutable='state')])
+        assert got.absent == ['mood'] and got.stale == []
+
+    def test_scene_days(self):
+        assert questions.scene_days({'a': {'timeline_day': ' 3 '}, 'b': {'timeline_day': ''},
+                                     'c': {'timeline_day': 'Day 2'}, 'd': {}}) == {'a': 3}
 
 
 class TestQuestionFor:
@@ -387,7 +559,8 @@ class TestAskQuestions:
     def test_the_second_asking_reverses_and_says_so(self):
         _, asked = self._ask([Q('first'), Q('second')],
                              lambda a, n: [ans(i, 'no') for i in range(1, n + 1)])
-        one, two = asked
+        one = first_asking(asked)
+        two = next(p for p in asked if 'independent asking 2' in p)
         assert one.index('first holds') < one.index('second holds')
         assert two.index('second holds') < two.index('first holds')
         assert 'independent asking 2' in two and 'independent asking' not in one
@@ -400,6 +573,62 @@ class TestAskQuestions:
         assert r.asked == 1 and asked[0].count('   Question: ') == 1
         # SF-7: the skipped facts are named
         assert r.notes == ['2 question(s) past the 1 a scene gets: not asked: b, c']
+
+    def test_questions_past_a_batch_are_a_second_call(self, tmp_path, monkeypatch):
+        """#739: a cap above `BATCH` is asked in more than one call."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 2)]
+        log = str(tmp_path / 'q.json')
+        r, asked = self._ask(qs, lambda a, n: [ans(k, 'no') for k in range(1, n + 1)],
+                             log_file=log)
+        assert sorted(p.count('   Question: ') for p in asked) == [2, 2, 30, 30]
+        assert r.asked == len(qs) and r.asked_fact_ids == [q.fact_id for q in qs]
+        for name in ('q.json', 'q.a2.json', 'q-b2.json', 'q-b2.a2.json'):
+            assert os.path.isfile(tmp_path / name)
+
+    def test_each_batch_rules_its_own_findings_and_notes(self, monkeypatch):
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
+        # the last question (alone in batch 2) is yes twice with no quote;
+        # the first is a finding
+        r, _ = self._ask(qs, lambda a, n: (
+            [ans(1, 'yes', 'not in the scene')] if n == 1
+            else [ans(1, 'yes', 'Oren laughed')] + [ans(k, 'no') for k in range(2, n + 1)]))
+        assert [f.fact_id for f in r.findings] == ['f0'] and r.misquoted == 1
+        assert r.notes == ['batch 2 of 2: 1 question(s) answered yes twice with no quote in '
+                           'the scene: not findings']
+
+    def test_a_failed_batch_fails_the_check(self, monkeypatch):
+        """T-2: a bad reply twice in batch 2 is a QuestionError, as in batch 1."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
+
+        def fake(path, body, **k):
+            n = body['messages'][0]['content'].count('   Question: ')
+            return _text({'answers': [] if n == 1 else [ans(i, 'no') for i in range(1, n + 1)]})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            with pytest.raises(QuestionError, match='failed twice'):
+                questions.ask_questions(SCENE, PROSE, qs, model='m')
+
+    def test_a_split_in_batch_two_is_asked_a_third_time_beside_its_log(self, tmp_path,
+                                                                        monkeypatch):
+        """T-3: batch 2's third asking logs at -b2.a3, and its note says so."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
+        log = str(tmp_path / 'q.json')
+        r, asked = self._ask(qs, lambda a, n: (
+            [ans(k, 'no') for k in range(1, n + 1)] if n == questions.BATCH
+            else [ans(1, 'yes' if a == 1 else 'no', 'Oren laughed')]), log_file=log)
+        assert len(asked) == 5 and r.split == 1
+        assert os.path.isfile(tmp_path / 'q-b2.a3.json')
+        assert not os.path.isfile(tmp_path / 'q.a3.json')
+        assert r.notes[0].startswith('batch 2 of 2: 1 question(s) got split answers')
+        assert r.notes[0].endswith(': f30')
+
+    def test_batch_log(self):
+        assert questions.batch_log('/l/q.json', 1) == '/l/q.json'
+        assert questions.batch_log('/l/q.json', 2) == '/l/q-b2.json'
+        assert questions.batch_log('', 2) == ''
 
     def test_a_bad_reply_twice_is_a_question_error(self):
         def fake(path, body, **k):
@@ -565,6 +794,46 @@ class TestEndingQuestion:
                                            'Mara slammed the door')])
         assert r.ended == [] and r.findings == []
 
+    def test_an_ending_in_a_later_batch_is_recorded(self, monkeypatch):
+        """#754's merge with #756: batches merge `ended` like the rest."""
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 2 * questions.BATCH)
+        d, q = self._q()
+        qs = [Q(f'f{i}') for i in range(questions.BATCH)] + [q]
+        r = self._ask_many(qs, lambda a, n: (
+            [ans(1, 'yes', 'Mara slammed the door')] if n == 1
+            else [ans(k, 'no') for k in range(1, n + 1)]))
+        assert r.ended == [d] and r.findings == []
+
+    def _ask_many(self, qs, answers):
+        with patch('storyforge.api._api_request', side_effect=_answering(answers)):
+            return questions.ask_questions(SCENE, PROSE, qs, model='m')
+
+    def test_endings_are_asked_with_the_disputes_first(self, project_dir):
+        """#754's merge with #756: an ending decides whether an end is
+        recorded, so it sits ahead of the brief's entering items and the
+        facts, where the cap can't cut it."""
+        from storyforge.elaborate import _read_csv, _write_csv
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        briefs = _read_csv(path)
+        for b in briefs:
+            if b['id'] == SCENE:
+                b['physical_state_in'] = 'Tessa wears a borrowed coat'
+        _write_csv(path, briefs, list(briefs[0].keys()))
+        rows = _add_rows(project_dir, TESSA_KIND,
+                         {**TESSA_KIND, 'id': 'tessa-limps', 'type': 'physical',
+                          'mutable': 'state', 'statement': 'Tessa limps'})
+        end = Dispute('tessa-limps', 'Tessa limps', 'Tessa mocked Dorren')
+        asked = []
+        with patch('storyforge.api._api_request', side_effect=_answering(
+                lambda a, n: [ans(i, 'no') for i in range(1, n + 1)], asked)):
+            questions.check_questions(project_dir, SCENE, prose=TESSA_PROSE, rows=rows,
+                                      records=[Record('at', 'Tessa', '')], endings=[end],
+                                      model='m', promises=False)
+        one = first_asking(asked)
+        assert one.index('clearly show this state ending') \
+            < one.index('Tessa wears a borrowed coat') \
+            < one.index('Tessa is never cruel to Dorren')
+
 
 class TestPrompt:
     def test_the_answering_rules(self):
@@ -658,6 +927,62 @@ class TestPromises:
         assert got == [P_ITEM, P_PLAIN, P_FACT, P_PLAN]
         assert got[0].must and not got[1].must and not got[2].must
 
+    def test_a_fact_an_earlier_scene_established_is_not_asked(self):
+        """#740: "Agamemnon's heralds took Briseis" set up two scenes back and
+        listed in a later brief was asked as the later scene's to establish:
+        no/no, a broken promise, and a fix that wrote real errors."""
+        left_out = []
+        got = questions.promises_for(
+            _brief(promised={'k1': 'Oren laughs at the mill', 'k2': 'Mara is wounded'}),
+            entering={'k2': 'set in s1, still in force'},
+            fields={'k1': 'knowledge_out', 'k2': 'physical_state_out'}, left_out=left_out)
+        # CR-1: the brief field a promise came from is recorded
+        assert got == [questions.Promise('promised', 'k1', 'knowledge_out',
+                                         'Oren laughs at the mill', 'Oren laughs at the mill')]
+        assert left_out == ['physical_state_out k2 (set in s1, still in force)']
+
+    @pytest.mark.parametrize('outcome', ['yes', 'No.', ' YES ', 'must: yes'])
+    def test_an_outcome_that_is_only_an_answer_is_not_asked(self, outcome):
+        left_out = []
+        got = questions.promises_for(_brief(items={'outcome': [outcome],
+                                                   'key_actions': ['yes']}),
+                                     left_out=left_out)
+        # only the outcome field: a key action "yes" is still the author's words
+        assert [p.field for p in got] == ['key_actions']
+        assert len(left_out) == 1 and left_out[0].startswith('outcome: "')
+        assert 'names no event' in left_out[0]
+
+    @pytest.mark.parametrize('outcome', ['no-and', 'yes, but she pays for it', 'Nobody wins'])
+    def test_an_outcome_with_words_is_asked(self, outcome):
+        got = questions.promises_for(_brief(items={'outcome': [outcome]}))
+        assert [p.text for p in got] == [outcome]
+
+    def test_held_entering_only_earlier_physical_facts_in_force(self):
+        P = 'physical'
+        rows = [row('a', P, scene='s1'), row('b', P, scene='s3'), row('c', P, scene='s4'),
+                row('d', P, scene=''), row('e', P, scene='cut-scene'),
+                # CR-1: knowledge_out set earlier may be learned here: a promise
+                row('k', 'knowledge', scene='s1'),
+                # CR-2/SF-1: ended or superseded before the scene: the brief
+                # brings it back, so it stays a promise
+                row('ended', P, scene='s1', mutable='state', resolves='s2'),
+                row('old', P, scene='s1'), row('new', P, scene='s2', supersedes='old'),
+                row('wound', P, scene='s2', mutable='state'),
+                row('nobody', P, scene='s1', subject=''),
+                row('oren', P, scene='s1', subject='oren-tal')]
+        got = questions.held_entering(rows, [r['id'] for r in rows], 's3', ORDER, {'mara'},
+                                      chars=CHARS)
+        assert sorted(got) == ['a', 'new', 'nobody', 'oren', 'wound']
+        assert got['a'].endswith('asked as a fact instead')
+        assert got['nobody'].endswith('it has no subject, so it is not checked')
+        assert got['oren'].endswith('its subject isn\'t in the scene, so it is not checked')
+        assert questions.held_entering(rows, ['a'], 'not-a-scene', ORDER) == {}
+
+    def test_promised_fields(self):
+        rows = [row('p', 'physical'), row('k', 'knowledge'), row('t', 'trait')]
+        assert questions.promised_fields(rows, ['p', 'k', 't']) == {
+            'p': 'physical_state_out', 'k': 'knowledge_out'}
+
     def _ask(self, promises, answers):
         asked = []
         with patch('storyforge.api._api_request', side_effect=_answering(answers, asked)):
@@ -705,7 +1030,7 @@ class TestPromises:
         assert r.misquoted == 1
 
     def test_past_the_cap_is_named_and_a_must_beat_blocks(self, monkeypatch):
-        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
+        monkeypatch.setattr(questions, 'MAX_PROMISES', 1)
         r, _ = self._ask([P_PLAIN, P_ITEM], lambda a, n: [ans(1, 'yes', 'Oren laughed')])
         assert any('past the 1' in n and 'Mara slams the door' in n for n in r.notes)
         assert [f.problem for f in r.unverified] == ['past the cap: not asked']
@@ -839,6 +1164,80 @@ class TestCheckQuestions:
         r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
         assert 'Tessa wears a borrowed coat' in asked[0]
 
+    def test_the_briefs_entering_items_come_before_the_facts(self, project_dir):
+        # #739: the cap cuts from the end; what the brief has holding as the
+        # scene opens used to come last
+        from storyforge.elaborate import _read_csv, _write_csv
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        briefs = _read_csv(path)
+        for b in briefs:
+            if b['id'] == SCENE:
+                b['physical_state_in'] = 'Tessa wears a borrowed coat'
+        _write_csv(path, briefs, list(briefs[0].keys()))
+        rows = _add_rows(project_dir, TESSA_KIND)
+        _, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        one = first_asking(asked)
+        assert one.index('Tessa wears a borrowed coat') \
+            < one.index('Tessa is never cruel to Dorren')
+
+    def test_a_stale_state_trait_is_said(self, project_dir):
+        # #739/CR-3: a state trait set on an earlier day is asked last, said
+        from storyforge.elaborate import _read_csv, _write_csv
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        scenes = _read_csv(path)
+        for sc in scenes:
+            if sc['id'] == SCENE:
+                sc['timeline_day'] = '2'
+        _write_csv(path, scenes, list(scenes[0].keys()))
+        rows = _add_rows(project_dir, {**TESSA_KIND, 'id': 'tessa-sulks', 'mutable': 'state',
+                                       'statement': 'Tessa is sulking'})
+        r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert r.asked_fact_ids[-1] == 'tessa-sulks'
+        assert any(n.startswith('1 state trait(s)') and n.endswith('other fact: tessa-sulks')
+                   for n in r.notes)
+
+    def test_a_stale_state_trait_past_the_cap_is_named(self, project_dir, monkeypatch):
+        from storyforge.elaborate import _read_csv, _write_csv
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        scenes = _read_csv(path)
+        for sc in scenes:
+            if sc['id'] == SCENE:
+                sc['timeline_day'] = '2'
+        _write_csv(path, scenes, list(scenes[0].keys()))
+        rows = _add_rows(project_dir, TESSA_KIND,
+                         {**TESSA_KIND, 'id': 'tessa-sulks', 'mutable': 'state',
+                          'statement': 'Tessa is sulking'})
+        r, _ = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert r.asked_fact_ids == ['tessa-kind']
+        assert any(n.endswith('(1 past the cap, not asked: tessa-sulks)') for n in r.notes)
+
+    def test_a_shared_name_asks_only_the_casts_bearer(self, project_dir):
+        """#746's acceptance: "Pisander" in a scene whose cast holds one
+        Pisander asks only his facts."""
+        from storyforge.elaborate import _read_csv, _write_csv
+        ref = os.path.join(project_dir, 'reference')
+        with open(os.path.join(ref, 'characters.csv'), 'a') as f:
+            f.write('pisander-a|Pisander||minor|\npisander-b|Pisander||minor|\n')
+        path = os.path.join(ref, 'scene-intent.csv')
+        intents = _read_csv(path)
+        for i in intents:
+            if i['id'] == SCENE:
+                i['characters'] = 'Dorren Hayle;pisander-b'
+        _write_csv(path, intents, list(intents[0].keys()))
+        rows = _add_rows(project_dir,
+                         # from before the book: a recent fact would tie him too
+                         {**TESSA_KIND, 'id': 'pa-trait', 'subject': 'pisander-a',
+                          'scene_id': '', 'statement': 'Pisander the elder never retreats'},
+                         {**TESSA_KIND, 'id': 'pb-trait', 'subject': 'pisander-b',
+                          'scene_id': '',
+                          'statement': 'Pisander the younger fights from a chariot'})
+        r, asked = self._check(project_dir, rows, [], prose='Pisander fell at the ford.')
+        assert 'fights from a chariot' in asked[0] and 'never retreats' not in asked[0]
+        assert 'pisander b' in r.present and 'pisander a' not in r.present
+        assert any(n.startswith('"pisander" in the prose names 2 people')
+                   and n.endswith('not placed: pisander a') for n in r.notes)
+
     def test_the_model_is_configurable(self, monkeypatch):
         monkeypatch.setenv(questions.MODEL_ENV, 'claude-sonnet-5-5')
         assert questions.resolve_model() == 'claude-sonnet-5-5'
@@ -927,6 +1326,40 @@ class TestGate:
                 b.update({k: '' for k in ('outcome', 'key_actions', 'key_dialogue',
                                           'knowledge_out', 'physical_state_out')}, **fields)
         _write_csv(path, briefs, list(briefs[0].keys()))
+
+    def test_an_earlier_scenes_fact_in_the_brief_is_not_a_broken_promise(
+            self, project_dir, tmp_path, monkeypatch):
+        """#740: a physical state set in act1-sc01, still in force, and
+        listed in this scene's physical_state_out isn't asked as this
+        scene's to establish; it is asked as a fact (Tessa is there)."""
+        _add_rows(project_dir, {'id': 'tessa-limps', 'scene_id': 'act1-sc01',
+                                'type': 'physical', 'subject': 'tessa-merrin',
+                                'statement': 'Tessa limps on her left leg',
+                                'status': 'binding', 'mutable': 'state'})
+        self._brief(project_dir, physical_state_out='tessa-limps', outcome='yes')
+        result, calls = self._gate(project_dir, tmp_path, monkeypatch,
+                                   lambda n: [ans(i, 'no') for i in range(1, n + 1)])
+        assert 'promises' not in calls
+        assert result.passed and 'tessa-limps' in result.asked_fact_ids
+        assert any('2 brief promise(s) not asked' in n
+                   and 'physical_state_out tessa-limps (set in act1-sc01, still in force '
+                   'entering this scene' in n and 'asked as a fact instead' in n
+                   and 'outcome: "yes"' in n for n in result.question_notes)
+
+    def test_knowledge_set_earlier_is_still_a_promise(self, project_dir, tmp_path,
+                                                      monkeypatch):
+        """CR-1: knowledge_out is what the point of view learns in this
+        scene, even when an earlier scene set the fact."""
+        _add_rows(project_dir, {'id': 'tessa-knows-map', 'scene_id': 'act1-sc01',
+                                'type': 'knowledge', 'subject': '',
+                                'statement': 'Tessa knows the map is wrong',
+                                'status': 'binding', 'mutable': 'fixed'})
+        self._brief(project_dir, knowledge_out='tessa-knows-map')
+        _, calls = self._gate(project_dir, tmp_path, monkeypatch,
+                              lambda n: [ans(i, 'no') for i in range(1, n + 1)],
+                              promised=lambda n: [ans(i, 'yes', 'Tessa mocked Dorren')
+                                                  for i in range(1, n + 1)])
+        assert calls.count('promises') == 2
 
     def test_a_broken_must_beat_stops_the_scene(self, project_dir, tmp_path, monkeypatch):
         # CR-3/SF-6: under --questions a must: beat used to go unchecked and
