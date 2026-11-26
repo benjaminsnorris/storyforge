@@ -56,6 +56,12 @@ def _answering(answers, asked=None):
     return fake
 
 
+def first_asking(asked):
+    """Of the prompts sent, the first asking's (T-1: the askings run on
+    threads, so `asked[0]` may be the second, which lists them reversed)."""
+    return next(p for p in asked if 'independent asking' not in p)
+
+
 def ans(n, answer, quote='', why='because'):
     return {'n': n, 'answer': answer, 'quote': quote, 'why': why}
 
@@ -282,6 +288,12 @@ class TestNamesakes:
         got = questions.tied_subjects(['Achilles', 'Pisander', 'agamemnon'], rows, 'L20', LONG,
                                       HOMER)
         assert got == {'achilles', 'agamemnon', 'pisander 1'}
+
+    def test_tied_subjects_reach_back_five_scenes(self):
+        # T-4: L15 is five scenes before L20, L14 six
+        rows = [row('in', subject='pisander-1', scene='L15'),
+                row('out', subject='pisander-2', scene='L14')]
+        assert questions.tied_subjects([], rows, 'L20', LONG, HOMER) == {'pisander 1'}
 
 
 REGISTRY = {'mara', 'oren tal', 'the mill'}
@@ -547,7 +559,8 @@ class TestAskQuestions:
     def test_the_second_asking_reverses_and_says_so(self):
         _, asked = self._ask([Q('first'), Q('second')],
                              lambda a, n: [ans(i, 'no') for i in range(1, n + 1)])
-        one, two = asked
+        one = first_asking(asked)
+        two = next(p for p in asked if 'independent asking 2' in p)
         assert one.index('first holds') < one.index('second holds')
         assert two.index('second holds') < two.index('first holds')
         assert 'independent asking 2' in two and 'independent asking' not in one
@@ -583,6 +596,30 @@ class TestAskQuestions:
         assert [f.fact_id for f in r.findings] == ['f0'] and r.misquoted == 1
         assert r.notes == ['batch 2 of 2: 1 question(s) answered yes twice with no quote in '
                            'the scene: not findings']
+
+    def test_a_failed_batch_fails_the_check(self):
+        """T-2: a bad reply twice in batch 2 is a QuestionError, as in batch 1."""
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
+
+        def fake(path, body, **k):
+            n = body['messages'][0]['content'].count('   Question: ')
+            return _text({'answers': [] if n == 1 else [ans(i, 'no') for i in range(1, n + 1)]})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            with pytest.raises(QuestionError, match='failed twice'):
+                questions.ask_questions(SCENE, PROSE, qs, model='m')
+
+    def test_a_split_in_batch_two_is_asked_a_third_time_beside_its_log(self, tmp_path):
+        """T-3: batch 2's third asking logs at -b2.a3, and its note says so."""
+        qs = [Q(f'f{i}') for i in range(questions.BATCH + 1)]
+        log = str(tmp_path / 'q.json')
+        r, asked = self._ask(qs, lambda a, n: (
+            [ans(k, 'no') for k in range(1, n + 1)] if n == questions.BATCH
+            else [ans(1, 'yes' if a == 1 else 'no', 'Oren laughed')]), log_file=log)
+        assert len(asked) == 5 and r.split == 1
+        assert os.path.isfile(tmp_path / 'q-b2.a3.json')
+        assert not os.path.isfile(tmp_path / 'q.a3.json')
+        assert r.notes[0].startswith('batch 2 of 2: 1 question(s) got split answers')
+        assert r.notes[0].endswith(': f30')
 
     def test_batch_log(self):
         assert questions.batch_log('/l/q.json', 1) == '/l/q.json'
@@ -1054,8 +1091,9 @@ class TestCheckQuestions:
         _write_csv(path, briefs, list(briefs[0].keys()))
         rows = _add_rows(project_dir, TESSA_KIND)
         _, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
-        assert asked[0].index('Tessa wears a borrowed coat') \
-            < asked[0].index('Tessa is never cruel to Dorren')
+        one = first_asking(asked)
+        assert one.index('Tessa wears a borrowed coat') \
+            < one.index('Tessa is never cruel to Dorren')
 
     def test_a_stale_state_trait_is_said(self, project_dir):
         # #739/CR-3: a state trait set on an earlier day is asked last, said
