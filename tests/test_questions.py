@@ -403,20 +403,23 @@ class TestQuestionOrder:
 
 class TestStaleStates:
     """#739: two of the four false fact findings on *Wrath Like Smoke* were
-    a mood or attire set days before and never ended in the ledger."""
+    a mood or attire set days before and never ended in the ledger. CR-3:
+    a vow or a grudge is a state trait too and still holds, so they are
+    asked last, not dropped."""
     DAYS = {'s1': 1, 's2': 1, 's3': 2}
 
     def pick(self, rows, days=DAYS):
         return facts_to_ask(rows, 's3', ORDER, {'mara'}, registry=REGISTRY, chars=CHARS,
                             days=days)
 
-    def test_a_state_trait_from_an_earlier_day_is_stale(self):
+    def test_a_state_trait_from_an_earlier_day_is_asked_last(self):
         rows = [row('mood', 'trait', scene='s1', mutable='state'),
                 row('kind', 'trait', scene='s1'),
+                row('backstory', 'world', scene=''),
                 row('wound', 'physical', scene='s1', mutable='state')]
         got = self.pick(rows)
         assert got.stale == ['mood']
-        assert sorted(r['id'] for r in got.facts) == ['kind', 'wound']
+        assert [r['id'] for r in got.facts][-1] == 'mood' and len(got.facts) == 4
 
     def test_the_same_day_or_no_day_is_asked(self):
         rows = [row('mood', 'trait', scene='s3', mutable='state'),
@@ -1055,7 +1058,7 @@ class TestCheckQuestions:
             < asked[0].index('Tessa is never cruel to Dorren')
 
     def test_a_stale_state_trait_is_said(self, project_dir):
-        # #739: a mood set on an earlier day isn't asked, and the notes say so
+        # #739/CR-3: a state trait set on an earlier day is asked last, said
         from storyforge.elaborate import _read_csv, _write_csv
         path = os.path.join(project_dir, 'reference', 'scenes.csv')
         scenes = _read_csv(path)
@@ -1066,9 +1069,25 @@ class TestCheckQuestions:
         rows = _add_rows(project_dir, {**TESSA_KIND, 'id': 'tessa-sulks', 'mutable': 'state',
                                        'statement': 'Tessa is sulking'})
         r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
-        assert 'Tessa is sulking' not in ''.join(asked)
-        assert any(n.startswith('1 state trait(s)') and n.endswith('not asked: tessa-sulks')
+        assert r.asked_fact_ids[-1] == 'tessa-sulks'
+        assert any(n.startswith('1 state trait(s)') and n.endswith('other fact: tessa-sulks')
                    for n in r.notes)
+
+    def test_a_stale_state_trait_past_the_cap_is_named(self, project_dir, monkeypatch):
+        from storyforge.elaborate import _read_csv, _write_csv
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        scenes = _read_csv(path)
+        for sc in scenes:
+            if sc['id'] == SCENE:
+                sc['timeline_day'] = '2'
+        _write_csv(path, scenes, list(scenes[0].keys()))
+        rows = _add_rows(project_dir, TESSA_KIND,
+                         {**TESSA_KIND, 'id': 'tessa-sulks', 'mutable': 'state',
+                          'statement': 'Tessa is sulking'})
+        r, _ = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert r.asked_fact_ids == ['tessa-kind']
+        assert any(n.endswith('(1 past the cap, not asked: tessa-sulks)') for n in r.notes)
 
     def test_a_shared_name_asks_only_the_casts_bearer(self, project_dir):
         """#746's acceptance: "Pisander" in a scene whose cast holds one

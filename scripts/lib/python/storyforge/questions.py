@@ -21,7 +21,7 @@ by asking about each one narrowly:
   the one source for that (knowledge facts someone knows: the possession
   and injury checks read the prose's records, not ledger rows, so every
   `physical` row is asked). A `state` trait (a mood, attire, a posture)
-  set on an earlier `timeline_day` is stale and isn't asked (#739).
+  set on an earlier `timeline_day` may be stale: it is asked last (#739).
 - **Likeliest slips first** (#739): disputes, the brief's entering items,
   then the facts: the on-stage cast's physical states, then the last
   `RECENT_SCENES` scenes' facts, then the rest, each by `TYPE_SALIENCE`
@@ -233,8 +233,9 @@ class Selection:
     #: of `facts`, those whose subject is in no registry (a group, a concept,
     #: an object): they can't be placed, so they're asked in every scene
     unplaced: list[str] = field(default_factory=list)
-    #: in-force `state` traits (a mood, what someone wears, a posture) set on
-    #: an earlier `timeline_day` than the scene's: stale, not asked (#739)
+    #: of `facts`, in-force `state` traits (a mood, what someone wears, a
+    #: posture, but also a vow or a grudge) set on an earlier
+    #: `timeline_day` than the scene's: maybe stale, so asked last (#739)
     stale: list[str] = field(default_factory=list)
 
 
@@ -452,9 +453,7 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
     compares it (`continuity.covered_fact_ids`) and it is not the scene's
     own: a fixed one (or one with no `mutable`) from any other scene or
     none, unless a binding fact supersedes it; a `state` one while in force
-    entering the scene, but a `state` trait (a mood, attire, a posture) set
-    on an earlier `timeline_day` (`days`, scene → day) is stale and isn't
-    asked (`Selection.stale`). A holding fact is asked when its subject
+    entering the scene. A holding fact is asked when its subject
     (through `chars` and `places`, the registries' alias maps) is
     `present`, or is in no `registry` (normalized registry ids: a group or
     concept can't be placed, so it's asked everywhere); with no subject, or
@@ -465,7 +464,11 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
     they hold or wear, their wounds, where they are; then facts from the
     `RECENT_SCENES` scenes before this one; then the rest. Within each, an
     on-stage subject's first, then by `TYPE_SALIENCE`, then the nearest
-    scene first (a fact from no scene of the book last), then by id."""
+    scene first (a fact from no scene of the book last), then by id. Last
+    of all, a `state` trait set on an earlier `timeline_day` (`days`, scene
+    → day; `Selection.stale`): a mood or what someone wore is likely over,
+    but a vow or a grudge isn't, and nothing tells them apart, so they are
+    asked when the cap leaves room."""
     from storyforge.continuity import covered_fact_ids
     from storyforge.ledger import active_states
     covered = covered_fact_ids(rows)
@@ -488,8 +491,6 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
         key = _lookup(subject, chars or {}, places or {})
         if not subject:
             out.no_subject.append(r['id'])
-        elif (key in present or key not in registry) and _stale(r, scene_id, days):
-            out.stale.append(r['id'])
         elif key in present:
             asked.append(r)
         elif key not in registry:
@@ -497,6 +498,7 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
             out.unplaced.append(r['id'])
         else:
             out.absent.append(r['id'])
+    stale = {r['id'] for r in asked if _stale(r, scene_id, days)}
     rank = {t: n for n, t in enumerate(TYPE_SALIENCE)}
     at = order.get(scene_id)
 
@@ -504,7 +506,9 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
         type_ = r['type'].strip()
         here = _lookup((r.get('subject') or '').strip(), chars or {}, places or {}) in on_stage
         pos = order.get((r.get('scene_id') or '').strip())
-        if here and type_ == 'physical' and (r.get('mutable') or '') == 'state':
+        if r['id'] in stale:
+            tier = 3
+        elif here and type_ == 'physical' and (r.get('mutable') or '') == 'state':
             tier = 0
         elif at is not None and pos is not None and at - RECENT_SCENES <= pos < at:
             tier = 1
@@ -513,6 +517,7 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
         distance = abs(at - pos) if at is not None and pos is not None else len(order) + 1
         return (tier, not here, rank[type_], distance, r['id'])
     out.facts = sorted(asked, key=key)
+    out.stale = [r['id'] for r in out.facts if r['id'] in stale]
     return out
 
 
@@ -530,11 +535,12 @@ def scene_days(scenes: dict[str, dict]) -> dict[str, int]:
 
 
 def _stale(r: dict, scene_id: str, days: dict[str, int]) -> bool:
-    """Whether `r` is a `state` trait (a mood, attire, a posture) set on an
-    earlier `timeline_day` than `scene_id`'s: past a day boundary it no
-    longer holds, though nothing in the ledger ended it (#739: two of the
-    question checker's four false fact findings on *Wrath Like Smoke*).
-    A day not known for either scene can't tell, so the fact is asked."""
+    """Whether `r` is a `state` trait set on an earlier `timeline_day`
+    than `scene_id`'s: a mood, attire or a posture past a day boundary
+    likely no longer holds, though nothing in the ledger ended it (#739:
+    two of the question checker's four false fact findings on *Wrath Like
+    Smoke*); a vow or a grudge still does. A day not known for either scene
+    can't tell."""
     if (r.get('type') or '').strip() != 'trait' or (r.get('mutable') or '') != 'state':
         return False
     now, then = days.get(scene_id), days.get((r.get('scene_id') or '').strip())
@@ -1092,9 +1098,12 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
                             f'scene (by its typed state, its location, or a name in its '
                             f'prose): not asked: ' + ', '.join(picked.absent))
     if picked.stale:
-        result.notes.append(f'{len(picked.stale)} state trait(s) (a mood, attire, a posture) '
-                            f'set on an earlier day than this scene\'s: stale, not asked: '
-                            + ', '.join(picked.stale))
+        cut = [q.fact_id for q in questions[MAX_QUESTIONS:] if q.fact_id in picked.stale]
+        result.notes.append(f'{len(picked.stale)} state trait(s) set on an earlier day than '
+                            f'this scene\'s, maybe stale (a mood, attire), asked after every '
+                            f'other fact: ' + ', '.join(picked.stale)
+                            + (f' ({len(cut)} past the cap, not asked: {", ".join(cut)})'
+                               if cut else ''))
     # the facts' questions and the promises' are independent: asked at once
     from storyforge.runner import together
     left_out: list[str] = []
