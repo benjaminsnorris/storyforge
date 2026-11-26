@@ -20,7 +20,13 @@ by asking about each one narrowly:
   check compares by code is left out, and `continuity.covered_fact_ids` is
   the one source for that (knowledge facts someone knows: the possession
   and injury checks read the prose's records, not ledger rows, so every
-  `physical` row is asked).
+  `physical` row is asked). A `state` trait (a mood, attire, a posture)
+  set on an earlier `timeline_day` may be stale: it is asked last (#739).
+- **Likeliest slips first** (#739): disputes, the brief's entering items,
+  then the facts: the on-stage cast's physical states, then the last
+  `RECENT_SCENES` scenes' facts, then the rest, each by `TYPE_SALIENCE`
+  and the nearest scene. At most `MAX_QUESTIONS` (30), asked `BATCH` (30)
+  to a call; the cap cuts from the end.
 - **Only about who is there** (`present_subjects`): a fact is asked when
   its subject (an id, name or alias, through the registries) is present by
   the scene's extracted cast (its typed state's `at` records), its places
@@ -30,6 +36,8 @@ by asking about each one narrowly:
   its facts are asked in every scene; a fact with no subject, or about a
   registry entry the scene doesn't have, isn't asked, and the notes count
   both. So the number of questions scales with the scene, not the ledger.
+  A name several subjects share places only those the brief's cast, a
+  recent fact or a name only one has ties to the scene (#746, `presence`).
 - **Storyforge writes the questions** (`question_for`), from the fact's
   type, subject and statement; no model writes them.
 - **Each is asked twice** (`yes_no.ask`, the stage sheet's machinery, #647):
@@ -54,7 +62,11 @@ by asking about each one narrowly:
   yeses with a verified quote deliver it and fill a promised registry
   fact's blank quote (`kept`, as the open checker's), and anything else is a
   note, or for a `must:` beat an unverified broken promise, which blocks.
-  The brief's entering items written in words are asked as facts.
+  The brief's entering items written in words are asked as facts. A
+  promised physical state an earlier scene set that is still in force
+  entering the scene isn't asked as this scene's to establish
+  (`held_entering`), nor is an `outcome` that is only "yes" or "no"; the
+  notes name both (#740).
 
 Findings are `checker.Finding`s, contradictions with the code of the fact's
 type (TRT, REL, PHY, WLD, KNO, TIM), set against the fact's scene and quote (the
@@ -69,6 +81,7 @@ The fixed labelled question set is `evals/suites/question_set.py`.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 from storyforge import yes_no
@@ -78,16 +91,34 @@ from storyforge.quotes import quote_in
 #: The ledger types asked about: every type but `promise` (a set-up the
 #: story pays off, not a fact a scene contradicts). Within them, a fact a
 #: typed check compares by code (`continuity.covered_fact_ids`, the one
-#: source: knowledge facts someone knows) is not asked. In this order, which
-#: is the order they're asked in (the cap cuts from the end)
+#: source: knowledge facts someone knows) is not asked
 QUESTION_TYPES = ('trait', 'relationship', 'physical', 'world', 'knowledge', 'timeline')
+#: #739: within a tier of `facts_to_ask`'s order, the types most likely
+#: to be contradicted first. On *Wrath Like Smoke* (2026-11-17) the old
+#: order, trait first, asked 889 of 936 qualifying traits and 192 of 2,246
+#: physical facts, where the open checker's real catches were 27 of 50
+#: timeline and 11 physical
+TYPE_SALIENCE = ('physical', 'timeline', 'relationship', 'world', 'knowledge', 'trait')
+#: #739: the scenes just before this one whose facts are asked next after
+#: the on-stage cast's physical states; also how far back a fact ties a
+#: shared name's bearer to the scene (#746)
+RECENT_SCENES = 5
 #: Overrides the model (default the extraction tier)
 MODEL_ENV = 'STORYFORGE_QUESTIONS_MODEL'
 ASKINGS = yes_no.ASKINGS
 #: The most questions asked per scene, disputes first (the rest are named
-#: in the notes; a dispute past it is unruled). The brief's promises are
-#: their own call with their own cap
+#: in the notes; a dispute past it is unruled), asked in calls of `BATCH`.
+#: #739 put the likeliest slips first and tried 60 (two calls): on
+#: `gate-set-questions` (2026-11-26) 60 had the same run-1 recall, one more
+#: catch in run 2, and one more false alarm on a correct fact over three
+#: runs (8 to 7), so it stays 30 (docs/history.md). The brief's promises are their own call with
+#: their own cap (`MAX_PROMISES`)
 MAX_QUESTIONS = 30
+#: Questions per call: a scene's questions past it are a second call (each
+#: asked twice, its splits a third time, as the first)
+BATCH = 30
+#: The most brief promises asked per scene (one call)
+MAX_PROMISES = 30
 #: The number of the asking that breaks a split (an asking's number names
 #: its log, `.a3`, and its prompt, "independent asking 3"): only the split
 #: questions, one more call. "Two yeses of three" holds only for two
@@ -207,6 +238,10 @@ class Selection:
     #: of `facts`, those whose subject is in no registry (a group, a concept,
     #: an object): they can't be placed, so they're asked in every scene
     unplaced: list[str] = field(default_factory=list)
+    #: of `facts`, in-force `state` traits (a mood, what someone wears, a
+    #: posture, but also a vow or a grudge) set on an earlier
+    #: `timeline_day` than the scene's: maybe stale, so asked last (#739)
+    stale: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -282,50 +317,166 @@ def _lookup(name: str, *maps: dict[str, str]) -> str:
     return _norm(key)
 
 
+@dataclass
+class Presence:
+    """Who and what is in the scene (`presence`), normalized ids."""
+    #: present: asked about
+    present: set[str] = field(default_factory=set)
+    #: of `present`, the people the typed state puts there (`at` records):
+    #: their physical states are asked first (#739)
+    on_stage: set[str] = field(default_factory=set)
+    #: a shared name whose bearers weren't all placed, and why (#746)
+    notes: list[str] = field(default_factory=list)
+
+
 def present_subjects(records, chars: dict[str, str], places: dict[str, str],
                      location: str = '', *, prose: str = '',
-                     names: dict[str, set[str]] | None = None) -> set[str]:
+                     names: dict[str, set[str]] | None = None,
+                     tied: set[str] | frozenset = frozenset()) -> set[str]:
+    """`presence(...).present`."""
+    return presence(records, chars, places, location, prose=prose, names=names,
+                    tied=tied).present
+
+
+def presence(records, chars: dict[str, str], places: dict[str, str],
+             location: str = '', *, prose: str = '',
+             names: dict[str, set[str]] | None = None,
+             tied: set[str] | frozenset = frozenset()) -> Presence:
     """The subjects present in the scene, normalized (`ledger._norm`): each
     `at` record's person (a registry id through `chars`, a lower-case name
     or alias → id; else the name itself), each place an `at` record names
     that `places` knows, each of the scene's own `location`s (scenes.csv's
     `;` array), and each registry subject its `prose` names as a whole word
     (`names`: `ledger.subject_names`, id → its names and aliases), so a
-    character only talked about, remembered or dead is asked about too."""
-    from storyforge.ledger import _mentions
-    out = set()
+    character only talked about, remembered or dead is asked about too.
+
+    A name `names` gives two or more subjects (#746: Homer's two Ajaxes,
+    several Pisanders; `ledger.name_index`) places only those of them that
+    something else ties to the scene: `tied` (normalized ids: the brief's
+    cast, the subjects of the last few scenes' facts) or a name only that
+    one has in the prose ("son of Oileus"). An `at` record or the prose
+    naming one with nothing tying any of them places none, and the notes
+    say so: a bare "Pisander" used to mark every Pisander present, and a
+    fact about the wrong man was asked."""
+    from storyforge.ledger import _norm as norm
+    from storyforge.ledger import _phrases, name_index, named_by, phrase_pattern
+    out = Presence()
+    names = names or {}
+    index = name_index(names)
+    shared = {p: ids for p, ids in index.items() if len(ids) > 1}
+    text = norm(prose) if prose else ''
+    # a subject the prose names by a phrase no other subject has
+    own: set[str] = set()
+    if text:
+        for sid in names:
+            pattern = phrase_pattern(_phrases(sid, names) - shared.keys())
+            if pattern and pattern.search(text):
+                own.add(sid)
+    ties = set(tied) | own
+    held: dict[str, tuple[set[str], str]] = {}
+
+    def namesakes(phrase: str, ids: set[str], where: str) -> set[str]:
+        placed = ids & ties
+        if ids - placed - own:
+            held.setdefault(phrase, (ids, where))
+        return placed
+
     for r in records or []:
         if getattr(r, 'type', '') != 'at':
             continue
-        if ' '.join((r.who or '').split()):
-            out.add(_lookup(r.who, chars))
+        who = ' '.join((r.who or '').split())
+        if who:
+            ids = named_by(who, index)
+            if len(ids) > 1:
+                placed = namesakes(norm(who).removeprefix('the '), ids, 'the typed state')
+                out.present |= placed
+                out.on_stage |= placed
+            else:
+                key = _lookup(who, chars)
+                out.present.add(key)
+                out.on_stage.add(key)
         where = ' '.join((r.item or '').split()).lower()
         if where and (where in places or where.removeprefix('the ') in places):
-            out.add(_lookup(where, places))
+            out.present.add(_lookup(where, places))
     for loc in (location or '').split(';'):
         if loc.strip():
-            out.add(_lookup(loc, places))
-    if prose and names:
-        cache: dict = {}
-        out |= {sid for sid in names if sid not in out and _mentions(prose, sid, names, cache)}
-    return out - {''}
+            out.present.add(_lookup(loc, places))
+    if text:
+        out.present |= own
+        for phrase, ids in shared.items():
+            pattern = phrase_pattern([phrase])
+            if pattern and pattern.search(text):
+                out.present |= namesakes(phrase, ids, 'the prose')
+    for phrase, (ids, where) in sorted(held.items()):
+        placed = sorted(ids & out.present)
+        left = sorted(ids - out.present)
+        if not left:
+            continue
+        out.notes.append(
+            f'"{phrase}" in {where} names {len(ids)} people ({", ".join(sorted(ids))}): '
+            + (f'placed {", ".join(placed)}, tied to the scene by its cast, a recent fact or '
+               f'a name only they have; not ' if placed else
+               'none is tied to the scene by its cast, a recent fact or a name only one has, '
+               'so none is ')
+            + f'placed: {", ".join(left)}')
+    out.present -= {''}
+    out.on_stage -= {''}
+    return out
+
+
+def tied_subjects(cast: list[str], rows: list[dict], scene_id: str, order: dict[str, int],
+                  names: dict[str, set[str]]) -> set[str]:
+    """The subjects tied to `scene_id` other than by a name in its prose
+    (#746), normalized ids: each of the brief's `cast` (ids or names; a name
+    two people share ties neither) and the subject of each binding fact of
+    the `RECENT_SCENES` scenes before it (by id or a name only it has)."""
+    from storyforge.ledger import name_index, named_by
+    index = name_index(names)
+
+    def one(name: str) -> set[str]:
+        ids = named_by(name, index)
+        return ids if len(ids) == 1 else set()
+    out: set[str] = set()
+    for name in cast:
+        out |= one(name)
+    at = order.get(scene_id)
+    if at is not None:
+        for r in rows:
+            pos = order.get((r.get('scene_id') or '').strip())
+            if (r.get('status') or '') == 'binding' and pos is not None \
+                    and at - RECENT_SCENES <= pos < at:
+                out |= one((r.get('subject') or '').strip())
+    return out
 
 
 def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
                  present: set[str], *, registry: set[str] | frozenset = frozenset(),
                  chars: dict[str, str] | None = None,
-                 places: dict[str, str] | None = None) -> Selection:
-    """The ledger facts to ask `scene_id` about, in type order then reading
-    order, and what was left out. A fact holds for the scene when it is
-    binding, of `QUESTION_TYPES`, no typed check compares it
-    (`continuity.covered_fact_ids`) and it is not the scene's own: a fixed
-    one (or one with no `mutable`) from any other scene or none, unless a
-    binding fact supersedes it; a `state` one while in force entering the
-    scene. A holding fact is asked when its subject (through `chars` and
-    `places`, the registries' alias maps) is `present`, or is in no
-    `registry` (normalized registry ids: a group or concept can't be placed,
-    so it's asked everywhere); with no subject, or about a registry entry
-    the scene doesn't have, it isn't."""
+                 places: dict[str, str] | None = None,
+                 on_stage: set[str] | frozenset = frozenset(),
+                 days: dict[str, int] | None = None) -> Selection:
+    """The ledger facts to ask `scene_id` about, likeliest slips first
+    (the cap cuts from the end), and what was left out. A fact holds for
+    the scene when it is binding, of `QUESTION_TYPES`, no typed check
+    compares it (`continuity.covered_fact_ids`) and it is not the scene's
+    own: a fixed one (or one with no `mutable`) from any other scene or
+    none, unless a binding fact supersedes it; a `state` one while in force
+    entering the scene. A holding fact is asked when its subject
+    (through `chars` and `places`, the registries' alias maps) is
+    `present`, or is in no `registry` (normalized registry ids: a group or
+    concept can't be placed, so it's asked everywhere); with no subject, or
+    about a registry entry the scene doesn't have, it isn't.
+
+    The order (#739): first the in-force physical states of the on-stage
+    cast (`on_stage`, normalized ids: the typed state's `at` records), what
+    they hold or wear, their wounds, where they are; then facts from the
+    `RECENT_SCENES` scenes before this one; then the rest. Within each, an
+    on-stage subject's first, then by `TYPE_SALIENCE`, then the nearest
+    scene first (a fact from no scene of the book last), then by id. Last
+    of all, a `state` trait set on an earlier `timeline_day` (`days`, scene
+    → day; `Selection.stale`): a mood or what someone wore is likely over,
+    but a vow or a grudge isn't, and nothing tells them apart, so they are
+    asked when the cap leaves room."""
     from storyforge.continuity import covered_fact_ids
     from storyforge.ledger import active_states
     covered = covered_fact_ids(rows)
@@ -340,6 +491,7 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
     holding = [r for r in candidates
                if (r['id'] in in_force if (r.get('mutable') or '') == 'state'
                    else r['id'] not in superseded)]
+    days = days or {}
     out = Selection()
     asked = []
     for r in holding:
@@ -354,12 +506,53 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
             out.unplaced.append(r['id'])
         else:
             out.absent.append(r['id'])
-    rank = {t: n for n, t in enumerate(QUESTION_TYPES)}
+    stale = {r['id'] for r in asked if _stale(r, scene_id, days)}
+    rank = {t: n for n, t in enumerate(TYPE_SALIENCE)}
+    at = order.get(scene_id)
 
-    def where(r: dict) -> int:
-        return order.get((r.get('scene_id') or '').strip(), -1)
-    out.facts = sorted(asked, key=lambda r: (rank[r['type'].strip()], where(r), r['id']))
+    def key(r: dict) -> tuple:
+        type_ = r['type'].strip()
+        here = _lookup((r.get('subject') or '').strip(), chars or {}, places or {}) in on_stage
+        pos = order.get((r.get('scene_id') or '').strip())
+        if r['id'] in stale:
+            tier = 3
+        elif here and type_ == 'physical' and (r.get('mutable') or '') == 'state':
+            tier = 0
+        elif at is not None and pos is not None and at - RECENT_SCENES <= pos < at:
+            tier = 1
+        else:
+            tier = 2
+        distance = abs(at - pos) if at is not None and pos is not None else len(order) + 1
+        return (tier, not here, rank[type_], distance, r['id'])
+    out.facts = sorted(asked, key=key)
+    out.stale = [r['id'] for r in out.facts if r['id'] in stale]
     return out
+
+
+def scene_days(scenes: dict[str, dict]) -> dict[str, int]:
+    """Scene id → its scenes.csv `timeline_day`, for each scene whose day is
+    a whole number (a scene with none, or another kind, can't tell a day
+    boundary)."""
+    out = {}
+    for sid, r in scenes.items():
+        try:
+            out[sid] = int((r.get('timeline_day') or '').strip())
+        except ValueError:
+            continue
+    return out
+
+
+def _stale(r: dict, scene_id: str, days: dict[str, int]) -> bool:
+    """Whether `r` is a `state` trait set on an earlier `timeline_day`
+    than `scene_id`'s: a mood, attire or a posture past a day boundary
+    likely no longer holds, though nothing in the ledger ended it (#739:
+    two of the question checker's four false fact findings on *Wrath Like
+    Smoke*); a vow or a grudge still does. A day not known for either scene
+    can't tell."""
+    if (r.get('type') or '').strip() != 'trait' or (r.get('mutable') or '') != 'state':
+        return False
+    now, then = days.get(scene_id), days.get((r.get('scene_id') or '').strip())
+    return now is not None and then is not None and now > then
 
 
 _ASKS = {
@@ -496,23 +689,35 @@ def _verified(said: list[dict[str, str]], prose: str) -> tuple[str, str]:
                  if a['quote'] and quote_in(prose, a['quote'])), ('', ''))
 
 
+def batch_log(log_file: str, batch: int) -> str:
+    """Where batch `batch` of a scene's questions logs: `log_file` for the
+    first, `-b<n>` before its extension for a later one ('' when there is
+    no log); each asking's own log is beside it (`yes_no.asking_log`)."""
+    if batch == 1 or not log_file:
+        return log_file
+    stem, ext = os.path.splitext(log_file)
+    return f'{stem}-b{batch}{ext}'
+
+
 def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model: str,
                   log_file: str = '') -> QuestionResult:
     """Ask `questions` (at most `MAX_QUESTIONS`; the rest are named in a
-    note, a dispute among them unruled) twice each about `prose`. A finding
-    needs two yeses and a quote in the scene, from an asking that said yes
-    (the first such whose quote is in the scene, with its reason). A
-    question the two askings split on is asked a third time, alone with the
-    other split ones (`TIE_ASKING`): a yes there is the second yes. A
-    dispute's question (`Question.dispute`) is ruled every time: two yeses
-    with a verified quote are a finding, two noes from the first two
-    askings clear it, anything else (split then no, misquoted, past the
-    cap) leaves it unruled.
+    note, a dispute among them unruled) twice each about `prose`, `BATCH`
+    to a call (the batches at once, a later one logged at `batch_log`). A
+    finding needs two yeses and a quote in the scene, from an asking that
+    said yes (the first such whose quote is in the scene, with its reason).
+    A question the two askings split on is asked a third time, alone with
+    the other split ones of its batch (`TIE_ASKING`): a yes there is the
+    second yes. A dispute's question (`Question.dispute`) is ruled every
+    time: two yeses with a verified quote are a finding, two noes from the
+    first two askings clear it, anything else (split then no, misquoted,
+    past the cap) leaves it unruled.
 
     Raises:
         QuestionError: a refusal, an API failure, or a reply cut off or off
             the schema twice running.
     """
+    from storyforge.runner import together
     result = QuestionResult(scene_id)
     if len(questions) > MAX_QUESTIONS:
         over = questions[MAX_QUESTIONS:]
@@ -520,6 +725,29 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
                             f'not asked: {", ".join(q.fact_id for q in over)}')
         result.unruled += [q.dispute for q in over if q.dispute]
         questions = questions[:MAX_QUESTIONS]
+    batches = [questions[i:i + BATCH] for i in range(0, len(questions), BATCH)] or [[]]
+    parts = together(*(
+        (lambda b=b, k=k: _ask_batch(scene_id, prose, b, model, batch_log(log_file, k)))
+        for k, b in enumerate(batches, start=1)))
+    for k, part in enumerate(parts, start=1):
+        result.findings += part.findings
+        result.asked += part.asked
+        result.asked_fact_ids += part.asked_fact_ids
+        result.split += part.split
+        result.tie_found += part.tie_found
+        result.misquoted += part.misquoted
+        result.cleared += part.cleared
+        result.unruled += part.unruled
+        result.ended += part.ended
+        result.notes += [f'batch {k} of {len(parts)}: {n}' if len(parts) > 1 else n
+                         for n in part.notes]
+    return result
+
+
+def _ask_batch(scene_id: str, prose: str, questions: list[Question], model: str,
+               log_file: str) -> QuestionResult:
+    """`ask_questions` for one call's questions (at most `BATCH`)."""
+    result = QuestionResult(scene_id)
     count = len(questions)
     answers = yes_no.ask(lambda n: build_prompt(scene_id, prose, questions, n), count,
                          model=model, log_file=log_file, tokens=max_tokens(count),
@@ -617,22 +845,107 @@ def ending_question(d: Dispute, row: dict, name: str = '') -> Question:
 # The brief's promises
 # ============================================================================
 
-def promises_for(brief) -> list[Promise]:
+def promises_for(brief, *, entering: dict[str, str] | None = None,
+                 fields: dict[str, str] | None = None,
+                 left_out: list[str] | None = None) -> list[Promise]:
     """The promises to ask about from `brief` (`checker.brief_from`): each
     promise field's items and registry promises in words (`brief.items`),
-    each binding registry fact it promises (`brief.promised`), and each
-    planned fact (`brief.planned`), in that order."""
+    each binding registry fact it promises (`brief.promised`; its brief
+    field from `fields`, id → field, `promised_fields`), and each planned
+    fact (`brief.planned`), in that order.
+
+    Not asked, each named in `left_out` (#740, *Wrath Like Smoke*: 7 of 9
+    blocking promise findings false, none real, and two of them led fixes
+    to write real errors): a promised fact in `entering` (id → why, from
+    `held_entering`: a physical state an earlier scene set that is still in
+    force entering this one, not this scene's to set up); and an `outcome`
+    that is only "yes" or "no", which names no event to deliver."""
     from storyforge.must import strip_marker
+    entering = entering or {}
+    fields = fields or {}
+    left_out = left_out if left_out is not None else []
     out = []
     for col, items_ in brief.items.items():
         for item in items_:
             text = ' '.join(strip_marker(item).split())
+            if col == 'outcome' and bare_answer(text):
+                left_out.append(f'{col}: "{text}" (only an answer: it names no event to '
+                                f'deliver)')
+                continue
             if text:
                 out.append(Promise('item', col, col, item, text))
-    out += [Promise('promised', rid, '', ' '.join(st.split()), ' '.join(st.split()))
-            for rid, st in brief.promised.items()]
+    for rid, st in brief.promised.items():
+        if rid in entering:
+            left_out.append(f'{fields.get(rid) or "promised"} {rid} ({entering[rid]})')
+            continue
+        out.append(Promise('promised', rid, fields.get(rid, ''), ' '.join(st.split()),
+                           ' '.join(st.split())))
     out += [Promise('planned', rid, '', ' '.join(st.split()), ' '.join(st.split()))
             for rid, st in brief.planned.items()]
+    return out
+
+
+def promised_fields(rows: list[dict], ids) -> dict[str, str]:
+    """The brief field each promised registry fact of `ids` came from, by
+    its type (`checker.REGISTRY_PROMISE_FIELDS`: a physical fact is a
+    `physical_state_out`, a knowledge fact a `knowledge_out`)."""
+    from storyforge.checker import REGISTRY_PROMISE_FIELDS
+    field_of = {t: col for col, t in REGISTRY_PROMISE_FIELDS.items()}
+    wanted = set(ids)
+    return {r['id']: field_of[(r.get('type') or '').strip()] for r in rows
+            if r.get('id') in wanted and (r.get('type') or '').strip() in field_of}
+
+
+def bare_answer(text: str) -> bool:
+    """Whether a brief item is only "yes" or "no" (any case, punctuation
+    aside): an outcome field's answer to the scene's question, not an
+    event."""
+    return re.sub(r'[\W_]+', '', text).casefold() in ('yes', 'no')
+
+
+def held_entering(rows: list[dict], ids, scene_id: str, order: dict[str, int],
+                  present: set[str] | frozenset = frozenset(), *,
+                  chars: dict[str, str] | None = None,
+                  places: dict[str, str] | None = None) -> dict[str, str]:
+    """Of the promised ledger fact `ids`, each physical one an earlier
+    scene set that holds entering `scene_id`: id → why it isn't asked as a
+    promise (#740). It holds when it is a `state` in force entering the
+    scene (`ledger.active_states`), or a fixed fact no binding fact
+    supersedes. The why says whether it is asked as a fact instead: when
+    its subject is `present` (through `chars` and `places`), as
+    `facts_to_ask` asks it; with no subject or absent, it is said to be
+    unchecked.
+
+    Only physical facts: a `knowledge_out` fact set earlier may still be
+    this scene's to deliver (the point of view learns it here, as
+    `continuity` reads `knowledge_out`), so it stays a promise. One
+    superseded or ended before the scene doesn't hold: the brief has the
+    scene bring it back, and it stays a promise. A fact with no scene of
+    the book (backstory, a cut scene) isn't an earlier scene's."""
+    from storyforge.ledger import active_states
+    at = order.get(scene_id)
+    if at is None:
+        return {}
+    wanted = set(ids)
+    superseded = {old.strip() for r in rows if (r.get('status') or '') == 'binding'
+                  for old in (r.get('supersedes') or '').split(';') if old.strip()}
+    in_force = {r['id'] for r in active_states(rows, scene_id, order, entering=True)}
+    out = {}
+    for r in rows:
+        sid = (r.get('scene_id') or '').strip()
+        if r.get('id') not in wanted or (r.get('type') or '').strip() != 'physical' \
+                or sid not in order or order[sid] >= at:
+            continue
+        if not (r['id'] in in_force if (r.get('mutable') or '') == 'state'
+                else r['id'] not in superseded):
+            continue
+        subject = (r.get('subject') or '').strip()
+        held = f'set in {sid}, still in force entering this scene: not this scene\'s to set up'
+        if subject and _lookup(subject, chars or {}, places or {}) in present:
+            out[r['id']] = held + '; asked as a fact instead'
+        else:
+            out[r['id']] = held + ('; its subject isn\'t in the scene' if subject
+                                   else '; it has no subject') + ', so it is not checked'
     return out
 
 
@@ -667,7 +980,7 @@ def _broken(p: Promise, why: str, problem: str = '') -> Finding:
 def ask_promises(scene_id: str, prose: str, promises: list[Promise], *, model: str,
                  log_file: str = '') -> QuestionResult:
     """Ask whether the scene delivers each of `promises` (at most
-    `MAX_QUESTIONS`; the rest named in a note), twice each, in one call per
+    `MAX_PROMISES`; the rest named in a note), twice each, in one call per
     asking. Two noes: a broken promise (`Finding`, kind `broken-promise`,
     the gate's to sort advisory or, for a `must:` beat, blocking), or for a
     planned fact a departure. Two yeses with a verified quote: delivered;
@@ -682,13 +995,13 @@ def ask_promises(scene_id: str, prose: str, promises: list[Promise], *, model: s
     from storyforge.checker import MIN_KEPT_WORDS
     from storyforge.quotes import word_count
     result = QuestionResult(scene_id)
-    if len(promises) > MAX_QUESTIONS:
-        over = promises[MAX_QUESTIONS:]
-        result.notes.append(f'{len(over)} brief promise(s) past the {MAX_QUESTIONS} a scene '
+    if len(promises) > MAX_PROMISES:
+        over = promises[MAX_PROMISES:]
+        result.notes.append(f'{len(over)} brief promise(s) past the {MAX_PROMISES} a scene '
                             f'gets: not asked: ' + '; '.join(p.text for p in over))
         result.unverified += [_broken(p, '', 'past the cap: not asked') for p in over
                               if p.must]
-        promises = promises[:MAX_QUESTIONS]
+        promises = promises[:MAX_PROMISES]
     count = len(promises)
     answers = yes_no.ask(lambda n: build_promise_prompt(scene_id, prose, promises, n), count,
                          model=model, log_file=log_file, tokens=max_tokens(count),
@@ -759,7 +1072,7 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     """
     from storyforge import ledger
     from storyforge.checker import brief_from
-    from storyforge.elaborate import _read_csv, _read_csv_as_map
+    from storyforge.elaborate import _read_csv, _read_csv_as_map, get_scene
     from storyforge.enrich import load_alias_map
     ref = os.path.join(project_dir, 'reference')
     try:
@@ -769,10 +1082,15 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         raise QuestionError(f'{scene_id}: {e}') from e
     chars = load_alias_map(os.path.join(ref, 'characters.csv'))
     places = load_alias_map(os.path.join(ref, 'locations.csv'))
-    location = (_read_csv_as_map(os.path.join(ref, 'scenes.csv')).get(scene_id, {})
-                .get('location') or '')
-    present = present_subjects(records, chars, places, location, prose=prose,
-                               names=subject_names)
+    scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+    location = scenes.get(scene_id, {}).get('location') or ''
+    # a shared name places only a bearer tied to the scene otherwise (#746)
+    scene = get_scene(scene_id, ref) or {}
+    cast = [c.strip() for col in ('characters', 'on_stage', 'pov')
+            for c in (scene.get(col) or '').split(';') if c.strip()]
+    seen = presence(records, chars, places, location, prose=prose, names=subject_names,
+                    tied=tied_subjects(cast, rows, scene_id, order, subject_names))
+    present, on_stage = seen.present, seen.on_stage
     names, registry = {}, set()
     for reg in ('characters.csv', 'locations.csv'):
         for r in _read_csv(os.path.join(ref, reg)):
@@ -781,10 +1099,11 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
                 names[_norm(rid)] = (r.get('name') or rid).strip()
                 registry.add(_norm(rid))
     picked = facts_to_ask(rows, scene_id, order, present, registry=registry, chars=chars,
-                          places=places)
+                          places=places, on_stage=on_stage, days=scene_days(scenes))
     by_id = {r.get('id'): r for r in rows}
     result = QuestionResult(scene_id, present=sorted(present))
     result.notes += [f'{n} (who is in the scene)' for n in name_notes]
+    result.notes += seen.notes
     questions, ruled = [], set()
     for d in disputes or []:
         row = by_id.get(d.fact_id)
@@ -796,6 +1115,8 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         ruled.add(d.fact_id)
         questions.append(dispute_question(d, row, names.get(_norm(row.get('subject') or ''),
                                                             '')))
+    # an ending claim sits with the disputes, first: it decides whether an
+    # end is recorded (#756), so the cap must never cut it
     for d in endings or []:
         row = by_id.get(d.fact_id)
         if row is None:
@@ -805,13 +1126,15 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         ruled.add(d.fact_id)
         questions.append(ending_question(d, row, names.get(_norm(row.get('subject') or ''),
                                                            '')))
+    # the brief's entering items next: what it has holding as the scene
+    # opens is the likeliest to be contradicted (#739; the cap cuts the end)
+    brief = brief_from(rows, project_dir, scene_id)
+    questions += [entering_question(col, item) for col, items_ in brief.entering.items()
+                  for item in items_]
     # a disputed fact is asked once, as its dispute (one slip is not two)
     questions += [question_for(r, names.get(_lookup(r['subject'], chars, places),
                                             r['subject'].strip()), order)
                   for r in picked.facts if r['id'] not in ruled]
-    brief = brief_from(rows, project_dir, scene_id)
-    questions += [entering_question(col, item) for col, items_ in brief.entering.items()
-                  for item in items_]
     if not present:
         result.notes.append('no one present by the typed state, no place, and no registry '
                             'name in the prose: only facts that can\'t be placed were asked')
@@ -823,9 +1146,23 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         result.notes.append(f'{len(picked.absent)} fact(s) about people or places not in the '
                             f'scene (by its typed state, its location, or a name in its '
                             f'prose): not asked: ' + ', '.join(picked.absent))
+    if picked.stale:
+        cut = [q.fact_id for q in questions[MAX_QUESTIONS:] if q.fact_id in picked.stale]
+        result.notes.append(f'{len(picked.stale)} state trait(s) set on an earlier day than '
+                            f'this scene\'s, maybe stale (a mood, attire), asked after every '
+                            f'other fact: ' + ', '.join(picked.stale)
+                            + (f' ({len(cut)} past the cap, not asked: {", ".join(cut)})'
+                               if cut else ''))
     # the facts' questions and the promises' are independent: asked at once
     from storyforge.runner import together
-    wanted = promises_for(brief) if promises else []
+    left_out: list[str] = []
+    wanted = promises_for(brief, entering=held_entering(rows, brief.promised, scene_id, order,
+                                                        present, chars=chars, places=places),
+                          fields=promised_fields(rows, brief.promised),
+                          left_out=left_out) if promises else []
+    if left_out:
+        result.notes.append(f'{len(left_out)} brief promise(s) not asked: '
+                            + '; '.join(left_out))
     stem, ext = os.path.splitext(log_file)
     calls = []
     if questions:

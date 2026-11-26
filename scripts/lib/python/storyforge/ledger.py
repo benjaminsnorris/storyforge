@@ -1029,18 +1029,45 @@ def _phrases(subject: str, names: dict[str, set[str]]) -> set[str]:
     return out
 
 
+def phrase_pattern(phrases) -> re.Pattern | None:
+    """A pattern matching any of `phrases` (normalized) as whole words in
+    normalized text (`_norm`), longest first; None for no phrases."""
+    phrases = sorted(phrases, key=len, reverse=True)
+    # (?<!\w)…(?!\w), not \b: a name may begin or end with punctuation
+    return (re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(p) for p in phrases) + r')(?!\w)')
+            if phrases else None)
+
+
 def _mentions(statement: str, subject: str, names: dict[str, set[str]],
               cache: dict[str, re.Pattern | None]) -> bool:
     """Whether `statement` names `subject` (normalized) as a whole word."""
     if not subject:
         return False
     if subject not in cache:
-        phrases = sorted(_phrases(subject, names), key=len, reverse=True)
-        # (?<!\w)…(?!\w), not \b: a name may begin or end with punctuation
-        cache[subject] = (re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(p) for p in phrases)
-                                     + r')(?!\w)') if phrases else None)
+        cache[subject] = phrase_pattern(_phrases(subject, names))
     pattern = cache[subject]
     return bool(pattern and pattern.search(_norm(statement)))
+
+
+def name_index(names: dict[str, set[str]]) -> dict[str, set[str]]:
+    """Each phrase a subject can be named by (`_phrases`: its id, names and
+    aliases, a leading "the" dropped) → the subject ids it names. A phrase
+    naming two or more is a shared name (#746: Homer's two Ajaxes, several
+    Pisanders, "son of Atreus" for both Atreides): it alone can't say which
+    of them is meant."""
+    out: dict[str, set[str]] = {}
+    for sid in names:
+        for p in _phrases(sid, names):
+            out.setdefault(p, set()).add(sid)
+    return out
+
+
+def named_by(name: str, index: dict[str, set[str]]) -> set[str]:
+    """The subject ids `name` (any case, hyphens or spacing; a leading
+    "the" dropped) names exactly through `index` (`name_index`): one id,
+    several for a shared name, none for a name no subject has."""
+    key = _norm(name)
+    return set(index.get(key.removeprefix('the ')) or index.get(key) or ())
 
 
 def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
