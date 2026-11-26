@@ -11,14 +11,16 @@ calendar and the world table, free and the same every run:
   is exempt, and so is a flashback, whose `timeline_day` comes before the
   death. An unmarked scene is reported, never assumed to be a memory.
 - **possession** (PHY): within a scene, an object in two people's hands
-  with nothing between; in any scene, an object used after it was
-  destroyed, or held again by the person who gave it away or lost it,
-  unless a fact between moves it (`gets`). An object in other hands than an
-  earlier scene left it is a note (an offstage handover is ordinary). A
-  bare kind ("shield") is its holder's own object, a name with an owner
-  ("Teucer's bow") the owner's (#732). A current stage sheet's hands (#647)
-  count for the objects tracked, placed by their quotes on the prose's
-  scale.
+  with nothing between; in any scene, an object held or taken whole after
+  it was destroyed (a holder's unowned "spear" taken after theirs broke is
+  another spear), or held again by the person who gave it away or lost
+  it, unless a fact between moves it to someone else (`gets`). An object
+  in other hands than an earlier scene left it is a note (an offstage
+  handover is ordinary). A name without an owner ("shield", "the round
+  shield") is its holder's own object, a name with one ("Teucer's bow")
+  the owner's (`object_id`, #732). A current stage sheet's hands (#647)
+  count for the kinds of object tracked, placed by their quotes on the
+  prose's scale.
 - **knowledge** (KNO): the POV character acts on, says or thinks a fact
   before a scene or brief shows them learning it (`knows learns`, the
   briefs' `knowledge_in`/`knowledge_out` for their POV). The ledger's
@@ -61,12 +63,12 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from storyforge.checker import CALENDAR, Finding
 from storyforge.quotes import normalize, quote_in
 from storyforge.typed_state import (END, MAX_OFFERED_FACTS, MAX_OFFERED_INJURIES,
-                                    MAX_OFFERED_OBJECTS, START, Record, object_key, part_key)
+                                    MAX_OFFERED_OBJECTS, START, Record, object_kind, part_key)
 
 #: The block and key in storyforge.yaml holding names the book rules out,
 #: `;`-separated (`continuity:` / `  forbidden_names: Jupiter; Juno`)
@@ -264,13 +266,99 @@ def check_life(book: Book) -> tuple[list[Finding], list[str]]:
 # Possession
 # ============================================================================
 
-def _name_parts(book: Book, name: str) -> tuple[str, list[str]]:
-    """An object's name as (owner, words): the owner is the canonical id of
-    the person a possessive names ("Teucer's bow", "Achilles' armour"; ''
-    for none), the words the rest of the name, lower case, without
-    articles, possessive pronouns or "own" (`stage_sheet._ARTICLES`)."""
+@dataclass(frozen=True)
+class ObjectRef:
+    """What an object's name says by itself (`object_ref`): `owner`, the
+    canonical id of the person a possessive names ("Teucer's bow"; '' for
+    none), and `name`, the rest, lower case, without articles, possessive
+    pronouns or "own"."""
+    owner: str
+    name: str
+
+    @property
+    def kind(self) -> str:
+        return object_kind(self.name)
+
+    def same(self, other: 'ObjectRef') -> bool:
+        """Whether the two names can be one object: no two different owners,
+        and `same_name`."""
+        return not (self.owner and other.owner and self.owner != other.owner) and \
+            same_name(self.name, other.name)
+
+
+@dataclass(frozen=True)
+class ObjectId:
+    """One tracked object (#732): an owner and a name. `owner` is the person
+    a possessive names, else the holder the object was first read with (a
+    person, or a place it lay at); `scope` says which (`owned`, `holder`),
+    and isn't part of the identity: Hector's "his shield" is "Hector's
+    shield"."""
+    owner: str
+    name: str
+    scope: str = field(default='holder', compare=False)
+
+    @property
+    def kind(self) -> str:
+        return object_kind(self.name)
+
+    def __str__(self) -> str:
+        return f'{self.owner}\'s {self.name}'
+
+
+def same_name(a: str, b: str) -> bool:
+    """Two names for one kind of thing: the same head noun (`object_kind`),
+    and one's words all in the other's ("brass key", "the small brass key";
+    not "shield" and "shield strap")."""
+    if not a or not b or object_kind(a) != object_kind(b):
+        return False
+    x, y = set(a.split()), set(b.split())
+    return x <= y or y <= x
+
+
+#: An object's state in the possession fold
+Status = Literal['held', 'given', 'lost', 'destroyed', 'unknown']
+
+
+@dataclass(frozen=True)
+class Holding:
+    """Where an object stands after a record: `held` by `holder` (canonical
+    id, or a place); `given`, `lost` or `destroyed` `by` someone; or
+    `unknown` (after a misquoted record). `rec` is the record that set it
+    (for a handover, its recipient's name in `who`). Built with the named
+    constructors, which keep the fields to their status."""
+    status: Status
+    rec: Record
+    holder: str = ''
+    by: str = ''
+
+    def __post_init__(self):
+        if (self.status == 'held') != bool(self.holder) or (
+                self.status == 'unknown' and self.by):
+            raise ValueError(f'a {self.status} holding with holder {self.holder!r} '
+                             f'and by {self.by!r}')
+
+    @classmethod
+    def held(cls, holder: str, rec: Record, by: str = '') -> 'Holding':
+        return cls('held', rec, holder=holder, by=by)
+
+    @classmethod
+    def gone(cls, status: Status, by: str, rec: Record) -> 'Holding':
+        if status not in ('given', 'lost', 'destroyed'):
+            raise ValueError(f'{status} is not a way to part with an object')
+        return cls(status, rec, by=by)
+
+    @classmethod
+    def unknown(cls, rec: Record) -> 'Holding':
+        return cls('unknown', rec)
+
+
+def object_ref(book: Book, item: str) -> ObjectRef:
+    """What `item` names by itself: the owner a possessive names (a person
+    in characters.csv, a name of one or more words: "Achilles' armour",
+    "Oren Tal's knife") and the rest of the name. A possessive naming no
+    one ("the king's ring") stays part of the name."""
     from storyforge.stage_sheet import _ARTICLES
-    raw = re.findall(r"[\w']+", (name or '').lower())
+    raw = re.findall(r"[\w']+", (item or '').lower())
     for n, w in enumerate(raw):
         if not w.endswith(("'s", "'")):
             continue
@@ -279,101 +367,147 @@ def _name_parts(book: Book, name: str) -> tuple[str, list[str]]:
         for cand in (' '.join(before + [stem]), stem):
             if cand and book.is_person(cand):
                 rest = [x.strip("'") for x in raw[n + 1:] if x not in _ARTICLES]
-                return book.who(cand), [x for x in rest if x]
+                return ObjectRef(book.who(cand), ' '.join(x for x in rest if x))
         break
     words = [w[:-2] if w.endswith("'s") else w.strip("'") for w in raw]
-    return '', [w for w in words if w and w not in _ARTICLES]
+    return ObjectRef('', ' '.join(w for w in words if w and w not in _ARTICLES))
 
 
-def _kind_words(key: str) -> set[str]:
-    """The words of a state key's name (after its owner, if any)."""
-    return set(key.split(':', 1)[-1].split())
+def object_id(book: Book, state: dict, r: Record) -> ObjectId | None:
+    """The object a `holds` record names, given the fold's `state` so far
+    ({} for none): the one identity rule, used by the fold, the handover
+    pairing (`object_ref`), the names offered to extraction and the stage
+    sheet's hands (`tracked_objects`, `ObjectId.kind`). None: a record with
+    neither an owner nor a holder.
+
+    A name with an owner is that person's ("Teucer's bow" is Teucer's,
+    whoever holds it; "Oren's old sword" is the tracked "Oren's sword"). A
+    name without one ("shield", "the round shield") is the holder's own,
+    unless the holder holds exactly one object it can name now (`same_name`:
+    "the sword" in the hand that took Achilles' sword), or once held one
+    by exactly that name or, failing that, by exactly one name it can be
+    (so the holder who lost their key still has "the key"). It never merges
+    into another person's object: two people's shields are two shields."""
+    ref = object_ref(book, r.item)
+    if not ref.name:
+        return None
+    if ref.owner:
+        oid = ObjectId(ref.owner, ref.name, 'owned')
+        if oid in state:
+            return oid
+        mine = [k for k in state if k.owner == ref.owner and same_name(k.name, ref.name)]
+        return mine[0] if len(mine) == 1 else oid
+    holder = book.who(r.who)
+    if not holder:
+        return None
+    held = [k for k, h in state.items() if h.status == 'held' and h.holder == holder
+            and same_name(k.name, ref.name)]
+    if len(held) == 1:
+        return held[0]
+    own = ObjectId(holder, ref.name)
+    if own in state or held:
+        return own
+    mine = [k for k in state if k.owner == holder and same_name(k.name, ref.name)]
+    return mine[0] if len(mine) == 1 else own
 
 
-def _held_by(state: dict, holder: str, kind: str) -> list[str]:
-    """The objects of `kind` (a word of their name) `holder` holds now."""
-    return [k for k, (h, status, _r, _b) in state.items()
-            if status == 'held' and h == holder and kind in _kind_words(k)]
+def _recipient(book: Book, r: Record) -> str:
+    """The canonical id of the person a `gives` record hands the object to
+    ('' for none, or for a recipient characters.csv doesn't name)."""
+    to = r.recipient
+    return book.who(to) if to and book.is_person(to) else ''
 
 
-def _object(book: Book, state: dict, r: Record) -> tuple[str, bool]:
-    """The object a `holds` record names, as a state key, and whether its
-    name is a bare kind (#732). A name with an owner is that person's:
-    "Teucer's bow" is `teucer:bow`, whoever holds it. A bare kind ("shield",
-    "his spear": one word once articles and pronouns are gone) is the
-    holder's own (`holder:kind`), unless the holder holds exactly one object
-    of that kind now, which it then is ("the sword" in the hand that took
-    Achilles' sword). Any other name ("the brass key") is one object
-    book-wide, matched to a tracked unowned one by `stage_sheet.same_object`
-    ("the small brass key"). A bare kind never merges into another person's
-    object: two people's own shields are two shields."""
-    from storyforge.stage_sheet import same_object
-    owner, words = _name_parts(book, r.item)
-    if not words:
-        return '', False
-    name = ' '.join(words)
-    if owner:
-        key = f'{owner}:{name}'
-        if key in state:
-            return key, False
-        mine = [k for k in state if k.startswith(f'{owner}:')
-                and same_object(k.split(':', 1)[1], name)]
-        return (mine[0] if len(mine) == 1 else key), False
-    if len(words) == 1:
-        holder = book.who(r.who)
-        held = _held_by(state, holder, name)
-        return (held[0] if len(held) == 1 else f'{holder}:{name}'), True
-    if name in state:
-        return name, False
-    matches = [k for k in state if ':' not in k and same_object(k, name)]
-    return (matches[0] if len(matches) == 1 else name), False
+def _is_person(book: Book, r: Record) -> bool:
+    return book.is_person(r.who) or r.origin == 'stage-sheet'
 
 
 def pair_handovers(book: Book, records: list[Record]) -> list[Record]:
     """`records` with each handover recorded twice made one (#732): a
     `gets` by one person and a `gives` or `loses` of the same object
-    (`stage_sheet.same_object`) by another, in the same scene on the same
-    or overlapping words (`overlaps`), whatever their order, become one
-    `gives` to the taker, placed at the earlier of the two."""
-    from storyforge.stage_sheet import same_object
+    (`ObjectRef.same`) by another, in the same scene on the same or
+    overlapping words (`overlaps`), whatever their order, become one
+    `gives` to the taker, placed at the earlier of the two. A `gets` by a
+    place (an object dropped there) stays a place's: it is only put after
+    the parting, so the fold lays the parted object there
+    (`_dropped_at`) and its holder may pick it up again (#732's review,
+    SF-1). A `gives` naming another recipient isn't paired."""
     out: list[Record | None] = list(records)
     used: set[int] = set()
     for gi, g in enumerate(records):
         if g.value != 'gets' or not g.verified or gi in used:
             continue
-        taker = book.who(g.who)
+        taker, ref, person = book.who(g.who), object_ref(book, g.item), _is_person(book, g)
         for xi, x in enumerate(records):
             if (xi in used or x.scene_id != g.scene_id or x.value not in ('gives', 'loses')
                     or not x.verified or book.who(x.who) == taker
-                    or not same_object(x.item, g.item) or not overlaps(x.quote, g.quote)):
+                    or not overlaps(x.quote, g.quote)
+                    or not object_ref(book, x.item).same(ref)):
                 continue
-            if x.value == 'gives' and x.detail.strip() and book.who(x.detail) != taker:
+            if x.value == 'gives' and x.recipient and _recipient(book, x) != taker:
                 continue
             used.update((gi, xi))
-            out[xi] = x.replace(value='gives', detail=g.who, index=min(x.index, g.index))
-            out[gi] = None
+            if person:
+                out[xi] = x.replace(value='gives', detail=g.who, index=min(x.index, g.index))
+                out[gi] = None
+            elif g.index < x.index:
+                out[xi], out[gi] = x.replace(index=g.index), g.replace(index=x.index)
             break
     kept = [r for r in out if r is not None]
     return sorted(kept, key=lambda r: (book.key.get(r.scene_id, (0, 0)), r.index))
 
 
+def _dropped_at(book: Book, parted: list[tuple[Record, ObjectId]], r: Record
+                ) -> ObjectId | None:
+    """The object a place's `gets` or `has` (`r`, a name without an owner)
+    takes from a parting on the same or overlapping words in its scene
+    (`parted`: `loses` and `gives` to no person, in fold order): the sword
+    dropped on the sand is the sand's, not a second sword."""
+    if object_ref(book, r.item).owner:
+        return None
+    name = object_ref(book, r.item).name
+    for x, oid in reversed(parted):
+        if x.scene_id == r.scene_id and overlaps(x.quote, r.quote) and same_name(oid.name, name):
+            return oid
+    return None
+
+
+def _unknown_after(book: Book, state: dict, r: Record, oid: ObjectId) -> set[ObjectId]:
+    """What a misquoted record makes unknown: the object it names; when its
+    name has no owner and its holder holds several it can name, all of
+    them; when the holder holds none, anyone's it can name (the record
+    might be the handover that took one)."""
+    out = {oid}
+    ref = object_ref(book, r.item)
+    if ref.owner:
+        return out
+    holder = book.who(r.who)
+    can = {k: h for k, h in state.items() if h.status == 'held' and same_name(k.name, ref.name)}
+    mine = {k for k, h in can.items() if h.holder == holder}
+    return out | (mine if mine else set(can))
+
+
 def check_possession(book: Book, sheet_records: list[Record] | None = None
                      ) -> tuple[list[Finding], list[str]]:
     """PHY: fold every `holds` record (and a current stage sheet's hands), in
-    story order, per object (`_object`: a bare kind is its holder's own, a
-    name with an owner the owner's, #732), each handover recorded twice
-    made one (`pair_handovers`); check this scene's against the state
-    before each. Blocking: within this scene, an object in another person's
-    hands with nothing between; in any scene, an object held or taken whole
-    (`has`, `gets`) after it was destroyed (its remains discarded, or a
-    second `destroyed`, is not), or held again by the person who gave it
-    away or lost it. A different holder than an earlier scene left it with
-    is a note (an offstage handover is ordinary, #648's review CR-3), and
-    so is anything that a scene between without typed state might explain
-    (CR-5). A misquoted record makes the state of every object it could
-    name unknown from there, and a record of this scene that state left
-    uncompared is a note. Exempt: an off-present scene. A holder not in
-    characters.csv is read as a place (an object lying there) and said."""
+    story order, per object (`object_id`: a name without an owner is its
+    holder's own, one with an owner the owner's, #732), each handover
+    recorded twice made one (`pair_handovers`); check this scene's against
+    the state (`Holding`) before each. Blocking: within this scene, an
+    object in another person's hands with nothing between; in any scene, an
+    object held (`has`) after it was destroyed, or taken (`gets`) when its
+    name has an owner (a holder's unowned "spear" taken after theirs broke
+    is another spear; discarding the remains or a second `destroyed` is
+    not a use); an object held again by the person who gave it away or
+    lost it. Notes, never findings: a different holder than an earlier
+    scene left it with (an offstage handover is ordinary, #648's review
+    CR-3); anything a scene between without typed state might explain
+    (CR-5); a record on an object whose state a misquoted record made
+    unknown; a name without an owner read as the holder's own while
+    another of that name is tracked (that pair isn't compared); a record
+    with neither an owner nor a holder. Exempt: an off-present scene. A
+    holder not in characters.csv is read as a place (an object lying
+    there) and said."""
     sid = book.scene_id
     if book.off_present(sid):
         return [], []
@@ -382,76 +516,85 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
     records = pair_handovers(book, book.present_records(('holds',))
                              + list(sheet_records or []) + misquoted)
     findings: list[Finding] = []
-    # object key → (holder canonical or place, status, record, by)
-    state: dict[str, tuple[str, str, Record, str]] = {}
-    flagged: set[str] = set()
-    offstage, gapped, places, unknown = [], [], set(), []
+    state: dict[ObjectId, Holding] = {}
+    flagged: set[ObjectId] = set()
+    offstage, gapped, places, unknown, apart, unheld = [], [], set(), [], [], []
+    parted: list[tuple[Record, ObjectId]] = []
     for r in records:
-        obj, bare = _object(book, state, r)
-        if not obj:
+        oid = object_id(book, state, r)
+        if oid is None:
+            if r.scene_id == sid and r.verified:
+                unheld.append(f'{r.value} {r.item}')
+            continue
+        if not r.verified:
+            for k in _unknown_after(book, state, r, oid):
+                state[k] = Holding.unknown(r)
             continue
         holder = book.who(r.who)
-        if not r.verified:
-            # unknown from here: what it names, and when it is a bare kind
-            # its holder holds none of, anyone's of that kind
-            kind = obj.split(':', 1)[-1]
-            touched = {obj} | ({k for k, (_h, st, _r, _b) in state.items()
-                                if st == 'held' and kind in _kind_words(k)}
-                               if bare and not _held_by(state, holder, kind) else set())
-            for k in touched:
-                state[k] = ('', 'unknown', r, '')
-            continue
-        person = book.is_person(r.who) or r.origin == 'stage-sheet'
-        if r.scene_id == sid and not person and r.value in ('gets', 'has'):
-            places.add(r.who)
-        prev = state.get(obj)
+        person = _is_person(book, r)
+        if not person and r.value in ('gets', 'has'):
+            oid = _dropped_at(book, parted, r) or oid
+            if r.scene_id == sid:
+                places.add(r.who)
+        prev = state.get(oid)
         problem = ''
-        if r.scene_id == sid and prev is not None and prev[1] == 'unknown':
-            unknown.append(f'{r.who} {r.value} {r.item} (after "{prev[2].quote}", '
-                           f'{prev[2].scene_id})')
-        elif r.scene_id == sid and prev is not None and obj not in flagged:
-            p_holder, status, p_rec, by = prev
+        if r.scene_id == sid and prev is None:
+            ref = object_ref(book, r.item)
+            others = [(k, h) for k, h in state.items() if same_name(k.name, ref.name)
+                      and (k.owner == ref.owner if ref.owner else k.owner != oid.owner)]
+            lost = [h for _k, h in others if h.status == 'unknown']
+            if lost:
+                unknown.append(f'{r.who} {r.value} {r.item} (after "{lost[0].rec.quote}", '
+                               f'{lost[0].rec.scene_id})')
+            elif others and not ref.owner:
+                apart.append(f'{r.who} {r.value} {r.item} (also tracked: {others[0][0]})')
+        elif r.scene_id == sid and prev.status == 'unknown':
+            unknown.append(f'{r.who} {r.value} {r.item} (after "{prev.rec.quote}", '
+                           f'{prev.rec.scene_id})')
+        elif r.scene_id == sid and oid not in flagged:
+            p_rec = prev.rec
             here = p_rec.scene_id == sid
             p_where = 'earlier in this scene' if here else _where(book, p_rec.scene_id)
-            if status == 'destroyed':
-                if r.value in ('has', 'gets'):
+            if prev.status == 'destroyed':
+                renewed = r.value == 'gets' and not object_ref(book, r.item).owner
+                if r.value == 'has' or (r.value == 'gets' and not renewed):
                     problem = f'{r.item} was destroyed {p_where}'
             elif r.value in ('has', 'gives', 'loses', 'destroyed') and person:
-                if status == 'held' and p_holder != holder and p_rec.origin != 'place':
+                if (prev.status == 'held' and prev.holder != holder
+                        and p_rec.origin != 'place'):
                     if here:
                         problem = f'{p_rec.who} holds {r.item} ({p_where}), with nothing between'
                     else:
                         offstage.append(f'{r.who} has {r.item}, which {p_rec.who} held in '
                                         f'{p_rec.scene_id}')
-                elif status in ('given', 'lost') and by == holder:
-                    problem = (f'{r.who} {"gave away" if status == "given" else "lost"} '
+                elif prev.status in ('given', 'lost') and prev.by == holder:
+                    problem = (f'{r.who} {"gave away" if prev.status == "given" else "lost"} '
                                f'{r.item} {p_where}, with nothing between')
             gap = [] if here else book.gap_between(p_rec.scene_id, sid)
             if problem and gap:
                 gapped.append(f'{r.item} ({", ".join(gap[:3])})')
             elif problem:
-                flagged.add(obj)
+                flagged.add(oid)
                 verb = {'has': 'has', 'gives': 'gives away', 'loses': 'loses',
                         'destroyed': 'destroys', 'gets': 'gets'}[r.value]
                 findings.append(_finding('possession', r.quote, p_rec.scene_id, p_rec.quote,
                                          f'{r.who} {verb} {r.item}, but {problem}'))
         # the state after the record
-        if prev is not None and prev[1] == 'destroyed' and r.value in (
+        if prev is not None and prev.status == 'destroyed' and r.value in (
                 'gives', 'loses', 'destroyed'):
             continue   # its remains, discarded: still destroyed
         if r.value in ('gets', 'has'):
-            rec = r if person else r.replace(origin='place')
-            state[obj] = (holder, 'held', rec, '')
+            state[oid] = Holding.held(holder, r if person else r.replace(origin='place'))
         elif r.value == 'gives':
-            to = r.detail.strip()
-            if to and book.is_person(to):
-                state[obj] = (book.who(to), 'held', r.replace(who=to), holder)
-            else:
-                state[obj] = ('', 'given', r, holder)
-        elif r.value == 'loses':
-            state[obj] = ('', 'lost', r, holder)
-        elif r.value == 'destroyed':
-            state[obj] = ('', 'destroyed', r, holder)
+            to = _recipient(book, r)
+            state[oid] = (Holding.held(to, r.replace(who=r.recipient), by=holder) if to
+                          else Holding.gone('given', holder, r))
+            if not to:
+                parted.append((r, oid))
+        elif r.value in ('loses', 'destroyed'):
+            state[oid] = Holding.gone('lost' if r.value == 'loses' else 'destroyed', holder, r)
+            if r.value == 'loses':
+                parted.append((r, oid))
     notes = []
     if offstage:
         notes.append(f'possession: {len(offstage)} object(s) in other hands than an earlier '
@@ -464,6 +607,13 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
     if unknown:
         notes.append(f'possession: {len(unknown)} record(s) on an object whose state is unknown '
                      f'after a misquoted record, not compared: ' + '; '.join(unknown[:5]))
+    if apart:
+        notes.append(f'possession: {len(apart)} object(s) named without an owner, read as the '
+                     f'holder\'s own while another of that name is tracked (not compared with '
+                     f'it; name the owner to compare): ' + '; '.join(apart[:5]))
+    if unheld:
+        notes.append(f'possession: {len(unheld)} record(s) with neither an owner nor a holder, '
+                     f'not compared: ' + '; '.join(unheld[:5]))
     if places:
         notes.append(f'possession: {len(places)} holder(s) characters.csv doesn\'t name, read as '
                      f'places (an object lying there), not compared as people: '
@@ -1366,13 +1516,15 @@ def tracked_objects(book: Book) -> list[str]:
     """The object names other present-time scenes' `holds` records give, for
     extraction to name an object the same way (#648's review, TD-6): those
     before this scene in story order first, nearest first; one name per
-    object key; capped at `MAX_OFFERED_OBJECTS`."""
+    name the identity rule reads (`object_ref`: "his shield" and "shield"
+    are one name, "Achilles' armour" another); capped at
+    `MAX_OFFERED_OBJECTS`."""
     sid = book.scene_id
-    seen: dict[str, tuple] = {}
-    names: dict[str, str] = {}
+    seen: dict[ObjectRef, tuple] = {}
+    names: dict[ObjectRef, str] = {}
     for r in book.present_records(('holds',)):
-        k = object_key(r.item)
-        if not k or r.scene_id == sid:
+        k = object_ref(book, r.item)
+        if not k.name or r.scene_id == sid:
             continue
         before = book.before((r.scene_id, r.index), (sid, START))
         rank = (0, tuple(-x for x in book.key.get(r.scene_id, (0, 0)))) if before else \
@@ -1455,7 +1607,9 @@ def check_continuity(project_dir: str, scene_id: str, *, prose: str | None = Non
                             f'scene: they make no finding')
     book.records[scene_id] = records
     result.records = records
-    tracked = {object_key(r.item) for recs in book.records.values() for r in recs
+    # the kinds of thing tracked (`ObjectId.kind`): a sheet's "the armour"
+    # counts for the records' "Achilles' armour" (#732's review, TD-3)
+    tracked = {object_ref(book, r.item).kind for recs in book.records.values() for r in recs
                if r.type == 'holds'} - {''}
     sheet_records = []
     for sid in book.records:
