@@ -604,3 +604,77 @@ class TestNarrowDependents:
         assert found.scenes == ['s3', 's4']
         assert 'only its links' in found.unrelated['g']
         assert ledger.dependents(rows, ['g'], ORDER, names={}).scenes == ['s2', 's3', 's4']
+
+
+# ============================================================================
+# #734's review (CR-3): the end of a state the plan sets up in the scene
+# follows the unchanged-prose rule, and its change lists the later scenes
+# ============================================================================
+
+class _Confirming(Book):
+    """The check finds every ending it is asked about shown in the scene."""
+
+    def __call__(self, path, body, **k):
+        if 'tools' in body and 'ended' in _schema(body)['properties']:
+            prompt = body['messages'][0]['content']
+            if not isinstance(prompt, str):
+                prompt = ''.join(b['text'] for b in prompt)
+            asked = re.findall(r'^- (\S+): the plan records', prompt, re.M)
+            reply = {'findings': list(self.findings), 'kept': [], 'ended': asked}
+            if 'cleared' in _schema(body)['properties']:
+                reply['cleared'] = []
+            return _text(reply)
+        return super().__call__(path, body, **k)
+
+
+class TestEndsHere:
+    WOUND = 'dorren-is-wounded'
+
+    def _plan(self, project_dir):
+        _git(project_dir)
+        rows = ledger.load(project_dir)
+        base = dict(rows[0], **{k: '' for k in rows[0]})
+        base.update(id=self.WOUND, scene_id=SCENE, type='physical', subject='dorren-hayle',
+                    statement='Dorren is wounded', status='binding', origin='plan',
+                    mutable='state', introduced_by='briefs')
+        ledger.save(project_dir, rows + [base], command='test')
+        _add_later(project_dir, id='later-dorren', statement='Dorren stands at the window')
+
+    def _ends_here(self, project_dir):
+        return {r['supersedes'] for r in _mine(project_dir, SCENE) if r.get('supersedes')}
+
+    def test_an_end_the_new_reading_drops_is_kept_on_unchanged_prose(self, project_dir,
+                                                                     tmp_path):
+        self._plan(project_dir)
+        book = _Confirming()
+        book.facts = [_fact(DESK, 'Dorren is healed', ends=[self.WOUND])]
+        assert book.gate(project_dir, tmp_path, SCENE).committed
+        assert self._ends_here(project_dir) == {self.WOUND}
+        book.facts = [_fact(DESK, 'Dorren is seated at her desk')]
+        result = book.unchanged(project_dir, tmp_path, SCENE, 'recheck')
+        assert result.committed and result.changed == [] and result.recheck == []
+        assert self._ends_here(project_dir) == {self.WOUND}
+
+    def test_a_new_end_on_unchanged_prose_is_not_applied(self, project_dir, tmp_path):
+        self._plan(project_dir)
+        book = _Confirming()
+        book.facts = [_fact(DESK, 'Dorren is at her desk')]
+        assert book.gate(project_dir, tmp_path, SCENE).committed
+        book.facts = [_fact(DESK, 'Dorren is healed', ends=[self.WOUND])]
+        result = book.unchanged(project_dir, tmp_path, SCENE, 'recheck')
+        assert result.committed and self._ends_here(project_dir) == set()
+        assert result.ends_held == [f'{self.WOUND}: unchanged prose, and the earlier version '
+                                    f'did not end it']
+        assert result.changed == []
+
+    def test_a_new_end_on_changed_prose_lists_the_later_scene(self, project_dir, tmp_path):
+        self._plan(project_dir)
+        book = _Confirming()
+        book.facts = [_fact(DESK, 'Dorren is at her desk')]
+        assert book.gate(project_dir, tmp_path, SCENE).committed
+        prose = _read(project_dir, SCENE) + '\n\nThe cut on her hand had closed.\n'
+        book.facts = [_fact('The cut on her hand had closed', 'Dorren is healed',
+                            ends=[self.WOUND])]
+        result = book.gate(project_dir, tmp_path, SCENE, command='revise', prose=prose)
+        assert result.committed and self._ends_here(project_dir) == {self.WOUND}
+        assert self.WOUND in result.changed and LATER in result.recheck

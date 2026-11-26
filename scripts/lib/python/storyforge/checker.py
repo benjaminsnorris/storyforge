@@ -158,6 +158,19 @@ DISPUTE_SCHEMA = {**SCHEMA,
                   'required': SCHEMA['required'] + ['cleared']}
 
 
+def schema_for(disputes, endings) -> dict:
+    """The reply schema: `SCHEMA`, plus `cleared` with disputes, plus
+    `ended` with endings (#734's review: the states the scene shows ending,
+    a ruling of its own). Each is added only when asked, so a scene without
+    them sends what it always sent."""
+    out = DISPUTE_SCHEMA if disputes else SCHEMA
+    if not endings:
+        return out
+    return {**out, 'properties': {**out['properties'],
+                                  'ended': {'type': 'array', 'items': {'type': 'string'}}},
+            'required': out['required'] + ['ended']}
+
+
 @dataclass
 class Dispute:
     """A registry fact extraction says the scene changes (supersedes, or ends
@@ -231,6 +244,9 @@ class CheckResult:
     #: disputes it neither reported as a contradiction nor cleared: they
     #: block the commit like an unverified finding
     unruled: list[Dispute] = field(default_factory=list)
+    #: of the endings asked (`check_scene(endings=)`; #734), those the check
+    #: found the scene shows ending; every reading must say so
+    ended: list[Dispute] = field(default_factory=list)
     #: the first reading's exchange (a later reading's is in its own log)
     run: ToolRun | None = None
 
@@ -774,6 +790,23 @@ def _disputes_text(disputes: list[Dispute]) -> str:
             'its id in `cleared`.\n\n' + lines + '\n')
 
 
+def _endings_text(endings: list[Dispute]) -> str:
+    """The states extraction read as ending in this scene, which the plan
+    sets up in it (#734): a ruling of their own, never a dispute. Empty
+    without any, so the prompt is what it always was."""
+    if not endings:
+        return ''
+    lines = '\n'.join(f'- {d.fact_id}: the plan records "{d.statement}"; extraction read '
+                      f'it ending in this scene: "{d.claim}"' for d in endings)
+    return ('\n## States this scene may end\n\n'
+            'The plan sets each of these up in this scene, and extraction read the scene '
+            'as ending it too. For each, put its id in `ended` only if the scene clearly '
+            'shows that state ending (it is undone, healed, resolved or reversed in the '
+            'scene\'s own words). Leave it out if the scene doesn\'t show that, or if you '
+            'can\'t tell; that is not a contradiction, so don\'t report one for it.\n\n'
+            + lines + '\n')
+
+
 def _reading_note(reading: int) -> str:
     return ('' if reading <= 1 else
             f'\n\n(Reading {reading}: an independent check of this scene; read it afresh.)')
@@ -781,7 +814,7 @@ def _reading_note(reading: int) -> str:
 
 def prompt_content(book: Book, at: str, brief_text: str,
                    disputes: list[Dispute] | None = None,
-                   reading: int = 1) -> str | list[dict]:
+                   reading: int = 1, endings: list[Dispute] | None = None) -> str | list[dict]:
     """The user message of a reading: `build_prompt`'s text. Reading 1 sends
     it whole, as it always has. A later reading sends the same text with its
     reading note as a block of its own, after a cache breakpoint: the rest is
@@ -790,7 +823,7 @@ def prompt_content(book: Book, at: str, brief_text: str,
     again, about $0.16 a reading). The breakpoint is the request's fourth,
     with the two in the system prompt and the automatic one at its end."""
     note = _reading_note(reading)
-    text = build_prompt(book, at, brief_text, disputes, reading)
+    text = build_prompt(book, at, brief_text, disputes, reading, endings)
     if not note:
         return text
     head = text[:-len(note)]
@@ -799,7 +832,8 @@ def prompt_content(book: Book, at: str, brief_text: str,
 
 
 def build_prompt(book: Book, at: str, brief_text: str,
-                 disputes: list[Dispute] | None = None, reading: int = 1) -> str:
+                 disputes: list[Dispute] | None = None, reading: int = 1,
+                 endings: list[Dispute] | None = None) -> str:
     s = book.scenes.get(at, {})
     promise_rules = '' if "## The brief's promises" not in brief_text else (
         "\n**Broken promises.** Each item under \"The brief's promises\" is a promise. "
@@ -820,7 +854,7 @@ def build_prompt(book: Book, at: str, brief_text: str,
 Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('location') or '-'}{'; ' + book.when(at) if book.when(at) else ''}
 
 {book.prose[at]}
-{brief_text}{_sheets_text(book)}{_disputes_text(disputes or [])}
+{brief_text}{_sheets_text(book)}{_disputes_text(disputes or [])}{_endings_text(endings or [])}
 ## Every scene, in reading order
 
 {_scene_index(book, at)}
@@ -923,12 +957,16 @@ GATE_READINGS = 2
 def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
                 promises: bool = True, model: str | None = None,
                 log_file: str = '', rows: list[dict[str, str]] | None = None,
-                disputes: list[Dispute] | None = None, readings: int = 1) -> CheckResult:
+                disputes: list[Dispute] | None = None, readings: int = 1,
+                endings: list[Dispute] | None = None) -> CheckResult:
     """Check `scene_id` (its file, or `prose` in its place) against the rest
     of the book; with `promises`, against its brief too. `rows` replaces the
     ledger on disk. `disputes` are registry facts extraction says the scene
     changes: each must come back as a contradiction or `cleared`, else it is
-    `unruled`. `readings` independent checks are made, one after the other,
+    `unruled`. `endings` (#734) are states the plan sets up in the scene
+    that extraction read as ending there: each is `ended` only when every
+    reading says the scene shows it ending, and is never a finding.
+    `readings` independent checks are made, one after the other,
     and their union returned (`merge_readings`); reading n > 1 logs to
     `log_file` with `.rN` before its extension.
 
@@ -950,13 +988,14 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
             stem, ext = os.path.splitext(log_file)
             log = f'{stem}.r{n}{ext}'
         results.append(_check_once(book, brief, project_dir, scene_id, model=model,
-                                   log_file=log, disputes=disputes, reading=n))
-    return merge_readings(results, disputes)
+                                   log_file=log, disputes=disputes, reading=n,
+                                   endings=endings))
+    return merge_readings(results, disputes, endings)
 
 
 def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
                 model: str | None, log_file: str, disputes: list[Dispute] | None,
-                reading: int) -> CheckResult:
+                reading: int, endings: list[Dispute] | None = None) -> CheckResult:
     from storyforge.common import select_model
     handlers = {
         'search_manuscript': lambda a: _search(book, scene_id, a),
@@ -965,11 +1004,11 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
     }
     where = f'{scene_id}' + (f' (reading {reading})' if reading > 1 else '')
     try:
-        run = converse(prompt_content(book, scene_id, brief.text, disputes, reading),
+        run = converse(prompt_content(book, scene_id, brief.text, disputes, reading, endings),
                        model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
                        label=f'check {where}', system=_system(book),
-                       output_schema=DISPUTE_SCHEMA if disputes else SCHEMA,
+                       output_schema=schema_for(disputes, endings),
                        log_file=log_file)
     except RuntimeError as e:   # RefusalError, ToolLoopError, an API failure
         error = CheckError(f'{where}: {e}')
@@ -981,6 +1020,7 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
         data = json.loads(extract_text(run.response))
         items, kept = data['findings'], data['kept']
         cleared = set(data['cleared']) if disputes else set()
+        ended = set(data['ended']) if endings else set()
     except (ValueError, KeyError, TypeError) as e:
         raise CheckError(f'{where}: the checker\'s reply is not the schema ({e})') from e
 
@@ -1009,6 +1049,7 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
             result.kept.append((rid, quote))
     _rule_disputes(result, disputes,
                    {f.fact_id for f in result.findings + result.unverified}, cleared)
+    result.ended = [d for d in endings or [] if d.fact_id in ended]
     return result
 
 
@@ -1075,7 +1116,8 @@ def _rule_disputes(out: CheckResult, disputes: list[Dispute] | None,
 
 
 def merge_readings(results: list[CheckResult],
-                   disputes: list[Dispute] | None = None) -> CheckResult:
+                   disputes: list[Dispute] | None = None,
+                   endings: list[Dispute] | None = None) -> CheckResult:
     """The union of independent readings of one scene.
 
     Reading 1's findings are all kept, as it made them. A later reading's
@@ -1136,4 +1178,7 @@ def merge_readings(results: list[CheckResult],
                 out.kept_unverified.append(item)
     reported = {f.fact_id for r in results for f in r.findings + r.unverified}
     _rule_disputes(out, disputes, reported, {d.fact_id for r in results for d in r.cleared})
+    # #734: an end is recorded only on a yes, so every reading must give it
+    out.ended = [d for d in endings or []
+                 if all(d.fact_id in {e.fact_id for e in r.ended} for r in results)]
     return out
