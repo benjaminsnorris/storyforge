@@ -998,3 +998,29 @@ class TestPlannedFacts:
         result, _ = _run(project_dir, [_answer(kept=[{'fact_id': 'village-vanished',
                                                       'quote': HERE}])])
         assert result.kept == [('village-vanished', HERE)]
+
+
+class TestEndings:
+    """#734's re-review (SF-1): an ending is a ruling of its own, asked only
+    when there is one."""
+
+    D = checker.Dispute('wound', 'Ares is wounded', 'Paeon heals Ares')
+
+    def test_no_endings_send_what_was_always_sent(self):
+        assert checker.schema_for([], None) is checker.SCHEMA
+        assert checker.schema_for([self.D], None) is checker.DISPUTE_SCHEMA
+        assert checker._endings_text([]) == ''
+
+    def test_endings_add_their_own_answer_and_section(self):
+        schema = checker.schema_for([], [self.D])
+        assert 'ended' in schema['properties'] and 'ended' in schema['required']
+        assert 'cleared' not in schema['properties']
+        text = checker._endings_text([self.D])
+        assert '## States this scene may end' in text and '- wound:' in text
+
+    def test_every_reading_must_find_it_ending(self):
+        one = checker.CheckResult('s', ended=[self.D])
+        none = checker.CheckResult('s')
+        assert checker.merge_readings([one, none], [], [self.D]).ended == []
+        assert checker.merge_readings([one, checker.CheckResult('s', ended=[self.D])], [],
+                                      [self.D]).ended == [self.D]

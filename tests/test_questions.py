@@ -525,6 +525,47 @@ class TestTieBreak:
         assert r.unruled == [d] and r.findings == [] and r.misquoted == 1
 
 
+class TestEndingQuestion:
+    """#734's re-review (SF-1): an ending is its own question. Yes means the
+    scene shows the state ending; it is never a finding, and only two yeses
+    of the first two askings with a quote in the scene record it."""
+
+    def _q(self):
+        d = Dispute('wound', 'Mara is wounded', 'Mara slammed the door on her brother')
+        return d, questions.ending_question(d, row('wound', 'physical', quote='cut'), 'Mara')
+
+    def _ask(self, q, answers):
+        with patch('storyforge.api._api_request', side_effect=_answering(answers)):
+            return questions.ask_questions(SCENE, PROSE, [q], model='m')
+
+    def test_it_asks_whether_the_scene_shows_it_ending(self):
+        _, q = self._q()
+        assert 'clearly show this state ending' in q.text
+        assert q.ending is not None and q.dispute is None
+
+    def test_two_yeses_with_a_quote_record_it_and_make_no_finding(self):
+        d, q = self._q()
+        r = self._ask(q, lambda a, n: [ans(1, 'yes', 'Mara slammed the door')])
+        assert r.ended == [d] and r.findings == [] and r.cleared == [] and r.unruled == []
+
+    def test_two_noes_record_nothing_and_make_no_finding(self):
+        """A false end on an unrelated fact: the scene doesn't show it."""
+        _, q = self._q()
+        r = self._ask(q, lambda a, n: [ans(1, 'no')])
+        assert r.ended == [] and r.findings == [] and r.unruled == []
+
+    def test_a_yes_with_no_quote_in_the_scene_records_nothing(self):
+        _, q = self._q()
+        r = self._ask(q, lambda a, n: [ans(1, 'yes', 'not in the scene')])
+        assert r.ended == [] and r.findings == []
+
+    def test_a_split_records_nothing(self):
+        _, q = self._q()
+        r = self._ask(q, lambda a, n: [ans(1, 'no' if a == 2 else 'yes',
+                                           'Mara slammed the door')])
+        assert r.ended == [] and r.findings == []
+
+
 class TestPrompt:
     def test_the_answering_rules(self):
         """T-9: the rules the 2026-11-16 recall rests on."""
