@@ -162,27 +162,37 @@ def questions_for(data: dict, scene: str) -> list:
 
 def selected(data: dict, book_dir: str, scene: str, prose: str) -> set[str]:
     """The labelled facts the gate's selection would ask `scene` (`prose`)
-    about: presence from its `cast` (as `at` records), its scenes.csv
-    locations and the registry names in the prose; the facts as binding,
-    fixed ledger rows."""
+    about, with the gate's inputs (`questions.check_questions`): presence
+    from its `cast` (as `at` records, so also the on-stage cast), its
+    scenes.csv locations and the registry names in the prose, a shared
+    name placed only through the scene's brief cast and recent facts
+    (`questions.tied_subjects`, #746), and the scenes' days (#739); the
+    facts as binding, fixed ledger rows. Order and the cap aren't scored:
+    this is which facts are selected, not which fit under the cap."""
     from storyforge import ledger, questions
-    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.elaborate import _read_csv_as_map, get_scene
     from storyforge.enrich import load_alias_map
     from storyforge.typed_state import Record
     ref = os.path.join(book_dir, 'reference')
     chars = load_alias_map(os.path.join(ref, 'characters.csv'))
     places = load_alias_map(os.path.join(ref, 'locations.csv'))
     names, _ = ledger.subject_names(book_dir)
-    location = _read_csv_as_map(os.path.join(ref, 'scenes.csv')).get(scene, {}).get(
-        'location', '')
-    present = questions.present_subjects(
-        [Record('at', who, '') for who in data['cast'][scene]], chars, places, location,
-        prose=prose, names=names)
+    scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+    location = scenes.get(scene, {}).get('location', '')
+    order = ledger.scene_order(book_dir)
     rows = [{'id': fid, 'scene_id': f['scene'], 'type': f['type'], 'subject': f['subject'],
              'statement': f['statement'], 'quote': f['quote'], 'status': 'binding',
              'mutable': 'fixed'} for fid, f in data['facts'].items()]
-    picked = questions.facts_to_ask(rows, scene, ledger.scene_order(book_dir), present,
-                                    registry=set(names), chars=chars, places=places)
+    brief = get_scene(scene, ref) or {}
+    cast = [c.strip() for col in ('characters', 'on_stage', 'pov')
+            for c in (brief.get(col) or '').split(';') if c.strip()]
+    seen = questions.presence(
+        [Record('at', who, '') for who in data['cast'][scene]], chars, places, location,
+        prose=prose, names=names,
+        tied=questions.tied_subjects(cast, rows, scene, order, names))
+    picked = questions.facts_to_ask(rows, scene, order, seen.present, registry=set(names),
+                                    chars=chars, places=places, on_stage=seen.on_stage,
+                                    days=questions.scene_days(scenes))
     return {r['id'] for r in picked.facts}
 
 
