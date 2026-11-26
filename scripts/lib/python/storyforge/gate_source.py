@@ -48,6 +48,13 @@ ruled on from this scene's source, #742). It rules:
   working/gate-source-notes.csv (`GateResult.source_has_it`,
   `gate.note_source_has_it`), never a silent pass.
 
+With contradictions or findings to rule on, the call is also handed the
+source's own facts (its fact ledger, `source.entering_state` through this
+scene's source scenes, at most `MAX_SOURCE_FACTS`) on the deaths, wounds
+and healings, and armour and weapons of the people they name (#747): a
+healing told in the source is in front of the ruling on "he is back at the
+front". Retrieval only: a quote still has to come from the source prose.
+
 Cost: only facts new to the scene are sent, an unchanged re-check makes no
 call, a fix round with the same facts reuses the ruling (`_MEMO`), source
 prose is cut at `MAX_SCENE_PROSE_CHARS` a scene and `MAX_SOURCE_CHARS` a
@@ -83,6 +90,9 @@ MAX_SCENE_PROSE_CHARS = 12000
 #: The fewest words a source quote may have to count as found: "the
 #: spear" is in every book of the Iliad
 MIN_SOURCE_QUOTE_WORDS = 4
+#: The most source facts (`source.entering_state`) a ruling is handed on
+#: the people in its findings (#747): the latest are kept
+MAX_SOURCE_FACTS = 20
 #: What `write`'s forecast adds to each gated scene of a faithful
 #: adaptation: one Sonnet call with up to `MAX_SOURCE_CHARS` of source (an
 #: estimate, not measured)
@@ -264,13 +274,15 @@ def build_prompt(scene_id: str, prose: str, facts: list[dict[str, str]],
                  contradictions: list[tuple[str, str, str, str]], this_source: str,
                  earlier_sources: dict[str, str], rules: str, treatment: str,
                  note: str, findings: list[tuple[str, str, str]] = (),
-                 errata: list[str] = ()) -> str:
+                 errata: list[str] = (), source_facts: list[str] = ()) -> str:
     """`contradictions`: (this scene's words, the earlier scene, its words,
     the check's explanation). `earlier_sources`: earlier scene id → the
     source text behind it; a contradiction whose earlier scene has none is
     ruled on from this scene's source (#742). `findings`: (the scene's
     words, the words they are set against, the explanation) for each other
-    blocking finding (#742). `errata`: `errata_lines`."""
+    blocking finding (#742). `errata`: `errata_lines`. `source_facts`:
+    `prompts_source.entering_lines` of the source's facts on the people in
+    the contradictions and findings (#747); none, no section."""
     fact_lines = '\n'.join(f'{n}. {f.get("statement", "")} (the scene\'s words: '
                            f'"{f.get("quote", "")}")'
                            for n, f in enumerate(facts, start=1)) or '(none)'
@@ -288,6 +300,15 @@ def build_prompt(scene_id: str, prose: str, facts: list[dict[str, str]],
     slips = ('\n\n## Known slips of the source text\n\nThe source text departs from its '
              'original here. Rule by the original: a fact or finding that follows the '
              'original is not a departure.\n\n' + '\n'.join(errata)) if errata else ''
+    known = ('\n\n## The source\'s facts on these people\n\nFrom the source\'s fact ledger, '
+             'oldest first: what the source tells, up to and through the passage this scene '
+             'adapts, of the deaths, wounds and healings, and armour and weapons of the '
+             'people in the contradictions and findings (a source scene each; [until …] '
+             'names the source scene that state ends in). Use them to find what the source '
+             'has happened to a person by this scene (a wound healed, a death, armour '
+             'changing hands). They were read from the source by a model and can miss or '
+             'misread: rule by the source prose, and copy every `source_quote` from the '
+             'source prose shown above.\n\n' + '\n'.join(source_facts)) if source_facts else ''
     return f"""Scene {scene_id} of a faithful adaptation is checked against its source. Rule on three lists.
 
 1. Facts: each was read from the scene's prose. Does the source contradict it? `contradicts` only when the source says otherwise (a different person, count, place, order, cause or outcome), not when the source is silent or the fact adds detail (`not-in-source`). A departure the version rules or the map's treatment or note allow is not a contradiction, nor is staging: order inside the scene, or a speech dramatised or partly reported, that changes no outcome, no cause and nothing a character knows when. When your reasoning finds the source agrees, the verdict is `agrees`.
@@ -310,7 +331,7 @@ Treatment: {treatment or '(none)'}. Note: {note or '(none)'}.{slips}
 
 ## Earlier scenes' sources
 
-{earlier}
+{earlier}{known}
 
 ## Scene {scene_id}
 
@@ -366,6 +387,32 @@ def _follows_original(fact: dict[str, str], why: str, errata: list) -> str:
 
 def _one_line(text: str) -> str:
     return ' '.join((text or '').split())
+
+
+def _source_facts(project_dir: str, scene_id: str, refs: list[tuple[str, str]],
+                  contradictions: list, findings: list, notes: list[str]) -> list[str]:
+    """The source's facts (`source.entering_state`, through this scene's own
+    source scenes) on the people the contradictions and findings name, or,
+    naming none the source knows, the scene's cast: retrieval for the
+    ruling (#747). [] with nothing to rule on. What can't be read is a
+    note, and the ruling goes on without them."""
+    from storyforge import source
+    from storyforge.prompts_source import entering_lines
+    if not contradictions and not findings:
+        return []
+    text = '\n'.join(part for f in [*contradictions, *findings]
+                     for part in (f.scene_quote, f.established_quote, f.explanation))
+    try:
+        people = (source.named_in(project_dir, [s for s, _ in refs], text)
+                  or source.scene_cast(project_dir, scene_id, refs))
+        state = source.entering_state(project_dir, refs, people, through=True,
+                                      limit=MAX_SOURCE_FACTS)
+    except (source.SourceError, OSError, UnicodeDecodeError) as e:
+        notes.append(f'the source\'s facts on the people in the findings could not be read '
+                     f'({e}): ruled without them')
+        return []
+    notes.extend(state.notes)
+    return entering_lines(state.facts, quotes=True)
 
 
 def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, str]],
@@ -425,6 +472,8 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
     shown = '\n\n'.join([this_prose, *(source_prose_of(t) for t in earlier.values())])
     # the facts are this scene's: only its own source scenes' slips clear one
     slips = [e for slug, sid in ctx.refs[scene_id] for e in ctx.errata.get((slug, sid), [])]
+    source_facts = _source_facts(project_dir, scene_id, ctx.refs[scene_id],
+                                 contradictions, findings, out.notes)
     row = ctx.map_rows.get(scene_id, {})
     prompt = build_prompt(scene_id, prose, facts,
                           [(c.scene_quote, c.established_scene, c.established_quote,
@@ -433,7 +482,7 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
                           row.get('note', ''),
                           [(f.scene_quote, f.established_quote, f.explanation)
                            for f in findings],
-                          errata_lines(ctx, refs))
+                          errata_lines(ctx, refs), source_facts)
     try:
         response = invoke_to_file(prompt, model, log_file, 4000, output_schema=SCHEMA,
                                   label=f'source check {scene_id}')
