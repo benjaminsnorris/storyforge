@@ -270,6 +270,14 @@ class GateResult:
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
     held_back: list[tuple[str, Finding]] = field(default_factory=list)
+    #: on a provisional commit (#735): (statement, finding) for each
+    #: extracted commitment stating a finding the scene was committed in
+    #: spite of (`_hold_back`'s `also`): recorded as disputed, status
+    #: `pending` (not in force) with `reviewed` `HELD` + its finding's key
+    #: (`is_held`), until `accept_blocked` accepts the finding or a re-gate
+    #: of the scene replaces it. Their rows are in `disputed_rows`
+    disputed: list[tuple[str, Finding]] = field(default_factory=list)
+    disputed_rows: list[dict[str, str]] = field(default_factory=list)
     #: on commit (#632): (statement, finding) for each kept (`steady`) fact
     #: the hold-back would have taken: it stays as it was, since its prose
     #: didn't change, and is reported
@@ -1425,8 +1433,13 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
     thanes"): a commitment is held back for one when its quote overlaps the
     finding's, lies in the same paragraph of `prose` as the finding's quote,
     or has the subject and type of the fact the finding says it
-    contradicts (`_finding_subjects` over `rows`, the ledger). They go to `held_back`,
-    reported.
+    contradicts (`_finding_subjects` over `rows`, the ledger). Those held
+    for an inherited finding go to `held_back`, reported, and are not
+    recorded. Those held for an `also` finding are recorded as disputed
+    (#735: a false finding kept Pandarus's death out of the ledger): status
+    `pending`, so nothing holds the book to them, and `reviewed` `HELD` +
+    the finding's key, so `accept_blocked` brings them into force when the
+    author accepts it. They go to `disputed` and `disputed_rows`, reported.
 
     A kept fact (`result.steady`: an earlier commitment read from a
     paragraph the prose has unchanged) is never held back (#632, iliad-teen:
@@ -1463,6 +1476,7 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
     for row in result.proposed:
         quote = _words(row.get('quote') or '')
         hit = next((f for f in strict if overlaps(quote, f)), None)
+        disputed = False
         if hit is None and wide:
             where = paragraph(row.get('quote') or '')
             key = (subject(row), row.get('type') or '')
@@ -1474,11 +1488,16 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
                         # residents" three paragraphs on)
                         or (values & claim and (not stating or key[0] in stating))),
                        None)
+            disputed = hit is not None
         if hit is None:
             keep.append(row)
         elif row.get('id') in steady:
             keep.append(row)
             result.kept_stating.append((row.get('statement', ''), hit))
+        elif disputed:
+            row['status'], row['reviewed'] = 'pending', HELD + finding_key(hit)
+            result.disputed.append((row.get('statement', ''), hit))
+            result.disputed_rows.append(row)
         else:
             result.held_back.append((row.get('statement', ''), hit))
     result.proposed = keep
@@ -1755,7 +1774,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     rejected_here = {ledger.fact_key(r): r['id'] for r in rows
                      if r.get('status') == 'rejected'
                      and (r.get('scene_id') or '').strip() == scene_id}
-    old = {r['id'] for r in old_rows}
+    # #735: the facts an earlier provisional commit recorded as disputed are
+    # replaced too: this version's own reading holds back, disputes or
+    # commits them afresh. Not in force, so nothing changed by their going
+    held_rows = [copy.deepcopy(r) for r in rows if is_held(r)
+                 and (r.get('scene_id') or '').strip() == scene_id]
+    old = {r['id'] for r in old_rows} | {r['id'] for r in held_rows}
     ended_before = ledger.ended_by(rows, scene_id)
     rows = [r for r in rows if r['id'] not in old]
     # ... and the ends the earlier version set: this version's extraction
@@ -1861,7 +1885,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         _carry_standing(result.check, standing, disputes)
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
-                                 names, name_notes, order, prose, command)
+                                 names, name_notes, order, prose, command, held_rows)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
                   extract_model or select_model('evaluation'), old_rows)
     _note_advisory(project_dir, scene_id, command, result, prose=prose)
@@ -1897,12 +1921,39 @@ class _CommitContext:
     order: dict[str, int]
     prose: str
     command: str
+    #: the scene's commitments an earlier provisional commit recorded as
+    #: disputed (#735, `is_held`): replaced on commit, their ids carried
+    held: list[dict[str, str]] = field(default_factory=list)
 
 
 #: A pending row's command for a scene `write --keep-going` committed
-#: without a pass (`commit_provisional`): its facts are in the ledger, less
-#: those stating what stopped it, and its findings are the author's
+#: without a pass (`commit_provisional`): its facts are in the ledger, those
+#: stating what stopped it as disputed (#735, not in force), and its
+#: findings are the author's
 PROVISIONAL = 'provisional'
+
+#: The `reviewed` stamp of a commitment a provisional commit recorded as
+#: disputed (#735): `held:` and the key of the finding it states
+#: (`finding_key`). With status `pending` it is in the ledger but not in
+#: force: every reader of the facts in force reads `binding` rows only
+HELD = 'held:'
+
+
+def is_held(row: dict[str, str]) -> bool:
+    """Whether `row` is a commitment recorded as disputed (#735)."""
+    return (row.get('status') == 'pending' and ledger.is_commitment(row)
+            and (row.get('reviewed') or '').startswith(HELD))
+
+
+def finding_row_key(row: dict[str, str]) -> str:
+    """The key of a finding as `BLOCKED_PATH` records it (`_finding_rows`):
+    its source and its quote's words, as `_same` matches two."""
+    return _paragraph_key(f"{row.get('source', '')} {_words(row.get('quote', ''))}".split())
+
+
+def finding_key(f: Finding) -> str:
+    """`finding_row_key` of `f` as `record_blocked` would record it."""
+    return finding_row_key(_finding_rows('', '', [f])[0])
 
 
 def can_commit_provisionally(result: GateResult) -> str:
@@ -1925,10 +1976,12 @@ def can_commit_provisionally(result: GateResult) -> str:
 
 def commit_provisional(project_dir: str, result: GateResult, reason: str) -> None:
     """Commit a scene that didn't pass, for `write --keep-going` (#556,
-    G-028/B-028/B-030: one stop ended an unattended draft): its commitments,
-    less each one stating a blocking finding (`_hold_back`), replace its
-    earlier ones as on a pass, and what they changed is listed for a
-    re-check; the scene is listed `PROVISIONAL` in `PENDING_PATH` with
+    G-028/B-028/B-030: one stop ended an unattended draft): its commitments
+    replace its earlier ones as on a pass, each one stating a blocking
+    finding (`_hold_back`) recorded as disputed, not in force (#735:
+    `is_held`, brought into force by `accept_blocked`), and what they
+    changed is listed for a re-check; the scene is listed `PROVISIONAL` in
+    `PENDING_PATH` with
     `reason`, and its verified contradictions stay in `BLOCKED_PATH` for
     `storyforge check --accept`. A later scene is then drafted from
     everything the scene got right. Sets `.committed` and `.provisional`.
@@ -1972,7 +2025,7 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
         fixed_toward_source = _write_commit(project_dir, result, holding, rows, old_rows,
                                             order, ended_before, revised_rejection, names,
                                             name_notes, prose, command, scene_id,
-                                            loaded=ctx.loaded)
+                                            loaded=ctx.loaded, held=ctx.held)
     except BaseException:
         vars(result).update(saved)
         rows[:] = saved_rows
@@ -1984,9 +2037,10 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
 
 def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_before,
                   revised_rejection, names, name_notes, prose, command, scene_id,
-                  loaded=()) -> bool:
+                  loaded=(), held=()) -> bool:
     """`_commit`'s changes to `result` and `rows`, ending in the ledger
-    write; returns whether the scene was fixed toward its source."""
+    write; returns whether the scene was fixed toward its source. `held`:
+    the scene's disputed commitments before (#735), whose ids carry."""
     _source_supersede(result, rows)
     fixed_toward_source = _keep_superseded(project_dir, result, rows, prose)
     # #558's second review: the kept facts go through the hold-back too,
@@ -1994,8 +2048,11 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
     _apply_ends(project_dir, result, rows, old_rows, prose, loaded)
-    _carry_ids(result.proposed, old_rows, result.steady)
-    new = rows + result.proposed
+    # #735: a disputed fact keeps its id across commits, and an earlier
+    # one's id goes to the same fact read again, disputed or not
+    _carry_ids(result.proposed + result.disputed_rows, list(old_rows) + list(held),
+               result.steady)
+    new = rows + result.proposed + result.disputed_rows
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)
@@ -2781,6 +2838,7 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
     earlier, _ = gated_prose(project_dir, scene_id)
     unchanged = earlier is not None and _paragraphs(earlier) == _paragraphs(prose)
     taken = ({r['id'] for r in rows} | {r['id'] for r in result.proposed}
+             | {r['id'] for r in result.disputed_rows}
              | {r['id'] for r in old_rows} | {r['id'] for r in loaded}
              | ledger.linked_ids(list(loaded)))
     for e in claims:
@@ -4333,10 +4391,13 @@ def report_lines(result: GateResult) -> list[str]:
                      f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '
                      f'{_one_line(f.message())}')
     if result.held_back:
-        lines.append(('NOTE (not recorded: states what stopped the commit): '
-                      if result.provisional else
-                      'NOTE (not recorded: states a contradiction already in the scene): ')
+        lines.append('NOTE (not recorded: states a contradiction already in the scene): '
                      + '; '.join(_one_line(st) for st, _ in result.held_back))
+    if result.disputed:
+        lines.append(f'NOTE (recorded as disputed, not in force until its finding is '
+                     f'accepted, `storyforge check --accept {result.scene_id}`, or a '
+                     f're-check clears it: states what stopped the commit): '
+                     + '; '.join(_one_line(st) for st, _ in result.disputed))
     if result.kept_stating:
         lines.append('NOTE (kept as it was, from unchanged prose, though it states '
                      + ('what stopped the commit' if result.provisional else
@@ -4872,16 +4933,22 @@ def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateRe
     return ''
 
 
-def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
+def accept_blocked(project_dir: str, scene_id: str,
+                   promoted: list[str] | None = None) -> list[dict[str, str]]:
     """The author accepts the verified contradictions that stopped
     `scene_id`'s last gate run (Ben, 2026-11-02): its `BLOCKED_PATH` rows
     move to `REPORTED_PATH` as `ACCEPTED`, so later gate runs of the scene
     report them, not stop on them, and a `RECHECK_FAILED` listing goes back
-    to `RECHECK` (the author has acted). Returns the rows accepted (none:
-    nothing is recorded for the scene, nothing changed).
+    to `RECHECK` (the author has acted). The scene's commitments a
+    provisional commit recorded as disputed for one of them (#735,
+    `is_held`) come into force (`binding`, `reviewed` blank, so the audit
+    digest lists them); their ids go to `promoted`. One disputed for a
+    finding not accepted here stays disputed. Returns the rows accepted
+    (none: nothing is recorded for the scene, nothing changed).
 
     Raises:
-        GateError: a file is malformed or can't be written."""
+        GateError: a file is malformed or can't be written (the ledger is
+            written first: when it can't be, nothing is accepted)."""
     stopped = blocked(project_dir)
     rows = stopped.pop(scene_id, [])
     if not rows:
@@ -4901,6 +4968,7 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
                         f'in the scene ("{gone[0][:80]}"): {BLOCKED_PATH} describes other '
                         f'prose; nothing accepted. Run `storyforge check {scene_id}` to '
                         f'record what this prose has.')
+    _bring_into_force(project_dir, scene_id, rows, promoted)
     kept = reported(project_dir)
     mine = kept.setdefault(scene_id, [])
     for r in rows:
@@ -4913,6 +4981,47 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
         mark_pending(project_dir, scene_id, RECHECK,
                      f're-check: the author accepted {len(rows)} finding(s)')
     return rows
+
+
+def _bring_into_force(project_dir: str, scene_id: str, accepted: list[dict[str, str]],
+                      promoted: list[str] | None) -> None:
+    """`accept_blocked`'s ledger side (#735): `scene_id`'s disputed
+    commitments whose finding is one of `accepted` become binding. Writes
+    only when one does; their ids go to `promoted`."""
+    keys = {HELD + finding_row_key(r) for r in accepted}
+    try:
+        rows = ledger.load(project_dir)
+        ids = []
+        for r in rows:
+            if (is_held(r) and (r.get('scene_id') or '').strip() == scene_id
+                    and r['reviewed'] in keys):
+                r['status'], r['reviewed'] = 'binding', ''
+                ids.append(r['id'])
+        if ids:
+            ledger.save(project_dir, rows, command='accept')
+    except (ledger.LedgerError, ValueError, OSError) as e:
+        raise GateError(f'{scene_id}: the facts disputed for these findings could not be '
+                        f'brought into force ({e}); nothing accepted') from e
+    if promoted is not None:
+        promoted.extend(ids)
+
+
+def held_facts(project_dir: str, scene_ids: list[str] | None = None) -> dict[str, list[str]]:
+    """Scene id → the statements of its commitments recorded as disputed
+    (#735, `is_held`), for the scenes named (every scene: None).
+
+    Raises:
+        GateError: the ledger can't be read."""
+    try:
+        rows = ledger.load(project_dir)
+    except ledger.LedgerError as e:
+        raise GateError(str(e)) from e
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        sid = (r.get('scene_id') or '').strip()
+        if is_held(r) and (scene_ids is None or sid in scene_ids):
+            out.setdefault(sid, []).append(r.get('statement', ''))
+    return out
 
 
 # ============================================================================

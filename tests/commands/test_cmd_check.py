@@ -698,7 +698,11 @@ class TestAccept:
         cmd_check.main(['--accept', SCENE])
         msg, paths = commits[-1]
         assert msg == f'Check: accept 1 contradiction(s) in {SCENE}'
-        assert set(paths) == {gate.REPORTED_PATH, gate.BLOCKED_PATH, gate.PENDING_PATH}
+        from storyforge import audit
+        # #735: and the ledger, which disputed facts come into force in
+        assert set(paths) == {gate.REPORTED_PATH, gate.BLOCKED_PATH, gate.PENDING_PATH,
+                              'reference/commitments.csv', audit.LOG_PATH,
+                              audit.SNAPSHOT_PATH}
         assert gate.reported(project_dir)[SCENE][0]['command'] == gate.ACCEPTED
         with _api([[BAD]]):
             cmd_check.main(['--pending'])
@@ -971,14 +975,16 @@ class TestProvisionalRecovery:
                                      extract_model='m', check_model='m')
         assert not result.passed and gate.can_commit_provisionally(result) == ''
         gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        # in force: a fact stating the finding is disputed (#735), not binding
         return result, [r['statement'] for r in ledger.load(project_dir)
-                        if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+                        if r['scene_id'] == SCENE and ledger.is_commitment(r)
+                        and r['status'] == 'binding']
 
     def test_a_fact_in_the_findings_paragraph_is_held_back(self, project):
         project_dir, _ = project
         result, mine = self._commit(project_dir, [self.SAME_PARA, self.OTHER])
         assert mine == ['The map shows no contour line']
-        assert [st for st, _ in result.held_back] == ['The Hollow was on the map']
+        assert [st for st, _ in result.disputed] == ['The Hollow was on the map']
 
     def test_the_claim_restated_in_another_paragraph_is_held_back(self, project):
         """#556's second review: the finding quotes paragraph 1 ("four hundred
@@ -990,7 +996,7 @@ class TestProvisionalRecovery:
                       subject='tarrens-hollow')
         result, mine = self._commit(project_dir, [again, self.OTHER])
         assert mine == ['The map shows no contour line']
-        assert [st for st, _ in result.held_back] == ['The Hollow had 412 residents']
+        assert [st for st, _ in result.disputed] == ['The Hollow had 412 residents']
 
     def test_with_a_fact_stating_it_the_restatement_must_share_its_subject(self, project):
         project_dir, _ = project
@@ -1012,7 +1018,7 @@ class TestProvisionalRecovery:
         far = _fact('The Hollow was abandoned', 'Not even a contour line',
                     subject='tarrens-hollow')
         result, mine = self._commit(project_dir, [far], finding=dict(BAD, fact_id='hollow-pop'))
-        assert mine == [] and [st for st, _ in result.held_back] == ['The Hollow was abandoned']
+        assert mine == [] and [st for st, _ in result.disputed] == ['The Hollow was abandoned']
 
     def test_a_failed_check_keeps_it_provisional_and_accept_clears_it(self, project):
         project_dir, _ = project
@@ -1024,6 +1030,45 @@ class TestProvisionalRecovery:
         with _api_facts([[BAD]], [self.OTHER]):
             cmd_check.main(['--pending'])
         assert SCENE not in gate.pending(project_dir)
+
+    def _held(self, project_dir):
+        return [(r['statement'], r['status']) for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)
+                and r['statement'] == 'The Hollow was on the map']
+
+    def test_the_held_fact_is_disputed_and_accept_brings_it_into_force(self, project, capsys):
+        """#735: the fact stating what stopped the commit is in the ledger,
+        not in force, and `check --accept` brings it in."""
+        project_dir, _ = project
+        self._commit(project_dir, [self.SAME_PARA, self.OTHER])
+        assert self._held(project_dir) == [('The Hollow was on the map', 'pending')]
+        cmd_check.main(['--accept', SCENE])
+        assert self._held(project_dir) == [('The Hollow was on the map', 'binding')]
+        assert 'in force now (recorded as disputed for these)' in capsys.readouterr().out
+
+    def test_check_pending_restores_a_fact_dropped_before_735(self, project, capsys):
+        """The repair path: a book committed provisionally before #735 lost
+        the held fact. `check --pending`, failing on the same finding,
+        commits the scene provisionally again, the fact disputed."""
+        project_dir, _ = project
+        self._commit(project_dir, [self.SAME_PARA, self.OTHER])
+        rows = [r for r in ledger.load(project_dir) if not gate.is_held(r)]
+        ledger.save(project_dir, rows, command='test')   # as a pre-#735 commit left it
+        assert self._held(project_dir) == []
+        with _api_facts([[BAD]], [self.SAME_PARA, self.OTHER]), pytest.raises(SystemExit):
+            cmd_check.main(['--pending'])
+        assert self._held(project_dir) == [('The Hollow was on the map', 'pending')]
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.PROVISIONAL
+        assert 'committed provisionally again' in capsys.readouterr().out
+        cmd_check.main(['--accept', SCENE])
+        assert self._held(project_dir) == [('The Hollow was on the map', 'binding')]
+
+    def test_a_scene_not_provisional_is_not_committed_by_a_failed_check(self, project):
+        project_dir, _ = project
+        with _api_facts([[BAD]], [self.SAME_PARA, self.OTHER]), pytest.raises(SystemExit):
+            cmd_check.main([SCENE])
+        assert not [r for r in ledger.load(project_dir)
+                    if r['scene_id'] == SCENE and ledger.is_commitment(r)]
 
     def test_status_and_validate_surface_it(self, project, capsys, monkeypatch):
         project_dir, _ = project

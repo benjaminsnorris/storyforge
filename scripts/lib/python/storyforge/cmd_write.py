@@ -1125,7 +1125,7 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
                 log(f'  Not committed provisionally: {e}')
             else:
                 for line in gate.report_lines(out.result):
-                    if line.startswith(('COMMITTED', 'NOTE (not recorded: states what')):
+                    if line.startswith(('COMMITTED', 'NOTE (recorded as disputed')):
                         log(f'  {line}')
                 report_changes(out.result)
                 return False, f'provisional: {why}'

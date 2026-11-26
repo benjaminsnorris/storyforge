@@ -3203,13 +3203,103 @@ class TestProvisional:
         gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
         assert result.committed and result.provisional and not result.passed
         mine = [r['statement'] for r in ledger.load(project_dir)
-                if r['scene_id'] == SCENE and ledger.is_commitment(r)]
-        assert mine == ['The world has an edge']   # the 412 fact is held back
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)
+                and r['status'] == 'binding']
+        assert mine == ['The world has an edge']   # the 412 fact is not in force
         assert gate.pending(project_dir)[SCENE]['command'] == gate.PROVISIONAL
         assert gate.blocked(project_dir)[SCENE]   # for check --accept
         lines = gate.report_lines(result)
         assert any(line.startswith('COMMITTED (provisionally') for line in lines)
-        assert any('states what stopped the commit' in line for line in lines)
+        assert any(line.startswith('NOTE (recorded as disputed') and
+                   'states what stopped the commit' in line for line in lines)
+
+    def _scene_rows(self, project_dir):
+        return {r['statement']: r for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)}
+
+    def test_the_held_fact_is_in_the_ledger_as_disputed(self, project_dir, tmp_path):
+        """#735: Pandarus's death, held back for a false finding, was lost.
+        The fact stating what stopped the commit is recorded, not in force
+        (`pending`), linked to its finding; the scene's other facts are
+        binding."""
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        mine = self._scene_rows(project_dir)
+        assert set(mine) == {"Tarren's Hollow had 412 people", 'The world has an edge'}
+        held = mine["Tarren's Hollow had 412 people"]
+        assert held['status'] == 'pending' and gate.is_held(held)
+        [blocked] = gate.blocked(project_dir)[SCENE]
+        assert held['reviewed'] == gate.HELD + gate.finding_row_key(blocked)
+        assert mine['The world has an edge']['status'] == 'binding'
+        assert [st for st, _ in result.disputed] == ["Tarren's Hollow had 412 people"]
+        assert result.held_back == []
+
+    def test_accept_brings_the_held_fact_into_force(self, project_dir, tmp_path):
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        held_id = self._scene_rows(project_dir)["Tarren's Hollow had 412 people"]['id']
+        promoted = []
+        assert gate.accept_blocked(project_dir, SCENE, promoted=promoted)
+        assert promoted == [held_id]
+        row = self._scene_rows(project_dir)["Tarren's Hollow had 412 people"]
+        assert (row['id'], row['status'], row['reviewed']) == (held_id, 'binding', '')
+
+    def test_accept_leaves_a_fact_held_for_another_finding_disputed(
+            self, project_dir, tmp_path):
+        """A fact held for a finding `--accept` doesn't take (here one not
+        recorded in gate-blocked.csv) stays out until a re-gate clears it."""
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        rows = ledger.load(project_dir)
+        for r in rows:
+            if gate.is_held(r):
+                r['reviewed'] = gate.HELD + 'another'
+        ledger.save(project_dir, rows, command='test')
+        promoted = []
+        gate.accept_blocked(project_dir, SCENE, promoted=promoted)
+        assert promoted == []
+        assert self._scene_rows(project_dir)["Tarren's Hollow had 412 people"]['status'] \
+            == 'pending'
+
+    def test_a_regate_that_passes_replaces_the_held_fact(self, project_dir, tmp_path):
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        held_id = self._scene_rows(project_dir)["Tarren's Hollow had 412 people"]['id']
+        again = _gate(project_dir, tmp_path,
+                      [_commitment(), _commitment(statement='The world has an edge',
+                                                  quote=self.OTHER, type='world')])
+        assert again.passed and again.committed
+        mine = [r for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+        assert sorted((r['statement'], r['status']) for r in mine) == [
+            ("Tarren's Hollow had 412 people", 'binding'), ('The world has an edge', 'binding')]
+        # the held fact's id carries, so nothing that named it loses it
+        assert next(r['id'] for r in mine if r['statement'].startswith('Tarren')) == held_id
+
+    def test_a_regate_that_drops_the_fact_removes_the_held_row(self, project_dir, tmp_path):
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        _gate(project_dir, tmp_path, [_commitment(statement='The world has an edge',
+                                                  quote=self.OTHER, type='world')])
+        assert list(self._scene_rows(project_dir)) == ['The world has an edge']
+
+    def test_a_regate_that_fails_keeps_the_held_fact(self, project_dir, tmp_path):
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        before = self._scene_rows(project_dir)
+        assert not self._failing(project_dir, tmp_path).committed
+        assert self._scene_rows(project_dir) == before
+
+    def test_a_held_fact_is_not_offered_or_checked_as_in_force(self, project_dir, tmp_path):
+        result = self._failing(project_dir, tmp_path)
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        held = self._scene_rows(project_dir)["Tarren's Hollow had 412 people"]
+        from storyforge import extract
+        rows = ledger.load(project_dir)
+        in_force = extract.facts_in_force(rows, 'act2-sc01', ledger.scene_order(project_dir))
+        assert held['id'] not in {r['id'] for r in in_force}
+        edge = self._scene_rows(project_dir)['The world has an edge']
+        assert edge['id'] in {r['id'] for r in in_force}
 
     def test_an_extraction_problem_is_not_committed_provisionally(self, project_dir,
                                                                   tmp_path):
