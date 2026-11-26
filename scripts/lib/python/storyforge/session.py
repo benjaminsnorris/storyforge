@@ -743,7 +743,7 @@ def forecast(project_dir: str, scene_ids: list[str], model: str, avg_words: int,
         per = (calculate_cost(rm, system_tokens + scene_tokens + 1500, 1200)
                + calculate_cost(rm, system_tokens + scene_tokens + 800, 1500))
         review_cost = per * len(scene_ids)
-    gate_cost = gate.WRITE_GATE_COST_PER_SCENE * len(scene_ids)
+    gate_cost = gate.write_gate_cost_per_scene() * len(scene_ids)
     basis = (f'writer ~${total:.2f}, voice review ~${review_cost:.2f}, gate '
              f'~${gate_cost:.2f}; {len(scene_ids)} scene(s) of ~{avg_words:,} words after '
              f'~{story_words:,} words of story so far')

@@ -399,7 +399,7 @@ def test_the_forecast_grows_with_the_story_and_counts_the_review(project_dir):
     big = session.forecast(project_dir, ['a'], 'claude-opus-5-5', 2000, 100_000, 5000, False)
     rev = session.forecast(project_dir, ['a'], 'claude-opus-5-5', 2000, 0, 5000, True)
     assert big[0] > small[0] and rev[0] > small[0]
-    assert small[1] == gate.WRITE_GATE_COST_PER_SCENE
+    assert small[1] == gate.write_gate_cost_per_scene()
     assert 'voice review' in rev[2]
 
 

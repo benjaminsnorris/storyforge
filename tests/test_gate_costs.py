@@ -9,6 +9,8 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
+
 from storyforge import api, gate
 from storyforge.costs import print_summary
 
@@ -157,7 +159,43 @@ class TestWriteCountsTheGate:
         assert forecast, logged
         assert 'of it the gate' in forecast[0]
         gate_part = float(forecast[0].split('~$')[2].split(' ')[0])
-        assert gate_part == round(gate.WRITE_GATE_COST_PER_SCENE, 2)
+        assert gate_part == round(gate.write_gate_cost_per_scene(), 2)
+
+
+    def test_the_forecast_prices_the_questions_with_the_flag(self, project_dir, monkeypatch):
+        # write --questions: the token-model forecast prices the question
+        # layer's gate run, not the open checker's
+        from storyforge import cmd_write
+        logged = []
+        monkeypatch.setattr(cmd_write, 'log', lambda m: logged.append(m))
+        monkeypatch.setattr(cmd_write, 'check_threshold', lambda c: False)  # stop there
+        monkeypatch.setattr(cmd_write, '_held_up_front', lambda *a, **k: {})
+        monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
+        monkeypatch.setattr(gate, 'GATE_CHECK_METHOD', 'open')
+        try:
+            cmd_write.main(['--force', '--coaching', 'full', '--questions', '--scenes', SCENE])
+        except SystemExit:
+            pass
+        forecast = [m for m in logged if m.startswith('Cost forecast')]
+        assert forecast, logged
+        gate_part = float(forecast[0].split('~$')[2].split(' ')[0])
+        want = gate.QUESTIONS_GATE_COST_PER_SCENE * gate.WRITE_GATE_FIX_SHARE
+        assert gate_part == round(want, 2)
+        assert gate_part != round(gate.RECHECK_COST_PER_SCENE * gate.WRITE_GATE_FIX_SHARE, 2)
+        assert gate.GATE_CHECK_METHOD == 'open'
+
+    @pytest.mark.parametrize('method,base', [('open', 'RECHECK_COST_PER_SCENE'),
+                                             ('questions', 'QUESTIONS_GATE_COST_PER_SCENE')])
+    def test_the_write_gate_cost_follows_the_method(self, monkeypatch, method, base):
+        from storyforge import session
+        monkeypatch.setattr(gate, 'GATE_CHECK_METHOD', method)
+        want = getattr(gate, base) * gate.WRITE_GATE_FIX_SHARE
+        assert gate.write_gate_cost_per_scene() == pytest.approx(want)
+        # the session's forecast reads it when called
+        _, gate_cost, _ = session.forecast('.', ['a', 'b'], 'claude-opus-5-5', 2000, 0, 5000,
+                                           False)
+        assert gate_cost == pytest.approx(2 * want)
 
 
 class TestSpendLoggingEdges:

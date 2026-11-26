@@ -4574,13 +4574,20 @@ def recheck_cost_per_scene() -> float:
             else RECHECK_COST_PER_SCENE)
 
 
-#: What `write`'s token-model forecast prices one drafted scene's gate at
-#: (#556's review): a gate run (`RECHECK_COST_PER_SCENE`), plus a share for
-#: the fixes, their re-gates and the partial-fix retry (`_partial_fix`), which
-#: run only on the scenes that fail. A quarter more is an estimate, not
-#: measured; the ledger-priced forecast (`costs.forecast_write`) counts
-#: what this book's gates actually cost, retries included
-WRITE_GATE_COST_PER_SCENE = RECHECK_COST_PER_SCENE * 1.25
+#: The share `write`'s forecast adds to a gate run for the fixes, their
+#: re-gates and the partial-fix retry (`_partial_fix`), which run only on
+#: the scenes that fail: a quarter more, an estimate, not measured
+WRITE_GATE_FIX_SHARE = 1.25
+
+
+def write_gate_cost_per_scene() -> float:
+    """What `write`'s token-model forecast prices one drafted scene's gate at
+    (#556's review): a gate run under the run's check method
+    (`recheck_cost_per_scene()`, read when called, so `write --questions`
+    prices the question layer), plus `WRITE_GATE_FIX_SHARE` for the fixes.
+    The ledger-priced forecast (`costs.forecast_write`) counts what this
+    book's gates actually cost, retries included."""
+    return recheck_cost_per_scene() * WRITE_GATE_FIX_SHARE
 
 
 #: A pending row's command for a scene listed for a re-check, and for one
