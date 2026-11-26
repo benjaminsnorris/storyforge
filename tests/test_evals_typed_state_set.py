@@ -147,13 +147,26 @@ class TestReplay:
             ('life', 'Pell met him there')]
         assert typed_state._call.__name__ == '_call'     # put back
 
-    def test_state_of_other_prose_is_an_error_naming_its_type_only(self, private_set, tmp_path):
+    def test_our_own_errors_keep_their_message(self, private_set, tmp_path):
+        """SF-1: a ReplayError names ids and hashes, never prose."""
         path, data = private_set
         run = data['runs'][0]
         other = tss.put_blob(path, b'Dorren walked alone.')
         out = tss.replay_run(path, dict(run, files={**run['files'],
                                                      f'scenes/{SCENE}.md': other}),
                              str(tmp_path / 'run'))
+        assert out == {'error': f'ReplayError: {SCENE}: its typed state is not of its prose'}
+
+    def test_any_other_error_is_its_type_only(self, private_set, tmp_path):
+        """A malformed record's message quotes the record: only its type."""
+        path, data = private_set
+        run = data['runs'][0]
+        bad = json.dumps({'format': 1, 'scene_id': SCENE, 'records': [
+            {'type': 'holds', 'who': 'Pell', 'item': 'map', 'value': 'maybe',
+             'detail': '', 'quote': 'spoke of the map'}]}).encode()
+        out = tss.replay_run(path, dict(run, files={
+            **run['files'], f'working/typed-state/{SCENE}.json': tss.put_blob(path, bad)}),
+            str(tmp_path / 'run'))
         assert out == {'error': 'ValueError'}
 
     def test_score_by_check_and_verdict(self, private_set):
@@ -209,6 +222,30 @@ class TestSuite:
         with open(os.path.join(path, 'results', 'latest.json')) as f:
             assert 'Pell met him there' in f.read()             # private, beside the set
         assert mod.CHECKS                                       # imported once, in the parent
+
+    def test_the_gates_read_a_fall_in_false_as_a_gain(self):
+        """T-1: on the suite's own FLOORS, fewer false alarms (what #732 and
+        #733 should bring) fail the exact gate as a gain to move the floor
+        to; a new unlabelled finding or a lost debatable one reads as said."""
+        from blocking_set.runner import floor_gates
+        g = _suite().run.__globals__
+        floors, better = g['FLOORS'], g['HIGHER_IS_BETTER']
+        assert 'real_kept' in better and 'possession_false' not in better
+        same = {k: v for k, v in floors.items()}
+        gates, notes = floor_gates(same, floors, better)
+        assert all(x.passed for x in gates) and notes == []
+        fewer = dict(same, possession_false=floors['possession_false'] - 3,
+                     possession_findings=floors['possession_findings'] - 3)
+        gates, notes = floor_gates(fewer, floors, better)
+        assert {x.name for x in gates if not x.passed} == {'possession_false',
+                                                           'possession_findings'}
+        assert all('a gain' in n for n in notes) and len(notes) == 2
+        worse = dict(same, unlabelled=floors['unlabelled'] + 1,
+                     real_kept=floors['real_kept'] - 1 if floors['real_kept'] else -1)
+        _gates, notes = floor_gates(worse, floors, better)
+        assert len(notes) == 2 and all('a loss' in n for n in notes)
+        more_real = dict(same, real_kept=floors['real_kept'] + 1)
+        assert 'a gain' in floor_gates(more_real, floors, better)[1][0]
 
     def test_another_set_errors(self, private_set, tmp_path):
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))

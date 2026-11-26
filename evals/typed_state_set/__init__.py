@@ -76,6 +76,11 @@ VERDICTS = ('real', 'debatable', 'false')
 _CHECK_IN_EXPLANATION = re.compile(r'^\(typed state, (\w+)\)')
 
 
+class ReplayError(ValueError):
+    """A run this module can't replay. Its message names run ids, paths and
+    hashes, never prose, so it may reach the report."""
+
+
 class SetMissing(SuiteUnavailable):
     """The private set isn't on this machine; the message says where to put it."""
 
@@ -166,19 +171,20 @@ def put_blob(path: str, data: bytes) -> str:
 
 
 def materialize(path: str, run: dict, dest: str) -> str:
-    """Write `run`'s files under `dest`; returns `dest`. Raises ValueError
-    when a blob is missing or isn't the bytes its name says."""
+    """Write `run`'s files under `dest`; returns `dest`. Raises ReplayError
+    when a path leaves the project, or a blob is missing or isn't the bytes
+    its name says."""
     for rel, digest in sorted(run['files'].items()):
         norm = os.path.normpath(rel)
         if os.path.isabs(norm) or norm.startswith('..'):
-            raise ValueError(f'run {run["id"]}: file path {rel!r} leaves the project')
+            raise ReplayError(f'run {run["id"]}: file path {rel!r} leaves the project')
         file = blob_path(path, digest)
         if not os.path.isfile(file):
-            raise ValueError(f'run {run["id"]}: blob {digest[:12]} ({rel}) is missing')
+            raise ReplayError(f'run {run["id"]}: blob {digest[:12]} ({rel}) is missing')
         with open(file, 'rb') as f:
             data = gzip.decompress(f.read())
         if hashlib.sha256(data).hexdigest() != digest:
-            raise ValueError(f'run {run["id"]}: blob {digest[:12]} ({rel}) is not its bytes')
+            raise ReplayError(f'run {run["id"]}: blob {digest[:12]} ({rel}) is not its bytes')
         out = os.path.join(dest, norm)
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'wb') as f:
@@ -206,14 +212,14 @@ def logged_reply(items: list[dict]):
 def replay(project: str, scene: str):
     """`continuity.check_continuity` on `scene` as the gate ran it, the
     extraction answered from the scene's saved typed state. Returns its
-    `ContinuityResult`. Raises ValueError when the saved state isn't of the
+    `ContinuityResult`. Raises ReplayError when the saved state isn't of the
     scene's prose (it would be another run's reply)."""
     from storyforge import continuity, typed_state
     from storyforge.illustrations import read_scene_raw
     prose = read_scene_raw(project, scene)
     data = typed_state.load_state(typed_state.state_path(project, scene))
     if data.get('prose_sha256') != typed_state.prose_hash(prose or ''):
-        raise ValueError(f'{scene}: its typed state is not of its prose')
+        raise ReplayError(f'{scene}: its typed state is not of its prose')
     items = [{'type': r.type, 'who': r.who, 'item': r.item, 'value': r.value,
               'detail': r.detail, 'quote': r.quote} for r in data['records']]
     with logged_reply(items):
@@ -232,10 +238,14 @@ def check_of(finding) -> str:
 def replay_run(path: str, run: dict, dest: str) -> dict:
     """One run, materialized under `dest` and replayed: ``{"findings":
     [{"check", "quote", "established_scene", "explanation"}], "notes"}``,
-    or ``{"error": <the exception's type>}`` (the type only: a message can
-    quote the prose). Top level, plain data in and out, for a process pool."""
+    or ``{"error": ...}``: a `ReplayError` with its own message (it names
+    ids, paths and hashes, never prose), anything else by its type only
+    (its message can quote the prose: a malformed record, a reply). Top
+    level, plain data in and out, for a process pool."""
     try:
         result = replay(materialize(path, run, dest), run['scene'])
+    except ReplayError as e:
+        return {'error': f'ReplayError: {e}'}
     except Exception as e:
         return {'error': type(e).__name__}
     return {'findings': [{'check': check_of(f), 'quote': f.scene_quote,
