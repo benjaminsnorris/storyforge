@@ -38,15 +38,20 @@ MIN_POSITIVES = 40   # as gate-set's
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
     # recorded 2026-11-16, seeded; topped up 2026-11-17 after names written
-    # surname first ("Erdel, Tam") count as present (run 1; runs 2 and 3:
-    # recall 0.3696 and 0.3913, false alarms 2 and 1, control stops 0.6129
-    # and 0.5484). Of 46 positives, 39 are seeded and 32 asked about their
-    # fact (30 before the top-up; both newly asked are caught)
+    # surname first ("Erdel, Tam") count as present; topped up 2026-11-26
+    # (PR #754, $0.68) after the question order, the cap of 60, the
+    # earlier-scene promise skip and the namesake guard (#739, #740, #746).
+    # Run 1; runs 2 and 3: recall 0.4348 and 0.3696, false alarms 3 and 3,
+    # control stops 0.6452 and 0.5806. Before the 2026-11-26 top-up, runs
+    # 1-3 were recall 0.413/0.3696/0.3913, false alarms 1/2/1, control stops
+    # 0.4839/0.6129/0.5484: recall held, false alarms rose (4 to 8 over the
+    # three runs). Of 46 positives, 39 are seeded and 32 asked about their
+    # fact
     'recall': 0.413, 'recall_per_case': 0.4689, 'cases_caught': 9,
-    'stop_rate_positive': 0.7609, 'false_alarm_on_fact': 1, 'stop_rate_control': 0.4839,
+    'stop_rate_positive': 0.7391, 'false_alarm_on_fact': 2, 'stop_rate_control': 0.5484,
     'unfinished': 0,
     'recall_seeded': 0.4872, 'recall_asked': 0.5625, 'asked_positives': 32,
-    'asked_controls': 24,
+    'asked_controls': 25,
 }
 
 
