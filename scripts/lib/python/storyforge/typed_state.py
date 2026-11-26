@@ -12,7 +12,7 @@ Record types (`RECORD_TYPES`), with `who`, `item`, `value` and `detail`:
 |---|---|---|---|---|
 | `alive` | the person | | `dead` (dies, or is found dead), `alive` (back from death) | |
 | `at` | a living person acting, speaking or spoken to as present | where they are ('' if unsaid) | | |
-| `holds` | the holder: a person, or a place an object lies | a particular object | `gets`, `has`, `gives`, `loses`, `destroyed` | who it goes to (`gives`) |
+| `holds` | the holder: a person, or a place an object lies | a particular object, named with its owner ("Achilles' shield") | `gets`, `has`, `gives`, `loses`, `destroyed` | who it goes to (`gives`) |
 | `knows` | the POV character | a fact id the prompt offers | `learns`, `uses` (acts on it or narrates it) | |
 | `injury` | the person | the body part | `minor`, `serious`, `disabling`, `healed` | `left`, `right` or '' |
 | `uses` | the person | an injured body part | `full` (at full strength), `impaired` | `left`, `right` or '' |
@@ -24,6 +24,15 @@ label, and code computes the days (#351's direction, #713): a phrase said of
 a future event ("He'll be home in twelve days") is `after`, and its `item` is
 the scene where that event happens, so it is measured forward to that scene,
 never as time already passed since the scene it is spoken in.
+
+**A `holds` record names the owner** in `item` and a handover is one
+`gives` record naming the receiver (#748): Haiku named items by bare kind
+("spear", "shield") and wrote one handover as a `gets` and a `loses` on the
+same quote, so nothing could follow Achilles' armour from Patroclus to
+Hector. One of several alike is no record, and a thing lodged or thrown is
+no one's `has`. Files read with the earlier prompt still have bare kinds and
+paired records, so the possession check keeps its fallbacks for them
+(`continuity.object_id`'s holder-scoped names, `continuity.pair_handovers`).
 
 The plan's other records come from data the book already has, and aren't
 extracted again: `when` is scenes.csv (`timeline_day`, `time_of_day`), a
@@ -138,7 +147,7 @@ Every record has `type`, `who`, `item`, `value`, `detail` and `quote`. `quote` i
 
 - `alive`: a person dies, is killed or is found dead here: `value` `dead`. One shown alive after being dead: `alive`.
 - `at`: each living person who acts, speaks or is spoken to as present in the scene, once per place they are in: `item` where they are, as the scene names it ('' if it doesn't). Never a corpse, and never someone only remembered, mentioned, dreamed or imagined.
-- `holds`: a particular object a later scene could track (a named weapon, the ring, the letter, Hector's helmet; not "a spear" among many): `who` the holder (a person, or the place it lies), `item` the object, named the same way every time (when it is one listed under "Objects other scenes track", that name exactly), `value` `gets` (takes it, is given it, picks it up), `has` (holds, carries, uses or wears it, with no taking shown), `gives` (hands it over; `detail` who to), `loses` (drops it for good, has it taken) or `destroyed` (broken, burned, sunk).
+- `holds`: a particular object a later scene could track. `item` is its owner's name as listed above and the object ("Achilles' shield", "Hector's helmet", "Teucer's bow"), even when the text says only "his shield" or "the bow"; the owner is whose it is, not who has it now (Achilles' armour on Patroclus is "Achilles' armour"). An object no listed person owns gets a name that singles it out ("the brass key", "the queen's letter"). One of several alike (a spear when he carries two, an arrow from a quiver, a stone, a spear from the rack) gets no record unless the scene singles it out. Name an object the same way every time: when it is one listed under "Objects other scenes track", that name exactly (with its owner added if the list leaves the owner out). `who` the holder (a person, or the place it lies). `value` `gets` (picks it up or takes it from a place, from no person), `has` (holds, carries, uses or wears it, with no taking shown), `gives` (it passes from `who` to another person, handed over or taken from them; `detail` that person), `loses` (drops it, throws or shoots it, has it knocked away, to no person) or `destroyed` (broken, burned, sunk). A handover between two people is one `gives` record, from the one who had it, naming the one who gets it in `detail`: never also a `gets` or `loses` for that handover. Never `has` for an object lodged in someone or something, or already thrown or shot: no one has it until someone takes it.
 - `knows`: only for the facts listed under "Facts {pov_name} may not know yet" above: when {pov_name} learns one in this scene, `value` `learns`; when {pov_name} acts on one, says it, or the narration gives it as {pov_name}'s thought, `value` `uses`. `item` the fact's id exactly as listed.
 - `injury`: a person is hurt: `item` the body part (arm, hand, leg, eye, ribs...), `detail` `left`, `right` or '', `value` `minor`, `serious` or `disabling`; an injury that has healed (with time, by care, or by a god or magic): `healed`. A part that fails for a moment in a fight (an arm that will not come up, a leg that buckles) is `minor` unless the scene shows it lasting.
 - `uses`: a person uses a body part listed under "Injuries in force" above, or one injured earlier in this scene: `item` the part, `detail` the side, `value` `full` (as if unhurt: grips, swings, runs, lifts at full strength) or `impaired` (favours it, winces, uses it weakly).

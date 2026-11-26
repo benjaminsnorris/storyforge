@@ -711,6 +711,58 @@ class TestPossessionReportB:
         assert f == [] and any("Achilles' armour, which Hector held in s2" in n for n in notes)
 
 
+#: Achilles' armour as #748's extraction writes it: the owner named in every
+#: `item`, each handover one `gives` naming the receiver (no paired `gets`)
+ARMOUR = {
+    's1': [H('achilles', "Achilles' armour", 'gives', detail='Patroclus',
+             quote='Achilles gives him the armour')],
+    's2': [H('patroclus', "Achilles' armour", quote='Patroclus wears the armour'),
+           H('patroclus', "Achilles' armour", 'gives', detail='Hector',
+             quote='Hector strips the armour from him')],
+    's3': [H('hector', "Achilles' armour", quote='Hector puts on the armour')],
+}
+
+
+class TestOwnerNamedExtraction:
+    """#748: with the owner named and one record per handover, the armour's
+    passage is followed across three scenes."""
+
+    def _check(self, scenes, scene='s3'):
+        return continuity.check_possession(make_book(scene, scenes, chars=ILIAD))
+
+    def test_the_armour_passes_achilles_patroclus_hector_cleanly(self):
+        f, notes = self._check(ARMOUR)
+        assert f == [] and not any('possession' in n for n in notes), notes
+
+    def test_patroclus_still_wearing_it_in_scene_three_is_said(self):
+        scenes = dict(ARMOUR, s3=[H('patroclus', "Achilles' armour",
+                                    quote='Patroclus wears the armour still')])
+        f, notes = self._check(scenes)
+        assert f == []
+        assert any("Achilles' armour, which Hector held in s2" in n for n in notes), notes
+
+    def test_patroclus_wearing_it_after_the_strip_in_the_same_scene_blocks(self):
+        scenes = dict(ARMOUR)
+        scenes['s2'] = ARMOUR['s2'] + [H('patroclus', "Achilles' armour",
+                                         quote='Patroclus fastens the armour')]
+        f, _ = self._check(scenes, 's2')
+        assert [x.scene_quote for x in f] == ['Patroclus fastens the armour']
+        assert 'Hector holds' in f[0].explanation
+
+    def test_achilles_named_owner_keeps_his_armour_apart_from_hector_s_own(self):
+        # Hector's own armour, named with its owner, is another object
+        scenes = dict(ARMOUR, s3=ARMOUR['s3'] + [
+            H('hector', "Hector's armour", 'loses', quote='Hector leaves his old armour')])
+        f, notes = self._check(scenes)
+        assert f == [] and not any('possession' in n for n in notes), notes
+
+    def test_the_prompt_asks_for_the_owner_and_one_record_per_handover(self):
+        prompt = typed_state.build_prompt('s1', 'Prose.', cast=['Achilles'])
+        assert "\"Achilles' shield\"" in prompt and 'not who has it now' in prompt
+        assert 'one `gives` record' in prompt and 'never also a `gets` or `loses`' in prompt
+        assert 'Never `has` for an object lodged' in prompt
+
+
 # ============================================================================
 # Knowledge
 # ============================================================================

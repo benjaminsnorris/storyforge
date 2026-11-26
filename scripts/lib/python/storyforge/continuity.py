@@ -547,7 +547,11 @@ def object_id(book: Book, state: dict, r: Record) -> ObjectId | None:
     "the sword" in the hand that took Achilles' sword), or once held one
     by exactly that name or, failing that, by exactly one name it can be
     (so the holder who lost their key still has "the key"). It never merges
-    into another person's object: two people's shields are two shields."""
+    into another person's object: two people's shields are two shields.
+
+    Extraction names the owner since #748, so the rule for a name without
+    one is the fallback: for state read with the earlier prompt (bare kinds
+    throughout), an object no listed person owns, and a model's slip."""
     ref = object_ref(book, r.item)
     if not ref.name:
         return None
@@ -591,7 +595,11 @@ def pair_handovers(book: Book, records: list[Record]) -> list[Record]:
     place (an object dropped there) stays a place's: it is only put after
     the parting, so the fold lays the parted object there
     (`_dropped_at`) and its holder may pick it up again (#732's review,
-    SF-1). A `gives` naming another recipient isn't paired."""
+    SF-1). A `gives` naming another recipient isn't paired.
+
+    A fallback since #748, whose extraction writes a handover as one `gives`
+    naming the receiver: state read with the earlier prompt has the pairs,
+    and a model may still write one."""
     out: list[Record | None] = list(records)
     used: set[int] = set()
     for gi, g in enumerate(records):
