@@ -16,15 +16,18 @@ ruled on from this scene's source, #742). It rules:
 - each proposed commitment: does the source contradict it? One it does is
   still committed (#742: the ledger records what the book says, and the
   check rules by the source's text, whose own slips differ from the
-  original); the departure is reported (`GateResult.source_departs`) and
-  the scene listed for the author (below). A verdict whose own reasoning
-  says the source isn't contradicted (`_SAYS_AGREES`), or that names a known
-  slip of the source's text (`source.read_errata`, sent with the call so
-  the call rules by the original), is not a departure (a note);
+  the departure is reported (`GateResult.source_departs`) and
+  the scene listed for the author (below). A verdict whose reasoning ends
+  by concluding the source agrees (`says_agrees`), or that rests on a known
+  slip of the source's text with the fact on the original's side
+  (`_follows_original`; `source.read_errata`, sent with the call so the
+  call rules by the original), is not a departure (a note). While the
+  scene is listed, every fact of it is sent again, so a departure is
+  re-ruled before the listing can come off;
 - each verified contradiction with an earlier scene: which side the source
-  backs, with a source quote code finds in the source sent (`quote_in`,
-  `MIN_SOURCE_QUOTE_WORDS`; one not found is a note and the finding
-  stands). When it backs this scene, the finding doesn't block it
+  backs, with a source quote code finds in the source prose sent
+  (`_quoted`: one unbroken run of `MIN_SOURCE_QUOTE_WORDS` words, never the
+  summary or brief; one not found is a note and the finding stands). When it backs this scene, the finding doesn't block it
   (`GateResult.source_backed`): on commit the earlier scene's commitments
   stating it become `superseded` and this scene's are committed, so later
   scenes follow the source (`gate._source_supersede`; one whose earlier fact
@@ -37,8 +40,8 @@ ruled on from this scene's source, #742). It rules:
   the source contradicts is listed the same way;
 - each other blocking finding, the scene's own (blocking, possession) and
   those against the ledger, a bible or the calendar (#742): does the source
-  narrate this same sequence? `source-has-it` (with a source quote code
-  finds), `prose-departs` or `silent`. `source-has-it` doesn't clear it
+  narrate this same sequence? `source-has-it` (with a quote code finds in
+  the prose of the source this scene adapts), `prose-departs` or `silent`. `source-has-it` doesn't clear it
   (Ben, 2026-11-26: a physical slip inside a scene is smoothed even when
   the original has it): the finding still blocks and goes to the fix, and
   the source's passage is listed for the author in
@@ -122,22 +125,26 @@ class SourceReviewError(RuntimeError):
     """The call failed, was cut off, or its reply isn't the schema."""
 
 
-#: A "contradicts" whose own reasoning says otherwise (#742: 5 of 18 on
-#: *Wrath Like Smoke*: "...so the source is not contradicted", "(Wait: ...
-#: matches the source.)"): not a departure
-_SAYS_AGREES = re.compile(
-    r"\bnot\s+(?:\w+\s+)?contradict|"
-    r"\b(?:isn't|aren't|wasn't|weren't|doesn't|don't|didn't)\s+(?:\w+\s+)?contradict|"
-    r"\buncontradicted\b|\bno\s+contradiction\b|"
-    r"(?<!\bnot\s)(?<!n't\s)(?<!\blonger\s)(?<!\bnever\s)"
-    r"\b(?:matches|agrees\s+with|is\s+consistent\s+with)\s+the\s+source\b",
+#: The last sentence of a "contradicts" whose reasoning concludes the
+#: source agrees (#742: 5 of 18 on *Wrath Like Smoke*: "...so the source is
+#: not contradicted", "(Wait: this matches the source.)"). Only a whole
+#: closing sentence of agreement counts (`says_agrees`): partial agreement
+#: ("only the count matches the source") or a denial inside a departure
+#: ("not only contradicts") is still a departure (#742's review, SF-2)
+_AGREES_END = re.compile(
+    r"(?:(?:so|thus|therefore|hence|and|wait)\s*,?\s+)?"
+    r"(?:this|it|that|the\s+(?:source|prose|fact|scene|statement))\s+"
+    r"(?:is\s+(?:not|never)\s+contradicted|is\s+uncontradicted"
+    r"|(?:matches|agrees\s+with|is\s+consistent\s+with)\s+the\s+source(?:\s+text)?)",
     re.IGNORECASE)
 
 
 def says_agrees(why: str) -> bool:
-    """Whether a "contradicts" verdict's reasoning says the source isn't
-    contradicted (`_SAYS_AGREES`)."""
-    return bool(_SAYS_AGREES.search(why or ''))
+    """Whether a "contradicts" verdict's reasoning ends by concluding the
+    source agrees: its last sentence is wholly `_AGREES_END`."""
+    text = re.sub(r'[\s.!?)\]"\']+$', '', why or '')
+    last = re.split(r'[.,;:!?(]\s*', text)[-1].strip()
+    return bool(last and _AGREES_END.fullmatch(last))
 
 
 @dataclass
@@ -167,6 +174,9 @@ class Setup:
     skip: str = ''
     #: (source slug, source scene id) → its known slips (`source.read_errata`)
     errata: dict = field(default_factory=dict)
+    #: what the check can't use and says on every run (an errata row naming
+    #: a source scene the source hasn't got, #742's review SF-4)
+    warnings: tuple = ()
 
     def active(self) -> bool:
         return not self.skip and bool(self.refs)
@@ -203,7 +213,13 @@ def setup(project_dir: str) -> Setup | None:
                  for r in source.split_ids(row.get('source_scenes', ''))]
         if found and all(found):
             refs[sid] = found
-    return Setup(refs, rules, by_scene, errata=errata)
+    warnings = tuple(
+        f'{cfg.errata_path(cfg.project(slug))}: the known slip at '
+        f'{e.ref or "(no ref)"} names source scene {sid!r}, which source {slug} hasn\'t '
+        f'got: it is never sent; fix its source_scene'
+        for (slug, sid), slips in errata.items() if sid not in cat.get(slug, {})
+        for e in slips)
+    return Setup(refs, rules, by_scene, errata=errata, warnings=warnings)
 
 
 def _source_text(project_dir: str, refs: list[tuple[str, str]]) -> str:
@@ -278,7 +294,7 @@ def build_prompt(scene_id: str, prose: str, facts: list[dict[str, str]],
 2. Contradictions: each is between this scene and an earlier scene of the adaptation. Which side does the source back? `this` when the source tells it this scene's way, `earlier` when the earlier scene's, `neither` when the source backs neither or is silent.
 3. Findings: each is a problem the check found in this scene (its own staging, what a character holds, or a fact of the book). Does the source narrate this same sequence? `source-has-it` only when the source itself tells what the finding flags, the same way (the source's own oddity); `prose-departs` when the source tells it otherwise; `silent` when the source doesn't tell it, or the prose adds to it what the source doesn't have (staging, a direction, a detail the source never gives). When the source has part of it and the prose adds the part the finding flags, that is not `source-has-it`.
 
-For `this` and `source-has-it`, give `source_quote`: the source's own words, copied exactly (at least {MIN_SOURCE_QUOTE_WORDS} words), from the source shown below; otherwise give an empty `source_quote`. Give each `why` in one sentence, quoting the source.
+For `this` and `source-has-it`, give `source_quote`: one unbroken run of the source's own prose (not its summary or brief), copied exactly, at least {MIN_SOURCE_QUOTE_WORDS} words, with no `...`. For `this` it may come from any source prose shown; for `source-has-it`, from the prose of the source this scene adapts. Otherwise give an empty `source_quote`. Give each `why` in one sentence, quoting the source.
 
 ## Version rules
 
@@ -313,19 +329,37 @@ Treatment: {treatment or '(none)'}. Note: {note or '(none)'}.{slips}
 {finding_lines}"""
 
 
-def _quoted(quote: str, text: str) -> bool:
-    """Whether `quote` is the source's own words: in `text` (the source
-    sent) and at least `MIN_SOURCE_QUOTE_WORDS` long."""
+_PROSE = re.compile(r'<source-prose[^>]*>\n?(.*?)</source-prose>', re.S)
+
+
+def source_prose_of(text: str) -> str:
+    """The source's own prose in `text` (a `_source_text`): its
+    `<source-prose>` parts, never the summary or brief (#742's review,
+    CR-2)."""
+    return '\n\n'.join(_PROSE.findall(text))
+
+
+def _quoted(quote: str, prose: str) -> bool:
+    """Whether `quote` is the source's own words: one unbroken run of at
+    least `MIN_SOURCE_QUOTE_WORDS` words of `prose` (no `...` joining
+    pieces, #742's review CR-3)."""
     from storyforge.quotes import quote_in, word_count
-    return word_count(quote) >= MIN_SOURCE_QUOTE_WORDS and quote_in(text, quote)
+    if '...' in quote or '\u2026' in quote:
+        return False
+    return word_count(quote) >= MIN_SOURCE_QUOTE_WORDS and quote_in(prose, quote)
 
 
-def _errata_named(why: str, errata: list) -> str:
-    """The ref of a known slip (`source.Erratum`) whose source text `why`
-    quotes, or ''."""
+def _follows_original(fact: dict[str, str], why: str, errata: list) -> str:
+    """The ref of a known slip (`source.Erratum`) a "contradicts" on `fact`
+    rests on, with the fact on the original's side: the fact's own words
+    (statement or quote) have the original's and not the slip's, and `why`
+    cites the slip. '' when none: a fact that follows the slip, against the
+    original, is a departure (#742's review, CR-1, SF-3)."""
     from storyforge.quotes import quote_in
+    own = f'{fact.get("statement", "")}\n{fact.get("quote", "")}'
     for e in errata:
-        if quote_in(why, e.has):
+        if (quote_in(own, e.original) and not quote_in(own, e.has)
+                and quote_in(why, e.has)):
             return e.ref or e.source_scene
     return ''
 
@@ -385,8 +419,12 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
         raise SourceReviewError(f'{scene_id}: the source can\'t be read: {e}') from e
     if not facts and not contradictions and not findings:
         return out
-    shown = '\n\n'.join([this, *earlier.values()])
-    slips = [e for slug, sid in refs for e in ctx.errata.get((slug, sid), [])]
+    # #742's review (CR-2, CR-7): a quote is checked against the source's
+    # own prose; a same-scene finding's against this scene's source alone
+    this_prose = source_prose_of(this)
+    shown = '\n\n'.join([this_prose, *(source_prose_of(t) for t in earlier.values())])
+    # the facts are this scene's: only its own source scenes' slips clear one
+    slips = [e for slug, sid in ctx.refs[scene_id] for e in ctx.errata.get((slug, sid), [])]
     row = ctx.map_rows.get(scene_id, {})
     prompt = build_prompt(scene_id, prose, facts,
                           [(c.scene_quote, c.established_scene, c.established_quote,
@@ -411,13 +449,14 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
                 continue
             why = str(item.get('why', ''))
             statement = _one_line(facts[n - 1].get('statement', ''))[:100]
-            slip = _errata_named(why, slips)
+            slip = _follows_original(facts[n - 1], why, slips)
             if says_agrees(why):
-                out.notes.append(f'"contradicts" set aside, its own reasoning says the source '
-                                 f'agrees: {statement} ({_one_line(why)[:160]})')
+                out.notes.append(f'"contradicts" set aside, its own reasoning concludes the '
+                                 f'source agrees: {statement} ({_one_line(why)[:160]})')
             elif slip:
                 out.notes.append(f'"contradicts" set aside, it rests on a known slip of the '
-                                 f'source text ({slip}): {statement}')
+                                 f'source text ({slip}) and the fact follows the original: '
+                                 f'{statement}')
             else:
                 out.departs.append((n - 1, why))
         for item in reply['contradictions']:
@@ -430,19 +469,19 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
             else:
                 out.notes.append(f'the source was said to back {scene_id} against '
                                  f'{contradictions[n - 1].established_scene}, but its quote '
-                                 f'is not in the source sent ("{_one_line(quote)[:120]}"): '
+                                 f'is not words of the source sent ("{_one_line(quote)[:120]}"): '
                                  f'the contradiction stands')
         for item in reply.get('findings') or []:
             n = int(item['n'])
             if item['verdict'] != 'source-has-it' or not 1 <= n <= len(findings):
                 continue
             quote, why = str(item.get('source_quote', '')), str(item.get('why', ''))
-            if _quoted(quote, shown):
+            if _quoted(quote, this_prose):
                 out.has_it.append((n - 1, _one_line(quote), why))
             else:
                 out.notes.append(f'the source was said to have "'
                                  f'{_one_line(findings[n - 1].scene_quote)[:80]}", but its '
-                                 f'quote is not in the source sent '
+                                 f'quote is not words of the source this scene adapts '
                                  f'("{_one_line(quote)[:120]}"): not listed')
     except (RuntimeError, ValueError, KeyError, TypeError) as e:
         raise SourceReviewError(f'{scene_id}: the source check failed: {e}') from e

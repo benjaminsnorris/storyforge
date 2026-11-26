@@ -19,6 +19,9 @@ EARLIER = 'act1-sc01'
 TOLD = {'s1': 'the herald counted three hundred souls in the hollow',
         's2': 'the herald counted four hundred and twelve souls, and the sword broke in '
               'his hand'}
+#: each source scene's summary (ours, not the source's words: never a quote)
+BRIEF = {'s1': 'the herald takes a census of the whole hollow',
+         's2': 'the herald recounts the hollow and his weapon fails him'}
 SECOND = "The hollow's well ran dry"
 SECOND_QUOTE = 'She tapped the empty space on the map'
 
@@ -35,7 +38,9 @@ def adaptation(monkeypatch):
                             'Rule: keep the poem\'s history.', {SCENE: {'treatment': 'adapt'}})
     monkeypatch.setattr(gate_source, 'setup', lambda project_dir: ctx)
     monkeypatch.setattr(gate_source, '_source_text',
-                        lambda project_dir, refs: f'SOURCE {refs[0][1]}: {TOLD[refs[0][1]]}')
+                        lambda project_dir, refs: f'SOURCE {refs[0][1]}: {BRIEF[refs[0][1]]}\n'
+                                                  f'<source-prose scene="{refs[0][1]}">\n'
+                                                  f'{TOLD[refs[0][1]]}\n</source-prose>')
     monkeypatch.setattr(gate_source, 'has_source_prose', lambda project_dir, refs: True)
     gate_source._MEMO.clear()
     return ctx
@@ -424,13 +429,98 @@ def test_a_same_scene_finding_is_sent_and_the_source_having_it_is_listed_not_cle
     assert len(gate.source_notes(project_dir)) == 1
 
 
-@pytest.mark.parametrize('quote', ['the sword shattered in his grip',   # not the source's
-                                   'sword broke'])                       # too short
-def test_source_has_it_needs_the_sources_own_words(project_dir, tmp_path, adaptation, quote):
-    result = _run(project_dir, tmp_path, _two(), findings=[_own()],
+@pytest.mark.parametrize('quote', [
+    'the sword shattered in his grip',           # not the source's
+    'sword broke',                                # too short
+    'the herald recounts the hollow and his weapon fails him',   # our summary (CR-2)
+    'the ... sword ... in ... hand',              # pieces joined by "..." (CR-3)
+    'counted three hundred souls in the hollow',  # an earlier scene's source (CR-7)
+])
+def test_source_has_it_needs_this_scenes_own_source_words(
+        project_dir, tmp_path, adaptation, quote):
+    """#742's review (CR-2, CR-3, CR-7): only an unbroken run of the
+    source's own prose, from the source this scene adapts."""
+    _earlier_fact(project_dir)   # the earlier scene's source is sent too
+    result = _run(project_dir, tmp_path, _two(), findings=[_own(), _contradiction()],
                   source=_ruled('source-has-it', quote))
     assert result.source_has_it == [] and gate.source_notes(project_dir) == []
-    assert any('not in the source sent' in n for n in result.source_notes)
+    assert any('not words of the source this scene adapts' in n for n in result.source_notes)
+
+
+def test_backing_this_scene_may_quote_any_source_prose_sent(project_dir, tmp_path, adaptation):
+    """#742's review (T-7): an earlier-scene contradiction may quote the
+    earlier scene's source; a quote from a source not sent is refused."""
+    _earlier_fact(project_dir)
+    result = _run(project_dir, tmp_path, _two(), findings=[_contradiction()],
+                  source={'facts': [], 'findings': [], 'contradictions': [
+                      {'n': 1, 'backs': 'this', 'why': 'w',
+                       'source_quote': 'counted three hundred souls in the hollow'}]})
+    assert result.source_backed
+    gate_source._MEMO.clear()
+    gate.clear_pending(project_dir, SCENE)
+    result = _run(project_dir, tmp_path, [_commitment(statement='A new fact', quote=SECOND_QUOTE)],
+                  findings=[_contradiction()],
+                  source={'facts': [], 'findings': [], 'contradictions': [
+                      {'n': 1, 'backs': 'this', 'why': 'w',
+                       'source_quote': 'a line from a source never sent here'}]})
+    assert result.source_backed == []
+    assert any('not words of the source sent' in n for n in result.source_notes)
+
+
+def test_an_unverified_finding_is_sent_too(project_dir, tmp_path, adaptation):
+    """#742's review (T-2): every blocking finding, its quote checked or not."""
+    sent = []
+    bad = dict(_own(), scene_quote='words that are nowhere in the scene at all')
+    result = _run(project_dir, tmp_path, _two(), findings=[bad], sent=sent)
+    assert result.unverified
+    assert 'words that are nowhere in the scene' in sent[0].split('## Findings')[1]
+
+
+def test_a_notes_row_keeps_its_cells_and_lf(project_dir, tmp_path, adaptation):
+    """#742's review (T-3): a `|` in the reasoning can't split the row."""
+    import os
+    reply = _ruled('source-has-it')
+    reply['findings'][0]['why'] = 'the source | tells it'
+    _run(project_dir, tmp_path, _two(), findings=[_own()], source=reply)
+    [row] = gate.source_notes(project_dir)
+    assert '|' not in row['why'] and row['source_quote'] == HAS_IT
+    with open(os.path.join(project_dir, gate.SOURCE_NOTES_PATH), 'rb') as f:
+        assert b'\r\n' not in f.read()
+
+
+def test_a_second_finding_citing_the_same_passage_gets_its_own_row(
+        project_dir, tmp_path, adaptation):
+    """#742's review (SF-5)."""
+    other = dict(_own(), explanation='the hilt is thrown down')
+    reply = _ruled('source-has-it')
+    reply['findings'].append(dict(reply['findings'][0], n=2))
+    _run(project_dir, tmp_path, _two(), findings=[_own(), other], source=reply)
+    assert len(gate.source_notes(project_dir)) == 2
+
+
+def test_an_unreadable_notes_file_is_said_and_the_finding_still_blocks(
+        project_dir, tmp_path, adaptation):
+    """#742's review (T-4)."""
+    import os
+    path = os.path.join(project_dir, gate.SOURCE_NOTES_PATH)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('not|the|header\n')
+    result = _run(project_dir, tmp_path, _two(), findings=[_own()],
+                  source=_ruled('source-has-it'))
+    assert not result.passed and result.source_has_it
+    assert any(gate.SOURCE_NOTES_PATH in n and 'could not be updated' in n
+               for n in result.source_notes)
+
+
+def test_other_findings_are_part_of_the_memo(project_dir, tmp_path, adaptation):
+    """#742's review (T-6): another finding is another ruling."""
+    sent = []
+    _run(project_dir, tmp_path, _two(), findings=[_own()], sent=sent)
+    gate.clear_pending(project_dir, SCENE)
+    _run(project_dir, tmp_path, _two(),
+         findings=[dict(_own(), explanation='another problem')], sent=sent)
+    assert len(sent) == 2
 
 
 @pytest.mark.parametrize('verdict', ['silent', 'prose-departs'])
@@ -448,14 +538,14 @@ def test_a_contradiction_whose_earlier_source_does_not_fit_is_still_ruled_on(
     """#742: the Aeneas finding went unruled because the earlier scene's
     source passed the budget, though the healing passage was in this
     scene's own source."""
-    monkeypatch.setattr(gate_source, 'MAX_SOURCE_CHARS', 90)
+    monkeypatch.setattr(gate_source, 'MAX_SOURCE_CHARS', 250)
     _earlier_fact(project_dir)
     sent = []
     result = _run(project_dir, tmp_path, _two(), findings=[_contradiction()], sent=sent,
                   source={'facts': [], 'findings': [], 'contradictions': [
                       {'n': 1, 'backs': 'this', 'why': 'w',
                        'source_quote': 'counted four hundred and twelve souls'}]})
-    assert 'SOURCE s1' not in sent[0]
+    assert 'SOURCE s2' in sent[0] and 'SOURCE s1' not in sent[0]
     assert f'The source behind {EARLIER} is not shown' in sent[0]
     assert result.passed and result.source_backed
     assert any('ruled on from' in n and 'alone' in n for n in result.source_notes)
@@ -480,7 +570,7 @@ def test_backing_this_scene_needs_the_sources_own_words(project_dir, tmp_path, a
 
 @pytest.mark.parametrize('why', ['The prose has 412, so the source is not contradicted.',
                                  'The source has a dry well. (Wait: this matches the source.)'])
-def test_a_contradicts_whose_reasoning_says_it_agrees_is_set_aside(
+def test_a_contradicts_whose_reasoning_concludes_it_agrees_is_set_aside(
         project_dir, tmp_path, adaptation, why):
     """#742: 5 of 18 "contradicts" verdicts contradicted their own reasoning."""
     result = _run(project_dir, tmp_path, _two(), source={
@@ -491,33 +581,115 @@ def test_a_contradicts_whose_reasoning_says_it_agrees_is_set_aside(
     assert any('set aside' in n for n in result.source_notes)
 
 
-def test_says_agrees_keeps_a_real_departure():
-    assert not gate_source.says_agrees('The source has a spear, not an arrow.')
-    assert not gate_source.says_agrees('The prose no longer matches the source: the stern.')
+@pytest.mark.parametrize('why', [
+    'The source has a spear, not an arrow.',
+    'The prose no longer matches the source: the stern.',
+    # #742's review (SF-2, CR-4, T-1): partial agreement, or a denial
+    # inside a departure, is still a departure
+    'The prose not only contradicts the source, it adds a death.',
+    'The fact does not merely contradict the source; it reverses the outcome.',
+    'No contradiction in the order, but the source has three, not four.',
+    'Only the count matches the source; the person is wrong.',
+    "The prose matches the source's count but not its cause: the source has a spear.",
+    'Although the order matches the source, the outcome differs.',
+])
+def test_a_partial_or_denied_agreement_is_still_a_departure(
+        project_dir, tmp_path, adaptation, why):
+    assert not gate_source.says_agrees(why)
+    result = _run(project_dir, tmp_path, _two(), source={
+        'facts': [{'n': 2, 'verdict': 'contradicts', 'why': why}], 'contradictions': [],
+        'findings': []})
+    assert result.source_departs == [(SECOND, why)]
 
 
-def _erratum(sid='s2', has='four hundred and twelve souls', original='four hundred souls'):
+def _erratum(sid='s2', has='the well was full', original='well ran dry'):
     from storyforge.source import Erratum
     return Erratum('7.471', sid, has, original, 'Murray', 'butler', 'homer')
 
 
-def test_known_slips_are_sent_and_a_verdict_resting_on_one_is_set_aside(
+def _with_errata(monkeypatch, adaptation, errata):
+    monkeypatch.setattr(gate_source, 'setup', lambda project_dir: gate_source.Setup(
+        adaptation.refs, adaptation.rules, adaptation.map_rows, errata=errata))
+
+
+def test_known_slips_are_sent_and_a_fact_following_the_original_is_not_a_departure(
         project_dir, tmp_path, adaptation, monkeypatch):
     """#742 (Ben, 2026-11-26): Homer wins over Butler; known slips are in an
-    errata file, sent with the call, and a verdict quoting one is set aside."""
-    monkeypatch.setattr(gate_source, 'setup', lambda project_dir: gate_source.Setup(
-        adaptation.refs, adaptation.rules, adaptation.map_rows,
-        errata={('src', 's2'): [_erratum()]}))
+    errata file, sent with the call, and a verdict resting on one, against a
+    fact that follows the original, is set aside."""
+    _with_errata(monkeypatch, adaptation, {('src', 's2'): [_erratum()]})
     sent = []
     result = _run(project_dir, tmp_path, _two(), sent=sent, source={
         'facts': [{'n': 2, 'verdict': 'contradicts',
-                   'why': 'The source has "four hundred and twelve souls".'}],
+                   'why': 'The source has "the well was full".'}],
         'contradictions': [], 'findings': []})
     assert '## Known slips of the source text' in sent[0]
-    assert ('- 7.471, s2: butler has "four hundred and twelve souls"; homer has "four '
-            'hundred souls" (checked: Murray)') in sent[0]
+    assert ('- 7.471, s2: butler has "the well was full"; homer has "well ran dry" '
+            '(checked: Murray)') in sent[0]
     assert result.source_departs == []
     assert any('known slip' in n and '7.471' in n for n in result.source_notes)
+
+
+def test_a_fact_following_the_slip_is_a_departure(project_dir, tmp_path, adaptation,
+                                                  monkeypatch):
+    """#742's review (CR-1): prose on the translation's side of a known slip,
+    against the original, departs."""
+    _with_errata(monkeypatch, adaptation, {('src', 's2'): [_erratum()]})
+    butler = _commitment(statement='The hollow said the well was full', quote=SECOND_QUOTE)
+    why = 'The original has "well ran dry"; the prose has "the well was full".'
+    result = _run(project_dir, tmp_path, [_commitment(), butler], source={
+        'facts': [{'n': 2, 'verdict': 'contradicts', 'why': why}],
+        'contradictions': [], 'findings': []})
+    assert result.source_departs == [('The hollow said the well was full', why)]
+
+
+def test_a_slip_of_a_source_scene_not_in_the_call_is_not_used(
+        project_dir, tmp_path, adaptation, monkeypatch):
+    """#742's review (SF-3, T-5)."""
+    _with_errata(monkeypatch, adaptation, {('src', 's1'): [_erratum('s1')]})
+    sent = []
+    why = 'The source has "the well was full".'
+    result = _run(project_dir, tmp_path, _two(), sent=sent, source={
+        'facts': [{'n': 2, 'verdict': 'contradicts', 'why': why}],
+        'contradictions': [], 'findings': []})
+    assert 'Known slips' not in sent[0]
+    assert result.source_departs == [(SECOND, why)]
+
+
+def test_a_departure_keeps_its_listing_until_it_is_gone_or_re_ruled(
+        project_dir, tmp_path, adaptation):
+    """#742's review (SF-1): the departing fact is committed, so it was never
+    sent again; an edit that brought one new ruled fact cleared the scene's
+    listing with the departure still in the prose."""
+    import os
+    departs = {'facts': [{'n': 2, 'verdict': 'contradicts', 'why': 'the well is full'}],
+               'contradictions': [], 'findings': []}
+    _run(project_dir, tmp_path, _two(), source=departs)
+    assert SCENE in gate.source_fixes(project_dir)
+    path = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text + '\n\nAn unrelated new line.\n')
+    gate_source._MEMO.clear()
+    sent = []
+    new = _commitment(statement='The lamp was lit', quote=SECOND_QUOTE)
+    _run(project_dir, tmp_path, _two() + [new], sent=sent, source={
+        'facts': [{'n': 1, 'verdict': 'agrees', 'why': 'w'},
+                  {'n': 2, 'verdict': 'contradicts', 'why': 'the well is full'},
+                  {'n': 3, 'verdict': 'not-in-source', 'why': 'w'}],
+        'contradictions': [], 'findings': []})
+    assert SECOND in sent[0]   # sent again while listed
+    assert SCENE in gate.source_fixes(project_dir)
+    assert gate.source_fix_waits(project_dir, SCENE)   # waits on the author again
+    # re-ruled with no departure: the listing comes off
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text + '\n\nAnother line.\n')
+    gate_source._MEMO.clear()
+    _run(project_dir, tmp_path, _two() + [new], source={
+        'facts': [{'n': i, 'verdict': 'agrees', 'why': 'w'} for i in (1, 2, 3)],
+        'contradictions': [], 'findings': []})
+    assert SCENE not in gate.source_fixes(project_dir)
 
 
 def test_without_errata_the_prompt_has_no_slips_section(project_dir, tmp_path, adaptation):
@@ -588,6 +760,31 @@ def test_setup_reads_the_errata_and_an_unreadable_file_skips_the_check(tmp_path,
         raise source.SourceError('source.errata: e.csv could not be read (gone)')
     monkeypatch.setattr(source, 'read_errata', bad)
     assert 'e.csv could not be read' in gate_source.setup(project).skip
+
+
+def test_an_errata_row_naming_no_source_scene_is_said(tmp_path, monkeypatch):
+    """#742's review (SF-4, CR-5): a mistyped source_scene was never sent,
+    and nothing said so."""
+    from source_helpers import SNAPSHOT_FILES, _write, import_source, make_adaptation
+    from storyforge import source
+    project = make_adaptation(tmp_path / 'book')
+    import_source(project)
+    _write(project, SNAPSHOT_FILES)
+    monkeypatch.setattr(source, 'read_errata', lambda p, cfg: {
+        ('odyssey', 'gods-debate'): [_erratum('gods-debate')],
+        ('odyssey', 'gods-debat'): [_erratum('gods-debat')]})
+    monkeypatch.setattr(source.SourceConfig, 'errata_path', lambda self, proj: 'e.csv')
+    ctx = gate_source.setup(project)
+    assert len(ctx.warnings) == 1 and "'gods-debat'" in ctx.warnings[0]
+    assert 'e.csv' in ctx.warnings[0] and '7.471' in ctx.warnings[0]
+
+
+def test_the_setups_warnings_are_said_on_every_run(project_dir, tmp_path, adaptation,
+                                                    monkeypatch):
+    said = 'e.csv: the known slip at 7.471 names source scene \'x\', which ...'
+    monkeypatch.setattr(gate_source, 'setup', lambda p: gate_source.Setup(
+        adaptation.refs, adaptation.rules, adaptation.map_rows, warnings=(said,)))
+    assert said in _run(project_dir, tmp_path, _two()).source_notes
 
 
 def test_no_errata_key_reads_nothing(tmp_path):

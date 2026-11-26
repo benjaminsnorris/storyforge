@@ -1488,6 +1488,7 @@ def _apply_source(result: GateResult, project_dir: str, scene_id: str, prose: st
     if ctx.skip:
         result.source_notes.append(f'not checked against the source: {ctx.skip}')
         return
+    result.source_notes.extend(ctx.warnings)
     if scene_id not in ctx.refs:
         result.source_notes.append('not checked against the source: the scene is invented '
                                    'or not mapped in reference/source-map.csv')
@@ -1502,7 +1503,17 @@ def _apply_source(result: GateResult, project_dir: str, scene_id: str, prose: st
                 if f.kind == 'contradiction' and not _among(f, contradictions)
                 and not _among(f, result.plan_conflicts)]
     known = {ledger.fact_key(r) for r in old_rows}
-    fresh = [i for i, r in enumerate(result.proposed) if ledger.fact_key(r) not in known]
+    try:
+        listed = scene_id in source_fixes(project_dir)
+    except GateError as e:
+        result.source_notes.append(str(e))
+        listed = False
+    # #742's review (SF-1): a fact the source contradicts is committed, so
+    # it is never new again; while the scene is listed to fix toward the
+    # source every fact is sent, so the listing comes off only once each
+    # departure is gone or re-ruled (`_keep_superseded`)
+    fresh = [i for i, r in enumerate(result.proposed)
+             if listed or ledger.fact_key(r) not in known]
     if not fresh and not contradictions and not blocking:
         return
     try:
@@ -1992,7 +2003,7 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
                             f'the source contradicts {len(result.source_departs)} fact(s) read '
                             f'from it (recorded as the book has them): '
                             + '; '.join(_one_line(st)[:100] for st, _ in result.source_departs[:3]),
-                            prose=prose)
+                            prose=prose, refresh=True)
     except GateError as e:   # the ledger is written; say why the list wasn't updated
         from storyforge.common import log
         log(f'WARNING: {scene_id} passed, but {PENDING_PATH} could not be updated: {e}. '
@@ -2097,17 +2108,23 @@ def _write_source_fixes(project_dir: str, rows: dict[str, dict[str, str]]) -> No
             f.write('|'.join(rows[sid][c] for c in _SOURCE_FIX_COLUMNS) + '\n')
 
 
-def mark_source_fix(project_dir: str, scene_id: str, why: str, prose: str | None = None) -> None:
+def mark_source_fix(project_dir: str, scene_id: str, why: str, prose: str | None = None,
+                    refresh: bool = False) -> None:
     """List `scene_id` for the author to fix toward the source (#557), in
     `SOURCE_FIX_PATH`, with the prose it has now (`prose`, else the scene
     file): the row stays until a commit of the scene with other prose. A
-    scene listed already gets `why` added."""
+    scene listed already gets `why` added. `refresh`: a row already giving
+    `why` takes the prose it has now (#742's review, SF-1: a departure the
+    edited prose still has, so `check --pending` waits on the author again)."""
     from storyforge.common import csv_safe
     rows = source_fixes(project_dir)
     sha = _prose_sha(prose) if prose is not None else _scene_sha(project_dir, scene_id)
     why = csv_safe(_one_line(why))
     old = rows.get(scene_id)
     if old and why in old['reason']:
+        if refresh and old['prose'] != sha:
+            rows[scene_id] = dict(old, prose=sha)
+            _write_source_fixes(project_dir, rows)
         return
     reason = f"{old['reason']} / {why}" if old else why
     rows[scene_id] = {'scene_id': scene_id, 'prose': sha, 'reason': reason}
@@ -2119,8 +2136,8 @@ def mark_source_fix(project_dir: str, scene_id: str, why: str, prose: str | None
 #: for the author: `scene_id|prose|finding|source_quote|why`, `prose` the
 #: sha1 of the prose ruled on. The finding still blocks and is fixed; the
 #: row is the author's record that the original has it (whether to keep it,
-#: with the license on the page, is theirs). One row a scene and source
-#: passage; the gate never takes a row off
+#: with the license on the page, is theirs). One row a scene, finding and
+#: source passage; the gate never takes a row off
 SOURCE_NOTES_PATH = 'working/gate-source-notes.csv'
 _SOURCE_NOTES_COLUMNS = ['scene_id', 'prose', 'finding', 'source_quote', 'why']
 
@@ -2160,16 +2177,18 @@ def note_source_has_it(project_dir: str, scene_id: str, prose: str,
     from storyforge.common import csv_safe
     from storyforge.quotes import normalize
     rows = source_notes(project_dir)
-    have = {(r['scene_id'], normalize(r['source_quote'])) for r in rows}
+    have = {(r['scene_id'], normalize(r['finding']), normalize(r['source_quote']))
+            for r in rows}
     sha = _prose_sha(prose)
     added = False
     for f, quote, why in found:
         quote = csv_safe(_one_line(quote))
-        if (scene_id, normalize(quote)) in have:
+        finding = csv_safe(_one_line(f.message()))
+        key = (scene_id, normalize(finding), normalize(quote))
+        if key in have:
             continue
-        have.add((scene_id, normalize(quote)))
-        rows.append({'scene_id': scene_id, 'prose': sha,
-                     'finding': csv_safe(_one_line(f.message())),
+        have.add(key)
+        rows.append({'scene_id': scene_id, 'prose': sha, 'finding': finding,
                      'source_quote': quote, 'why': csv_safe(_one_line(why))})
         added = True
     if not added:
@@ -2225,7 +2244,10 @@ def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, 
         result.source_notes.append(str(e))
         listed = None
     if not mine:
-        return bool(listed) and listed['prose'] != _prose_sha(prose) and result.source_ruled
+        # #742's review (SF-1): every fact was sent again (`_apply_source`)
+        # and none departs from the source
+        return (bool(listed) and listed['prose'] != _prose_sha(prose) and result.source_ruled
+                and not result.source_departs)
 
     def subject(r: dict[str, str]) -> str:
         return (r.get('subject') or '').strip().casefold()
@@ -2258,7 +2280,7 @@ def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, 
         rows[:] = [r for r in rows if r.get('id') not in gone]
         result.source_notes.append(f'retired, the prose fixed toward the source: '
                                    f'{", ".join(sorted(gone))}')
-    return len(fixed) == len(mine)
+    return len(fixed) == len(mine) and not result.source_departs
 
 
 #: The prose each committed scene's commitments were read from, as the git
