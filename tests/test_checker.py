@@ -356,7 +356,7 @@ class TestReference:
             check_scene(project_dir, 'act1-sc01', model='claude-opus-5-5')
         other = api.call_args[0][1]
         assert first[0]['system'][0] == other['system'][0]
-        assert first[0]['system'][0]['cache_control'] == {'type': 'ephemeral'}
+        assert first[0]['system'][0]['cache_control'] == {'type': 'ephemeral', 'ttl': '1h'}
 
     def test_a_bible_that_is_not_utf8_is_a_check_error(self, project_dir):
         import os
@@ -441,8 +441,8 @@ class TestStorySoFar:
         ids = [b['text'].split('"')[1] for b in system[2:]]
         assert ids == ['act1-sc01', 'act1-sc02', 'new-x1']
         assert THERE in system[2]['text']
-        assert [b.get('cache_control') for b in system] == [
-            {'type': 'ephemeral'}, None, None, None, {'type': 'ephemeral'}]
+        hour = {'type': 'ephemeral', 'ttl': checker.CACHE_TTL}
+        assert [b.get('cache_control') for b in system] == [hour, None, None, None, hour]
         assert 'story so far: 3 scene(s)' in prompt
         assert 'Some of the scenes' not in prompt
 
@@ -693,8 +693,30 @@ class TestReadings:
         assert [f.scene_quote for f in result.findings] == [HERE, HERE2]
         assert result.readings == 2
         first, second = (b['messages'][0]['content'] for b in bodies)
-        assert 'Reading 2' not in first and 'Reading 2: an independent check' in second
-        assert first != second   # recordings are keyed by the request
+        second_text = ''.join(b['text'] for b in second)
+        assert 'Reading 2' not in first and 'Reading 2: an independent check' in second_text
+        assert first != second_text   # recordings are keyed by the request
+
+    def test_reading_two_reads_reading_one_from_cache_and_writes_only_its_note(
+            self, project_dir):
+        """#741: reading 2 is reading 1's message, a breakpoint, then its
+        note in a block of its own, so only the note is written to the
+        cache; joined, it is the text it always was."""
+        _, bodies = _run(project_dir, [_answer(), _answer()], readings=2)
+        first, second = (b['messages'][0]['content'] for b in bodies)
+        assert isinstance(first, str)
+        head, note = second
+        assert head == {'type': 'text', 'text': first, 'cache_control': {'type': 'ephemeral'}}
+        assert note == {'type': 'text', 'text': checker._reading_note(2)}
+        book = checker.Book.load(project_dir, SCENE, None, None)
+        brief = checker._brief(book, project_dir, SCENE)
+        assert head['text'] + note['text'] == checker.build_prompt(
+            book, SCENE, brief.text, None, 2)
+        # the API's limit of four, and a longer TTL never after a shorter
+        assert json.dumps(bodies[1]).count('"cache_control"') <= 4
+        ttls = [b['cache_control'].get('ttl', '5m') for b in bodies[1]['system']
+                if 'cache_control' in b] + ['5m']
+        assert ttls == sorted(ttls, key=lambda t: t != '1h')
 
     def test_one_reading_sends_what_it_always_sent(self, project_dir):
         _, bodies = _run(project_dir, [_answer()])
