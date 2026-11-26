@@ -24,6 +24,10 @@ expansion, a rewrite. This module holds everything deterministic about that:
   optional `range:` (the chapters or scenes this novel adapts; the rest stays
   imported as context), and `check_bible_span`, which stops a bible built for
   another range.
+- `entering_state` (#747): what the source's ledger tells, before the
+  source scenes a scene adapts, of its people's deaths, wounds and
+  healings, and armour and weapons, for the drafting prompt and the
+  gate's source check. Retrieval only, no model call.
 
 A project with no `source:` block gets None from `read_config`, and every
 caller does exactly what it did before.
@@ -1702,6 +1706,317 @@ def character_pronouns(project_dir: str) -> CastPronouns:
         else:
             out[cid] = Pronoun('', NO_PRONOUNS, slug, match, hits, note, problem)
     return CastPronouns(out, tuple(notes), cfg.mode if cfg else '')
+
+
+# ============================================================================
+# Entering state (#747)
+# ============================================================================
+
+#: The kinds of source fact the entering state carries: who is dead, wounded
+#: or healed, and who has whose armour or weapons
+ENTERING_KINDS = ('death', 'wound', 'healing', 'arms')
+#: The ledger types a state can be told in; a promise, trait or
+#: relationship is never one ("vows to bring Hector's armour")
+_STATE_TYPES = frozenset({'physical', 'knowledge', 'world', 'timeline'})
+#: Categories that are never a state, whatever their words
+_NOT_STATE = frozenset({'motive-intent', 'stakes-threat'})
+
+_HEAL_RE = re.compile(r"\b(?:heal(?:s|ed|ing)?|cured?|unharmed|unhurt|unwounded)\b", re.I)
+_DEATH_RE = re.compile(r"\b(?:kill(?:s|ed)?|slew|slain|slays?|dead|dies|died|death|corpse)\b",
+                       re.I)
+_WOUND_RE = re.compile(
+    r"\b(?:wound(?:s|ed)?|injur(?:y|ies|ed)|hurt|maimed|bleed(?:s|ing)?|crushed|pierced|"
+    r"grazed|lamed?)\b", re.I)
+_ARMOUR_RE = re.compile(
+    r"\b(?:armou?r|helmet|helm|shield|breastplate|cuirass|corslet|greaves|spoils)\b", re.I)
+_WEAPON_RE = re.compile(r"\b(?:spear|sword|bow|lance|axe|club|weapons?)\b", re.I)
+#: Armour or a weapon changing hands, or worn: holding or carrying one is
+#: every fighter in every scene
+_HANDOVER_RE = re.compile(
+    r"\b(?:gave|gives?|lent|lends?|strip(?:s|ped)?|exchang\w*|swap\w*|wears?|wearing|wore|"
+    r"don(?:s|ned)?|put on|puts on|took off|takes off)\b|\bin (?:\w+['’]s? )?armou?r\b",
+    re.I)
+#: Having armour (not a weapon: every fighter holds one)
+_POSSESS_RE = re.compile(
+    r"\b(?:bears?|bore|holds?|held|has|had|took|takes|carr(?:y|ies|ied)|keeps?|kept)\b", re.I)
+#: A name followed by one of these is someone else ("Priam's son
+#: Gorgythion", "Hector's comrade Podes")
+_NOT_THEM_RE = re.compile(
+    r"['’]s?\s+(?:\w+\s+)?(?:sons?|daughters?|brothers?|sisters?|father|mother|wife|"
+    r"husband|comrades?|companions?|friends?|squires?|charioteers?|men|man|followers?|"
+    r"people|host|horses?|city|ships?|tent|house|bidding|kin|kinsman|ally|allies)\b", re.I)
+#: ... or preceded by one of these ("a comrade of Aeneas", "son of Priam")
+_NOT_THEM_BEFORE_RE = re.compile(
+    r"\b(?:sons?|daughters?|brothers?|sisters?|father|mother|wife|husband|comrades?|"
+    r"companions?|friends?|squires?|charioteers?|men|followers?|people|host|kin|kinsman|"
+    r"ally|allies)\s+of\s+$", re.I)
+#: A verb whose doer, named before it, is not the one a death or wound
+#: happens to ("Aeneas killed Crethon": nothing about Aeneas's state);
+#: followed by "by" it is passive, and the one named before it is
+_AGENT_RE = re.compile(
+    r"\b(?:kill(?:s|ed)?|slew|slays?|wounded|speared|struck|strikes?|hit|hits|"
+    r"crushed|pierced|grazed|stabbed|shot|cut)\b", re.I)
+#: A passive verb: a form of "be" (and one word) just before it ("Machaon
+#: has been wounded", "Rhesus was killed")
+_PASSIVE_BEFORE_RE = re.compile(r"\b(?:is|was|are|were|been|be|being)\s+(?:\w+\s+)?$", re.I)
+#: The doer of a passive: "by" and a name ("by Diomed", "by a spear thrown
+#: by Coon", "by Paris' arrow"), never "by driving a spear"
+_BY_DOER_RE = re.compile(r"\bby\s+(?:(?:a|an|the|his|her|their)\s+)?(?=[A-Z])")
+#: Words that put a death or wound on the fact's subject
+_PATIENT_RE = re.compile(
+    r"\b(?:(?:is|was|lies|lay|lying|fell)\s+(?:dead|slain|wounded|hurt)|"
+    r"(?:his|her)\s+(?:wound|wounds|injury|death|corpse|body)|died|dies)\b", re.I)
+
+
+class SourceFact(NamedTuple):
+    """One fact of a source's ledger in a scene's entering state."""
+    slug: str
+    scene_id: str            # the source scene it is told in
+    seq: float
+    fact_id: str
+    who: tuple[str, ...]     # the cast ids it is about
+    kind: str                # one of ENTERING_KINDS
+    statement: str
+    quote: str
+    ends: str                # the source scene its state ends at ('' none)
+
+
+@dataclass
+class EnteringState:
+    facts: list[SourceFact] = field(default_factory=list)
+    #: facts about the cast left out to keep the list short, oldest first
+    left_out: int = 0
+    #: what wasn't read, and why (a source with no ledger)
+    notes: list[str] = field(default_factory=list)
+
+
+def fact_kind(row: dict[str, str]) -> str:
+    """The entering-state kind of a source ledger row, or '' when it tells
+    none of `ENTERING_KINDS`: by its category (`injury`, `equipment`) or,
+    the source's ledger leaving most rows uncategorised, its words."""
+    if (row.get('type') or '').strip() not in _STATE_TYPES:
+        return ''
+    category = (row.get('category') or '').strip()
+    if category in _NOT_STATE:
+        return ''
+    text = row.get('statement') or ''
+    if _HEAL_RE.search(text):
+        return 'healing'
+    if _DEATH_RE.search(text):
+        return 'death'
+    if category == 'injury' or _WOUND_RE.search(text):
+        return 'wound'
+    if (category == 'equipment'
+            or (_ARMOUR_RE.search(text) and (_HANDOVER_RE.search(text)
+                                             or _POSSESS_RE.search(text)))
+            or (_WEAPON_RE.search(text) and _HANDOVER_RE.search(text))):
+        return 'arms'
+    return ''
+
+
+def _name_pattern(names: list[str]) -> re.Pattern | None:
+    names = sorted({n for n in names if n and n.strip()}, key=len, reverse=True)
+    if not names:
+        return None
+    return re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(n) for n in names) + r')(?!\w)')
+
+
+def _cast_names(project_dir: str, slug: str) -> dict[str, re.Pattern]:
+    """Each character id of the imported source → a pattern of its name and
+    aliases (the novel's names: the import maps them)."""
+    out = {}
+    for r in read_table(project_dir, slug, 'characters.csv'):
+        cid = (r.get('id') or '').strip()
+        pat = _name_pattern([r.get('name', '')] + split_ids(r.get('aliases', '')))
+        if cid and pat:
+            out[cid] = pat
+    return out
+
+
+def named_in(project_dir: str, slugs: list[str], text: str) -> set[str]:
+    """The ids of the source characters (of `slugs`) whose name or an alias
+    `text` holds."""
+    out = set()
+    for slug in dict.fromkeys(slugs):
+        out |= {cid for cid, pat in _cast_names(project_dir, slug).items() if pat.search(text)}
+    return out
+
+
+def scene_cast(project_dir: str, scene_id: str, refs: list[tuple[str, str]]) -> set[str]:
+    """The people on stage in `scene_id`: its pov and `on_stage`
+    (reference/scenes.csv and scene-intent.csv); with no `on_stage`, the
+    `on_stage` of the source scenes `refs` it adapts (whose ids the import
+    mapped to the novel's). Never `characters`, and the source's only as a
+    fallback: a battle's source scene has every fighter on stage, and each
+    would bring their whole war."""
+    from storyforge.csv_cli import get_field
+    ref = os.path.join(project_dir, 'reference')
+    pov = get_field(os.path.join(ref, 'scenes.csv'), scene_id, 'pov')
+    cells = [get_field(os.path.join(ref, 'scene-intent.csv'), scene_id, 'on_stage')]
+    if not split_ids(cells[0]):
+        intents: dict[str, dict[str, dict]] = {}
+        for slug, sid in refs:
+            if slug not in intents:
+                intents[slug] = {r.get('id'): r
+                                 for r in read_table(project_dir, slug, 'scene-intent.csv')}
+            cells.append(intents[slug].get(sid, {}).get('on_stage', ''))
+    return {c for cell in [pov, *cells] for c in split_ids(cell) if not is_narrator(c)}
+
+
+def _about(row: dict[str, str], kind: str, cast: set[str],
+           names: dict[str, re.Pattern]) -> tuple[str, ...]:
+    """The cast ids a row of `kind` is about. Armour and weapons: its
+    subject, or one it names. A healing, a death or a wound: the one it
+    happens to, never its doer (#747's review, CR-1, CR-5):
+
+    - passive (a form of "be" just before the verb, the verb opening the
+      statement as in "Speared in the chest by Thoas", or "by" a name
+      after it): the people named before the verb ("Rhesus was killed in
+      his sleep by Diomed"), or the subject when nobody is;
+    - active: the people named after the verb ("Hector killed Patroclus",
+      "Apollo healed Aeneas"); for an `injury` row naming nobody there, the
+      subject ("Paris' arrow struck his right thigh");
+    - no verb ("Patroclus is dead"): the people named before the word
+      for it, and the subject when the row is an injury or says so.
+
+    Whoever is named after "by" is the doer, never the one it happens to."""
+    text = row.get('statement') or ''
+    subject = (row.get('subject') or '').strip()
+    injury = (row.get('category') or '').strip() == 'injury'
+
+    def named(cid: str, start: int = 0, end: int | None = None) -> bool:
+        pat = names.get(cid)
+        if pat is None:
+            return False
+        return any(not _NOT_THEM_RE.match(text, m.end())
+                   and not _NOT_THEM_BEFORE_RE.search(text, 0, m.start())
+                   for m in pat.finditer(text, start, len(text) if end is None else end))
+
+    def anyone(start: int, end: int) -> set[str]:
+        return {cid for cid in names if named(cid, start, end)} if end > start else set()
+
+    if kind == 'arms':
+        return tuple(cid for cid in sorted(cast) if cid == subject or named(cid))
+    verb = (_HEAL_RE if kind == 'healing' else _AGENT_RE).search(text)
+    if verb:
+        by = _BY_DOER_RE.search(text, verb.end())
+        before = text[:verb.start()].rstrip()
+        # "Tydeus slew an ambush ... led by Maeon": a name just before the
+        # verb is its doer, whatever "by" comes later
+        tail = re.search(r"((?:[A-Z][\w'’-]*\s+)?[A-Z][\w'’-]*)$", before)
+        doer_first = bool(tail) and any(
+            p.fullmatch(tail.group(1)) or p.fullmatch(tail.group(1).split()[-1])
+            for p in names.values())
+        passive = bool(_PASSIVE_BEFORE_RE.search(text, 0, verb.start()) or not before
+                       or (by and not doer_first))
+        if passive:
+            people = anyone(0, verb.start()) or ({subject} if subject else set())
+        else:
+            people = anyone(verb.end(), by.start() if by else len(text))
+            if not people and injury and subject:
+                people = {subject}
+    else:
+        word = (_DEATH_RE if kind == 'death' else _WOUND_RE).search(text)
+        people = anyone(0, word.start() if word else len(text))
+        if subject and (injury or _PATIENT_RE.search(text)):
+            people.add(subject)
+    return tuple(cid for cid in sorted(cast) if cid in people)
+
+
+#: The most facts one person brings to an entering state, and the most in
+#: all: the latest are kept (a long war's kills would fill the prompt)
+ENTERING_PER_PERSON = 6
+ENTERING_MAX = 40
+
+
+def entering_state(project_dir: str, refs: list[tuple[str, str]], cast: set[str], *,
+                   through: bool = False, limit: int | None = None) -> EnteringState:
+    """What the source's ledgers (`reference/source/<slug>/commitments.csv`)
+    tell of `cast`'s deaths, wounds and healings, and armour and weapons
+    (`fact_kind`) before the source scenes `refs` a scene adapts: told in a
+    source scene earlier in reading order than the first of `refs` (with
+    `through`, up to the last of them), and not ended before it (a row's
+    `resolves` names the source scene its state ends at). Oldest first,
+    the latest `ENTERING_PER_PERSON` a person and `limit` (default
+    `ENTERING_MAX`) in all.
+    Retrieval only (no model call): the ledger has the extractor's limits
+    (missed facts, a namesake's facts under one subject) and the
+    translation's slips. Raises SourceError as `read_table` does."""
+    out = EnteringState()
+    if not refs:
+        return out
+    if not cast:
+        # #747's review (SF-3): an empty list is never "checked and clean"
+        out.notes.append('the scene has no pov or on_stage (nor its source scenes): no one '
+                         'to look up, so no entering state')
+        return out
+    inf = float('inf')
+    found: list[SourceFact] = []
+    for slug in dict.fromkeys(s for s, _ in refs):
+        if not os.path.isfile(os.path.join(source_dir(project_dir, slug), 'commitments.csv')):
+            out.notes.append(f'source {slug} has no fact ledger (reference/source/{slug}/'
+                             f'commitments.csv): no entering state from it')
+            continue
+        seqs = {r.get('id'): _seq(r) for r in read_table(project_dir, slug, 'scenes.csv')}
+        # #747's review (SF-4, CR-3): a source scene with no position says
+        # so and never widens the span to the rest of the ledger
+        unplaced = [sid for s, sid in refs if s == slug and seqs.get(sid, inf) == inf]
+        mine = [seqs[sid] for s, sid in refs if s == slug and sid not in unplaced]
+        if unplaced:
+            out.notes.append(f'source {slug}: {", ".join(unplaced)} has no seq in its '
+                             f'scenes.csv, so the entering state can\'t be placed by it')
+        if not mine:
+            continue
+        start = min(mine)
+        stop = max(mine) if through else start
+        names = _cast_names(project_dir, slug)
+        unnamed = sorted(c for c in cast if c not in names)
+        if unnamed:
+            out.notes.append(f'source {slug} has no character {", ".join(unnamed)}: only '
+                             f'facts with that subject are found, none that name them')
+        rows = [r for r in read_table(project_dir, slug, 'commitments.csv')
+                if (r.get('status') or 'binding').strip() in ('binding', '')]
+        unknown = sum(1 for r in rows if seqs.get((r.get('scene_id') or '').strip(), inf) == inf)
+        if unknown:
+            out.notes.append(f'source {slug}: {unknown} ledger fact(s) name no source scene '
+                             f'with a seq, so when they hold is unknown: left out')
+        # #747's review (CR-4): a fact superseded by one told by then is
+        # no longer the state, as in `ledger.drafting_slice`
+        def told_by_then(at: float) -> bool:
+            return at < start or (through and at <= stop)
+
+        superseded = {old for r in rows
+                      if told_by_then(seqs.get((r.get('scene_id') or '').strip(), inf))
+                      for old in split_ids(r.get('supersedes', ''))}
+        for row in rows:
+            sid = (row.get('scene_id') or '').strip()
+            at = seqs.get(sid, inf)
+            if not told_by_then(at):
+                continue
+            if (row.get('id') or '').strip() in superseded:
+                continue
+            ends = (row.get('resolves') or '').strip()
+            ends = '' if ends == 'never' else ends
+            if ends and seqs.get(ends, float('inf')) < start:
+                continue
+            kind = fact_kind(row)
+            if not kind:
+                continue
+            who = _about(row, kind, cast, names)
+            if who:
+                found.append(SourceFact(slug, sid, at, (row.get('id') or '').strip(), who, kind,
+                                        (row.get('statement') or '').strip(),
+                                        (row.get('quote') or '').strip(), ends))
+    found.sort(key=lambda f: f.seq)
+    keep: set[int] = set()
+    for cid in cast:
+        theirs = [i for i, f in enumerate(found) if cid in f.who]
+        keep.update(theirs[-ENTERING_PER_PERSON:])
+    limit = ENTERING_MAX if limit is None else limit
+    kept = [f for i, f in enumerate(found) if i in keep][-limit:] if limit > 0 else []
+    out.facts = kept
+    out.left_out = len(found) - len(kept)
+    return out
 
 
 # ============================================================================
