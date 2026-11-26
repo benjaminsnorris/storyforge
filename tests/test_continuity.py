@@ -287,7 +287,7 @@ class TestPossession:
                              's2': [R('holds', 'Mara', 'the spear', 'has')]})
         f, notes = continuity.check_possession(b)
         assert f == []
-        assert any('held again by the person who lost or gave one away in an earlier scene'
+        assert any('own object(s) used again by them after they lost or gave one away'
                    in n and 'Mara has the spear in s2' in n and ' in s1' in n for n in notes)
 
     def test_an_unowned_name_held_again_in_the_same_scene_blocks(self):
@@ -295,13 +295,42 @@ class TestPossession:
                                     R('holds', 'Mara', 'the spear', 'has', quote='again')]})
         assert 'Mara lost the spear' in continuity.check_possession(b)[0][0].explanation
 
-    @pytest.mark.parametrize('first,then', [("Mara's spear", 'the spear'),
-                                            ('spear', "Mara's spear")])
-    def test_an_owned_name_held_again_in_a_later_scene_blocks(self, first, then):
+    @pytest.mark.parametrize('first,then', [("Oren's spear", "Oren's spear"),
+                                            ("Mara's brass key", "Mara's brass key"),
+                                            ('brass key', "Mara's key")])
+    def test_one_object_held_again_in_a_later_scene_blocks(self, first, then):
+        # someone else's object, or one a name singles out, is one thing
         b = make_book('s2', {'s1': [R('holds', 'Mara', first, 'loses')],
                              's2': [R('holds', 'Mara', then, 'has', quote='Mara spear')]})
         f, _ = continuity.check_possession(b)
         assert f[0].scene_quote == 'Mara spear' and 'Mara lost' in f[0].explanation
+
+    @pytest.mark.parametrize('first,then', [("Mara's spear", 'the spear'),
+                                            ('spear', "Mara's spear"),
+                                            ("Mara's spear", "Mara's spear")])
+    def test_her_own_bare_kind_held_again_in_a_later_scene_is_a_note(self, first, then):
+        # #748: extraction names the owner every time, so "Mara's spear" is
+        # any of her spears; lost in one scene, held in a later one, it may
+        # be another (the typed-state set's re-extraction: Diomedes', Ares'
+        # and Hector's spears, Patroclus' knife)
+        b = make_book('s2', {'s1': [R('holds', 'Mara', first, 'loses')],
+                             's2': [R('holds', 'Mara', then, 'has', quote='Mara spear')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('Mara has' in n and 'lost in s1' in n for n in notes)
+
+    def test_her_own_bare_kind_parted_with_twice_in_a_scene_is_a_note(self):
+        # #748: "Teucer's arrow" lost at each shot is the next arrow
+        b = make_book('s1', {'s1': [R('holds', 'Mara', "Mara's arrow", 'loses', quote='looses'),
+                                    R('holds', 'Mara', "Mara's arrow", 'loses',
+                                      quote='shoots again')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('Mara loses' in n and 'parted' in n for n in notes)
+
+    def test_her_own_bare_kind_held_after_she_threw_it_in_the_scene_blocks(self):
+        b = make_book('s1', {'s1': [R('holds', 'Mara', "Mara's spear", 'loses', quote='throws'),
+                                    R('holds', 'Mara', "Mara's spear", 'has', quote='grips')]})
+        f, _ = continuity.check_possession(b)
+        assert [x.scene_quote for x in f] == ['grips']
 
     def test_used_after_it_was_destroyed(self):
         b = make_book('s2', {'s1': [R('holds', 'Mara', 'the letter', 'destroyed')],

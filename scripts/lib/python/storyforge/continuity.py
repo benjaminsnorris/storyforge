@@ -18,8 +18,10 @@ calendar and the world table, free and the same every run:
 - **possession** (PHY): within a scene, an object in two people's hands
   with nothing between; in any scene, an object held or taken whole after
   it was destroyed (a holder's unowned "spear" taken after theirs broke is
-  another spear), or held again by the person who gave it away or lost
-  it (across scenes, only a name with an owner), unless a fact between
+  another spear), or used again by the person who gave it away or lost
+  it (someone else's object, or one a name singles out, anywhere; their
+  own bare kind only held again in the same scene: their own "spear" may
+  be another of theirs), unless a fact between
   moves it to someone else (`gets`). An object
   in other hands than an earlier scene left it is a note (an offstage
   handover is ordinary). A name without an owner ("shield", "the round
@@ -666,9 +668,14 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
     object held (`has`) after it was destroyed, or taken (`gets`) when its
     name has an owner (a holder's unowned "spear" taken after theirs broke
     is another spear; discarding the remains or a second `destroyed` is
-    not a use); an object held again by the person who gave it away or
-    lost it (across scenes only when either name has an owner; an unowned
-    "spear" lost in one scene and held in a later one is a note). Notes,
+    not a use); an object used again by the person who gave it away or
+    lost it, when either name has an owner other than that person (Pandion
+    with Teucer's bow) or singles it out ("brass key"), and within one
+    scene a person's own bare kind held (`has`) again after they parted
+    with it. A person's own bare kind ("his spear", "Teucer's arrow" in
+    Teucer's hand) used again in a later scene, or parted with again in
+    the same one, is a note: it may be another of theirs (#748: with owners
+    named, "Teucer's arrow" is each arrow). Notes,
     never findings: a different holder than an earlier
     scene left it with (an offstage handover is ordinary, #648's review
     CR-3); anything a scene between without typed state might explain
@@ -740,13 +747,19 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
                                         f'{p_rec.scene_id}')
                 elif prev.status in ('given', 'lost') and prev.by == holder:
                     parted_how = 'gave away' if prev.status == 'given' else 'lost'
-                    if here or object_ref(book, r.item).owner or \
-                            object_ref(book, p_rec.item).owner:
+                    # someone else's object, or a name that singles one
+                    # out ("brass key"), is one thing; the holder's own
+                    # bare kind ("spear", "Teucer's arrow" in Teucer's
+                    # hand) may be another of theirs: a second spear, the
+                    # next arrow (#732; #748, whose extraction names the
+                    # owner every time)
+                    refs = (object_ref(book, r.item), object_ref(book, p_rec.item))
+                    one = any(x.owner not in ('', holder) or len(x.name.split()) > 1
+                              for x in refs)
+                    if one or (here and r.value == 'has'):
                         problem = (f'{r.who} {parted_how} {r.item} {p_where}, with nothing '
                                    f'between')
                     else:
-                        # an unowned "spear" across scenes may be another
-                        # spear (the typed-state set's eval, #732)
                         again.append(f'{r.who} {r.value} {r.item} in {sid}, '
                                      f'{parted_how} in {p_rec.scene_id}')
             gap = [] if here else book.gap_between(p_rec.scene_id, sid)
@@ -784,9 +797,10 @@ def check_possession(book: Book, sheet_records: list[Record] | None = None
                      f'or destroyed, with a scene between whose typed state wasn\'t read, not '
                      f'compared: ' + '; '.join(gapped[:5]))
     if again:
-        notes.append(f'possession: {len(again)} object(s) named without an owner held again by '
-                     f'the person who lost or gave one away in an earlier scene (it may be '
-                     f'another; not a finding, name the owner to compare): '
+        notes.append(f'possession: {len(again)} of a person\'s own object(s) used again by '
+                     f'them after they lost or gave one away (in an earlier scene, or parted '
+                     f'with again in the same one: it may be another of theirs; not a '
+                     f'finding): '
                      + '; '.join(again[:5]))
     if unknown:
         notes.append(f'possession: {len(unknown)} record(s) on an object whose state is unknown '
