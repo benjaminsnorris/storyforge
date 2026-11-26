@@ -808,11 +808,13 @@ class TestPromises:
         no/no, a broken promise, and a fix that wrote real errors."""
         left_out = []
         got = questions.promises_for(
-            _brief(promised={'k1': 'Oren laughs at the mill', 'k2': 'Mara leaves'}),
-            earlier={'k2': 's1'}, left_out=left_out)
-        assert got == [P_FACT]
-        assert left_out == ['k2 (established in s1, before this scene: it holds entering the '
-                            'scene, so it is asked as a fact when its subject is present)']
+            _brief(promised={'k1': 'Oren laughs at the mill', 'k2': 'Mara is wounded'}),
+            entering={'k2': 'set in s1, still in force'},
+            fields={'k1': 'knowledge_out', 'k2': 'physical_state_out'}, left_out=left_out)
+        # CR-1: the brief field a promise came from is recorded
+        assert got == [questions.Promise('promised', 'k1', 'knowledge_out',
+                                         'Oren laughs at the mill', 'Oren laughs at the mill')]
+        assert left_out == ['physical_state_out k2 (set in s1, still in force)']
 
     @pytest.mark.parametrize('outcome', ['yes', 'No.', ' YES ', 'must: yes'])
     def test_an_outcome_that_is_only_an_answer_is_not_asked(self, outcome):
@@ -830,12 +832,31 @@ class TestPromises:
         got = questions.promises_for(_brief(items={'outcome': [outcome]}))
         assert [p.text for p in got] == [outcome]
 
-    def test_established_earlier(self):
-        rows = [row('a', scene='s1'), row('b', scene='s3'), row('c', scene='s4'),
-                row('d', scene=''), row('e', scene='cut-scene'), row('f', scene='s2')]
-        assert questions.established_earlier(rows, ['a', 'b', 'c', 'd', 'e'], 's3',
-                                             ORDER) == {'a': 's1'}
-        assert questions.established_earlier(rows, ['a'], 'not-a-scene', ORDER) == {}
+    def test_held_entering_only_earlier_physical_facts_in_force(self):
+        P = 'physical'
+        rows = [row('a', P, scene='s1'), row('b', P, scene='s3'), row('c', P, scene='s4'),
+                row('d', P, scene=''), row('e', P, scene='cut-scene'),
+                # CR-1: knowledge_out set earlier may be learned here: a promise
+                row('k', 'knowledge', scene='s1'),
+                # CR-2/SF-1: ended or superseded before the scene: the brief
+                # brings it back, so it stays a promise
+                row('ended', P, scene='s1', mutable='state', resolves='s2'),
+                row('old', P, scene='s1'), row('new', P, scene='s2', supersedes='old'),
+                row('wound', P, scene='s2', mutable='state'),
+                row('nobody', P, scene='s1', subject=''),
+                row('oren', P, scene='s1', subject='oren-tal')]
+        got = questions.held_entering(rows, [r['id'] for r in rows], 's3', ORDER, {'mara'},
+                                      chars=CHARS)
+        assert sorted(got) == ['a', 'new', 'nobody', 'oren', 'wound']
+        assert got['a'].endswith('asked as a fact instead')
+        assert got['nobody'].endswith('it has no subject, so it is not checked')
+        assert got['oren'].endswith('its subject isn\'t in the scene, so it is not checked')
+        assert questions.held_entering(rows, ['a'], 'not-a-scene', ORDER) == {}
+
+    def test_promised_fields(self):
+        rows = [row('p', 'physical'), row('k', 'knowledge'), row('t', 'trait')]
+        assert questions.promised_fields(rows, ['p', 'k', 't']) == {
+            'p': 'physical_state_out', 'k': 'knowledge_out'}
 
     def _ask(self, promises, answers):
         asked = []
@@ -1166,20 +1187,37 @@ class TestGate:
 
     def test_an_earlier_scenes_fact_in_the_brief_is_not_a_broken_promise(
             self, project_dir, tmp_path, monkeypatch):
-        """#740: a registry fact set up in act1-sc01 and listed in this
-        scene's knowledge_out isn't asked as this scene's to establish."""
+        """#740: a physical state set in act1-sc01, still in force, and
+        listed in this scene's physical_state_out isn't asked as this
+        scene's to establish; it is asked as a fact (Tessa is there)."""
+        _add_rows(project_dir, {'id': 'tessa-limps', 'scene_id': 'act1-sc01',
+                                'type': 'physical', 'subject': 'tessa-merrin',
+                                'statement': 'Tessa limps on her left leg',
+                                'status': 'binding', 'mutable': 'state'})
+        self._brief(project_dir, physical_state_out='tessa-limps', outcome='yes')
+        result, calls = self._gate(project_dir, tmp_path, monkeypatch,
+                                   lambda n: [ans(i, 'no') for i in range(1, n + 1)])
+        assert 'promises' not in calls
+        assert result.passed and 'tessa-limps' in result.asked_fact_ids
+        assert any('2 brief promise(s) not asked' in n
+                   and 'physical_state_out tessa-limps (set in act1-sc01, still in force '
+                   'entering this scene' in n and 'asked as a fact instead' in n
+                   and 'outcome: "yes"' in n for n in result.question_notes)
+
+    def test_knowledge_set_earlier_is_still_a_promise(self, project_dir, tmp_path,
+                                                      monkeypatch):
+        """CR-1: knowledge_out is what the point of view learns in this
+        scene, even when an earlier scene set the fact."""
         _add_rows(project_dir, {'id': 'tessa-knows-map', 'scene_id': 'act1-sc01',
                                 'type': 'knowledge', 'subject': '',
                                 'statement': 'Tessa knows the map is wrong',
                                 'status': 'binding', 'mutable': 'fixed'})
-        self._brief(project_dir, knowledge_out='tessa-knows-map', outcome='yes')
-        result, calls = self._gate(project_dir, tmp_path, monkeypatch,
-                                   lambda n: [ans(i, 'no') for i in range(1, n + 1)])
-        assert 'promises' not in calls
-        assert result.passed
-        assert any('2 brief promise(s) not asked' in n and 'tessa-knows-map (established in '
-                   'act1-sc01' in n and 'outcome: "yes"' in n
-                   for n in result.question_notes)
+        self._brief(project_dir, knowledge_out='tessa-knows-map')
+        _, calls = self._gate(project_dir, tmp_path, monkeypatch,
+                              lambda n: [ans(i, 'no') for i in range(1, n + 1)],
+                              promised=lambda n: [ans(i, 'yes', 'Tessa mocked Dorren')
+                                                  for i in range(1, n + 1)])
+        assert calls.count('promises') == 2
 
     def test_a_broken_must_beat_stops_the_scene(self, project_dir, tmp_path, monkeypatch):
         # CR-3/SF-6: under --questions a must: beat used to go unchecked and

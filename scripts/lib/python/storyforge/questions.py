@@ -63,9 +63,10 @@ by asking about each one narrowly:
   fact's blank quote (`kept`, as the open checker's), and anything else is a
   note, or for a `must:` beat an unverified broken promise, which blocks.
   The brief's entering items written in words are asked as facts. A
-  promised fact an earlier scene established holds entering the scene and
-  isn't asked as this scene's to establish, nor is an `outcome` that is
-  only "yes" or "no"; the notes name both (#740).
+  promised physical state an earlier scene set that is still in force
+  entering the scene isn't asked as this scene's to establish
+  (`held_entering`), nor is an `outcome` that is only "yes" or "no"; the
+  notes name both (#740).
 
 Findings are `checker.Finding`s, contradictions with the code of the fact's
 type (TRT, REL, PHY, WLD, KNO, TIM), set against the fact's scene and quote (the
@@ -802,22 +803,24 @@ def _ask_batch(scene_id: str, prose: str, questions: list[Question], model: str,
 # The brief's promises
 # ============================================================================
 
-def promises_for(brief, *, earlier: dict[str, str] | None = None,
+def promises_for(brief, *, entering: dict[str, str] | None = None,
+                 fields: dict[str, str] | None = None,
                  left_out: list[str] | None = None) -> list[Promise]:
     """The promises to ask about from `brief` (`checker.brief_from`): each
     promise field's items and registry promises in words (`brief.items`),
-    each binding registry fact it promises (`brief.promised`), and each
-    planned fact (`brief.planned`), in that order.
+    each binding registry fact it promises (`brief.promised`; its brief
+    field from `fields`, id → field, `promised_fields`), and each planned
+    fact (`brief.planned`), in that order.
 
     Not asked, each named in `left_out` (#740, *Wrath Like Smoke*: 7 of 9
     blocking promise findings false, none real, and two of them led fixes
-    to write real errors): a promised fact an earlier scene established
-    (`earlier`, id → that scene, from `established_earlier`), which holds
-    entering this scene rather than being this scene's to set up (it is
-    asked as a fact when its subject is present); and an `outcome` that is
-    only "yes" or "no", which names no event to deliver."""
+    to write real errors): a promised fact in `entering` (id → why, from
+    `held_entering`: a physical state an earlier scene set that is still in
+    force entering this one, not this scene's to set up); and an `outcome`
+    that is only "yes" or "no", which names no event to deliver."""
     from storyforge.must import strip_marker
-    earlier = earlier or {}
+    entering = entering or {}
+    fields = fields or {}
     left_out = left_out if left_out is not None else []
     out = []
     for col, items_ in brief.items.items():
@@ -830,15 +833,25 @@ def promises_for(brief, *, earlier: dict[str, str] | None = None,
             if text:
                 out.append(Promise('item', col, col, item, text))
     for rid, st in brief.promised.items():
-        if rid in earlier:
-            left_out.append(f'{rid} (established in {earlier[rid]}, before this scene: it '
-                            f'holds entering the scene, so it is asked as a fact when its '
-                            f'subject is present)')
+        if rid in entering:
+            left_out.append(f'{fields.get(rid) or "promised"} {rid} ({entering[rid]})')
             continue
-        out.append(Promise('promised', rid, '', ' '.join(st.split()), ' '.join(st.split())))
+        out.append(Promise('promised', rid, fields.get(rid, ''), ' '.join(st.split()),
+                           ' '.join(st.split())))
     out += [Promise('planned', rid, '', ' '.join(st.split()), ' '.join(st.split()))
             for rid, st in brief.planned.items()]
     return out
+
+
+def promised_fields(rows: list[dict], ids) -> dict[str, str]:
+    """The brief field each promised registry fact of `ids` came from, by
+    its type (`checker.REGISTRY_PROMISE_FIELDS`: a physical fact is a
+    `physical_state_out`, a knowledge fact a `knowledge_out`)."""
+    from storyforge.checker import REGISTRY_PROMISE_FIELDS
+    field_of = {t: col for col, t in REGISTRY_PROMISE_FIELDS.items()}
+    wanted = set(ids)
+    return {r['id']: field_of[(r.get('type') or '').strip()] for r in rows
+            if r.get('id') in wanted and (r.get('type') or '').strip() in field_of}
 
 
 def bare_answer(text: str) -> bool:
@@ -848,20 +861,49 @@ def bare_answer(text: str) -> bool:
     return re.sub(r'[\W_]+', '', text).casefold() in ('yes', 'no')
 
 
-def established_earlier(rows: list[dict], ids, scene_id: str,
-                        order: dict[str, int]) -> dict[str, str]:
-    """Of the ledger fact `ids`, each one a scene before `scene_id` in
-    reading `order` established: id → that scene. A fact with no scene of
-    the book (backstory, a cut scene) isn't one."""
+def held_entering(rows: list[dict], ids, scene_id: str, order: dict[str, int],
+                  present: set[str] | frozenset = frozenset(), *,
+                  chars: dict[str, str] | None = None,
+                  places: dict[str, str] | None = None) -> dict[str, str]:
+    """Of the promised ledger fact `ids`, each physical one an earlier
+    scene set that holds entering `scene_id`: id → why it isn't asked as a
+    promise (#740). It holds when it is a `state` in force entering the
+    scene (`ledger.active_states`), or a fixed fact no binding fact
+    supersedes. The why says whether it is asked as a fact instead: when
+    its subject is `present` (through `chars` and `places`), as
+    `facts_to_ask` asks it; with no subject or absent, it is said to be
+    unchecked.
+
+    Only physical facts: a `knowledge_out` fact set earlier may still be
+    this scene's to deliver (the point of view learns it here, as
+    `continuity` reads `knowledge_out`), so it stays a promise. One
+    superseded or ended before the scene doesn't hold: the brief has the
+    scene bring it back, and it stays a promise. A fact with no scene of
+    the book (backstory, a cut scene) isn't an earlier scene's."""
+    from storyforge.ledger import active_states
     at = order.get(scene_id)
     if at is None:
         return {}
     wanted = set(ids)
+    superseded = {old.strip() for r in rows if (r.get('status') or '') == 'binding'
+                  for old in (r.get('supersedes') or '').split(';') if old.strip()}
+    in_force = {r['id'] for r in active_states(rows, scene_id, order, entering=True)}
     out = {}
     for r in rows:
         sid = (r.get('scene_id') or '').strip()
-        if r.get('id') in wanted and sid in order and order[sid] < at:
-            out[r['id']] = sid
+        if r.get('id') not in wanted or (r.get('type') or '').strip() != 'physical' \
+                or sid not in order or order[sid] >= at:
+            continue
+        if not (r['id'] in in_force if (r.get('mutable') or '') == 'state'
+                else r['id'] not in superseded):
+            continue
+        subject = (r.get('subject') or '').strip()
+        held = f'set in {sid}, still in force entering this scene: not this scene\'s to set up'
+        if subject and _lookup(subject, chars or {}, places or {}) in present:
+            out[r['id']] = held + '; asked as a fact instead'
+        else:
+            out[r['id']] = held + ('; its subject isn\'t in the scene' if subject
+                                   else '; it has no subject') + ', so it is not checked'
     return out
 
 
@@ -1056,8 +1098,9 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     # the facts' questions and the promises' are independent: asked at once
     from storyforge.runner import together
     left_out: list[str] = []
-    wanted = promises_for(brief, earlier=established_earlier(rows, brief.promised, scene_id,
-                                                             order),
+    wanted = promises_for(brief, entering=held_entering(rows, brief.promised, scene_id, order,
+                                                        present, chars=chars, places=places),
+                          fields=promised_fields(rows, brief.promised),
                           left_out=left_out) if promises else []
     if left_out:
         result.notes.append(f'{len(left_out)} brief promise(s) not asked: '
