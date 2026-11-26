@@ -12,7 +12,11 @@ was drafted past. With `--keep-going` (#556) a scene stopped only by the
 check's findings is committed provisionally (`gate.commit_provisional`),
 so the scenes that depend on it are drafted too. A redraft that passes
 re-checks the later scenes depending on what it changed (Phase 4,
-`gate.recheck_pending`). Coaching levels coach and
+`gate.recheck_pending`). With `--questions` every gate run the command
+makes (first runs, re-gates after a fix, re-checks) uses the question layer
+(`gate.GATE_CHECK_METHOD` `questions`, #649) instead of the open checker,
+set for the run only, as `check --questions` sets it; the forecast prices it
+(`gate.write_gate_cost_per_scene()`). Coaching levels coach and
 strict write briefs or constraints, not prose, and are not gated; only they
 take `--batch` (every scene at once through the Batch API). Prose is never
 drafted in parallel: on E4, drafting every scene at once (no earlier prose,
@@ -26,6 +30,7 @@ Usage:
     storyforge write --act 2                # Draft all scenes in act 2
     storyforge write --dry-run act1-sc01    # Build prompt and forecast, no API call
     storyforge write --keep-going           # Commit a gate failure provisionally, so its dependents draft too
+    storyforge write --session --questions  # Gate with yes/no questions, not the open checker (#649)
     storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
 
@@ -118,12 +123,33 @@ def parse_args(argv):
                              'stops only itself and the scenes that depend on it. Halts, '
                              'extraction problems and bad replies are never committed '
                              'provisionally: they hold back the scenes that depend on them')
+    parser.add_argument('--questions', action='store_true',
+                        help='Full coaching: the gate checks each drafted scene against the '
+                             'book with yes/no questions from the ledger and the brief\'s '
+                             'promises instead of the open checker, as `storyforge check '
+                             '--questions` does: its first run, the re-checks after a fix and '
+                             'the re-checks this run triggers. The forecast prices the '
+                             'question layer. Model: STORYFORGE_QUESTIONS_MODEL (default the '
+                             'extraction tier)')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    if not args.questions:
+        return _main(args)
+    # this run only, as `check --questions` does: an in-process caller after
+    # it keeps its own method
+    from storyforge import gate
+    saved = gate.GATE_CHECK_METHOD
+    gate.GATE_CHECK_METHOD = 'questions'
+    try:
+        return _main(args)
+    finally:
+        gate.GATE_CHECK_METHOD = saved
 
+
+def _main(args):
     install_signal_handlers()
     apply_coaching_override(args)
 
@@ -154,6 +180,19 @@ def main(argv=None):
         log('ERROR: --session writes prose: it takes full coaching, and neither --batch nor '
             '--interactive. Drop them, or drop --session.')
         sys.exit(1)
+    if args.questions and coaching != 'full':
+        log('ERROR: --questions sets how the gate checks a drafted scene; coaching coach and '
+            'strict write briefs or constraints, which are not gated. Drop --questions, or '
+            'draft prose at full coaching.')
+        sys.exit(1)
+    if args.questions:
+        from storyforge import gate
+        if not gate.GATE_CONTINUITY:
+            # the question layer reads the typed state (`gate._gate_scene`
+            # raises without it): stop before anything is drafted or spent
+            log('ERROR: --questions needs the gate\'s continuity checks '
+                '(gate.GATE_CONTINUITY), which are off.')
+            sys.exit(1)
     if args.stop_after is not None and (not args.session or args.stop_after < 0):
         log('ERROR: --stop-after takes a count of 0 or more, with --session.')
         sys.exit(1)
@@ -1298,7 +1337,7 @@ def _forecast(project_dir: str, pending_ids: list[str], metadata_csv: str,
             log(f'WARNING: the forecast leaves out the shared context ({e})')
     return costs.forecast_write(
         project_dir, pending_ids, avg_words, model,
-        gate_per_scene=(gate.WRITE_GATE_COST_PER_SCENE + _source_check_cost(project_dir)
+        gate_per_scene=(gate.write_gate_cost_per_scene() + _source_check_cost(project_dir)
                         if coaching == 'full' else 0.0),
         earlier_words=earlier, shared_tokens=shared, batch=write_mode == 'batch')
 

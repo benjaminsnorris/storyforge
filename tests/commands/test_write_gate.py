@@ -420,7 +420,7 @@ class TestReview443:
         draft = api.calculate_cost_from_usage(
             {'input_tokens': 0, 'output_tokens': 10_000}, 'claude-opus-4-6')
         per_scene = forecast.total / 2
-        assert forecast.gate == pytest.approx(2 * gate.WRITE_GATE_COST_PER_SCENE)
+        assert forecast.gate == pytest.approx(2 * gate.write_gate_cost_per_scene())
         assert seen == [pytest.approx(draft + per_scene)]   # act1-sc02 still to draft
 
     def test_drafting_stops_when_its_spend_passes_the_threshold(
@@ -1095,3 +1095,89 @@ class TestKeepGoing:
         assert cmd_write._gate_blockers(setup, 'act1-sc02', keep_going=True) == []
         gate.mark_pending(setup, 'act1-sc01', 'draft', '1 problem')
         assert cmd_write._gate_blockers(setup, 'act1-sc02', keep_going=True)
+
+
+class TestWriteQuestions:
+    """`write --questions` (#649): every gate run the command makes uses the
+    question layer, for the run only, as `check --questions` does."""
+
+    @pytest.fixture
+    def questions(self, setup, monkeypatch):
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)   # the layer needs it
+        monkeypatch.setattr(gate, 'GATE_CHECK_METHOD', 'open')
+        return setup
+
+    def test_the_flag_parses(self):
+        assert cmd_write.parse_args(['--questions']).questions is True
+        assert cmd_write.parse_args([]).questions is False
+
+    def test_each_gate_run_and_recheck_uses_the_questions_then_restores(
+            self, questions, monkeypatch):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        seen = []
+
+        def fake(project_dir, scene_id, *, command, prose, log_dir, **k):
+            seen.append(('gate', scene_id, gate.GATE_CHECK_METHOD))
+            return gate.GatedScene(prose, _result(scene_id, True), _result(scene_id, False))
+        monkeypatch.setattr(gate, 'gate_and_fix', fake)
+
+        def recheck(pd, *, log_dir, skip=frozenset(), **k):
+            seen.append(('recheck', 'new-x1', gate.GATE_CHECK_METHOD))
+            gate.clear_pending(pd, 'new-x1')
+            return gate.Recheck(passed=['new-x1'])
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(questions, 'new-x1', 'recheck', 're-check: x')
+        main(['--questions', '--force', '--scenes', 'act1-sc01,act1-sc02'])
+        assert [s[:2] for s in seen] == [('gate', 'act1-sc01'), ('recheck', 'new-x1'),
+                                         ('gate', 'act1-sc02')]
+        assert {s[2] for s in seen} == {'questions'}
+        assert gate.GATE_CHECK_METHOD == 'open'   # the run's only
+
+    def test_without_the_flag_the_gate_keeps_its_method(self, questions, monkeypatch):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        seen = []
+
+        def fake(project_dir, scene_id, *, command, prose, log_dir, **k):
+            seen.append(gate.GATE_CHECK_METHOD)
+            return gate.GatedScene(prose, _result(scene_id, True), _result(scene_id, False))
+        monkeypatch.setattr(gate, 'gate_and_fix', fake)
+        main(['--force', '--scenes', 'act1-sc01'])
+        assert seen == ['open']
+
+    @pytest.mark.parametrize('stop', [None, SystemExit(1), RuntimeError('boom')])
+    def test_a_session_gates_with_the_questions_and_restores_on_any_exit(
+            self, questions, monkeypatch, stop):
+        from storyforge.costs import WriteForecast
+        seen = []
+
+        def session(*a, **k):
+            seen.append(gate.GATE_CHECK_METHOD)
+            if stop is not None:
+                raise stop
+            return cmd_write.DraftOutcome(0, 0, [])
+        monkeypatch.setattr(cmd_write, '_run_session_mode', session)
+        monkeypatch.setattr(cmd_write, '_session_forecast',
+                            lambda *a, **k: WriteForecast(0.0, 0.0, 'stub'))
+        try:
+            main(['--session', '--questions', '--dry-run', '--force', 'act1-sc01'])
+        except (SystemExit, RuntimeError):
+            assert stop is not None
+        assert seen == ['questions']
+        assert gate.GATE_CHECK_METHOD == 'open'
+
+    def test_refused_with_coaching_that_is_not_gated(self, questions, monkeypatch, capsys):
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: pytest.fail('gated'))
+        with pytest.raises(SystemExit) as e:
+            main(['--questions', '--coaching', 'coach', '--scenes', 'act1-sc01'])
+        assert e.value.code == 1
+        assert '--questions' in capsys.readouterr().out
+        assert gate.GATE_CHECK_METHOD == 'open'
+
+    def test_refused_without_the_continuity_checks(self, questions, monkeypatch, capsys):
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: pytest.fail('gated'))
+        with pytest.raises(SystemExit) as e:
+            main(['--questions', '--scenes', 'act1-sc01'])
+        assert e.value.code == 1
+        assert 'GATE_CONTINUITY' in capsys.readouterr().out
+        assert gate.GATE_CHECK_METHOD == 'open'

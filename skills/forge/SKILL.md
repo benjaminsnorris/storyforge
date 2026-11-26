@@ -195,7 +195,7 @@ After each scene the session runs the tense check (`scenes.csv`'s `tense`; a sce
 
 Before the first session, tell the author to check: a `tense` in `scenes.csv` for each scene when tense follows POV, a `checks.md` with checks (with none, no scene gets a voice review), and `drafting.brief_notes: exclude` in `storyforge.yaml` when the briefs' note columns were written by a model (briefs from before #644). `must:` lines are sent either way, as required.
 
-`--session` takes full coaching and neither `--batch` nor `--interactive`. `storyforge status` names `storyforge write --session` as next for a prose book (a graphic novel's script: `storyforge write --keep-going`). The scene-by-scene draft (`write --keep-going`, "Draft overnight" below) still works.
+`--session` takes full coaching and neither `--batch` nor `--interactive`. `--questions` gates each scene with yes/no questions from the ledger and the brief instead of the open checker, as `storyforge check --questions` does (cheaper per scene; it doesn't look for contradictions with earlier prose no ledger fact records); the forecast prices it. `storyforge status` names `storyforge write --session` as next for a prose book (a graphic novel's script: `storyforge write --keep-going`). The scene-by-scene draft (`write --keep-going`, "Draft overnight" below) still works.
 If prerequisites are missing, route to `elaborate` to build them.
 
 **"Evaluate" / "Run evaluation":**
