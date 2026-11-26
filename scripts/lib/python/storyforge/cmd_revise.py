@@ -3633,7 +3633,8 @@ def _revise_scenes(project_dir: str, scenes: list, source: str, log_dir: str, dr
     budget = RunBudget()
     code, done = 0, []
     gate_files = [cmd_write.gate_pending_path(), cmd_write.gate_prose_path(),
-                  cmd_write.gate_source_fix_path(), cmd_write.gate_advisory_path(),
+                  cmd_write.gate_source_fix_path(), cmd_write.gate_source_notes_path(),
+                  cmd_write.gate_advisory_path(),
                   *cmd_write.gate_state_paths(), 'reference/', 'working/audit-log.csv',
                   'working/.audit-snapshot.csv']
     review_dir = voice_review.REVIEWS_DIR.replace(os.sep, '/') + '/'

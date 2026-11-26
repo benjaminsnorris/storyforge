@@ -172,6 +172,13 @@ class Record:
     #: scene opens; `END`: by its end)
     index: int = 0
 
+    @property
+    def recipient(self) -> str:
+        """Whom a `holds gives` record hands the object to, as written
+        (`detail`; '' for any other record). The possession check resolves
+        it to a character id (`continuity._recipient`)."""
+        return self.detail.strip() if self.type == 'holds' and self.value == 'gives' else ''
+
     def replace(self, **changes) -> 'Record':
         return dataclasses.replace(self, **changes)
 
@@ -483,7 +490,8 @@ def registry_deaths(project_dir: str) -> list[Record]:
 
 def sheet_holdings(project_dir: str, scene_id: str, objects: set[str]
                    ) -> tuple[list[Record], str]:
-    """`holds has` records for the objects in `objects` (keys, `object_key`)
+    """`holds has` records for the objects of the kinds in `objects`
+    (`object_kind`: head nouns, so "the armour" counts for "Achilles' armour")
     a hand holds on the scene's saved stage sheet (#647), when the sheet is
     of the scene's current prose: only states the scene's own verified
     quotes set (a carried state, or a beat whose event is misquoted, is
@@ -510,7 +518,7 @@ def sheet_holdings(project_dir: str, scene_id: str, objects: set[str]
         event = beat.get('event') if isinstance(beat.get('event'), dict) else {}
         for e in beat.get('set', []):
             if not (e.get('field') in stage_sheet.HANDS and e.get('who')
-                    and object_key(e.get('value', '')) in objects):
+                    and object_kind(e.get("value", "")) in objects):
                 continue
             quote = e.get('quote', '')
             if (e.get('origin', 'scene') != 'scene' or event.get('verified') is False
@@ -524,11 +532,15 @@ def sheet_holdings(project_dir: str, scene_id: str, objects: set[str]
     return place_in_prose(prose, out), why
 
 
-def object_key(name: str) -> str:
-    """An object's key: the stage sheet's (`stage_sheet._obj`: lower case,
-    no articles or possessives)."""
+def object_kind(name: str) -> str:
+    """An object's kind: the head noun of its name, the last word once
+    articles and possessives are gone (`stage_sheet._obj`): "Achilles'
+    armour" and "the armour" are `armour`; "shield strap" is `strap`, not
+    `shield` ('' for none)."""
     from storyforge.stage_sheet import _obj
-    return _obj(name)
+    words = [w.strip("'") for w in _obj(name).split()]
+    words = [w for w in words if w]
+    return words[-1] if words else ''
 
 
 def part_key(name: str) -> str:

@@ -5,6 +5,7 @@ and ghost; the
 world table's `speed`; the gate's use of the checks. Every scene, name and
 place here is invented for the tests."""
 
+import dataclasses
 import json
 import os
 from unittest.mock import patch
@@ -35,7 +36,7 @@ def R(type_, who='', item='', value='', detail='', quote=None, verified=True, or
 
 
 def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, world=None,
-              time_mode_column=True, forbidden=None, known=None):
+              time_mode_column=True, forbidden=None, known=None, chars=None):
     """`scenes`: id → overrides of a row (`timeline_day`, `time_of_day`,
     `pov`, `time_mode`, `location`); reading order is the dict's.
     `recs`: id → records, numbered in order."""
@@ -45,7 +46,7 @@ def make_book(scene, recs, *, scenes=None, rows=None, briefs=None, deaths=None, 
         rows_[sid] = {'id': sid, 'seq': str(n + 1), 'timeline_day': str(n + 1),
                       'time_of_day': 'morning', 'pov': 'Mara', 'location': '', **over}
     order = {sid: n for n, sid in enumerate(scenes)}
-    book = Book(scene, order, rows_, deaths=list(deaths or []), chars=dict(CHARS),
+    book = Book(scene, order, rows_, deaths=list(deaths or []), chars=dict(chars or CHARS),
                 places=dict(PLACES), place_names={'harbour': 'Harbour', 'mill': 'Mill',
                                                   'tower': 'Tower'},
                 world=world or World(), rows=list(rows or []), briefs=dict(briefs or {}),
@@ -162,33 +163,71 @@ class TestPossession:
     def test_two_hands_at_once_in_one_scene(self):
         b = make_book('s2', {'s1': [], 's2': [
             R('holds', 'Mara', 'the brass key', 'has', quote='Mara key'),
-            R('holds', 'Oren', 'brass key', 'has', quote='Oren key')]})
+            R('holds', 'Oren', "Mara's brass key", 'has', quote='Oren key')]})
         f, _ = continuity.check_possession(b)
         assert codes(f) == ['PHY'] and f[0].established_scene == 's2'
-        assert 'Mara holds brass key' in f[0].explanation
+        assert "Mara holds Mara's brass key" in f[0].explanation
 
     def test_another_holder_across_scenes_is_a_note(self):
         # #648's review CR-3: an offstage handover is ordinary
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'the letter', 'has', quote='Mara letter')],
-                             's2': [R('holds', 'Oren', 'the letter', 'has', quote='Oren letter')]})
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'the sealed letter', 'has',
+                                      quote='Mara letter')],
+                             's2': [R('holds', 'Oren', "Mara's sealed letter", 'has',
+                                      quote='Oren letter')]})
         f, notes = continuity.check_possession(b)
         assert f == []
         assert any('other hands than an earlier scene left them' in n and
-                   'Oren has the letter, which Mara held in s1' in n for n in notes)
+                   "Oren has Mara's sealed letter, which Mara held in s1" in n for n in notes)
 
     def test_names_for_one_object_are_matched(self):
-        # TD-6: "Hector's sword" and "the sword" are one object; two matches are none
+        # TD-6: "Oren's sword" and Oren's "the sword" are one object; so are
+        # "the brass key" and "the small brass key" in one holder's hands
         b = make_book('s2', {'s1': [R('holds', 'Mara', "Oren's sword", 'destroyed')],
-                             's2': [R('holds', 'Mara', 'the sword', 'has', quote='Mara sword')]})
+                             's2': [R('holds', 'Oren', 'his sword', 'has', quote='Oren sword')]})
         assert 'destroyed' in continuity.check_possession(b)[0][0].explanation
-        b = make_book('s2', {'s1': [R('holds', 'Mara', "Oren's sword", 'destroyed'),
-                                    R('holds', 'Jory', "Lise's sword", 'has')],
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'the brass key', 'destroyed')],
+                             's2': [R('holds', 'Mara', 'the small brass key', 'has')]})
+        assert 'destroyed' in continuity.check_possession(b)[0][0].explanation
+        # an owner's name matches the owner's tracked object by its words
+        b = make_book('s1', {'s1': [R('holds', 'Mara', "Oren's sword", 'has', quote='Mara'),
+                                    R('holds', 'Jory', "Oren's old sword", 'has', quote='Jory')]})
+        assert 'Mara holds' in continuity.check_possession(b)[0][0].explanation
+
+    def test_two_matches_are_none(self):
+        # #732's review CR-5, T-1: a name that could be either of two tracked
+        # objects is neither
+        b = make_book('s1', {'s1': [R('holds', 'Mara', "Oren's sword", 'has', quote='a'),
+                                    R('holds', 'Mara', "Lise's sword", 'has', quote='b'),
+                                    R('holds', 'Mara', 'the sword', 'loses', quote='c'),
+                                    R('holds', 'Jory', "Oren's sword", 'has', quote='d')]})
+        f, _ = continuity.check_possession(b)
+        assert [x.scene_quote for x in f] == ['d']   # still Mara's to hold, not lost
+        b = make_book('s1', {'s1': [R('holds', 'Oren', "Oren's long sword", 'has', quote='a'),
+                                    R('holds', 'Oren', "Oren's short sword", 'has', quote='b'),
+                                    R('holds', 'Jory', "Oren's sword", 'has', quote='c')]})
+        assert continuity.check_possession(b)[0] == []
+
+    def test_a_bare_kind_never_merges_into_another_person_s_object(self):
+        # #732: Mara's "the sword" is her own, not the Oren's sword she broke
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Oren's sword", 'destroyed')],
                              's2': [R('holds', 'Mara', 'the sword', 'has', quote='Mara sword')]})
         assert continuity.check_possession(b)[0] == []
 
+    @pytest.mark.parametrize('name', ['round shield', 'the bronze spear', 'his round shield'])
+    def test_a_name_without_an_owner_is_the_holder_s_own(self, name):
+        # #732's review CR-1: "with his round shield up" in two hands is two shields
+        b = make_book('s1', {'s1': [R('holds', 'Mara', name, 'has', quote='Mara'),
+                                    R('holds', 'Oren', name, 'has', quote='Oren')]})
+        f, notes = continuity.check_possession(b)
+        assert f == []
+        # never silently: the pair not compared is said
+        assert any('read as the holder\'s own while another of that name is tracked' in n
+                   and f'Oren has {name}' in n for n in notes)
+
     def test_a_gap_between_turns_a_finding_into_a_note(self):
         # CR-5: a scene between without typed state may hold the `gets`
-        b = make_book('s3', {'s1': [R('holds', 'Mara', 'brass key', 'gives', 'a stranger')],
+        b = make_book('s3', {'s1': [R('holds', 'Mara', "Mara's brass key", 'gives',
+                                      'a stranger')],
                              's2': [], 's3': [R('holds', 'Mara', 'brass key', 'has')]})
         b.gaps = {'s2'}
         f, notes = continuity.check_possession(b)
@@ -201,13 +240,13 @@ class TestPossession:
         assert f == [] and any('read as places' in n and 'Captain Ash' in n for n in notes)
 
     def test_lost_then_held_again_by_the_loser(self):
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'loses')],
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Mara's brass key", 'loses')],
                              's2': [R('holds', 'Mara', 'brass key', 'has')]})
-        assert 'Mara lost brass key' in continuity.check_possession(b)[0][0].explanation
+        assert "Mara lost brass key" in continuity.check_possession(b)[0][0].explanation
 
     def test_given_to_no_one_then_held_by_another_is_fine(self):
         b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'gives', '')],
-                             's2': [R('holds', 'Oren', 'brass key', 'has')]})
+                             's2': [R('holds', 'Oren', "Mara's brass key", 'has')]})
         assert continuity.check_possession(b) == ([], [])
 
     def test_an_off_present_scene_s_holding_is_left_out(self):
@@ -222,10 +261,37 @@ class TestPossession:
         assert continuity.check_possession(b)[0] == []
 
     def test_held_after_giving_it_away(self):
-        b = make_book('s2', {'s1': [R('holds', 'Mara', 'brass key', 'gives', 'a stranger')],
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Mara's brass key", 'gives',
+                                      'a stranger')],
                              's2': [R('holds', 'Mara', 'brass key', 'has')]})
         f, _ = continuity.check_possession(b)
         assert 'Mara gave away brass key s1' in f[0].explanation
+
+    @pytest.mark.parametrize('value', ['loses', 'gives'])
+    def test_an_unowned_name_held_again_in_a_later_scene_is_a_note(self, value):
+        # #732, the typed-state set: Agamemnon loses a spear in one scene and
+        # has "two spears" later; Ares gives away a spear he lost scenes ago.
+        # An unowned spear across scenes may be another, so it is said, with
+        # both scenes, not blocked
+        b = make_book('s2', {'s1': [R('holds', 'Mara', 'spear', value, 'a stranger')],
+                             's2': [R('holds', 'Mara', 'the spear', 'has')]})
+        f, notes = continuity.check_possession(b)
+        assert f == []
+        assert any('held again by the person who lost or gave one away in an earlier scene'
+                   in n and 'Mara has the spear in s2' in n and ' in s1' in n for n in notes)
+
+    def test_an_unowned_name_held_again_in_the_same_scene_blocks(self):
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'spear', 'loses', quote='throws'),
+                                    R('holds', 'Mara', 'the spear', 'has', quote='again')]})
+        assert 'Mara lost the spear' in continuity.check_possession(b)[0][0].explanation
+
+    @pytest.mark.parametrize('first,then', [("Mara's spear", 'the spear'),
+                                            ('spear', "Mara's spear")])
+    def test_an_owned_name_held_again_in_a_later_scene_blocks(self, first, then):
+        b = make_book('s2', {'s1': [R('holds', 'Mara', first, 'loses')],
+                             's2': [R('holds', 'Mara', then, 'has', quote='Mara spear')]})
+        f, _ = continuity.check_possession(b)
+        assert f[0].scene_quote == 'Mara spear' and 'Mara lost' in f[0].explanation
 
     def test_used_after_it_was_destroyed(self):
         b = make_book('s2', {'s1': [R('holds', 'Mara', 'the letter', 'destroyed')],
@@ -249,7 +315,8 @@ class TestPossession:
         assert continuity.check_possession(b)[0] == []
 
     def test_a_stage_sheet_hand_counts(self):
-        b = make_book('s2', {'s1': [], 's2': [R('holds', 'Mara', 'brass key', 'has', quote='a')]})
+        b = make_book('s2', {'s1': [], 's2': [R('holds', 'Mara', "Oren's brass key", 'has',
+                                                quote='a')]})
         sheet = [Record('holds', 'Oren', 'brass key', 'has', quote='Oren gripped the key',
                         scene_id='s2', origin='stage-sheet', index=5)]
         f, _ = continuity.check_possession(b, sheet)
@@ -268,6 +335,370 @@ class TestPossession:
         b.records['s1'] = [r.replace(scene_id='s1') for r in recs]
         assert continuity.check_possession(b, [r.replace(scene_id='s1') for r in sheet]) \
             == ([], [])
+
+    def test_a_handover_recorded_twice_is_one_whatever_the_order(self):
+        # #732 F2: `gets` before `gives` on the same quote no longer leaves the
+        # giver holding it, and the state after is the handover's
+        for first, second in ((R('holds', 'Oren', 'the brass key', 'gets', quote='Oren takes it'),
+                               R('holds', 'Mara', 'brass key', 'loses', quote='Oren takes it')),
+                              (R('holds', 'Mara', 'brass key', 'gives', quote='hands it to Oren'),
+                               R('holds', 'Oren', 'brass key', 'gets', quote='it to Oren'))):
+            b = make_book('s1', {'s1': [R('holds', 'Mara', 'brass key', 'has', quote='Mara key'),
+                                        first, second,
+                                        R('holds', 'Oren', 'brass key', 'has', quote='Oren key')]})
+            assert continuity.check_possession(b) == ([], [])
+            b.records['s1'].append(R('holds', 'Mara', 'brass key', 'has', quote='Mara again')
+                                   .replace(scene_id='s1', index=9))
+            f, _ = continuity.check_possession(b)
+            assert f[0].scene_quote == 'Mara again' and 'Oren holds' in f[0].explanation
+
+    def test_a_handover_on_other_words_is_not_paired(self):
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'brass key', 'has', quote='Mara key'),
+                                    R('holds', 'Oren', "Mara's brass key", 'gets',
+                                      quote='Oren took it'),
+                                    R('holds', 'Mara', 'brass key', 'loses',
+                                      quote='Mara lost it')]})
+        assert 'Oren holds' in continuity.check_possession(b)[0][0].explanation
+
+    def test_a_gives_naming_another_recipient_is_not_paired(self):
+        # #732's review T-4: Mara hands it to Jory, so Oren's `gets` is another
+        # handover, not this one
+        b = make_book('s1', {'s1': [
+            R('holds', 'Mara', 'brass key', 'has', quote='Mara key'),
+            R('holds', 'Oren', "Mara's brass key", 'gets', quote='as Oren'),
+            R('holds', 'Mara', 'brass key', 'gives', 'Jory', quote='gives it to Jory as Oren')]})
+        f, _ = continuity.check_possession(b)
+        assert f[0].scene_quote == 'gives it to Jory as Oren'
+        assert 'Oren holds' in f[0].explanation
+
+    def test_a_drop_to_a_place_is_not_a_handover(self):
+        # #732's review SF-1: a sword dropped on the sand (the sand `gets` it,
+        # on the same words) and picked up again is no block, and the place is said
+        for drop in ([R('holds', 'Mara', 'sword', 'loses', quote='drops it on the sand'),
+                      R('holds', 'the sand', 'sword', 'gets', quote='drops it on the sand')],
+                     [R('holds', 'the sand', 'sword', 'gets', quote='on the sand'),
+                      R('holds', 'Mara', 'sword', 'loses', quote='drops it on the sand')]):
+            b = make_book('s1', {'s1': [R('holds', 'Mara', 'sword', 'has', quote='Mara sword'),
+                                        *drop,
+                                        R('holds', 'Mara', 'sword', 'has', quote='picks it up')]})
+            f, notes = continuity.check_possession(b)
+            assert f == []
+            assert any('read as places' in n and 'the sand' in n for n in notes)
+        # and without the place, picking up what you lost still blocks
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'sword', 'has', quote='Mara sword'),
+                                    R('holds', 'Mara', 'sword', 'loses', quote='drops it'),
+                                    R('holds', 'Mara', 'sword', 'has', quote='picks it up')]})
+        assert 'Mara lost sword' in continuity.check_possession(b)[0][0].explanation
+
+    def test_a_misquoted_record_makes_the_object_unknown_and_says_so(self):
+        # #732 F3: an unreadable handover no longer leaves the old holder in place
+        b = make_book('s1', {'s1': [
+            R('holds', 'Mara', 'brass key', 'has', quote='Mara key'),
+            R('holds', 'Oren', 'brass key', 'gets', quote='Oren snatches it', verified=False),
+            R('holds', 'Oren', 'brass key', 'has', quote='Oren key')]})
+        f, notes = continuity.check_possession(b)
+        assert f == []
+        assert any('unknown after a misquoted record, not compared' in n
+                   and 'Oren has brass key' in n for n in notes)
+        # and from there on: the next record sets it again
+        b.records['s1'] += [R('holds', 'Mara', 'brass key', 'has', quote='Mara again')
+                            .replace(scene_id='s1', index=9),
+                            R('holds', 'Jory', "Mara's brass key", 'has', quote='Jory')
+                            .replace(scene_id='s1', index=10)]
+        f, _ = continuity.check_possession(b)
+        assert [x.scene_quote for x in f] == ['Jory'] and 'Mara holds' in f[0].explanation
+
+    def test_a_new_holder_after_a_misquote_is_said(self):
+        # #732's review SF-2: Oren's "sword" starts his own, but Mara's went
+        # unknown on a misquote: that is said, not silent
+        b = make_book('s1', {'s1': [
+            R('holds', 'Mara', 'sword', 'has', quote='Mara sword'),
+            R('holds', 'Mara', 'sword', 'loses', quote='Oren wrests it', verified=False),
+            R('holds', 'Oren', 'sword', 'has', quote='Oren sword')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('unknown after a misquoted record' in n
+                               and 'Oren has sword' in n for n in notes)
+
+    def test_a_misquoted_bare_kind_makes_anyone_s_of_that_kind_unknown(self):
+        b = make_book('s1', {'s1': [
+            R('holds', 'Mara', 'robe', 'has', quote='Mara robe'),
+            R('holds', 'Oren', 'robe', 'gets', quote='Oren takes the robe', verified=False),
+            R('holds', 'Mara', 'robe', 'gives', quote='Mara gives it up')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('not compared' in n and 'Mara gives robe' in n for n in notes)
+
+    def test_a_misquote_by_a_holder_with_one_leaves_others_known(self):
+        # #732's review T-5: Oren holds a robe, so his misquoted record is
+        # about his; Mara's stays known
+        b = make_book('s1', {'s1': [
+            R('holds', 'Mara', 'robe', 'has', quote='Mara robe'),
+            R('holds', 'Oren', 'robe', 'has', quote='Oren robe'),
+            R('holds', 'Oren', 'robe', 'gets', quote='Oren takes it', verified=False),
+            R('holds', 'Jory', "Mara's robe", 'has', quote='Jory robe')]})
+        f, _ = continuity.check_possession(b)
+        assert [x.scene_quote for x in f] == ['Jory robe']
+
+    def test_a_misquote_by_a_holder_with_several_makes_all_theirs_unknown(self):
+        # #732's review CR-4
+        b = make_book('s1', {'s1': [
+            R('holds', 'Mara', "Oren's spear", 'has', quote='a'),
+            R('holds', 'Mara', "Lise's spear", 'has', quote='b'),
+            R('holds', 'Mara', 'spear', 'gives', quote='c', verified=False),
+            R('holds', 'Jory', "Oren's spear", 'has', quote='d'),
+            R('holds', 'Jory', "Lise's spear", 'has', quote='e')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('unknown after a misquoted record' in n for n in notes)
+
+    @pytest.mark.parametrize('value', ['loses', 'gives', 'destroyed'])
+    def test_after_destroyed_the_remains_may_be_discarded(self, value):
+        # #732 F4: a broken sword's hilt thrown down, or a second "destroyed"
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'brass key', 'destroyed', quote='snaps'),
+                                    R('holds', 'Mara', 'brass key', value, quote='the stub')]})
+        assert continuity.check_possession(b)[0] == []
+
+    @pytest.mark.parametrize('value', ['has', 'gets'])
+    def test_after_destroyed_an_intact_use_blocks(self, value):
+        b = make_book('s2', {'s1': [R('holds', 'Mara', "Mara's brass key", 'destroyed',
+                                      quote='snaps'),
+                                    R('holds', 'Mara', 'brass key', 'loses', quote='the stub')],
+                             's2': [R('holds', 'Oren', "Mara's brass key", value,
+                                      quote='Oren key')]})
+        f, _ = continuity.check_possession(b)
+        assert 'was destroyed s1' in f[0].explanation and f[0].established_quote == 'snaps'
+
+    def test_a_holder_s_own_kind_taken_after_it_broke_is_another(self):
+        # #732's review CR-2: Hector's spear shatters, then he takes up a spear
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'spear', 'destroyed', quote='snaps'),
+                                    R('holds', 'Mara', 'a spear', 'gets', quote='takes up'),
+                                    R('holds', 'Mara', 'spear', 'has', quote='with it')]})
+        assert continuity.check_possession(b) == ([], [])
+        b = make_book('s1', {'s1': [R('holds', 'Mara', 'spear', 'destroyed', quote='snaps'),
+                                    R('holds', 'Mara', 'spear', 'has', quote='with it')]})
+        assert 'was destroyed' in continuity.check_possession(b)[0][0].explanation
+
+    def test_an_owner_s_name_and_a_bare_kind(self):
+        # "Mara's knife" in Oren's hand is Mara's; Mara's bare "knife" is hers
+        b = make_book('s1', {'s1': [R('holds', 'Oren', "Mara's knife", 'has', quote='Oren knife'),
+                                    R('holds', 'Mara', 'her knife', 'has', quote='Mara knife')]})
+        assert 'Oren holds' in continuity.check_possession(b)[0][0].explanation
+        b = make_book('s1', {'s1': [R('holds', 'Oren', 'knife', 'has', quote='Oren knife'),
+                                    R('holds', 'Mara', 'knife', 'has', quote='Mara knife')]})
+        assert continuity.check_possession(b)[0] == []
+
+    def test_a_record_with_no_owner_or_holder_is_said(self):
+        b = make_book('s1', {'s1': [R('holds', '', 'brass key', 'has', quote='a key lay')]})
+        f, notes = continuity.check_possession(b)
+        assert f == [] and any('neither an owner nor a holder' in n for n in notes)
+
+
+class TestObjectIdentity:
+    """#732's review TD-1..TD-4: one identity rule, typed state."""
+
+    @pytest.mark.parametrize('name,kind', [("Achilles' armour", 'armour'),
+                                           ('the armour', 'armour'),
+                                           ('his round shield', 'shield'),
+                                           ('the shield strap', 'strap'), ('', '')])
+    def test_kind_is_the_head_noun(self, name, kind):
+        assert typed_state.object_kind(name) == kind
+
+    def test_a_kind_is_not_any_word(self):
+        assert not continuity.same_name('shield', 'shield strap')
+        assert continuity.same_name('key', 'small brass key')
+
+    def test_the_owner_s_name_and_the_holder_s_own_are_one(self):
+        b = make_book('s1', {'s1': []})
+        owned = continuity.object_id(b, {}, R('holds', 'Jory', "Oren Tal's knife"))
+        own = continuity.object_id(b, {}, R('holds', 'Oren', 'his knife'))
+        assert owned == own and owned.scope == 'owned' and own.scope == 'holder'
+        assert continuity.object_ref(b, "the king's ring") == continuity.ObjectRef(
+            '', 'king ring')
+
+    def test_a_holding_keeps_its_fields_to_its_status(self):
+        rec = R('holds', 'Mara', 'key', 'has')
+        assert continuity.Holding.held('mara', rec).holder == 'mara'
+        assert continuity.Holding.gone('lost', 'mara', rec).holder == ''
+        with pytest.raises(ValueError):
+            continuity.Holding('destroyed', rec, holder='mara')
+        with pytest.raises(ValueError):
+            continuity.Holding.gone('held', 'mara', rec)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            continuity.Holding.unknown(rec).status = 'held'
+
+    def test_the_recipient(self):
+        assert R('holds', 'Mara', 'key', 'gives', ' Oren ').recipient == 'Oren'
+        assert R('holds', 'Mara', 'key', 'loses', 'Oren').recipient == ''
+        assert R('elapsed', 'Mara', 'days', 'three', 'before').recipient == ''
+
+    def test_offered_names_follow_the_identity_rule(self):
+        b = make_book('s3', {'s1': [R('holds', 'Mara', 'his shield', 'has')],
+                             's2': [R('holds', 'Oren', 'shield', 'has'),
+                                    R('holds', 'Oren', "Lise's shield", 'has')], 's3': []})
+        assert continuity.tracked_objects(b) == ['shield', "Lise's shield"]
+
+    def test_a_sheet_s_bare_kind_counts_for_an_owned_record(self, project_dir):
+        # TD-3: the sheet's "the armour" is read for the records' "Achilles' armour"
+        from storyforge import stage_sheet
+        prose = 'Pell took the armour in his right hand.'
+        _write(project_dir, SCENE, prose)
+        stage_sheet.write_sheet(project_dir, {
+            'format': 1, 'scene_id': SCENE, 'prose_sha256': stage_sheet.prose_hash(prose),
+            'opening': [], 'end': [], 'beats': [{'quote': 'Pell took the armour', 'set': [
+                {'who': 'Pell', 'field': 'hand_right', 'item': '', 'value': 'the armour',
+                 'quote': 'Pell took the armour'}]}]})
+        kinds = {typed_state.object_kind("Achilles' armour")}
+        got, _ = typed_state.sheet_holdings(project_dir, SCENE, kinds)
+        assert [r.item for r in got] == ['the armour']
+
+
+# ============================================================================
+# Possession on Wrath Like Smoke's overnight run (#732, report B)
+# ============================================================================
+
+ILIAD = {n: n for n in (
+    'achilles', 'agamemnon', 'ajax', 'alcathous', 'ares', 'athena', 'automedon', 'cebriones',
+    'diomedes', 'epicles', 'eurypylus', 'glaucus', 'hector', 'hecuba', 'helenus', 'idomeneus',
+    'menelaus', 'meriones', 'nestor', 'odysseus', 'pandion', 'paris', 'patroclus', 'phoenix',
+    'polydamas', 'poseidon', 'sarpedon', 'teucer', 'theano')}
+
+
+def H(who, item, value='has', quote=None, detail='', verified=True):
+    return R('holds', who.title(), item, value, detail,
+             quote=quote or f'{who} {value} {item}', verified=verified)
+
+
+def _has_both(kind, first, second):
+    return {'s1': [H(first, kind), H(second, kind)]}
+
+
+#: Each possession finding report B read against the prose
+#: (docs/plans/2026-11-26-checker-review/B-typed-state.md, section 2), as
+#: the records behind it: id → (scenes and their records, the last scene
+#: judged; whether it should still block). The logged `gate-state-*.json`
+#: replies aren't in the repo, so each is rebuilt from the report's account
+#: of the reply (bare kinds, the reply order, the shared quote).
+REPORT_B = {
+    'P1': ({'s1': [H('athena', 'spear', quote='Athena levels her spear'),
+                   H('ares', 'spear', 'loses', quote='the spear tears loose from Ares')]}, False),
+    'P2': (_has_both('spear', 'athena', 'diomedes'), False),
+    'P3': (_has_both('cloak', 'automedon', 'phoenix'), False),
+    'P4': (_has_both('shield', 'ajax', 'eurypylus'), False),
+    'P5': (_has_both('cloak', 'nestor', 'odysseus'), False),
+    'P6': ({'s1': [H('poseidon', 'sword'),
+                   H('ajax', 'sword', quote='the silver-studded sword Hector gave him')]}, False),
+    'P7': (_has_both('shield', 'ajax', 'hector'), False),
+    'P8': (_has_both('shield', 'ajax', 'teucer'), False),
+    'P9': (_has_both('helmet', 'teucer', 'ajax'), False),
+    'P10': ({'s1': [H('hector', 'whip', 'gets', quote="He takes the whip from Cebriones' hand"),
+                    H('cebriones', 'whip', 'gives',
+                      quote="He takes the whip from Cebriones' hand"),
+                    H('hector', 'the whip', quote='Hector cracks the whip')]}, False),
+    'P11': ({'s1': [H('the tamarisk', 'bow', quote='a bow hung in the tamarisk'),
+                    H('odysseus', 'bow'),
+                    H('diomedes', 'bow', 'gives', detail='Odysseus')]}, False),
+    'P12': (_has_both('helmet', 'diomedes', 'glaucus'), False),
+    'P13': ({'s1': [H('hector', 'helmet'), H('paris', 'helmet'),
+                    H('hector', 'his helmet', quote='Hector puts the helmet on')]}, False),
+    'P14': (_has_both('bow', 'paris', 'helenus'), False),
+    'P15': (_has_both('sword', 'hector', 'ajax'), False),
+    'P16': (_has_both('bow', 'helenus', 'paris'), False),
+    'P17': ({'s1': [H('hecuba', 'robe'),
+                    H('theano', 'robe', 'gets', quote='Theano takes the robe from his mother',
+                      verified=False),
+                    H('theano', 'robe', quote='Theano lays the robe on the knees')]}, False),
+    'P18': ({'s0': [H('patroclus', "Achilles' sword", 'gets')],
+             's1': [H('hector', 'sword'), H('patroclus', 'sword')]}, False),
+    'P19': ({'s1': [H('idomeneus', 'spear', 'destroyed', quote='the shaft snaps'),
+                    H('idomeneus', 'spear', 'destroyed', quote='I broke mine')]}, False),
+    'P20': (_has_both('shield', 'idomeneus', 'alcathous'), False),
+    'P21': ({'s1': [H('menelaus', 'spear'),
+                    H('paris', 'spear', quote='the spear stands in his shield')]}, False),
+    'P22': ({'s1': [H('menelaus', 'sword', 'destroyed', quote='the blade shivers'),
+                    H('menelaus', 'sword', 'loses', quote='he flings the hilt away')]}, False),
+    'P23': (_has_both('shield', 'odysseus', 'ajax'), False),
+    'P24': (_has_both('shield', 'hector', 'sarpedon'), False),
+    'P25': (_has_both('spear', 'sarpedon', 'patroclus'), False),
+    'P26': (_has_both('shield', 'polydamas', 'hector'), False),
+    'P27': (_has_both('shield', 'polydamas', 'ajax'), False),
+    'P28': ({'s0': [H('idomeneus', 'spear', 'destroyed')], 's1': [H('hector', 'spear')]}, False),
+    'P29': ({'s1': [H('pandion', "Teucer's bow", quote="carrying Teucer's bow"),
+                    H('teucer', 'bow', quote='Teucer bends the bow')]}, True),
+    'P30': ({'s0': [H('eurypylus', 'arrow', 'destroyed')], 's1': [H('glaucus', 'arrow')]},
+            False),
+    'P32': (_has_both('stone', 'ajax', 'epicles'), False),
+    'P33': ({'s1': [H('athena', 'helmet', 'gets', quote='strips the helmet from his head'),
+                    H('ares', 'helmet', 'loses', quote='strips the helmet from his head')]},
+            False),
+    'P34': ({'s1': [H('athena', 'shield', 'gets', quote='the shield from his shoulders'),
+                    H('ares', 'shield', 'loses', quote='the shield from his shoulders')]}, False),
+    'P35': ({'s1': [H('athena', 'spear', 'gets', quote='the spear out of his hand'),
+                    H('ares', 'spear', 'loses', quote='the spear out of his hand')]}, False),
+    'P36': ({'s1': [H('diomedes', 'spear', 'loses', quote='Diomedes throws'),
+                    H('diomedes', 'spear', quote='with his spear')]}, True),
+}
+#: The one false finding the fix leaves (report B, F1 + F4): Sarpedon lets
+#: both spears fall, then "has" a spear (Ajax's, stuck in his shield). A
+#: fungible-kinds rule would clear it, and P36 with it.
+LEFT = {'P31': ({'s1': [H('sarpedon', 'spear', 'loses', quote='lets both spears fall'),
+                        H('sarpedon', 'spear', quote='the spear in his shield')]}, True)}
+
+
+def _judge(case):
+    scenes, _ = case
+    book = make_book(list(scenes)[-1], scenes, chars=ILIAD)
+    return continuity.check_possession(book)
+
+
+class TestPossessionReportB:
+    @pytest.mark.parametrize('pid', sorted({**REPORT_B, **LEFT}))
+    def test_each_finding(self, pid):
+        case = {**REPORT_B, **LEFT}[pid]
+        f, _ = _judge(case)
+        assert bool(f) is case[1], (pid, [x.explanation for x in f])
+
+    def test_33_of_the_34_false_findings_no_longer_fire(self):
+        false = {p: c for p, c in {**REPORT_B, **LEFT}.items() if p not in ('P29', 'P36')}
+        assert len(false) == 34
+        quiet = [p for p, c in false.items() if not _judge(c)[0]]
+        assert len(quiet) == 33 and set(false) - set(quiet) == set(LEFT)
+
+    def test_the_two_debatable_findings_still_fire(self):
+        for pid, quote in (('P29', 'Teucer bends the bow'), ('P36', 'with his spear')):
+            f, _ = _judge(REPORT_B[pid])
+            assert [x.scene_quote for x in f] == [quote]
+
+    def test_the_paired_handover_leaves_the_taker_holding_it(self):
+        # #732's review T-2: P35's spear is Athena's after the strip, so Ares
+        # holding it again is "Athena holds", which needs the pairing (the
+        # per-holder rule alone says "Ares lost it")
+        scenes = {'s1': REPORT_B['P35'][0]['s1'] + [H('ares', 'spear', quote='Ares grips it')]}
+        f, _ = _judge((scenes, True))
+        assert [x.scene_quote for x in f] == ['Ares grips it']
+        assert 'Athena holds' in f[0].explanation
+
+    def test_p17_s_misquote_is_said(self):
+        # #732's review T-2: the robe's handover was misquoted, so Theano's
+        # robe isn't compared, and the note says so
+        _, notes = _judge(REPORT_B['P17'])
+        assert any('unknown after a misquoted record' in n and 'Theano has robe' in n
+                   for n in notes)
+
+    def test_achilles_armour_is_tracked_across_scenes(self):
+        # a unique object named with its owner keeps one identity: given to
+        # Patroclus, stripped by Hector, then Hector's "the armour" is it
+        # (the one armour he holds), and Patroclus can't still have it
+        scenes = {'s1': [H('achilles', "Achilles' armour", 'gives', detail='Patroclus',
+                           quote='Achilles gives him the armour')],
+                  's2': [H('hector', "Achilles' armour", 'gets', quote='Hector strips the armour'),
+                         H('patroclus', 'the armour', 'loses', quote='Hector strips the armour')],
+                  's3': [H('hector', 'the armour', quote='Hector puts on the armour'),
+                         H('patroclus', "Achilles's armour", quote='Patroclus wears it')]}
+        f, notes = continuity.check_possession(make_book('s3', scenes, chars=ILIAD))
+        assert len(f) == 1 and f[0].scene_quote == 'Patroclus wears it'
+        assert 'Hector holds' in f[0].explanation
+        # and across scenes: Patroclus having it after Hector took it is a note
+        scenes['s3'] = [H('patroclus', "Achilles' armour", quote='Patroclus wears it')]
+        f, notes = continuity.check_possession(make_book('s3', scenes, chars=ILIAD))
+        assert f == [] and any("Achilles' armour, which Hector held in s2" in n for n in notes)
 
 
 # ============================================================================
@@ -875,7 +1306,7 @@ class TestFile:
             'opening': [], 'end': [], 'beats': [{'quote': 'Pell took the brass key', 'set': [
                 {'who': 'Pell', 'field': 'hand_right', 'item': '', 'value': 'the brass key',
                  'quote': 'Pell took the brass key'}]}]})
-        got, why = typed_state.sheet_holdings(project_dir, SCENE, {'brass key'})
+        got, why = typed_state.sheet_holdings(project_dir, SCENE, {'key'})
         assert why == '' and [(r.who, r.value, r.origin) for r in got] == [
             ('Pell', 'has', 'stage-sheet')]
         assert typed_state.sheet_holdings(project_dir, SCENE, {'letter'})[0] == []
@@ -1450,7 +1881,7 @@ class TestReviewSheet:
                  'quote': 'Pell took the brass key'}]},
             {'quote': 'x', 'set': [{'who': 'Pell', 'field': 'hand_left', 'item': '',
                                     'value': 'brass key', 'quote': 'not in the prose'}]}])
-        got, why = typed_state.sheet_holdings(project_dir, SCENE, {'brass key'})
+        got, why = typed_state.sheet_holdings(project_dir, SCENE, {'key'})
         assert got == [] and '2 hand(s)' in why
 
     def test_a_sheet_of_earlier_prose_is_said(self, project_dir):
