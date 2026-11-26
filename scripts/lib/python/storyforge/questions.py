@@ -60,7 +60,10 @@ by asking about each one narrowly:
   yeses with a verified quote deliver it and fill a promised registry
   fact's blank quote (`kept`, as the open checker's), and anything else is a
   note, or for a `must:` beat an unverified broken promise, which blocks.
-  The brief's entering items written in words are asked as facts.
+  The brief's entering items written in words are asked as facts. A
+  promised fact an earlier scene established holds entering the scene and
+  isn't asked as this scene's to establish, nor is an `outcome` that is
+  only "yes" or "no"; the notes name both (#740).
 
 Findings are `checker.Finding`s, contradictions with the code of the fact's
 type (TRT, REL, PHY, WLD, KNO, TIM), set against the fact's scene and quote (the
@@ -75,6 +78,7 @@ The fixed labelled question set is `evals/suites/question_set.py`.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 from storyforge import yes_no
@@ -693,22 +697,66 @@ def _ask_batch(scene_id: str, prose: str, questions: list[Question], model: str,
 # The brief's promises
 # ============================================================================
 
-def promises_for(brief) -> list[Promise]:
+def promises_for(brief, *, earlier: dict[str, str] | None = None,
+                 left_out: list[str] | None = None) -> list[Promise]:
     """The promises to ask about from `brief` (`checker.brief_from`): each
     promise field's items and registry promises in words (`brief.items`),
     each binding registry fact it promises (`brief.promised`), and each
-    planned fact (`brief.planned`), in that order."""
+    planned fact (`brief.planned`), in that order.
+
+    Not asked, each named in `left_out` (#740, *Wrath Like Smoke*: 7 of 9
+    blocking promise findings false, none real, and two of them led fixes
+    to write real errors): a promised fact an earlier scene established
+    (`earlier`, id → that scene, from `established_earlier`), which holds
+    entering this scene rather than being this scene's to set up (it is
+    asked as a fact when its subject is present); and an `outcome` that is
+    only "yes" or "no", which names no event to deliver."""
     from storyforge.must import strip_marker
+    earlier = earlier or {}
+    left_out = left_out if left_out is not None else []
     out = []
     for col, items_ in brief.items.items():
         for item in items_:
             text = ' '.join(strip_marker(item).split())
+            if col == 'outcome' and bare_answer(text):
+                left_out.append(f'{col}: "{text}" (only an answer: it names no event to '
+                                f'deliver)')
+                continue
             if text:
                 out.append(Promise('item', col, col, item, text))
-    out += [Promise('promised', rid, '', ' '.join(st.split()), ' '.join(st.split()))
-            for rid, st in brief.promised.items()]
+    for rid, st in brief.promised.items():
+        if rid in earlier:
+            left_out.append(f'{rid} (established in {earlier[rid]}, before this scene: it '
+                            f'holds entering the scene, so it is asked as a fact when its '
+                            f'subject is present)')
+            continue
+        out.append(Promise('promised', rid, '', ' '.join(st.split()), ' '.join(st.split())))
     out += [Promise('planned', rid, '', ' '.join(st.split()), ' '.join(st.split()))
             for rid, st in brief.planned.items()]
+    return out
+
+
+def bare_answer(text: str) -> bool:
+    """Whether a brief item is only "yes" or "no" (any case, punctuation
+    aside): an outcome field's answer to the scene's question, not an
+    event."""
+    return re.sub(r'[\W_]+', '', text).casefold() in ('yes', 'no')
+
+
+def established_earlier(rows: list[dict], ids, scene_id: str,
+                        order: dict[str, int]) -> dict[str, str]:
+    """Of the ledger fact `ids`, each one a scene before `scene_id` in
+    reading `order` established: id → that scene. A fact with no scene of
+    the book (backstory, a cut scene) isn't one."""
+    at = order.get(scene_id)
+    if at is None:
+        return {}
+    wanted = set(ids)
+    out = {}
+    for r in rows:
+        sid = (r.get('scene_id') or '').strip()
+        if r.get('id') in wanted and sid in order and order[sid] < at:
+            out[r['id']] = sid
     return out
 
 
@@ -899,7 +947,13 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
                             + ', '.join(picked.stale))
     # the facts' questions and the promises' are independent: asked at once
     from storyforge.runner import together
-    wanted = promises_for(brief) if promises else []
+    left_out: list[str] = []
+    wanted = promises_for(brief, earlier=established_earlier(rows, brief.promised, scene_id,
+                                                             order),
+                          left_out=left_out) if promises else []
+    if left_out:
+        result.notes.append(f'{len(left_out)} brief promise(s) not asked: '
+                            + '; '.join(left_out))
     stem, ext = os.path.splitext(log_file)
     calls = []
     if questions:

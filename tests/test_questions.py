@@ -727,6 +727,41 @@ class TestPromises:
         assert got == [P_ITEM, P_PLAIN, P_FACT, P_PLAN]
         assert got[0].must and not got[1].must and not got[2].must
 
+    def test_a_fact_an_earlier_scene_established_is_not_asked(self):
+        """#740: "Agamemnon's heralds took Briseis" set up two scenes back and
+        listed in a later brief was asked as the later scene's to establish:
+        no/no, a broken promise, and a fix that wrote real errors."""
+        left_out = []
+        got = questions.promises_for(
+            _brief(promised={'k1': 'Oren laughs at the mill', 'k2': 'Mara leaves'}),
+            earlier={'k2': 's1'}, left_out=left_out)
+        assert got == [P_FACT]
+        assert left_out == ['k2 (established in s1, before this scene: it holds entering the '
+                            'scene, so it is asked as a fact when its subject is present)']
+
+    @pytest.mark.parametrize('outcome', ['yes', 'No.', ' YES ', 'must: yes'])
+    def test_an_outcome_that_is_only_an_answer_is_not_asked(self, outcome):
+        left_out = []
+        got = questions.promises_for(_brief(items={'outcome': [outcome],
+                                                   'key_actions': ['yes']}),
+                                     left_out=left_out)
+        # only the outcome field: a key action "yes" is still the author's words
+        assert [p.field for p in got] == ['key_actions']
+        assert len(left_out) == 1 and left_out[0].startswith('outcome: "')
+        assert 'names no event' in left_out[0]
+
+    @pytest.mark.parametrize('outcome', ['no-and', 'yes, but she pays for it', 'Nobody wins'])
+    def test_an_outcome_with_words_is_asked(self, outcome):
+        got = questions.promises_for(_brief(items={'outcome': [outcome]}))
+        assert [p.text for p in got] == [outcome]
+
+    def test_established_earlier(self):
+        rows = [row('a', scene='s1'), row('b', scene='s3'), row('c', scene='s4'),
+                row('d', scene=''), row('e', scene='cut-scene'), row('f', scene='s2')]
+        assert questions.established_earlier(rows, ['a', 'b', 'c', 'd', 'e'], 's3',
+                                             ORDER) == {'a': 's1'}
+        assert questions.established_earlier(rows, ['a'], 'not-a-scene', ORDER) == {}
+
     def _ask(self, promises, answers):
         asked = []
         with patch('storyforge.api._api_request', side_effect=_answering(answers, asked)):
@@ -1027,6 +1062,23 @@ class TestGate:
                 b.update({k: '' for k in ('outcome', 'key_actions', 'key_dialogue',
                                           'knowledge_out', 'physical_state_out')}, **fields)
         _write_csv(path, briefs, list(briefs[0].keys()))
+
+    def test_an_earlier_scenes_fact_in_the_brief_is_not_a_broken_promise(
+            self, project_dir, tmp_path, monkeypatch):
+        """#740: a registry fact set up in act1-sc01 and listed in this
+        scene's knowledge_out isn't asked as this scene's to establish."""
+        _add_rows(project_dir, {'id': 'tessa-knows-map', 'scene_id': 'act1-sc01',
+                                'type': 'knowledge', 'subject': '',
+                                'statement': 'Tessa knows the map is wrong',
+                                'status': 'binding', 'mutable': 'fixed'})
+        self._brief(project_dir, knowledge_out='tessa-knows-map', outcome='yes')
+        result, calls = self._gate(project_dir, tmp_path, monkeypatch,
+                                   lambda n: [ans(i, 'no') for i in range(1, n + 1)])
+        assert 'promises' not in calls
+        assert result.passed
+        assert any('2 brief promise(s) not asked' in n and 'tessa-knows-map (established in '
+                   'act1-sc01' in n and 'outcome: "yes"' in n
+                   for n in result.question_notes)
 
     def test_a_broken_must_beat_stops_the_scene(self, project_dir, tmp_path, monkeypatch):
         # CR-3/SF-6: under --questions a must: beat used to go unchecked and
