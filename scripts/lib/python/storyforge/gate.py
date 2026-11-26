@@ -140,8 +140,8 @@ _REPORTED_LABEL = {
     UNOFFERED: 'a link named a fact in force that extraction was not offered (past the '
                'cap); read as that fact, by its id or the nearest id of the same scene',
     ENDS_HERE: 'a state the plan sets up in this scene, with no end given, ends in this '
-               'scene too (the check confirmed it); recorded as a commitment of the scene '
-               'that supersedes it, never on the plan\'s row',
+               'scene too (the check found the scene shows it ending); recorded as a '
+               'commitment of the scene that supersedes it, never on the plan\'s row',
     'cap': 'facts in force left out of what extraction was offered, over the cap '
            '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
 }
@@ -507,16 +507,20 @@ def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
         out.setdefault(m.group(1), Dispute(
             m.group(1), _statement(rows, m.group(1)),
             f'the state ends in this scene (the plan says it ends at {m.group(2)})'))
-    # #734's review SF-1: a state the plan sets up here, ended here too, is
-    # recorded only when the check confirms the scene shows it ending
-    from storyforge.extract import ENDS_HERE
-    for e in result.ends:
-        if e.kind == ENDS_HERE:
-            said = _one_line(e.carrier.get('quote') or e.carrier.get('statement', ''))
-            out.setdefault(e.state_id, Dispute(
-                e.state_id, _statement(rows, e.state_id),
-                f'the state ends in this scene, where the plan sets it up: "{said}"'))
     return list(out.values())
+
+
+def _endings(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
+    """#734's re-review (SF-1): each `ENDS_HERE` claim, a state the plan
+    sets up in this scene that extraction read as ending here, for the check
+    to rule on with a question of its own: does the scene show it ending?
+    (`check_scene(endings=)`, `questions.ending_question`). Not a dispute: a
+    dispute asks whether the scene contradicts the fact, and clearing one
+    means it leaves the fact standing."""
+    from storyforge.extract import ENDS_HERE
+    return [Dispute(e.state_id, _statement(rows, e.state_id),
+                    _one_line(e.carrier.get('quote') or e.carrier.get('statement', '')))
+            for e in result.ends if e.kind == ENDS_HERE]
 
 
 def _statement(rows: list[dict[str, str]], rid: str) -> str:
@@ -1778,6 +1782,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 f'which the author rejected')
         result.halts = audit.halting_conditions(result.proposed, rows)
     disputes = _disputes(result, rows)
+    endings = _endings(result, rows)
     if GATE_CHECK_METHOD == 'questions':
         # filled after the typed state is read (`_ask_questions`)
         result.check = CheckResult(scene_id)
@@ -1786,7 +1791,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                        log_file=os.path.join(log_dir,
                                                              f'gate-check-{scene_id}.json'),
-                                       rows=rows, disputes=disputes, readings=GATE_READINGS)
+                                       rows=rows, disputes=disputes, readings=GATE_READINGS,
+                                       endings=endings)
         except CheckError as e:
             error = GateError(str(e))
             error.run = getattr(e, 'run', None)
@@ -1816,7 +1822,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         records = _merge_continuity(scene_id, state, result)
         if GATE_CHECK_METHOD == 'questions':
             _ask_questions(project_dir, scene_id, prose, rows, records, disputes, log_dir,
-                           result)
+                           result, endings=endings)
     # #642: a `must` line's words, checked by code
     result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check,
                                                     short_lines=result.short_must))
@@ -2641,8 +2647,8 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
     with the carrying fact's quote, that supersedes the plan fact and
     resolves here, so the state isn't in force after the scene and a
     re-gate, which replaces the scene's commitments, reads it afresh. One is
-    recorded only when the check cleared its dispute (it confirms the scene
-    shows the state ending; SF-1), the fact that ends it is committed (not
+    recorded only when the check found the scene shows the state ending
+    (`check.ended`, a ruling of its own: #734's re-review, SF-1), the fact that ends it is committed (not
     held back, not dropped as a reading again) with its quote in the scene,
     and, on prose with every paragraph unchanged, the earlier version ended
     it too (`_keep_steady_ends`' rule). One already recorded by a kept
@@ -2661,7 +2667,7 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
     here_ids = _here_registry_ids(rows, scene_id)
     already = _ended_here(result.proposed, here_ids)
     before = _ended_here(old_rows, here_ids)
-    confirmed = {d.fact_id for d in result.check.cleared} if result.check else set()
+    confirmed = {d.fact_id for d in result.check.ended} if result.check else set()
     earlier, _ = gated_prose(project_dir, scene_id)
     unchanged = earlier is not None and _paragraphs(earlier) == _paragraphs(prose)
     taken = ({r['id'] for r in rows} | {r['id'] for r in result.proposed}
@@ -2672,7 +2678,7 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
             continue
         quote = e.carrier.get('quote', '')
         if e.state_id not in confirmed:
-            why = 'the check did not confirm the scene shows it ending (see its finding)'
+            why = 'the check did not find the scene shows it ending'
         elif unchanged and e.state_id not in before:
             why = 'unchanged prose, and the earlier version did not end it'
         elif not any(r is e.carrier for r in result.proposed):
@@ -3983,7 +3989,7 @@ QUESTION_LAYER_GAPS = (
 
 def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
                    records: list, disputes: list[Dispute], log_dir: str,
-                   result: 'GateResult') -> None:
+                   result: 'GateResult', endings: list[Dispute] = ()) -> None:
     """The question layer in place of the open checker (#649): its
     contradictions join the check's (one on the same words with the same
     code as one the blocking check or the continuity checks already made is
@@ -3999,7 +4005,7 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
     from storyforge.questions import QuestionError, check_questions
     try:
         got = check_questions(project_dir, scene_id, prose=prose, rows=rows, records=records,
-                              disputes=disputes,
+                              disputes=disputes, endings=endings,
                               log_file=os.path.join(log_dir, f'gate-questions-{scene_id}.json'))
     except QuestionError as e:
         raise GateError(str(e)) from e
@@ -4017,6 +4023,7 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
     check.stale_brief_items += got.stale_brief_items
     check.cleared += got.cleared
     check.unruled += got.unruled
+    check.ended += got.ended
     result.question_notes = list(got.notes) + list(QUESTION_LAYER_GAPS)
     result.asked_fact_ids += [i for i in dict.fromkeys(got.asked_fact_ids)
                               if i not in result.asked_fact_ids]
@@ -4220,15 +4227,12 @@ def report_lines(result: GateResult) -> list[str]:
                         'a contradiction already in the scene') + '): '
                      + '; '.join(_one_line(st) for st, _ in result.kept_stating))
     if result.check:
-        from storyforge.extract import ENDS_HERE
-        claims = {e.state_id for e in result.ends if e.kind == ENDS_HERE}
+        if not result.committed:
+            for d in result.check.ended:
+                lines.append(f'NOTE (the check found the scene shows a state the plan sets '
+                             f'up in it ending; recorded when the scene commits): '
+                             f'{d.fact_id} ("{_one_line(d.statement)}")')
         for d in result.check.cleared:
-            if d.fact_id in claims:
-                if not result.committed:
-                    lines.append(f'NOTE (the check confirmed the scene ends a state the plan '
-                                 f'sets up in it; recorded when the scene commits): '
-                                 f'{d.fact_id} ("{_one_line(d.statement)}")')
-                continue
             lines.append(f'NOTE (plan fact kept, link not applied; the check found no '
                          f'contradiction): {d.fact_id} ("{_one_line(d.statement)}") vs '
                          f'"{_one_line(d.claim)}"')

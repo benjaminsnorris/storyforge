@@ -612,13 +612,18 @@ class TestNarrowDependents:
 # ============================================================================
 
 class _Confirming(Book):
-    """The check clears every dispute it is asked about."""
+    """The check finds every ending it is asked about shown in the scene."""
 
     def __call__(self, path, body, **k):
-        if 'tools' in body and 'cleared' in _schema(body)['properties']:
+        if 'tools' in body and 'ended' in _schema(body)['properties']:
             prompt = body['messages'][0]['content']
+            if not isinstance(prompt, str):
+                prompt = ''.join(b['text'] for b in prompt)
             asked = re.findall(r'^- (\S+): the plan records', prompt, re.M)
-            return _text({'findings': list(self.findings), 'kept': [], 'cleared': asked})
+            reply = {'findings': list(self.findings), 'kept': [], 'ended': asked}
+            if 'cleared' in _schema(body)['properties']:
+                reply['cleared'] = []
+            return _text(reply)
         return super().__call__(path, body, **k)
 
 

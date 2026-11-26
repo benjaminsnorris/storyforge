@@ -5,6 +5,7 @@ other extraction."""
 
 import copy
 import json
+import re
 import os
 from unittest.mock import patch
 
@@ -85,7 +86,7 @@ def _with_persistence(fake, drop=()):
 
 
 def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=None,
-          drop=(), **kw):
+          drop=(), ended=None, **kw):
     """`cleared`: the disputes the check clears; None clears every one it
     is asked about (a request with disputes asks for `cleared`). `drop`:
     statements the persistence check says don't last."""
@@ -98,6 +99,13 @@ def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=N
                 asked = [line.split(':')[0][2:] for line in prompt.split(
                     'may change\n\n')[1].split('\n\n')[1].split('\n') if line.startswith('- ')]
                 reply['cleared'] = asked if cleared is None else list(cleared)
+            if 'ended' in schema['properties']:
+                prompt = body['messages'][0]['content']
+                if not isinstance(prompt, str):
+                    prompt = ''.join(b['text'] for b in prompt)
+                claims = re.findall(r'^- (\S+): the plan records .*; extraction read it ending',
+                                    prompt, re.M)
+                reply['ended'] = claims if ended is None else list(ended)
             return _text(reply)
         return _text({'commitments': list(commitments)})
     with patch('storyforge.api._api_request', side_effect=_with_persistence(fake, drop)):
@@ -4312,32 +4320,54 @@ class TestEndsAStateSetUpHere:
         assert self.PLAN not in {r['id'] for r in facts_in_force(rows, later, order)}
         assert self.PLAN not in {r['id'] for r in ledger.active_states(rows, later, order)}
 
-    def test_the_check_is_asked_to_confirm_it(self, project_dir, tmp_path):
-        """SF-1: an end the check doesn't confirm is never recorded, and
-        stops the scene where it can be seen."""
+    def test_a_false_end_on_an_unrelated_fact_is_not_recorded(self, project_dir,
+                                                                tmp_path):
+        """#734's re-review (SF-1): the check is asked whether the scene shows
+        the state ending, not whether it contradicts it. It says no: nothing
+        is recorded, the wound stays in force, and the scene isn't stopped."""
+        from storyforge.extract import facts_in_force
         self._add_plan_state(project_dir)
-        result = _gate(project_dir, tmp_path, [self._healing()], cleared=())
-        assert not result.committed
-        assert [d.fact_id for d in result.unruled] == [self.PLAN]
-        assert 'where the plan sets it up' in result.unruled[0].claim
+        unrelated = _commitment(type='physical', statement='Ares drives his chariot',
+                                mutable='state', ends=[self.PLAN])
+        result = _gate(project_dir, tmp_path, [unrelated], ended=())
+        assert result.committed and result.unruled == [] and result.findings == []
+        assert result.ends_held == [
+            f'{self.PLAN}: the check did not find the scene shows it ending']
+        assert any(line.startswith('NOTE (not recorded: the end of a state the plan sets up')
+                   for line in gate.report_lines(result))
         rows = ledger.load(project_dir)
         assert not any(r.get('supersedes') == self.PLAN for r in rows)
+        order = ledger.scene_order(project_dir)
+        assert self.PLAN in {r['id'] for r in facts_in_force(rows, self._later(project_dir),
+                                                             order)}
 
-    def test_a_contradiction_ruled_on_it_is_a_finding_and_no_end(self, project_dir,
-                                                                 tmp_path):
-        from storyforge import extract
+    def test_it_is_asked_as_an_ending_not_a_dispute(self, project_dir, tmp_path):
+        """A dispute's `cleared` means the scene leaves the fact standing."""
         self._add_plan_state(project_dir)
-        finding = dict(_contradiction(), fact_id=self.PLAN, established_scene='',
-                       established_quote='Diomedes wounded Ares')
-        result = _gate(project_dir, tmp_path, [self._healing()], findings=[finding],
-                       cleared=())
-        assert not result.passed and [f.fact_id for f in result.findings] == [self.PLAN]
-        assert [e.state_id for e in result.ends if e.kind == extract.ENDS_HERE] == [self.PLAN]
-        gate.commit_provisional(project_dir, result, 'provisional: test')
-        assert result.ends_held == [f'{self.PLAN}: the check did not confirm the scene shows '
-                                    f'it ending (see its finding)']
-        assert not any(r.get('supersedes') == self.PLAN for r in ledger.load(project_dir))
-        assert any(line.startswith('NOTE (not recorded: the end of a state the plan sets up')
+        prompts = []
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                prompts.append(body)
+                return _text({'findings': [], 'kept': [], 'ended': [self.PLAN]})
+            return _text({'commitments': [self._healing()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path / 'logs'),
+                       extract_model='m', check_model='m')
+        schema = prompts[0]['output_config']['format']['schema']['properties']
+        assert 'ended' in schema and 'cleared' not in schema
+        text = prompts[0]['messages'][0]['content']
+        text = text if isinstance(text, str) else ''.join(b['text'] for b in text)
+        assert '## States this scene may end' in text
+        assert 'that this scene may change' not in text
+
+    def test_a_confirmed_end_the_scene_cant_commit_is_said(self, project_dir, tmp_path):
+        """The report wording: found, recorded when the scene commits."""
+        self._add_plan_state(project_dir)
+        result = _gate(project_dir, tmp_path, [self._healing()], findings=[_contradiction()])
+        assert not result.committed
+        assert any(line.startswith('NOTE (the check found the scene shows a state the plan '
+                                   'sets up in it ending; recorded when the scene commits)')
                    for line in gate.report_lines(result))
 
     def test_a_later_row_leaning_on_it_sends_it_to_the_checker(self, project_dir, tmp_path):
