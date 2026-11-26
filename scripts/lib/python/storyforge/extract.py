@@ -11,6 +11,7 @@ import json
 import os
 import re
 from collections.abc import Set
+from dataclasses import dataclass, field
 from typing import Any
 
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
@@ -1065,10 +1066,32 @@ ID_PREFIX = 'id prefix'
 #: by the one id of the same scene worded nearest (`commitment_rows` with
 #: `order`; #634)
 UNOFFERED = 'unoffered'
+#: An `ends` naming an open state the plan sets up in this same scene (a
+#: registry fact recorded for it): the scene sets it up and ends it
+#: (`commitment_rows` with `registry_is_plan` and `ends_out`; #734,
+#: diomedes-spears-ares: Ares wounded and healed in one scene stopped the
+#: session as a slip). The gate records it, once the checker confirms it,
+#: as the carrying commitment's `supersedes` (`gate._apply_ends`), never on
+#: the plan's row
+ENDS_HERE = 'ends here'
+#: An `Ending`'s kind for an offered state ended here
+OFFERED_END = 'ends'
+
+
+@dataclass
+class Ending:
+    """An end `commitment_rows(ends_out=)` read and left for the caller to
+    apply (#734's review CR-5): `kind` `OFFERED_END`, `ENDS_MOVED` (both
+    set `state_id`'s `resolves` to the scene) or `ENDS_HERE` (a claim on a
+    state the plan sets up in the scene); `carrier` is the proposed row
+    whose `ends` named it."""
+    kind: str
+    state_id: str
+    carrier: dict = field(repr=False, compare=False)
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
 COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
                        'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced',
-                       ENDS_MOVED, ID_PREFIX, UNOFFERED)
+                       ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE)
 
 #: How alike (`difflib` ratio) the words of an id that isn't in the ledger
 #: must be to those of one fact of the same scene for `_nearest_id` to
@@ -1119,7 +1142,8 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                     own_writers: tuple[str, ...],
                     registry_is_plan: bool = False, *,
                     reserved: Set[str],
-                    order: dict[str, int] | None = None) -> list[dict[str, str]]:
+                    order: dict[str, int] | None = None,
+                    ends_out: list[Ending] | None = None) -> list[dict[str, str]]:
     """Ledger rows for one scene's parsed commitments (`parse_commitments_response`).
 
     Each is binding, `origin=prose`, `introduced_by`, with an id that no row
@@ -1162,6 +1186,19 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     scene worded nearest (`_nearest_id`). One found is linked as an offered
     fact would be and listed in `UNOFFERED`; one not found is reported as
     before.
+
+    With `ends_out` (the gate; #734's review CR-5), no row is changed: each
+    end is appended there as an `Ending` for the caller to apply, and the
+    ends already listed count when a later item ends the same state.
+
+    An `ends` naming a fact recorded for this scene (`recorded`, not
+    offered: it isn't in force entering the scene) is never a link to
+    nothing (#734): a fixed one is `ends fixed`, one the plan already ends
+    here is left, and one the plan ends in another scene is `ends
+    registry`. An open state is, with `registry_is_plan` and `ends_out`
+    (the gate), an `Ending` of kind `ENDS_HERE`: a claim the caller has the
+    checker rule on before it records anything; without them (phase 4,
+    which edits only its own rows) it is `ends registry`.
     """
     from .common import csv_safe
     from . import ledger
@@ -1193,6 +1230,31 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                                    else f'{scene_id}: {ref} -> {named}')
         offered[named] = unoffered[named]
         return named, []
+    ended: dict[str, str] = {}   # with `ends_out`: state id -> the end listed
+
+    def _resolves(state: dict[str, str]) -> str:
+        return ended.get(state['id']) or (state.get('resolves') or '').strip()
+
+    def _end(state: dict[str, str], carrier: dict[str, str], kind: str = '') -> None:
+        if ends_out is None:
+            state['resolves'] = scene_id
+            return
+        ended[state['id']] = scene_id
+        ends_out.append(Ending(kind or OFFERED_END, state['id'], carrier))
+
+    def _end_set_up_here(state: dict[str, str], carrier: dict[str, str]) -> None:
+        """An `ends` naming `state`, a fact recorded for this scene (#734)."""
+        gone = state['id']
+        ends = (state.get('resolves') or '').strip()
+        if state.get('mutable') != 'state':
+            problems['ends fixed'].append(f'{scene_id}: {gone}')
+        elif ends == scene_id or gone in ended:
+            pass   # the plan ends it here, or an earlier item claimed it
+        elif ends or not registry_is_plan or ends_out is None:
+            problems['ends registry'].append(f'{scene_id}: {gone} (resolves: {ends or "blank"})')
+        else:
+            ended[gone] = scene_id
+            ends_out.append(Ending(ENDS_HERE, gone, carrier))
     from .quotes import quote_in
     out = []
     for item in found:
@@ -1233,7 +1295,10 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                                         f'not guessed)')
                 continue
             old = offered.get(gone)
-            ends = (old or {}).get('resolves', '').strip()
+            if old is None and gone in here:
+                _end_set_up_here(here[gone], row)
+                continue
+            ends = _resolves(old) if old is not None else ''
             if old is None:
                 problems['ends'].append(f'{scene_id}: {gone}')
             elif old.get('mutable') != 'state':   # a fixed fact can't end (G-028, #556)
@@ -1246,11 +1311,11 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
             elif (ends and order is not None and scene_id in order and ends in order
                   and order[ends] > order[scene_id]):
                 problems[ENDS_MOVED].append(f'{scene_id}: {gone} (was: {ends})')
-                old['resolves'] = scene_id
+                _end(old, row, ENDS_MOVED)
             elif ends:
                 problems['ends again'].append(f'{scene_id}: {gone} (resolves: {ends})')
             else:
-                old['resolves'] = scene_id
+                _end(old, row)
         if not item['quote']:
             problems[NO_QUOTE].append(f'{scene_id}: {row["id"]}')
         elif not quote_in(scene_text, item['quote']):

@@ -156,6 +156,10 @@ class Question:
     #: the dispute this question rules on (None for a plain fact): two noes
     #: clear it, anything but a finding or that leaves it unruled
     dispute: Dispute | None = None
+    #: the ending this question rules on (#734; `ending_question`): two
+    #: yeses with a quote in the scene from the first two askings say the
+    #: scene shows the state ending; never a finding
+    ending: Dispute | None = None
 
     @property
     def code(self) -> str:
@@ -234,6 +238,9 @@ class QuestionResult:
     #: disputes with no ruling (split then no, misquoted, past the cap, no
     #: fact to ask about): they block
     unruled: list[Dispute] = field(default_factory=list)
+    #: endings (#734) the first two askings both said the scene shows, with
+    #: a quote in the scene
+    ended: list[Dispute] = field(default_factory=list)
     #: the subjects found present (normalized ids), for the log
     present: list[str] = field(default_factory=list)
     #: the brief's promises asked (each `ASKINGS` times)
@@ -551,6 +558,12 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
     for n in sorted(said_yes):
         q = questions[n - 1]
         quote, why = _verified(said_yes[n], prose)
+        if q.ending is not None:
+            # #734: an ending is a yes of the first two askings with a quote
+            # in the scene; a tie-break yes, or no quote, records nothing
+            if quote and n in agreed_yes:
+                result.ended.append(q.ending)
+            continue
         if not quote:
             misquoted += 1
             continue
@@ -577,6 +590,27 @@ def ask_questions(scene_id: str, prose: str, questions: list[Question], *, model
         result.notes.append(f'{misquoted} question(s) answered yes twice with no quote in '
                             f'the scene: not findings')
     return result
+
+
+def ending_question(d: Dispute, row: dict, name: str = '') -> Question:
+    """#734: the question for a state the plan sets up in the scene that
+    extraction read as ending there: does the scene show it ending? `yes`
+    is the ending (never a finding), and the doubt goes to `no`: an end
+    recorded on a misreading would take a true state out of the book."""
+    scene = (row.get('scene_id') or '').strip()
+    claim = ' '.join(d.claim.split())
+    return Question(fact_id=d.fact_id, type=(row.get('type') or '').strip(),
+                    subject=name or (row.get('subject') or '').strip(),
+                    statement=' '.join(d.statement.split()), established_scene=scene,
+                    established_quote=' '.join((row.get('quote') or '').split())
+                    or ' '.join(d.statement.split()),
+                    text=(f'A reader took this scene to end the fact: "{claim}". ' if claim
+                          else 'A reader took this scene to end the fact. ')
+                         + 'Does the scene clearly show this state ending, so that it no '
+                           'longer holds after the scene? Answer `yes` only when it clearly '
+                           'does, and quote the words that show it; if it doesn\'t, or you '
+                           'can\'t tell, answer `no`.',
+                    ending=d)
 
 
 # ============================================================================
@@ -707,12 +741,14 @@ def ask_promises(scene_id: str, prose: str, promises: list[Promise], *, model: s
 def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[dict],
                     records, disputes: list[Dispute] | None = None,
                     model: str | None = None, log_file: str = '',
-                    promises: bool = True) -> QuestionResult:
+                    promises: bool = True,
+                    endings: list[Dispute] | None = None) -> QuestionResult:
     """Ask `scene_id`'s prose about the facts in `rows` (the ledger as the
     gate reads it, without the scene's own commitments) that hold for it
     and whose subject is present by `records` (the scene's typed state),
     its places or its prose's names, or can't be placed; about the brief's
-    entering items in words; about `disputes`; and, with `promises`, whether
+    entering items in words; about `disputes`; whether the scene shows each
+    of `endings` ending (#734, `ending_question`); and, with `promises`, whether
     it delivers each of its brief's promises (`ask_promises`, its own call
     logged beside `log_file` as `-promises`). The notes say how many were
     asked and what wasn't.
@@ -760,6 +796,15 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         ruled.add(d.fact_id)
         questions.append(dispute_question(d, row, names.get(_norm(row.get('subject') or ''),
                                                             '')))
+    for d in endings or []:
+        row = by_id.get(d.fact_id)
+        if row is None:
+            result.notes.append(f'ending of {d.fact_id}: no ledger fact to ask about: '
+                                f'not asked, so not recorded')
+            continue
+        ruled.add(d.fact_id)
+        questions.append(ending_question(d, row, names.get(_norm(row.get('subject') or ''),
+                                                           '')))
     # a disputed fact is asked once, as its dispute (one slip is not two)
     questions += [question_for(r, names.get(_lookup(r['subject'], chars, places),
                                             r['subject'].strip()), order)
