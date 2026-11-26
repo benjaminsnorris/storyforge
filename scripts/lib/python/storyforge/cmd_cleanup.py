@@ -1360,6 +1360,38 @@ def dedup_pipeline_reviews(project_dir: str) -> None:
 
 
 # ============================================================================
+# Deaths from the source (#745)
+# ============================================================================
+
+DEATHS_TITLE: Final = 'Checking death_scene against the source...'
+
+
+def plan_death_scenes(project_dir: str) -> StepPlan:
+    """Plan the blank characters.csv `death_scene` cells a faithful
+    adaptation's source fills (`source_deaths.plan_deaths`): one change per
+    character. What it couldn't fill is the report's (`_check_source_deaths`)
+    or, when nothing was read, this step's summary. An author's value is
+    never overwritten."""
+    from storyforge import source_deaths
+    plan = source_deaths.plan_deaths(project_dir)
+    changes = tuple(_change('fill', f.describe()) for f in plan.fills)
+
+    def apply() -> tuple[PlannedChange, ...]:
+        try:
+            done = {f.who for f in source_deaths.apply_fills(project_dir, plan.fills)}
+        except (OSError, UnicodeDecodeError) as exc:
+            log(f'WARNING: could not write reference/characters.csv '
+                f'({type(exc).__name__}: {exc}). Its death_scene cells are unchanged.')
+            return ()
+        if len(done) != len(plan.fills):
+            _warn_vanished(f'{len(plan.fills) - len(done)} blank death_scene cell(s)')
+        return tuple(c for c, f in zip(changes, plan.fills) if f.who in done)
+
+    summary = _note('; '.join(plan.notes)) if plan.notes else None
+    return StepPlan(DEATHS_TITLE, changes, apply if changes else _no_op, summary=summary)
+
+
+# ============================================================================
 # storyforge.yaml migration
 # ============================================================================
 
@@ -2773,6 +2805,22 @@ def _check_world_table(project_dir: str) -> list[dict]:
     } for p in found]
 
 
+def _check_source_deaths(project_dir: str) -> list[dict]:
+    """Report the deaths a faithful adaptation's source records that
+    cleanup couldn't fill into characters.csv's `death_scene` (#745): a death
+    in a source scene the map cuts or leaves out, deaths in two sources, an
+    author's `death_scene` the source places elsewhere, a source death_scene
+    naming no source scene. The author decides; never repaired."""
+    from storyforge import source_deaths
+    return [{
+        'type': 'source_death', 'file': 'reference/characters.csv', 'category': 'integrity',
+        'detail': csv_safe(p),
+        'action': 'Set death_scene in reference/characters.csv to the scene after which '
+                  'the character is dead (blank if they live), or fix the source map',
+        'severity': 'warning',
+    } for p in source_deaths.plan_deaths(project_dir).problems]
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Report CRLF line endings in the CSVs and in `storyforge.yaml`.
 
@@ -3083,6 +3131,9 @@ def build_cleanup_report(project_dir: str) -> dict:
     # --- The world table's rows (#647) ---
     all_findings.extend(_check_world_table(project_dir))
 
+    # --- Deaths the source records that weren't filled (#745) ---
+    all_findings.extend(_check_source_deaths(project_dir))
+
     # --- Canon files (graphic-novel projects only) ---
     all_findings.extend(report_canon_files(project_dir))
 
@@ -3203,6 +3254,7 @@ def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
         plan_legacy_files(project_dir, disk),
         plan_loose_files(project_dir, disk),
         plan_pipeline_reviews(project_dir),
+        plan_death_scenes(project_dir),
     ]
     if scenes:
         plans.append(plan_scene_files(project_dir))
