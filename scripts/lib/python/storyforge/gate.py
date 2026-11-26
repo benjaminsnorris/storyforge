@@ -1481,13 +1481,15 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
             where = paragraph(row.get('quote') or '')
             key = (subject(row), row.get('type') or '')
             values = _values(f"{row.get('statement', '')} {row.get('quote', '')}")
-            hit = next((f for f, at, subjects, claim, stating in wide
-                        if overlaps(quote, f) or (where & at)
-                        or (key[0] and key in subjects)
-                        # #556's review: the claim restated elsewhere ("412
-                        # residents" three paragraphs on)
-                        or (values & claim and (not stating or key[0] in stating))),
-                       None)
+            # #735's review CR-4: every finding it states, so it comes into
+            # force only once each is accepted
+            hits = [f for f, at, subjects, claim, stating in wide
+                    if overlaps(quote, f) or (where & at)
+                    or (key[0] and key in subjects)
+                    # #556's review: the claim restated elsewhere ("412
+                    # residents" three paragraphs on)
+                    or (values & claim and (not stating or key[0] in stating))]
+            hit = hits[0] if hits else None
             disputed = hit is not None
         if hit is None:
             keep.append(row)
@@ -1495,7 +1497,8 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
             keep.append(row)
             result.kept_stating.append((row.get('statement', ''), hit))
         elif disputed:
-            row['status'], row['reviewed'] = 'pending', HELD + finding_key(hit)
+            row['status'] = 'pending'
+            row['reviewed'] = held_stamp(sorted({finding_key(f) for f in hits}))
             result.disputed.append((row.get('statement', ''), hit))
             result.disputed_rows.append(row)
         else:
@@ -1777,7 +1780,11 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     # #735: the facts an earlier provisional commit recorded as disputed are
     # replaced too: this version's own reading holds back, disputes or
     # commits them afresh. Not in force, so nothing changed by their going
-    held_rows = [copy.deepcopy(r) for r in rows if is_held(r)
+    # (#735's review CR-3: every `pending` commitment of the scene, so a
+    # disputed row whose stamp was edited away can't be left behind; a
+    # superseded or rejected one stays, the record of a decision)
+    held_rows = [copy.deepcopy(r) for r in rows if ledger.is_commitment(r)
+                 and r.get('status') == 'pending'
                  and (r.get('scene_id') or '').strip() == scene_id]
     old = {r['id'] for r in old_rows} | {r['id'] for r in held_rows}
     ended_before = ledger.ended_by(rows, scene_id)
@@ -1945,6 +1952,25 @@ def is_held(row: dict[str, str]) -> bool:
             and (row.get('reviewed') or '').startswith(HELD))
 
 
+#: The part of a `HELD` stamp naming the earlier states the disputed fact
+#: ends (#735's review CR-1/CR-2): applied when it comes into force
+_HELD_ENDS = ' ends:'
+
+
+def held_stamp(keys: list[str], ends: list[str] = ()) -> str:
+    """A disputed fact's `reviewed`: `held:` and the keys of the findings it
+    states (`;`-joined), then ` ends:` and the earlier states it ends."""
+    return HELD + ';'.join(keys) + (_HELD_ENDS + ';'.join(ends) if ends else '')
+
+
+def held_parts(reviewed: str) -> tuple[list[str], list[str]]:
+    """(finding keys, ended state ids) of a `held_stamp`."""
+    if not (reviewed or '').startswith(HELD):
+        return [], []
+    keys, _, ends = reviewed[len(HELD):].partition(_HELD_ENDS)
+    return ([k for k in keys.split(';') if k], [e for e in ends.split(';') if e])
+
+
 def finding_row_key(row: dict[str, str]) -> str:
     """The key of a finding as `BLOCKED_PATH` records it (`_finding_rows`):
     its source and its quote's words, as `_same` matches two."""
@@ -2047,7 +2073,7 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     # which keeps them and reports them (#632)
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
-    _apply_ends(project_dir, result, rows, old_rows, prose, loaded)
+    _apply_ends(project_dir, result, rows, old_rows, prose, loaded, held=held)
     # #735: a disputed fact keeps its id across commits, and an earlier
     # one's id goes to the same fact read again, disputed or not
     _carry_ids(result.proposed + result.disputed_rows, list(old_rows) + list(held),
@@ -2059,7 +2085,15 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     # the old side only: a fact new to the scene lists nothing
     new_keys = {ledger._fact_key(r) for r in result.proposed}
     result.changed = [r['id'] for r in old_rows if ledger._fact_key(r) not in new_keys]
-    _keep_steady_ends(project_dir, result, new, ended_before, loaded, prose)
+    # #735's review SF-1: a disputed fact coming into force is a change: the
+    # later scenes were gated while it was held. One dropped while held
+    # changes nothing in force
+    held_keys = {ledger.fact_key(r) for r in held}
+    result.changed += [r['id'] for r in result.proposed
+                       if ledger.fact_key(r) in held_keys and r['id'] not in result.changed]
+    held_ends = {e for r in held for e in held_parts(r.get('reviewed', ''))[1]}
+    _keep_steady_ends(project_dir, result, new, ended_before, loaded, prose,
+                      claimed=held_ends)
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
     # #734's review CR-3: a state the plan sets up here that this version
     # ends, or no longer ends, changes what the later scenes have in force
@@ -2144,6 +2178,11 @@ def _after_commit(project_dir, result, holding, pending_reason, prose, command, 
         from storyforge.common import log
         log(f'WARNING: {scene_id} passed, but {REPORTED_PATH} could not be updated: {e}. '
             f'Its contradictions already in the scene are only in this log.')
+    if holding is not None and result.disputed:
+        # #735's review SF-5: the author sees what is waiting on them
+        pending_reason += (f' [{len(result.disputed)} fact(s) recorded as disputed: '
+                           + '; '.join(_one_line(st)[:80] for st, _ in result.disputed[:3])
+                           + ('; ...' if len(result.disputed) > 3 else '') + ']')
     try:
         if holding is not None:
             mark_pending(project_dir, scene_id, PROVISIONAL, pending_reason)
@@ -2805,7 +2844,7 @@ def _ended_here(commitments: list[dict[str, str]], here_ids: set[str]) -> set[st
 
 
 def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]],
-                old_rows: list[dict[str, str]], prose: str, loaded=()) -> None:
+                old_rows: list[dict[str, str]], prose: str, loaded=(), held=()) -> None:
     """The ends extraction read (`result.ends`; #734's review CR-5), applied
     on commit. An offered state's end sets its `resolves` to the scene. An
     `ENDS_HERE` claim, on a state the plan sets up in the scene, is never
@@ -2825,15 +2864,29 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
     from storyforge.quotes import quote_in
     scene_id = result.scene_id
     by_id = {r['id']: r for r in rows}
+    def disputed(carrier) -> bool:
+        return any(r is carrier for r in result.disputed_rows)
+
     for e in result.ends:
         if e.kind != ENDS_HERE and e.state_id in by_id:
+            if disputed(e.carrier):
+                # #735's review CR-1: a disputed fact ends nothing while it is
+                # held; its stamp keeps the end for `accept_blocked`
+                keys, ends = held_parts(e.carrier.get('reviewed', ''))
+                if e.state_id not in ends:
+                    e.carrier['reviewed'] = held_stamp(keys, ends + [e.state_id])
+                result.ends_held.append(f'{e.state_id}: the fact that ends it is recorded '
+                                        f'as disputed; ended when it comes into force')
+                continue
             by_id[e.state_id]['resolves'] = scene_id
     claims = [e for e in result.ends if e.kind == ENDS_HERE]
     if not claims:
         return
     here_ids = _here_registry_ids(rows, scene_id)
     already = _ended_here(result.proposed, here_ids)
-    before = _ended_here(old_rows, here_ids)
+    # an end a disputed row of the earlier version recorded counts (#735's
+    # review CR-2): accepted, then gated again on the same prose, it stays
+    before = _ended_here(list(old_rows) + list(held), here_ids)
     confirmed = {d.fact_id for d in result.check.ended} if result.check else set()
     earlier, _ = gated_prose(project_dir, scene_id)
     unchanged = earlier is not None and _paragraphs(earlier) == _paragraphs(prose)
@@ -2845,13 +2898,14 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
         if e.state_id in already:
             continue
         quote = e.carrier.get('quote', '')
+        held_end = disputed(e.carrier)
         if e.state_id not in confirmed:
             why = 'the check did not find the scene shows it ending'
         elif unchanged and e.state_id not in before:
             why = 'unchanged prose, and the earlier version did not end it'
-        elif not any(r is e.carrier for r in result.proposed):
-            why = ('the fact that ends it was not recorded (held back, or a reading again '
-                   'of unchanged prose)')
+        elif not held_end and not any(r is e.carrier for r in result.proposed):
+            why = ('the fact that ends it was not recorded (a contradiction already in the '
+                   'scene, or a reading again of unchanged prose)')
         elif not quote or not quote_in(prose, quote):
             why = 'the quote of the fact that ends it is not in the scene'
         else:
@@ -2868,13 +2922,23 @@ def _apply_ends(project_dir: str, result: GateResult, rows: list[dict[str, str]]
                    supersedes=e.state_id, resolves=scene_id,
                    introduced_by=e.carrier.get('introduced_by', ''))
         taken.add(end['id'])
+        if held_end:
+            # #735's review CR-2: recorded with its carrier, as disputed (the
+            # same finding keys), and in force with it
+            keys, _ = held_parts(e.carrier.get('reviewed', ''))
+            end.update(status='pending', reviewed=held_stamp(keys))
+            result.disputed_rows.append(end)
+            result.ends_held.append(f'{e.state_id}: carrier recorded as disputed; the end '
+                                    f'is recorded with it, in force when it is')
+            continue
         result.proposed.append(end)
         result.problems.setdefault(ENDS_HERE, []).append(
             f'{scene_id}: {e.state_id} (by {e.carrier.get("id", "")})')
 
 
 def _keep_steady_ends(project_dir: str, result: GateResult, new: list[dict[str, str]],
-                      ended_before: set[str], loaded, prose: str) -> None:
+                      ended_before: set[str], loaded, prose: str,
+                      claimed: Set[str] = frozenset()) -> None:
     """#632: on prose with every paragraph unchanged since the scene's last
     gate (`gated_prose`), the earlier states the scene ended stay ended
     here and no others are, whatever the new reading's `ends` say: a
@@ -2884,7 +2948,9 @@ def _keep_steady_ends(project_dir: str, result: GateResult, new: list[dict[str, 
     added on an open state is not applied. An end moved here from a later
     scene (#621, `ENDS_MOVED`) is left as extraction made it. Each is said
     in `prose_notes`. On prose with any paragraph changed, nothing here can
-    tell which paragraph an end was read from, so every change counts."""
+    tell which paragraph an end was read from, so every change counts.
+    `claimed` (#735's review CR-2): the ends the earlier version's disputed
+    facts recorded; one applied now that its fact is in force stays."""
     now = ledger.ended_by(new, result.scene_id)
     if not ended_before ^ now:
         return
@@ -2899,7 +2965,7 @@ def _keep_steady_ends(project_dir: str, result: GateResult, new: list[dict[str, 
             r['resolves'] = result.scene_id
             result.prose_notes.append(f'{result.scene_id}: kept its end of {rid} (unchanged '
                                       f'prose; the new reading left it out)')
-    for rid in sorted(now - ended_before):
+    for rid in sorted(now - ended_before - set(claimed)):
         r = by_id.get(rid)
         if r is not None and not was.get(rid):
             r['resolves'] = ''
@@ -4933,22 +4999,28 @@ def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateRe
     return ''
 
 
-def accept_blocked(project_dir: str, scene_id: str,
-                   promoted: list[str] | None = None) -> list[dict[str, str]]:
+def accept_blocked(project_dir: str, scene_id: str, promoted: list[str] | None = None,
+                   listed: list[str] | None = None,
+                   notes: list[str] | None = None) -> list[dict[str, str]]:
     """The author accepts the verified contradictions that stopped
     `scene_id`'s last gate run (Ben, 2026-11-02): its `BLOCKED_PATH` rows
     move to `REPORTED_PATH` as `ACCEPTED`, so later gate runs of the scene
     report them, not stop on them, and a `RECHECK_FAILED` listing goes back
     to `RECHECK` (the author has acted). The scene's commitments a
-    provisional commit recorded as disputed for one of them (#735,
-    `is_held`) come into force (`binding`, `reviewed` blank, so the audit
-    digest lists them); their ids go to `promoted`. One disputed for a
-    finding not accepted here stays disputed. Returns the rows accepted
-    (none: nothing is recorded for the scene, nothing changed).
+    provisional commit recorded as disputed (#735, `is_held`) come into
+    force once every finding they state is accepted, here or before
+    (`binding`, `reviewed` blank, so the audit digest lists them), with the
+    earlier states they end (`_bring_into_force`); their ids go to
+    `promoted`, the later scenes listed for a re-check because of them
+    (#735's review SF-1: they were gated while the facts were held) to
+    `listed`, and what couldn't be applied to `notes`. Returns the rows
+    accepted (none: nothing is recorded for the scene, nothing changed).
 
     Raises:
-        GateError: a file is malformed or can't be written (the ledger is
-            written first: when it can't be, nothing is accepted)."""
+        GateError: a file is malformed or can't be written. The ledger is
+            written last (#735's review SF-4): when it alone fails, the
+            findings are accepted and the message says to run
+            `storyforge check --pending`, whose re-gate commits the facts."""
     stopped = blocked(project_dir)
     rows = stopped.pop(scene_id, [])
     if not rows:
@@ -4968,7 +5040,6 @@ def accept_blocked(project_dir: str, scene_id: str,
                         f'in the scene ("{gone[0][:80]}"): {BLOCKED_PATH} describes other '
                         f'prose; nothing accepted. Run `storyforge check {scene_id}` to '
                         f'record what this prose has.')
-    _bring_into_force(project_dir, scene_id, rows, promoted)
     kept = reported(project_dir)
     mine = kept.setdefault(scene_id, [])
     for r in rows:
@@ -4980,30 +5051,88 @@ def accept_blocked(project_dir: str, scene_id: str,
     if row and row['command'] == RECHECK_FAILED:
         mark_pending(project_dir, scene_id, RECHECK,
                      f're-check: the author accepted {len(rows)} finding(s)')
+    _bring_into_force(project_dir, scene_id, [m for m in mine if m['command'] == ACCEPTED],
+                      promoted, listed, notes)
     return rows
 
 
 def _bring_into_force(project_dir: str, scene_id: str, accepted: list[dict[str, str]],
-                      promoted: list[str] | None) -> None:
+                      promoted: list[str] | None, listed: list[str] | None = None,
+                      notes: list[str] | None = None) -> None:
     """`accept_blocked`'s ledger side (#735): `scene_id`'s disputed
-    commitments whose finding is one of `accepted` become binding. Writes
-    only when one does; their ids go to `promoted`."""
-    keys = {HELD + finding_row_key(r) for r in accepted}
+    commitments every one of whose findings is in `accepted` (the scene's
+    accepted rows; #735's review CR-4) become binding, and the earlier
+    states their stamp says they end (`held_parts`) end here, as
+    `_apply_ends` would have: one already ended at or before the scene is
+    left, said in `notes`. The later scenes depending on what came into
+    force are listed `RECHECK` (#735's review SF-1). Writes only when a fact
+    comes into force; ids to `promoted`, scenes to `listed`."""
+    keys = {finding_row_key(r) for r in accepted}
     try:
         rows = ledger.load(project_dir)
-        ids = []
+        order = ledger.scene_order(project_dir)
+        by_id = {r['id']: r for r in rows}
+        ids, changed, said = [], [], []
         for r in rows:
-            if (is_held(r) and (r.get('scene_id') or '').strip() == scene_id
-                    and r['reviewed'] in keys):
-                r['status'], r['reviewed'] = 'binding', ''
-                ids.append(r['id'])
+            if not (is_held(r) and (r.get('scene_id') or '').strip() == scene_id):
+                continue
+            mine, ends = held_parts(r['reviewed'])
+            if not mine or not set(mine) <= keys:
+                continue
+            r['status'], r['reviewed'] = 'binding', ''
+            ids.append(r['id'])
+            for sid in ends:
+                state = by_id.get(sid)
+                end = (state.get('resolves') or '').strip() if state else ''
+                if state is None or state.get('status') != 'binding':
+                    said.append(f'{r["id"]} ends {sid}, which is not a binding fact in the '
+                                f'ledger now: not applied')
+                elif end and end in order and scene_id in order and order[end] <= order[scene_id]:
+                    said.append(f'{r["id"]} ends {sid}, which {end} already ends: not applied')
+                else:
+                    state['resolves'] = scene_id
+                    changed.append(sid)
+                    if end and end != scene_id:   # moved here from a later scene
+                        changed.append(f'{sid}@{end}')
         if ids:
             ledger.save(project_dir, rows, command='accept')
     except (ledger.LedgerError, ValueError, OSError) as e:
-        raise GateError(f'{scene_id}: the facts disputed for these findings could not be '
-                        f'brought into force ({e}); nothing accepted') from e
+        raise GateError(f'{scene_id}: the findings are accepted, but the facts disputed for '
+                        f'them could not be brought into force ({e}); run `storyforge check '
+                        f'--pending`, whose re-gate of the scene commits them') from e
     if promoted is not None:
         promoted.extend(ids)
+    if notes is not None:
+        notes.extend(said)
+    if ids:
+        scenes = _list_for_force(project_dir, scene_id, rows, ids + [c for c in changed
+                                                                      if '@' not in c],
+                                 order, moved=[c.split('@')[1] for c in changed if '@' in c])
+        if listed is not None:
+            listed.extend(scenes)
+
+
+def _list_for_force(project_dir: str, scene_id: str, rows: list[dict[str, str]],
+                    ids: list[str], order: dict[str, int], moved: list[str] = ()) -> list[str]:
+    """#735's review SF-1: list `RECHECK` the later scenes, with prose, whose
+    facts depend on `ids` (facts of `scene_id` that came into force, and the
+    states they end), plus `moved` (scenes whose end of a state moved here):
+    they were gated while the facts were held. A scene already waiting
+    stays as it is. Returns the scenes listed."""
+    names, _ = ledger.subject_names(project_dir)
+    found = ledger.dependents(rows, ids, order, names=names, narrow=True)
+    later = sorted({s for s in list(found.scenes) + list(moved)
+                    if s in order and order[s] > order.get(scene_id, -1)}, key=order.get)
+    gone = _gone_scenes(project_dir)
+    scenes = [s for s in later if s not in gone and _has_prose(project_dir, s)]
+    waiting = pending(project_dir)
+    for s in scenes:
+        if s not in waiting:
+            why = found.why.get(s) or 'an end moved here from it'
+            mark_pending(project_dir, s, RECHECK,
+                         f're-check: {len(ids)} fact(s) of {scene_id} recorded as disputed came '
+                         f'into force (`check --accept`) ({why})')
+    return scenes
 
 
 def held_facts(project_dir: str, scene_ids: list[str] | None = None) -> dict[str, list[str]]:

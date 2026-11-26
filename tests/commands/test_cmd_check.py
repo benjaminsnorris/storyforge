@@ -1063,6 +1063,42 @@ class TestProvisionalRecovery:
         cmd_check.main(['--accept', SCENE])
         assert self._held(project_dir) == [('The Hollow was on the map', 'binding')]
 
+    def test_accept_says_which_facts_stay_disputed(self, project, capsys):
+        """T-5: a fact held for a finding `--accept` didn't take is named."""
+        project_dir, _ = project
+        self._commit(project_dir, [self.SAME_PARA, self.OTHER])
+        rows = ledger.load(project_dir)
+        for r in rows:
+            if gate.is_held(r):
+                r['reviewed'] = gate.held_stamp(['another'])
+        ledger.save(project_dir, rows, command='test')
+        cmd_check.main(['--accept', SCENE])
+        out = capsys.readouterr().out
+        assert 'still disputed, for findings not accepted here' in out
+        assert 'The Hollow was on the map' in out
+
+    def test_the_repair_is_in_the_report(self, project):
+        """T-6."""
+        project_dir, _ = project
+        self._commit(project_dir, [self.SAME_PARA, self.OTHER])
+        with _api_facts([[BAD]], [self.SAME_PARA, self.OTHER]), pytest.raises(SystemExit):
+            cmd_check.main(['--pending'])
+        with open(os.path.join(project_dir, cmd_check.REPORT_PATH), encoding='utf-8') as f:
+            report = f.read()
+        assert f'{SCENE}: committed provisionally again, from this check' in report
+        assert 'NOTE (recorded as disputed' in report
+
+    def test_a_repair_that_cannot_commit_is_a_warning(self, project, capsys, monkeypatch):
+        """T-6, SF-5: the dropped facts are still missing, said as a WARNING."""
+        project_dir, _ = project
+        self._commit(project_dir, [self.SAME_PARA, self.OTHER])
+        monkeypatch.setattr(gate, 'can_commit_provisionally', lambda r: 'a halt')
+        with _api_facts([[BAD]], [self.SAME_PARA, self.OTHER]), pytest.raises(SystemExit):
+            cmd_check.main(['--pending'])
+        out = capsys.readouterr().out
+        assert (f'WARNING: {SCENE} keeps its earlier provisional commit; this run\'s facts '
+                f'were not committed provisionally (a halt)') in out
+
     def test_a_scene_not_provisional_is_not_committed_by_a_failed_check(self, project):
         project_dir, _ = project
         with _api_facts([[BAD]], [self.SAME_PARA, self.OTHER]), pytest.raises(SystemExit):

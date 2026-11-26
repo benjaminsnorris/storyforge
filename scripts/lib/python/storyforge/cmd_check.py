@@ -604,8 +604,9 @@ def _recommit_provisional(project_dir: str, result, reason: str) -> list[str]:
         except gate.GateError as e:
             cannot = str(e)
     if cannot:
-        line = (f'NOTE: {sid} keeps its earlier provisional commit; this run\'s facts were '
-                f'not committed provisionally: {cannot}')
+        line = (f'WARNING: {sid} keeps its earlier provisional commit; this run\'s facts '
+                f'were not committed provisionally ({cannot}), so a fact an earlier commit '
+                f'left out is still missing')
         log(f'  {line}')
         return [f'- {line}', '']
     lines = [f'{sid}: committed provisionally again, from this check']
@@ -769,8 +770,11 @@ def _accept(project_dir: str, scene_ids: list[str]) -> None:
     from storyforge import audit, ledger
     for sid in scene_ids:
         promoted: list[str] = []
+        listed: list[str] = []
+        notes: list[str] = []
         try:
-            rows = gate.accept_blocked(project_dir, sid, promoted=promoted)
+            rows = gate.accept_blocked(project_dir, sid, promoted=promoted, listed=listed,
+                                       notes=notes)
         except gate.GateError as e:
             log(f'ERROR: {sid}: {e}')
             sys.exit(1)
@@ -781,6 +785,11 @@ def _accept(project_dir: str, scene_ids: list[str]) -> None:
         # #735: the facts a provisional commit recorded as disputed for them
         if promoted:
             log(f'  in force now (recorded as disputed for these): {", ".join(promoted)}')
+        for n in notes:
+            log(f'  WARNING: {n}')
+        if listed:
+            log(f'  listed for a re-check (gated while those facts were held): '
+                f'{", ".join(listed)}')
         try:
             still = gate.held_facts(project_dir, [sid]).get(sid, [])
         except gate.GateError as e:

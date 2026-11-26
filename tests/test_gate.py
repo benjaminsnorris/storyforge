@@ -3328,6 +3328,254 @@ class TestProvisional:
         assert hunt['resolves'] == ''
 
 
+class TestDisputed:
+    """#735's review: what a disputed fact (held at a provisional commit)
+    holds while held, what it brings when it comes into force, and that
+    nothing can orphan it."""
+    OTHER = TestProvisional.OTHER
+    TARREN = "Tarren's Hollow had 412 people"
+
+    def _edge(self, **over):
+        return _commitment(statement='The world has an edge', quote=self.OTHER, type='world',
+                           **over)
+
+    def _provisional(self, project_dir, tmp_path, commitments=None, findings=None, **kw):
+        result = _gate(project_dir, tmp_path,
+                       [_commitment(), self._edge()] if commitments is None else commitments,
+                       findings=[_contradiction()] if findings is None else findings, **kw)
+        assert gate.can_commit_provisionally(result) == ''
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        return result
+
+    def _rows(self, project_dir, scene=SCENE):
+        return {r['statement']: r for r in ledger.load(project_dir)
+                if r['scene_id'] == scene and ledger.is_commitment(r)}
+
+    def _add(self, project_dir, **row):
+        rows = ledger.load(project_dir)
+        base = {c: '' for c in ledger.COLUMNS}
+        base.update(origin='prose', status='binding', mutable='state', introduced_by='draft',
+                    type='world')
+        base.update(row)
+        ledger.save(project_dir, rows + [base], command='test')
+
+    def _git(self, project_dir):
+        import subprocess
+        subprocess.run(['git', 'init', '-q', project_dir], check=True)
+
+    # --- ends (CR-1, CR-2)
+
+    def test_a_disputed_fact_ends_no_earlier_state_until_accepted(self, project_dir,
+                                                                  tmp_path):
+        self._add(project_dir, id='bleeding', statement='bleeding', type='physical',
+                  scene_id='act1-sc01')
+        result = self._provisional(project_dir, tmp_path,
+                                   [_commitment(ends=['bleeding']), self._edge()])
+        by_id = {r['id']: r for r in ledger.load(project_dir)}
+        assert by_id['bleeding']['resolves'] == ''   # still in force
+        assert result.ends_held == ['bleeding: the fact that ends it is recorded as '
+                                    'disputed; ended when it comes into force']
+        held = self._rows(project_dir)[self.TARREN]
+        assert gate.held_parts(held['reviewed'])[1] == ['bleeding']
+        gate.accept_blocked(project_dir, SCENE)
+        assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
+
+    def test_a_held_end_of_a_state_set_up_here_comes_into_force_with_its_carrier(
+            self, project_dir, tmp_path):
+        """#734 end to end: the healing is disputed, so the wound stays in
+        force; `--accept` brings the healing and its end in; a re-gate of the
+        same prose keeps the end."""
+        from storyforge.extract import facts_in_force
+        self._git(project_dir)
+        plan = TestEndsAStateSetUpHere.PLAN
+        TestEndsAStateSetUpHere()._add_plan_state(project_dir)
+        healing = TestEndsAStateSetUpHere()._healing()
+        later = TestEndsAStateSetUpHere()._later(project_dir)
+        order = ledger.scene_order(project_dir)
+        result = self._provisional(project_dir, tmp_path, [healing, self._edge()])
+        assert any(h.startswith(f'{plan}: carrier recorded as disputed')
+                   for h in result.ends_held)
+        rows = ledger.load(project_dir)
+        [end] = [r for r in rows if r.get('supersedes') == plan]
+        assert end['status'] == 'pending' and gate.is_held(end)
+        assert plan in {r['id'] for r in facts_in_force(rows, later, order)}
+        gate.accept_blocked(project_dir, SCENE)
+        rows = ledger.load(project_dir)
+        [end] = [r for r in rows if r.get('supersedes') == plan]
+        assert end['status'] == 'binding'
+        assert plan not in {r['id'] for r in facts_in_force(rows, later, order)}
+        # the same prose again, the finding accepted: the end stays
+        again = _gate(project_dir, tmp_path, [healing, self._edge()],
+                      findings=[_contradiction()])
+        assert again.committed, gate.report_lines(again)
+        rows = ledger.load(project_dir)
+        assert [r['status'] for r in rows if r.get('supersedes') == plan] == ['binding']
+        assert plan not in {r['id'] for r in facts_in_force(rows, later, order)}
+
+    def test_an_end_claimed_while_held_survives_a_passing_regate_of_unchanged_prose(
+            self, project_dir, tmp_path):
+        """CR-2: `_keep_steady_ends` took the end a now-binding fact applies
+        as new on unchanged prose and undid it."""
+        self._git(project_dir)
+        self._add(project_dir, id='bleeding', statement='bleeding', type='physical',
+                  scene_id='act1-sc01')
+        self._provisional(project_dir, tmp_path, [_commitment(ends=['bleeding']), self._edge()])
+        again = _gate(project_dir, tmp_path, [_commitment(ends=['bleeding']), self._edge()])
+        assert again.committed and again.passed
+        assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
+
+    def test_a_held_end_survives_a_passing_regate_of_unchanged_prose(self, project_dir,
+                                                                    tmp_path):
+        """CR-2: the check doesn't raise the finding again on the same prose;
+        the healing passes, and its end, held with it, is recorded."""
+        self._git(project_dir)
+        plan = TestEndsAStateSetUpHere.PLAN
+        TestEndsAStateSetUpHere()._add_plan_state(project_dir)
+        healing = TestEndsAStateSetUpHere()._healing()
+        self._provisional(project_dir, tmp_path, [healing, self._edge()])
+        again = _gate(project_dir, tmp_path, [healing, self._edge()])
+        assert again.passed and again.committed, again.ends_held
+        assert [r['status'] for r in ledger.load(project_dir)
+                if r.get('supersedes') == plan] == ['binding']
+
+    def test_a_disputed_rows_id_is_never_given_to_an_end_commitment(self, project_dir,
+                                                                    tmp_path):
+        """T-8: the end commitment's id is minted from the plan statement; a
+        disputed row stating it holds that id already."""
+        plan = TestEndsAStateSetUpHere.PLAN
+        TestEndsAStateSetUpHere()._add_plan_state(project_dir)
+        twin = _commitment(type='physical', statement='Diomedes wounded Ares')
+        healing = _commitment(type='physical', statement='Paeon heals Ares', mutable='state',
+                              quote=self.OTHER, ends=[plan])
+        self._provisional(project_dir, tmp_path, [twin, healing])
+        ids = [r['id'] for r in ledger.load(project_dir)]
+        assert len(ids) == len(set(ids))
+        rows = self._rows(project_dir)
+        assert rows['Diomedes wounded Ares']['status'] in ('pending', 'binding')
+        assert any(r.get('supersedes') == plan and r['status'] == 'binding'
+                   for r in ledger.load(project_dir))
+
+    # --- coming into force lists re-checks (SF-1), dropping doesn't (T-4)
+
+    def test_accept_lists_the_later_scenes_gated_while_it_was_held(self, project_dir,
+                                                                   tmp_path):
+        result = self._provisional(project_dir, tmp_path,
+                                   [_commitment(subject='tarrens-hollow'), self._edge()])
+        assert [st for st, _ in result.disputed] == [self.TARREN]
+        self._add(project_dir, id='later-hollow', subject='tarrens-hollow',
+                  statement='The hollow is empty', scene_id='act2-sc01')
+        listed = []
+        gate.accept_blocked(project_dir, SCENE, listed=listed)
+        assert listed == ['act2-sc01']
+        assert gate.pending(project_dir)['act2-sc01']['command'] == gate.RECHECK
+
+    def test_a_regate_bringing_it_in_counts_it_changed(self, project_dir, tmp_path):
+        self._provisional(project_dir, tmp_path,
+                          [_commitment(subject='tarrens-hollow'), self._edge()])
+        held_id = self._rows(project_dir)[self.TARREN]['id']
+        self._add(project_dir, id='later-hollow', subject='tarrens-hollow',
+                  statement='The hollow is empty', scene_id='act2-sc01')
+        again = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                              self._edge()])
+        assert again.passed and held_id in again.changed
+        assert 'act2-sc01' in again.recheck
+
+    def test_a_regate_dropping_it_changes_nothing(self, project_dir, tmp_path):
+        """T-4: a fact dropped while held was never in force."""
+        self._provisional(project_dir, tmp_path,
+                          [_commitment(subject='tarrens-hollow'), self._edge()])
+        self._add(project_dir, id='later-hollow', subject='tarrens-hollow',
+                  statement='The hollow is empty', scene_id='act2-sc01')
+        again = _gate(project_dir, tmp_path, [self._edge()])
+        assert again.passed and again.changed == [] and again.recheck_why == {}
+
+    # --- scene scoping (T-1, T-2) and ids (T-3)
+
+    def _twin_in(self, project_dir, scene):
+        rows = ledger.load(project_dir)
+        held = next(r for r in rows if gate.is_held(r))
+        twin = dict(held, id=f'{scene}--twin', scene_id=scene)
+        ledger.save(project_dir, rows + [twin], command='test')
+
+    def test_a_regate_leaves_another_scenes_disputed_facts(self, project_dir, tmp_path):
+        self._provisional(project_dir, tmp_path)
+        self._twin_in(project_dir, 'act1-sc01')
+        _gate(project_dir, tmp_path, [self._edge()])
+        assert self._rows(project_dir, 'act1-sc01')[self.TARREN]['status'] == 'pending'
+
+    def test_accept_promotes_only_the_scenes_own_disputed_facts(self, project_dir, tmp_path):
+        self._provisional(project_dir, tmp_path)
+        self._twin_in(project_dir, 'act1-sc01')
+        gate.accept_blocked(project_dir, SCENE)
+        assert self._rows(project_dir)[self.TARREN]['status'] == 'binding'
+        assert self._rows(project_dir, 'act1-sc01')[self.TARREN]['status'] == 'pending'
+
+    def test_a_fact_disputed_twice_keeps_its_id(self, project_dir, tmp_path):
+        self._provisional(project_dir, tmp_path)
+        first = self._rows(project_dir)[self.TARREN]['id']
+        self._provisional(project_dir, tmp_path)
+        assert self._rows(project_dir)[self.TARREN]['id'] == first
+
+    # --- every finding (CR-4)
+
+    def test_it_comes_into_force_only_when_every_finding_it_states_is_accepted(
+            self, project_dir, tmp_path):
+        second = dict(_contradiction(), established_scene='act2-sc01',
+                      established_quote='They had walked since dawn')
+        self._provisional(project_dir, tmp_path, findings=[_contradiction(), second])
+        held = self._rows(project_dir)[self.TARREN]
+        keys, _ = gate.held_parts(held['reviewed'])
+        assert len(keys) == 2
+        # one of its findings accepted only
+        stopped = gate.blocked(project_dir)
+        stopped[SCENE] = [r for r in stopped[SCENE] if r['source'] == 'act1-sc01']
+        gate._write_rows(project_dir, gate.BLOCKED_PATH, stopped)
+        gate.accept_blocked(project_dir, SCENE)
+        assert self._rows(project_dir)[self.TARREN]['status'] == 'pending'
+
+    # --- orphans (CR-3)
+
+    def test_audit_mark_refuses_a_disputed_fact(self, project_dir, tmp_path):
+        from storyforge import audit
+        self._provisional(project_dir, tmp_path)
+        rows = ledger.load(project_dir)
+        held = next(r for r in rows if gate.is_held(r))
+        with pytest.raises(ValueError, match='recorded as disputed'):
+            audit.mark(rows, [held['id']], 'seen')
+
+    def test_a_regate_replaces_a_pending_row_whose_stamp_was_lost(self, project_dir,
+                                                                  tmp_path):
+        self._provisional(project_dir, tmp_path)
+        rows = ledger.load(project_dir)
+        for r in rows:
+            if gate.is_held(r):
+                r['reviewed'] = 'seen:2026-11-26'
+        ledger.save(project_dir, rows, command='test')
+        _gate(project_dir, tmp_path, [_commitment(), self._edge()])
+        mine = [r for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+        assert sorted((r['statement'], r['status']) for r in mine) == [
+            (self.TARREN, 'binding'), ('The world has an edge', 'binding')]
+
+    # --- the ledger last (SF-4), the pending reason (SF-5)
+
+    def test_a_failed_ledger_write_on_accept_says_the_findings_are_accepted(
+            self, project_dir, tmp_path, monkeypatch):
+        self._provisional(project_dir, tmp_path)
+
+        def refuse(*a, **k):
+            raise ledger.LedgerError('disk full')
+        monkeypatch.setattr(ledger, 'save', refuse)
+        with pytest.raises(GateError, match='the findings are accepted'):
+            gate.accept_blocked(project_dir, SCENE)
+        assert gate.reported(project_dir)[SCENE][0]['command'] == gate.ACCEPTED
+
+    def test_the_pending_reason_names_the_disputed_facts(self, project_dir, tmp_path):
+        self._provisional(project_dir, tmp_path)
+        reason = gate.pending(project_dir)[SCENE]['reason']
+        assert f'1 fact(s) recorded as disputed: {self.TARREN}' in reason
+
+
 class TestSteadyParagraphs:
     """#558 (B-032): re-extraction rewords facts whose prose never changed,
     and each rewording counted as a change that re-checked every later scene
