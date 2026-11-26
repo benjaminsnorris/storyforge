@@ -132,6 +132,9 @@ def mode() -> str:
 #: recordings named by scheme 1 (the raw body), which `rekey` renames
 KEY_SCHEME = 2
 KEY_SCHEME_FILE = 'KEY_SCHEME'
+#: Appended to a recording `rekey` found a different reply for: no longer a
+#: recording to any scan (each counts `.json.gz` / `.json`)
+SUPERSEDED = '.superseded'
 
 
 def _plain_text(block) -> bool:
@@ -221,24 +224,29 @@ def needs_rekey(cassette_dir: str) -> bool:
 def rekey(cassette_dir: str) -> tuple[int, list[str]]:
     """Rename every recording in ``cassette_dir`` to its key under
     `KEY_SCHEME`, from the request it holds, and mark the directory. Free:
-    nothing is called. Returns how many were renamed and the problems: a
-    recording that can't be read, or two that are now one key with different
-    replies (the first, by file name, is kept; the other stays under its old
-    name, unreachable, for the author to look at). A directory with no
-    recordings is left alone."""
-    renamed, problems = 0, []
+    nothing is called. Returns how many were renamed and the problems:
+
+    - a recording that can't be read (nor one already at its new key, to
+      compare with): left as it is, and the directory is not marked, so a
+      miss there still says to re-key, and the next re-key reports it again,
+      rather than reading as a stale prompt that a paid re-record would fix;
+    - two that are now one key with different replies: the first, by file
+      name, is kept; the other is renamed with `SUPERSEDED` appended, which
+      no scan counts as a recording, for the author to look at.
+
+    A directory with no recordings is left alone."""
+    renamed, problems, unread = 0, [], False
     files = list(_recordings(cassette_dir))
     if not files:
         return 0, []
     for path in files:
         try:
-            opener = gzip.open if path.endswith('.gz') else open
-            with opener(path, 'rt', encoding='utf-8') as f:
-                data = json.load(f)
+            data = _read_recording(path)
             req = data['request']
             key = request_key(req['method'], req['path'], req['body'])
         except (OSError, EOFError, ValueError, KeyError, TypeError) as e:
             problems.append(f'{path}: unreadable ({e}); not re-keyed')
+            unread = True
             continue
         target = recording_path(cassette_dir, key)
         if not path.endswith('.gz'):
@@ -247,14 +255,20 @@ def rekey(cassette_dir: str) -> tuple[int, list[str]]:
             continue
         existing = _existing_recording(cassette_dir, key)
         if existing:
-            opener = gzip.open if existing.endswith('.gz') else open
-            with opener(existing, 'rt', encoding='utf-8') as f:
-                same = json.load(f).get('response') == data.get('response')
+            try:
+                same = _read_recording(existing).get('response') == data.get('response')
+            except (OSError, EOFError, ValueError, AttributeError) as e:
+                problems.append(f'{existing}: unreadable ({e}), so {path}, the same request '
+                                f'once caching is set aside, was not re-keyed')
+                unread = True
+                continue
             if same:
                 os.remove(path)
             else:
+                os.replace(path, path + SUPERSEDED)
                 problems.append(f'{path}: the same request as {existing} once caching is '
-                                f'set aside, with a different reply; kept {existing}')
+                                f'set aside, with a different reply; kept {existing}, this one '
+                                f'renamed to {os.path.basename(path)}{SUPERSEDED}')
             continue
         os.makedirs(os.path.dirname(target), exist_ok=True)
         os.replace(path, target)
@@ -264,8 +278,15 @@ def rekey(cassette_dir: str) -> tuple[int, list[str]]:
             os.rmdir(shard)   # only if the renames emptied it
         except OSError:
             pass
-    _write_scheme(cassette_dir)
+    if not unread:
+        _write_scheme(cassette_dir)
     return renamed, problems
+
+
+def _read_recording(path: str) -> dict:
+    opener = gzip.open if path.endswith('.gz') else open
+    with opener(path, 'rt', encoding='utf-8') as f:
+        return json.load(f)
 
 
 def recording_path(cassette_dir: str, key: str) -> str:
@@ -386,8 +407,9 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
         raise _fail(CassetteError(
             f'No recording for {method} {path} (key {key[:12]}) in {cassette_dir}, whose '
             f'recordings are named by an older key scheme (no {KEY_SCHEME_FILE} '
-            f'{KEY_SCHEME}). Re-key them first, which is free: python3 -m '
-            f'storyforge.cassette rekey {cassette_dir} (evals/run.py does it itself).'))
+            f'{KEY_SCHEME}), or a re-key couldn\'t read one of them. Re-key them first, '
+            f'which is free and names any it can\'t read: python3 -m storyforge.cassette '
+            f'rekey {cassette_dir} (evals/run.py does it itself).'))
     if current == 'replay':
         raise _fail(CassetteMiss(
             f'No recording for {method} {path} (key {key[:12]}) in {cassette_dir}. '

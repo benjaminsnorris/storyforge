@@ -324,7 +324,19 @@ def test_rekey_keeps_the_first_of_two_recordings_that_become_one(tape):
     renamed, problems = cassette.rekey(tape_dir)
     assert renamed == 1 and len(problems) == 1 and 'different reply' in problems[0]
     assert os.path.isfile(cassette.recording_path(tape_dir, _key(CACHED)))
-    assert os.path.exists(first) != os.path.exists(second)   # the other stays, named
+    assert not os.path.exists(first) and not os.path.exists(second)
+    # CR-1: the other is kept for the author, but no scan counts it a recording
+    loser = [p + cassette.SUPERSEDED for p in (first, second)
+             if os.path.exists(p + cassette.SUPERSEDED)]
+    assert len(loser) == 1 and os.path.basename(loser[0]) in problems[0]
+    import sys
+    from conftest import PLUGIN_DIR
+    sys.path.insert(0, str(PLUGIN_DIR / 'evals'))
+    from blocking_set import recordings
+    from harness import has_recordings
+    assert len(list(cassette._recordings(tape_dir))) == 1 == recordings(tape_dir)
+    os.remove(cassette.recording_path(tape_dir, _key(CACHED)))
+    assert not has_recordings(tape_dir)
 
 
 def test_rekey_drops_a_duplicate_with_the_same_reply(tape):
@@ -344,6 +356,24 @@ def test_rekey_reports_an_unreadable_recording(tape):
         f.write(b'not gzip')
     renamed, problems = cassette.rekey(tape_dir)
     assert renamed == 0 and 'unreadable' in problems[0] and os.path.isfile(bad)
+    # SF-1: not marked, so a miss still says re-key (not a stale prompt)
+    assert cassette.needs_rekey(tape_dir)
+    assert not os.path.exists(os.path.join(tape_dir, cassette.KEY_SCHEME_FILE))
+
+
+def test_rekey_reports_an_unreadable_recording_already_at_the_new_key(tape):
+    """SF-2: one corrupt file at the target is a problem, not a traceback."""
+    tape_dir = os.environ['STORYFORGE_CASSETTE']
+    old = _legacy_recording(tape_dir, CACHED, RESPONSE)
+    target = cassette.recording_path(tape_dir, _key(CACHED))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, 'wb') as f:
+        f.write(b'not gzip')
+    renamed, problems = cassette.rekey(tape_dir)
+    # the corrupt file itself, and the recording that would have joined it
+    assert renamed == 0 and len(problems) == 2
+    assert any('was not re-keyed' in p and old in p for p in problems)
+    assert os.path.isfile(old) and cassette.needs_rekey(tape_dir)
 
 
 def test_a_new_recording_marks_its_directory(tape, monkeypatch, live_calls):
