@@ -116,8 +116,10 @@ def parse_args(argv):
                              'cost forecast and threshold check cover those N scenes')
     parser.add_argument('--keep-going', action='store_true',
                         help='Full coaching: a scene the gate still stops on only for the '
-                             'check\'s findings is committed provisionally (its facts less '
-                             'those stating the findings) and listed for the author, so the '
+                             'check\'s findings is committed provisionally (its facts, '
+                             'those stating the findings recorded as disputed, in force once '
+                             'check --accept accepts their finding) and listed for the '
+                             'author, so the '
                              'later scenes that depend on it are drafted too; provisional '
                              'scenes hold nothing back. Without it a failing scene still '
                              'stops only itself and the scenes that depend on it. Halts, '
