@@ -28,11 +28,13 @@ _LEDGER_LOCK = threading.Lock()
 # ============================================================================
 
 def _rates(input_: float, output: float, cache_read: float | None = None) -> dict:
-    """Per-million-token rates. Cache writes (5-minute TTL) are 1.25x input;
-    cache reads are 0.1x input unless the model's price sheet says otherwise."""
+    """Per-million-token rates. Cache writes are 1.25x input with the
+    5-minute TTL and 2x with the 1-hour TTL (`cache_create_1h`); cache reads
+    are 0.1x input unless the model's price sheet says otherwise."""
     return {'input': input_, 'output': output,
             'cache_read': round(input_ * 0.1, 6) if cache_read is None else cache_read,
-            'cache_create': round(input_ * 1.25, 6)}
+            'cache_create': round(input_ * 1.25, 6),
+            'cache_create_1h': round(input_ * 2, 6)}
 
 
 # Rates by model id (a dated id like ``claude-haiku-4-5-20251001`` matches its
@@ -126,11 +128,14 @@ BATCH_DISCOUNT = 0.50  # Anthropic Batch API charges 50% of standard pricing
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int,
                    cache_read: int = 0, cache_create: int = 0,
-                   batch: bool = False) -> float:
+                   batch: bool = False, cache_create_1h: int = 0) -> float:
     """Calculate cost in USD from token counts.
 
     Cache tokens are folded into the cost but not tracked separately
-    in the ledger — they affect the dollar amount only.
+    in the ledger — they affect the dollar amount only. `cache_create` is
+    every token written to the cache; `cache_create_1h` is how many of them
+    were written with the 1-hour TTL, priced at its rate (2x input, not
+    1.25x).
 
     If batch=True, applies the Anthropic Batch API 50% discount.
     """
@@ -139,7 +144,9 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int,
     cost += input_tokens * _get_price(model, 'input', prompt) / 1_000_000
     cost += output_tokens * _get_price(model, 'output', prompt) / 1_000_000
     cost += cache_read * _get_price(model, 'cache_read', prompt) / 1_000_000
-    cost += cache_create * _get_price(model, 'cache_create', prompt) / 1_000_000
+    hour = min(cache_create_1h, cache_create)
+    cost += (cache_create - hour) * _get_price(model, 'cache_create', prompt) / 1_000_000
+    cost += hour * _get_price(model, 'cache_create_1h', prompt) / 1_000_000
     if batch:
         cost *= BATCH_DISCOUNT
     return cost

@@ -198,7 +198,7 @@ def check_blocking(project_dir: str, scene_id: str, *, prose: str | None = None,
                    model: str | None = None, log_file: str = '',
                    readings: int | None = None) -> BlockingResult:
     """Read `scene_id`'s blocking (its file, or `prose` in its place),
-    `readings` times (default `BLOCKING_READINGS`), one after the other, and
+    `readings` times (default `BLOCKING_READINGS`), all at once, and
     return their union: reading 1's findings, then each later reading's that
     no earlier one made (`_same`). Reading n > 1 logs to `log_file` with
     `.rN` before its extension.
@@ -218,13 +218,18 @@ def check_blocking(project_dir: str, scene_id: str, *, prose: str | None = None,
         raise BlockingError(f'{scene_id} has no prose to check')
     model = model or select_model('checking')
     pov = _pov(project_dir, scene_id)
+    from storyforge.runner import together
     result = BlockingResult(scene_id)
-    for n in range(1, readings + 1):
+
+    def reading(n: int):
         log = log_file
         if n > 1 and log_file:
             stem, ext = os.path.splitext(log_file)
             log = f'{stem}.r{n}{ext}'
-        for f in _read_once(scene_id, text, pov, model, log, n):
+        return lambda: _read_once(scene_id, text, pov, model, log, n)
+    # the readings are independent: at once, their union taken in order
+    for found in together(*(reading(n) for n in range(1, readings + 1))):
+        for f in found:
             known = result.findings + result.unverified
             if any(_same(f, k) for k in known):
                 continue

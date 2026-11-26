@@ -40,7 +40,7 @@ class TestMeter:
         assert [m for m, _ in outer.replies] == ['claude-opus-5-5', 'claude-sonnet-5-5']
         assert [m for m, _ in inner.replies] == ['claude-sonnet-5-5']
         assert outer.by_model()['claude-opus-5-5'] == {
-            'input_tokens': 10, 'output_tokens': 3, 'cache_read': 5, 'cache_create': 0}
+            'input_tokens': 10, 'output_tokens': 3, 'cache_read': 5, 'cache_create': 0, 'cache_create_1h': 0}
 
     def test_log_writes_one_row_per_model(self, tmp_path):
         meter = api.SpendMeter()

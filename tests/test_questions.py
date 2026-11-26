@@ -110,7 +110,8 @@ class TestYesNo:
         with patch('storyforge.api._api_request', side_effect=fake):
             with pytest.raises(QuestionError, match='the questions failed: '):
                 questions.ask_questions(SCENE, PROSE, [Q('a')], model='m')
-        assert len(calls) == 1
+        # the askings run at once, so each was sent; neither was retried
+        assert len(calls) == yes_no.ASKINGS
 
     def test_a_bad_reply_then_a_good_one_is_answered(self):
         replies = iter([_text({'answers': []}), _text({'answers': [ans(1, 'no')]}),
@@ -854,7 +855,8 @@ class TestGate:
                                    lambda n: [ans(1, 'yes', 'Tessa mocked Dorren', 'Cruel.')],
                                    promised=lambda n: [ans(i, 'yes', 'Tessa mocked Dorren')
                                                        for i in range(1, n + 1)])
-        assert calls == ['questions', 'questions', 'promises', 'promises']
+        # each asked twice; the questions and the promises run at once
+        assert sorted(calls) == ['promises', 'promises', 'questions', 'questions']
         assert not result.passed and [f.code for f in result.findings] == ['TRT']
         report = '\n'.join(gate.report_lines(result))
         assert 'CONTRADICTION: TRT contradicts act1-sc01 [tessa-kind]' in report

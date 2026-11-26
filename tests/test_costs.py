@@ -1,6 +1,7 @@
 """Tests for cost calculation (migrated from test-costs.sh)."""
 
 import os
+import pytest
 from storyforge.costs import calculate_cost, estimate_cost, format_duration, log_operation, print_summary, PRICING, LEDGER_HEADER
 
 
@@ -186,3 +187,21 @@ def test_concurrent_log_operation_writes_one_header(tmp_path):
     assert lines[0] == LEDGER_HEADER
     assert lines.count(LEDGER_HEADER) == 1
     assert len(lines) == workers + 1
+
+
+def test_an_hours_cache_writes_cost_twice_input():
+    # the writing session caches for an hour (session.CACHE_TTL): those
+    # writes are 2x input, the rest of `cache_create` 1.25x
+    from storyforge.api import calculate_cost_from_usage, extract_usage
+    from storyforge.costs import calculate_cost
+    assert calculate_cost('claude-opus-5-5', 0, 0, cache_create=1_000_000,
+                          cache_create_1h=1_000_000) == pytest.approx(8.00)
+    assert calculate_cost('claude-opus-5-5', 0, 0, cache_create=1_000_000,
+                          cache_create_1h=250_000) == pytest.approx(0.75 * 5.00 + 0.25 * 8.00)
+    usage = extract_usage({'usage': {'input_tokens': 0, 'output_tokens': 0,
+                                     'cache_creation_input_tokens': 300,
+                                     'cache_creation': {'ephemeral_5m_input_tokens': 100,
+                                                        'ephemeral_1h_input_tokens': 200}}})
+    assert usage['cache_create'] == 300 and usage['cache_create_1h'] == 200
+    assert calculate_cost_from_usage(usage, 'claude-opus-5-5') == pytest.approx(
+        (100 * 5.00 + 200 * 8.00) / 1_000_000)

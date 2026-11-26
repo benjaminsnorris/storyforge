@@ -62,6 +62,27 @@ def run_parallel(
     return results
 
 
+def together(*calls: Callable[[], Any]) -> list[Any]:
+    """Run `calls` (each taking no arguments) at once, on threads, and
+    return their results in the order given. When all have finished, the
+    first in that order that raised re-raises (the one a sequential run
+    would have raised, though the later ones ran too). Quiet, unlike
+    `run_parallel`: for a step's few independent model calls (the gate's).
+    The caller's spend meters see every call (`api.carry_meters`).
+    `STORYFORGE_PARALLEL=1` runs them one after the other."""
+    if len(calls) < 2 or int(os.environ.get('STORYFORGE_PARALLEL', '0') or 0) == 1:
+        return [call() for call in calls]
+    from storyforge.api import carry_meters
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = [pool.submit(carry_meters(call)) for call in calls]
+        done = [(f.exception(), None) if f.exception() else (None, f.result())
+                for f in futures]
+    for error, _ in done:
+        if error is not None:
+            raise error
+    return [value for _, value in done]
+
+
 def run_batched(
     items: list[str],
     worker_fn: Callable[[str], Any],

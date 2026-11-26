@@ -70,6 +70,14 @@ SCENE_TOKENS = 16000
 STORY_SHARE = 0.55
 #: rough tokens per word of English prose
 TOKENS_PER_WORD = 1.35
+#: how long the writer's cached conversation lives between turns. A
+#: scene's gate runs between the draft and its fix, and the fix's re-check
+#: between the fix and the next scene's draft: minutes, often past the
+#: default five, after which every turn wrote the whole story to the cache
+#: again (iliad-adult, 2026-11-17: 34 of 46 drafts and 34 of 55 fixes, $96
+#: of the writer's $101). An hour's writes cost 2x input, not 1.25x, but
+#: after the first turn each writes only what the turn before added
+CACHE_TTL = '1h'
 #: what separates the scene from the writer's stage note in a reply
 STAGE_OPEN = '<stage>'
 STAGE_CLOSE = '</stage>'
@@ -180,7 +188,8 @@ def system_blocks(project_dir: str) -> list[dict]:
     if rows_text:
         parts.append(rows_text)
     blocks = [{'type': 'text', 'text': p} for p in parts]
-    blocks[-1]['cache_control'] = {'type': 'ephemeral'}
+    # the conversation's TTL (`api.chat`): a longer one can't follow a shorter
+    blocks[-1]['cache_control'] = {'type': 'ephemeral', 'ttl': CACHE_TTL}
     return blocks
 
 
@@ -532,6 +541,46 @@ def compare_sheets(project_dir: str, scene_id: str, prose: str) -> tuple[list[st
 
 
 # ============================================================================
+# The fix's reply
+# ============================================================================
+
+#: how a fix turn asks for its edits: in words, not by `output_schema`
+#: (`Session.fixer`); `gate.FIX_SCHEMA`'s shape
+FIX_REPLY = (
+    '\n\n## Your reply\n\nReply with one JSON object and nothing else: '
+    '{"edits": [{"problem": <the problem\'s number>, "find": "<words from the scene>", '
+    '"replace": "<the new words>"}, ...]}. With no edit to make, reply {"edits": []}.')
+
+
+def parse_fix_reply(text: str) -> list[dict]:
+    """The edits in a fix turn's reply (`FIX_REPLY`): one JSON object,
+    bare or in a code fence, holding `edits`, each with string `find` and
+    `replace` and an integer `problem` (`gate.FIX_SCHEMA`; `apply_edits`
+    reads only `find` and `replace`, so a missing `problem` is let pass).
+
+    Raises:
+        ValueError: the reply isn't that.
+    """
+    body = text.strip()
+    if body.startswith('```'):
+        body = body.split('\n', 1)[1] if '\n' in body else ''
+        body = body.rsplit('```', 1)[0]
+    try:
+        reply = json.loads(body)
+    except ValueError as e:
+        raise ValueError(f'not one JSON object ({e})') from e
+    if not isinstance(reply, dict) or set(reply) != {'edits'} \
+            or not isinstance(reply['edits'], list):
+        raise ValueError('not an object holding "edits" and nothing else')
+    for e in reply['edits']:
+        if not (isinstance(e, dict) and set(e) <= {'problem', 'find', 'replace'}
+                and type(e.get('problem', 0)) is int
+                and isinstance(e.get('find'), str) and isinstance(e.get('replace'), str)):
+            raise ValueError(f'an edit is not {{problem, find, replace}}: {e!r}'[:200])
+    return reply['edits']
+
+
+# ============================================================================
 # The conversation
 # ============================================================================
 
@@ -569,7 +618,8 @@ class Session:
         self.messages.append({'role': 'user', 'content': content})
         try:
             response = chat(self.messages, self.model, tokens, label=label, system=self.system,
-                            output_schema=output_schema, log_file=log_file)
+                            output_schema=output_schema, log_file=log_file,
+                            cache_ttl=CACHE_TTL)
         except RefusalError as e:
             self.messages.pop()
             raise SessionError(f'{label}: the writer refused ({e})') from e
@@ -625,18 +675,29 @@ class Session:
         if not problems:
             return prose
         prompt = ('This is about the scene you just wrote. '
-                  + gate.build_fix_prompt(scene_id, prose, problems, protected, earlier))
+                  + gate.build_fix_prompt(scene_id, prose, problems, protected, earlier)
+                  + FIX_REPLY)
+        # No `output_schema`: a schema changes the request ahead of the
+        # conversation, so the fix couldn't read the cache the draft wrote,
+        # nor the next draft the fix's (iliad-adult, 2026-11-17: every
+        # first fix wrote the whole story to the cache again, $0.70-2.07 a
+        # turn). The reply is read by `parse_fix_reply` instead, and a
+        # reply it can't read is asked for once more
         try:
-            response = self._ask(prompt, f'fix-{scene_id}', 8000, output_schema=gate.FIX_SCHEMA,
-                                 operation=None)
+            response = self._ask(prompt, f'fix-{scene_id}', 8000, operation=None)
+            try:
+                edits = parse_fix_reply(extract_text(response))
+            except ValueError as e:
+                response = self._ask(f'That reply could not be read ({e}). {FIX_REPLY.strip()}',
+                                     f'fix-{scene_id}-again', 8000, operation=None)
+                edits = parse_fix_reply(extract_text(response))
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True)
                 with open(os.path.join(log_dir, f'gate-fix-{scene_id}.json'), 'w') as f:
                     json.dump(response, f)
-            edits = json.loads(extract_text(response))['edits']
         except SessionError as e:
             raise gate.GateError(f'{scene_id}: the writer\'s fix failed: {e}') from e
-        except (ValueError, KeyError, TypeError) as e:
+        except ValueError as e:
             raise gate.GateError(f'{scene_id}: the writer\'s fix could not be read: {e}') from e
         fixed = gate.apply_edits(prose, edits)
         if edits_out is not None:

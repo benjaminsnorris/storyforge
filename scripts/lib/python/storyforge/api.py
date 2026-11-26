@@ -412,11 +412,17 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
 
 def chat(messages: list[dict], model: str, max_tokens: int = 4096, label: str = '',
          timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-         output_schema: dict | None = None, log_file: str = '') -> dict:
+         output_schema: dict | None = None, log_file: str = '',
+         cache_ttl: str = '') -> dict:
     """One request in a conversation the caller keeps (#655's writing
     session): ``messages`` as the Messages API takes them, alternating user
     and assistant. The request is auto-cached (as ``converse``'s), so each
-    turn reads the conversation so far from cache. ``max_tokens`` is the
+    turn reads the conversation so far from cache; ``cache_ttl`` ('1h') sets
+    the cache's lifetime (default five minutes). A cache marker in
+    ``system`` must have a TTL at least as long (longer TTLs come first).
+    ``output_schema`` changes the request ahead of the conversation, so a
+    turn with one doesn't read a cache written by a turn without one, or
+    the other way round. ``max_tokens`` is the
     answer's budget (``THINKING_ALLOWANCE`` is added). ``log_file``, if
     given, gets the reply. Check ``is_truncated`` on the reply.
 
@@ -428,7 +434,8 @@ def chat(messages: list[dict], model: str, max_tokens: int = 4096, label: str = 
         'model': model,
         'max_tokens': request_max_tokens(model, max_tokens),
         'messages': messages,
-        'cache_control': {'type': 'ephemeral'},
+        'cache_control': ({'type': 'ephemeral', 'ttl': cache_ttl} if cache_ttl
+                          else {'type': 'ephemeral'}),
     }
     if system:
         body['system'] = system
@@ -759,6 +766,9 @@ def extract_usage(response: dict) -> dict:
         'output_tokens': usage.get('output_tokens', 0),
         'cache_read': usage.get('cache_read_input_tokens', 0),
         'cache_create': usage.get('cache_creation_input_tokens', 0),
+        # of `cache_create`, the tokens written with the 1-hour TTL (`chat`'s
+        # `cache_ttl`), which cost more to write
+        'cache_create_1h': (usage.get('cache_creation') or {}).get('ephemeral_1h_input_tokens', 0),
     }
 
 
@@ -775,6 +785,7 @@ def calculate_cost_from_usage(usage: dict, model: str, batch: bool = False) -> f
         cache_read=usage.get('cache_read', 0),
         cache_create=usage.get('cache_create', 0),
         batch=batch,
+        cache_create_1h=usage.get('cache_create_1h', 0),
     )
 
 
