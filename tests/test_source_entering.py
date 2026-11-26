@@ -283,3 +283,185 @@ def test_without_source_facts_the_prompt_is_unchanged():
     args = ('sc', 'prose', [], [], 'SRC', {}, '', 'adapt', '')
     assert gate_source.build_prompt(*args) == gate_source.build_prompt(*args, source_facts=[])
     assert "facts on these people" not in gate_source.build_prompt(*args)
+
+
+# ---- #747's review ---------------------------------------------------------
+
+def _names(*people):
+    return {p.split(':')[0]: source._name_pattern([p.split(':')[-1]]) for p in people}
+
+
+NAMES = _names('rhesus:Rhesus', 'diomedes:Diomed', 'machaon:Machaon', 'paris:Paris',
+               'aeneas:Aeneas', 'patroclus:Patroclus', 'euphorbus:Euphorbus',
+               'hector:Hector', 'priam:Priam', 'eurypylus:Eurypylus', 'tydeus:Tydeus',
+               'maeon:Maeon', 'apollo:Apollo', 'achilles:Achilles', 'pandarus:Pandarus',
+               'ajax:Ajax', 'teucer:Teucer')
+
+
+@pytest.mark.parametrize('statement, subject, category, kind, cast, who', [
+    # CR-1, SF-1: passives, with and without "by" right after the verb
+    ('Rhesus was killed in his sleep by Diomed.', 'rhesus', '', 'death',
+     {'rhesus', 'diomedes'}, ('rhesus',)),
+    ('Machaon has been wounded and is carried from the field.', 'machaon', '', 'wound',
+     {'machaon'}, ('machaon',)),
+    ("Wounded in the right shoulder by Paris' arrow.", 'machaon', 'injury', 'wound',
+     {'machaon', 'paris'}, ('machaon',)),
+    ('Aeneas was wounded in the hip by Diomed.', 'aeneas', '', 'wound',
+     {'aeneas', 'diomedes'}, ('aeneas',)),
+    ("Aeneas's hip was crushed.", 'aeneas', 'injury', 'wound', {'aeneas'}, ('aeneas',)),
+    ('Patroclus is dead, speared in the back by Euphorbus.', 'patroclus', 'injury', 'death',
+     {'patroclus', 'euphorbus'}, ('patroclus',)),
+    # active: the one it happens to, never the doer
+    ('Hector killed Patroclus.', 'hector', '', 'death', {'hector', 'patroclus'},
+     ('patroclus',)),
+    ('Aeneas killed Crethon.', 'aeneas', '', 'death', {'aeneas'}, ()),
+    ("Teucer killed Priam's son Gorgythion.", '', '', 'death', {'priam', 'teucer'}, ()),
+    ('Ajax killed the son of Priam.', '', '', 'death', {'priam', 'ajax'}, ()),
+    ('Tydeus slew the ambush led by Maeon.', 'tydeus', '', 'death', {'tydeus', 'maeon'}, ()),
+    ('Diomed killed Pandarus by driving a spear through his nose.', 'diomedes', '', 'death',
+     {'diomedes', 'pandarus'}, ('pandarus',)),
+    ("Paris' arrow struck his right thigh.", 'eurypylus', 'injury', 'wound',
+     {'eurypylus', 'paris'}, ('eurypylus',)),
+    # CR-5: the healer is never the one healed
+    ('Apollo healed Aeneas.', '', '', 'healing', {'apollo', 'aeneas'}, ('aeneas',)),
+    ('Aeneas is healed by Apollo.', '', '', 'healing', {'apollo', 'aeneas'}, ('aeneas',)),
+    ('Was healed and made whole.', 'aeneas', '', 'healing', {'aeneas'}, ('aeneas',)),
+    ('Achilles lends Patroclus his armour.', 'achilles', '', 'arms',
+     {'achilles', 'patroclus'}, ('achilles', 'patroclus')),
+])
+def test_whose_fact(statement, subject, category, kind, cast, who):
+    row = {'statement': statement, 'subject': subject, 'category': category}
+    assert source._about(row, kind, cast, NAMES) == who
+
+
+@pytest.mark.parametrize('row, kind', [
+    # T-5: a motive is no state, even one that would be armour
+    ({'type': 'knowledge', 'category': 'motive-intent',
+      'statement': 'Nestor urges him to put on the armour.'}, ''),
+    # T-7: a healing wins over a death in the same words
+    ({'type': 'world', 'statement': 'Apollo healed the wounds of the dead Sarpedon.'},
+     'healing'),
+    ({'type': 'physical', 'statement': 'Hector corpse bears fresh spear wounds.'}, 'death'),
+])
+def test_fact_kind_more(row, kind):
+    assert source.fact_kind(row) == kind
+
+
+def _ledger(book, rows, header='id|scene_id|type|subject|statement|quote|status|category|'
+                               'resolves|supersedes'):
+    with open(os.path.join(book, 'reference', 'source', 'iliad', 'commitments.csv'), 'w',
+              encoding='utf-8') as f:
+        f.write(header + '\n' + '\n'.join(rows) + '\n')
+
+
+def test_two_source_scenes_start_at_the_first_and_through_ends_at_the_last(book):
+    """T-1: the cut is the earliest of the scene's source scenes, whatever
+    order the map lists them in; `through` reaches the last."""
+    refs = [('iliad', 's-fire'), ('iliad', 's-heal')]
+    assert _ids(source.entering_state(book, refs, {'aeneas', 'patroclus'})) == ['hip']
+    assert _ids(source.entering_state(book, refs, {'aeneas', 'patroclus'}, through=True)) \
+        == ['hip', 'healed', 'armour']
+
+
+def test_a_superseded_fact_is_no_longer_the_state(book):
+    """CR-4: a fact superseded by one told by then is left out."""
+    _ledger(book, ['own|s-hip|physical|patroclus|Wears his own armour.||binding|equipment||',
+                   'theirs|s-arm|physical|patroclus|Wears borrowed armour.||binding|'
+                   'equipment||own'])
+    assert _ids(source.entering_state(book, FIRE, {'patroclus'})) == ['theirs']
+    assert _ids(source.entering_state(book, [('iliad', 's-arm')], {'patroclus'})) == ['own']
+
+
+def test_facts_come_oldest_first_whatever_the_file_order(book):
+    _ledger(book, ['b|s-arm|physical|patroclus|Wears new armour.||binding|equipment||',
+                   'a|s-hip|physical|patroclus|Wears old armour.||binding|equipment||'])
+    assert _ids(source.entering_state(book, FIRE, {'patroclus'})) == ['a', 'b']
+
+
+def test_never_and_an_unknown_end(book):
+    """T-6: `never` is no end; an end the source hasn't got is shown."""
+    _ledger(book, ['a|s-hip|physical|patroclus|Wears old armour.||binding|equipment|never|',
+                   'b|s-arm|physical|patroclus|Wears new armour.||binding|equipment|nowhere|'])
+    state = source.entering_state(book, FIRE, {'patroclus'})
+    assert [f.ends for f in state.facts] == ['', 'nowhere']
+    from storyforge.prompts_source import entering_lines
+    lines = entering_lines(state.facts)
+    assert '[until' not in lines[0] and lines[1].endswith('[until nowhere]')
+
+
+def test_the_newest_are_kept_under_the_cap(book, monkeypatch):
+    """T-4: `limit` and `ENTERING_MAX` keep the newest."""
+    state = source.entering_state(book, HEAL, {'aeneas'}, through=True, limit=1)
+    assert _ids(state) == ['healed'] and state.left_out == 1
+    monkeypatch.setattr(source, 'ENTERING_MAX', 1)
+    assert _ids(source.entering_state(book, HEAL, {'aeneas'}, through=True)) == ['healed']
+
+
+def _finding(quote='Aeneas fights', explanation='a hip', other=''):
+    return Finding('contradiction', 'PHY', quote, '', other, '', explanation)
+
+
+def test_the_ruling_gets_only_the_people_its_findings_name(book):
+    """T-3: Diomedes is on stage, but the finding is about Aeneas."""
+    lines = gate_source._source_facts(book, 'aeneas-back-at-the-front', HEAL, [],
+                                      [_finding()], [])
+    assert any(HEALED in line for line in lines)
+    assert not any('shoulder' in line for line in lines)
+
+
+def test_a_contradiction_alone_and_a_name_only_in_the_explanation_are_looked_up(book):
+    lines = gate_source._source_facts(book, 'aeneas-back-at-the-front', HEAL,
+                                      [_finding('he fights', "Aeneas's hip is crushed")], [],
+                                      [])
+    assert any(HEALED in line for line in lines)
+    assert not any('shoulder' in line for line in lines)
+
+
+def test_a_cut_list_says_it_is_partial(book, monkeypatch):
+    """CR-2, SF-2: the ruling is told the list is partial, and so is the
+    author."""
+    monkeypatch.setattr(gate_source, 'MAX_SOURCE_FACTS', 1)
+    notes = []
+    lines = gate_source._source_facts(book, 'aeneas-back-at-the-front', HEAL, [],
+                                      [_finding()], notes)
+    assert lines[0].startswith('A partial list: 1 older fact(s)')
+    assert len(lines) == 2 and HEALED in lines[1]
+    assert notes == ['1 older source fact(s) on the people in the findings left out of '
+                     'the ruling (the latest 1 were sent)']
+
+
+def test_no_cast_is_said(book):
+    """SF-3."""
+    state = source.entering_state(book, FIRE, set())
+    assert state.facts == [] and 'no one to look up' in state.notes[0]
+
+
+def test_a_source_scene_with_no_seq_is_said_and_never_widens_the_span(book):
+    """SF-4, CR-3: through a scene with no position is not through the
+    rest of the ledger."""
+    _write(os.path.join(book, 'reference', 'source', 'iliad'), {'scenes.csv': (
+        'id|seq|title\ns-hip|1|a\ns-heal|2|b\ns-arm|3|c\ns-fire||d\ns-death|5|e\n')})
+    state = source.entering_state(book, [('iliad', 's-heal'), ('iliad', 's-fire')],
+                                  {'aeneas', 'patroclus'}, through=True)
+    assert _ids(state) == ['hip', 'healed']
+    assert any('s-fire has no seq' in n for n in state.notes)
+
+
+def test_ledger_rows_on_no_known_scene_are_said(book):
+    _ledger(book, ['a|s-gone|physical|patroclus|Wears old armour.||binding|equipment||',
+                   'b|s-arm|physical|patroclus|Wears new armour.||binding|equipment||'])
+    state = source.entering_state(book, FIRE, {'patroclus'})
+    assert _ids(state) == ['b']
+    assert any('1 ledger fact(s) name no source scene' in n for n in state.notes)
+
+
+def test_a_cast_member_the_source_has_no_character_for_is_said(book):
+    """SF-5."""
+    state = source.entering_state(book, FIRE, {'patroclus', 'thersites'})
+    assert any('no character thersites' in n for n in state.notes)
+
+
+def test_the_pov_is_in_the_cast(book):
+    """T-7."""
+    _write(book, {'reference/scenes.csv': 'id|seq|title|pov\npriam-waits|3|Waits|hector\n'})
+    assert source.scene_cast(book, 'priam-waits', FIRE) == {'hector', 'priam'}

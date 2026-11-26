@@ -412,7 +412,14 @@ def _source_facts(project_dir: str, scene_id: str, refs: list[tuple[str, str]],
                      f'({e}): ruled without them')
         return []
     notes.extend(state.notes)
-    return entering_lines(state.facts, quotes=True)
+    lines = entering_lines(state.facts, quotes=True)
+    if state.left_out and lines:
+        # #747's review (CR-2, SF-2): a cut list says it is partial
+        notes.append(f'{state.left_out} older source fact(s) on the people in the findings '
+                     f'left out of the ruling (the latest {len(lines)} were sent)')
+        lines.insert(0, f'A partial list: {state.left_out} older fact(s) on these people are '
+                        f'left out, so a state told only in them is not here.\n')
+    return lines
 
 
 def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, str]],

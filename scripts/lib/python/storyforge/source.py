@@ -1754,9 +1754,14 @@ _NOT_THEM_BEFORE_RE = re.compile(
 #: happens to ("Aeneas killed Crethon": nothing about Aeneas's state);
 #: followed by "by" it is passive, and the one named before it is
 _AGENT_RE = re.compile(
-    r"\b(?:kill(?:s|ed)?|slew|slays?|wound(?:s|ed)|speared|struck|strikes?|hit|hits|"
+    r"\b(?:kill(?:s|ed)?|slew|slays?|wounded|speared|struck|strikes?|hit|hits|"
     r"crushed|pierced|grazed|stabbed|shot|cut)\b", re.I)
-_BY_RE = re.compile(r"\s+(?:\w+\s+)?by\b", re.I)
+#: A passive verb: a form of "be" (and one word) just before it ("Machaon
+#: has been wounded", "Rhesus was killed")
+_PASSIVE_BEFORE_RE = re.compile(r"\b(?:is|was|are|were|been|be|being)\s+(?:\w+\s+)?$", re.I)
+#: The doer of a passive: "by" and a name ("by Diomed", "by a spear thrown
+#: by Coon", "by Paris' arrow"), never "by driving a spear"
+_BY_DOER_RE = re.compile(r"\bby\s+(?:(?:a|an|the|his|her|their)\s+)?(?=[A-Z])")
 #: Words that put a death or wound on the fact's subject
 _PATIENT_RE = re.compile(
     r"\b(?:(?:is|was|lies|lay|lying|fell)\s+(?:dead|slain|wounded|hurt)|"
@@ -1861,12 +1866,20 @@ def scene_cast(project_dir: str, scene_id: str, refs: list[tuple[str, str]]) -> 
 def _about(row: dict[str, str], kind: str, cast: set[str],
            names: dict[str, re.Pattern]) -> tuple[str, ...]:
     """The cast ids a row of `kind` is about. Armour and weapons: its
-    subject, or one it names. A healing: its subject, or one named after
-    the healing ("Apollo healed Aeneas"). A death or wound: the one it
-    happens to, never only its doer: one named after an active verb
-    ("Hector killed Patroclus"), before a passive one ("Venus is wounded
-    by Diomed") or before the word for it ("Patroclus is dead"), and the
-    subject unless it is the doer."""
+    subject, or one it names. A healing, a death or a wound: the one it
+    happens to, never its doer (#747's review, CR-1, CR-5):
+
+    - passive (a form of "be" just before the verb, the verb opening the
+      statement as in "Speared in the chest by Thoas", or "by" a name
+      after it): the people named before the verb ("Rhesus was killed in
+      his sleep by Diomed"), or the subject when nobody is;
+    - active: the people named after the verb ("Hector killed Patroclus",
+      "Apollo healed Aeneas"); for an `injury` row naming nobody there, the
+      subject ("Paris' arrow struck his right thigh");
+    - no verb ("Patroclus is dead"): the people named before the word
+      for it, and the subject when the row is an injury or says so.
+
+    Whoever is named after "by" is the doer, never the one it happens to."""
     text = row.get('statement') or ''
     subject = (row.get('subject') or '').strip()
     injury = (row.get('category') or '').strip() == 'injury'
@@ -1879,26 +1892,35 @@ def _about(row: dict[str, str], kind: str, cast: set[str],
                    and not _NOT_THEM_BEFORE_RE.search(text, 0, m.start())
                    for m in pat.finditer(text, start, len(text) if end is None else end))
 
-    out = []
-    for cid in sorted(cast):
-        if kind == 'arms':
-            hit = cid == subject or named(cid)
-        elif kind == 'healing':
-            heal = _HEAL_RE.search(text)
-            hit = cid == subject or named(cid, heal.end())
+    def anyone(start: int, end: int) -> set[str]:
+        return {cid for cid in names if named(cid, start, end)} if end > start else set()
+
+    if kind == 'arms':
+        return tuple(cid for cid in sorted(cast) if cid == subject or named(cid))
+    verb = (_HEAL_RE if kind == 'healing' else _AGENT_RE).search(text)
+    if verb:
+        by = _BY_DOER_RE.search(text, verb.end())
+        before = text[:verb.start()].rstrip()
+        # "Tydeus slew an ambush ... led by Maeon": a name just before the
+        # verb is its doer, whatever "by" comes later
+        tail = re.search(r"((?:[A-Z][\w'’-]*\s+)?[A-Z][\w'’-]*)$", before)
+        doer_first = bool(tail) and any(
+            p.fullmatch(tail.group(1)) or p.fullmatch(tail.group(1).split()[-1])
+            for p in names.values())
+        passive = bool(_PASSIVE_BEFORE_RE.search(text, 0, verb.start()) or not before
+                       or (by and not doer_first))
+        if passive:
+            people = anyone(0, verb.start()) or ({subject} if subject else set())
         else:
-            agent = _AGENT_RE.search(text)
-            if agent and _BY_RE.match(text, agent.end()):
-                hit = cid == subject or named(cid, 0, agent.start())
-            elif agent:
-                hit = named(cid, agent.end())
-            else:
-                word = (_DEATH_RE if kind == 'death' else _WOUND_RE).search(text)
-                hit = ((cid == subject and (injury or bool(_PATIENT_RE.search(text))))
-                       or named(cid, 0, word.start() if word else len(text)))
-        if hit:
-            out.append(cid)
-    return tuple(out)
+            people = anyone(verb.end(), by.start() if by else len(text))
+            if not people and injury and subject:
+                people = {subject}
+    else:
+        word = (_DEATH_RE if kind == 'death' else _WOUND_RE).search(text)
+        people = anyone(0, word.start() if word else len(text))
+        if subject and (injury or _PATIENT_RE.search(text)):
+            people.add(subject)
+    return tuple(cid for cid in sorted(cast) if cid in people)
 
 
 #: The most facts one person brings to an entering state, and the most in
@@ -1921,8 +1943,14 @@ def entering_state(project_dir: str, refs: list[tuple[str, str]], cast: set[str]
     (missed facts, a namesake's facts under one subject) and the
     translation's slips. Raises SourceError as `read_table` does."""
     out = EnteringState()
-    if not refs or not cast:
+    if not refs:
         return out
+    if not cast:
+        # #747's review (SF-3): an empty list is never "checked and clean"
+        out.notes.append('the scene has no pov or on_stage (nor its source scenes): no one '
+                         'to look up, so no entering state')
+        return out
+    inf = float('inf')
     found: list[SourceFact] = []
     for slug in dict.fromkeys(s for s, _ in refs):
         if not os.path.isfile(os.path.join(source_dir(project_dir, slug), 'commitments.csv')):
@@ -1930,18 +1958,42 @@ def entering_state(project_dir: str, refs: list[tuple[str, str]], cast: set[str]
                              f'commitments.csv): no entering state from it')
             continue
         seqs = {r.get('id'): _seq(r) for r in read_table(project_dir, slug, 'scenes.csv')}
-        mine = [seqs.get(sid, float('inf')) for s, sid in refs if s == slug]
+        # #747's review (SF-4, CR-3): a source scene with no position says
+        # so and never widens the span to the rest of the ledger
+        unplaced = [sid for s, sid in refs if s == slug and seqs.get(sid, inf) == inf]
+        mine = [seqs[sid] for s, sid in refs if s == slug and sid not in unplaced]
+        if unplaced:
+            out.notes.append(f'source {slug}: {", ".join(unplaced)} has no seq in its '
+                             f'scenes.csv, so the entering state can\'t be placed by it')
+        if not mine:
+            continue
         start = min(mine)
         stop = max(mine) if through else start
-        if start == float('inf'):
-            continue
         names = _cast_names(project_dir, slug)
-        for row in read_table(project_dir, slug, 'commitments.csv'):
-            if (row.get('status') or 'binding').strip() not in ('binding', ''):
-                continue
+        unnamed = sorted(c for c in cast if c not in names)
+        if unnamed:
+            out.notes.append(f'source {slug} has no character {", ".join(unnamed)}: only '
+                             f'facts with that subject are found, none that name them')
+        rows = [r for r in read_table(project_dir, slug, 'commitments.csv')
+                if (r.get('status') or 'binding').strip() in ('binding', '')]
+        unknown = sum(1 for r in rows if seqs.get((r.get('scene_id') or '').strip(), inf) == inf)
+        if unknown:
+            out.notes.append(f'source {slug}: {unknown} ledger fact(s) name no source scene '
+                             f'with a seq, so when they hold is unknown: left out')
+        # #747's review (CR-4): a fact superseded by one told by then is
+        # no longer the state, as in `ledger.drafting_slice`
+        def told_by_then(at: float) -> bool:
+            return at < start or (through and at <= stop)
+
+        superseded = {old for r in rows
+                      if told_by_then(seqs.get((r.get('scene_id') or '').strip(), inf))
+                      for old in split_ids(r.get('supersedes', ''))}
+        for row in rows:
             sid = (row.get('scene_id') or '').strip()
-            at = seqs.get(sid, float('inf'))
-            if not (at < start or (through and at <= stop)):
+            at = seqs.get(sid, inf)
+            if not told_by_then(at):
+                continue
+            if (row.get('id') or '').strip() in superseded:
                 continue
             ends = (row.get('resolves') or '').strip()
             ends = '' if ends == 'never' else ends
