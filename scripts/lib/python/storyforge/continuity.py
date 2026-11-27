@@ -33,11 +33,15 @@ calendar and the world table, free and the same every run:
   (`Book.old_holds`). A current stage sheet's hands (#647)
   count for the kinds of object tracked, placed by their quotes on the
   prose's scale.
-- **knowledge** (KNO): the POV character acts on, says or thinks a fact
-  before a scene or brief shows them learning it (`knows learns`, the
-  briefs' `knowledge_in`/`knowledge_out` for their POV). The ledger's
-  `known_by` says who knows a fact, not when, so a fact it alone places
-  later, or one never shown learned, is a note.
+- **knowledge** (KNO, advisory): the POV character acts on, says or
+  thinks a fact before a scene or brief shows them learning it (`knows
+  learns`, or a fact a brief's `knowledge_out` adds for its POV). The
+  ledger's `known_by` says who knows a fact, not when, and so does a
+  brief's `knowledge_in` (known by the scene's start, learned at any time
+  before): a fact only they place later, or one never shown learned, is a
+  note. Its findings are advisory (`ADVISORY_CHECKS`): reported, never
+  stopping a scene (E4, 2026-11-27: in 11 of 24 gate stops, the only cause
+  of 9, every one false).
 - **travel** (WLD): a person further from where the story last had them
   than world.csv's fastest `speed` allows in the days between (a time of
   day is a slot: at least `SLOT_DAYS`), places matched through
@@ -71,7 +75,8 @@ clean. A scene before this one in story order whose typed state wasn't read
 (`Book.gaps`) turns a finding it could explain (a `gets`, a `learns`, a
 `healed` there) into a note. Cut and merged scenes don't count. The gate
 runs this on every scene it checks (`gate.GATE_CONTINUITY`): its findings
-join the check's and block like any continuity error.
+join the check's and block like any continuity error, except an advisory
+check's (`is_advisory`), which the gate reports and never stops on.
 """
 
 from __future__ import annotations
@@ -107,6 +112,13 @@ SLOT_DAYS = 0.25
 #: Codes by check
 CODES = {'life': 'PHY', 'possession': 'PHY', 'knowledge': 'KNO',
          'travel': 'WLD', 'time': 'TIM', 'injury': 'PHY', 'names': 'WLD', 'sky': 'WLD'}
+#: The checks whose findings are advisory: the gate reports them
+#: (`gate.GateResult.advisory`) and never stops a scene on them or sends
+#: them to the fix. Knowledge: when a character learns a fact is read from
+#: briefs and a model's records, which misplace it far more often than the
+#: prose does (E4, 2026-11-27: the check was in 11 of 24 gate stops and the
+#: only cause of 9, all false)
+ADVISORY_CHECKS = ('knowledge',)
 
 
 class ContinuityError(RuntimeError):
@@ -293,6 +305,14 @@ def _finding(check: str, quote: str, established_scene: str, established_quote: 
     return Finding(kind='contradiction', code=CODES[check], scene_quote=quote,
                    established_scene=established_scene, established_quote=established_quote,
                    fact_id=fact_id, explanation=f'(typed state, {check}) {why}')
+
+
+def is_advisory(f: Finding) -> bool:
+    """Whether `f` is a finding of an advisory check (`ADVISORY_CHECKS`),
+    told by the explanation `_finding` writes."""
+    return f.kind == 'contradiction' and any(
+        f.code == CODES[c] and f.explanation.startswith(f'(typed state, {c})')
+        for c in ADVISORY_CHECKS)
 
 
 def _where(book: Book, sid: str) -> str:
@@ -980,25 +1000,34 @@ class Learned(NamedTuple):
     """Where a person learns a fact: `at` (scene, index), None for before
     the book; `source` (the scene or file that says so); `words`;
     `shown` True when a scene or brief shows the learning (`knows learns`,
-    `knowledge_in`/`knowledge_out`), False for the ledger's `known_by`
-    alone, which says who knows a fact, not when they learned it."""
+    a fact a brief's `knowledge_out` adds), False for what says only that
+    it is known by then: the ledger's `known_by` (who knows a fact, not
+    when) and a brief's `knowledge_in` (known by the scene's start,
+    learned at any time before it; E4, 2026-11-27: read as learned there,
+    it flagged every earlier scene that used the fact)."""
     at: tuple[str, int] | None
     source: str
     words: str
     shown: bool
 
 
+#: How `learned_at` words a brief's `knowledge_in`: known by then
+KNOWN_BY_START = 'knowledge_in'
+
+
 def learned_at(book: Book, who: str, facts: dict[str, dict], *, shown_only: bool = False
                ) -> dict[str, Learned]:
     """Fact id → the earliest `Learned` for every fact `who` is known to
     learn: from the ledger's `known_by` (a fact's scene, or before the book
-    when it has none; skipped with `shown_only`), the briefs
-    (`knowledge_out` of a scene `who` is the POV of: learned there;
-    `knowledge_in`: known by its start) and `knows learns` records."""
+    when it has none), the briefs of scenes `who` is the POV of
+    (`knowledge_in`: known by its start; `knowledge_out`, which the schema
+    makes cumulative: learned there when not also in the brief's
+    `knowledge_in`, else carried, known by its start) and `knows learns`
+    records. With `shown_only`, only what shows the learning (`shown`)."""
     out: dict[str, Learned] = {}
 
     def put(fid: str, at, source: str, words: str, shown: bool) -> None:
-        if fid not in facts:
+        if fid not in facts or (shown_only and not shown):
             return
         if fid in out:
             old = out[fid].at
@@ -1006,19 +1035,20 @@ def learned_at(book: Book, who: str, facts: dict[str, dict], *, shown_only: bool
                 return
         out[fid] = Learned(at, source, words, shown)
 
-    if not shown_only:
-        for fid, r in facts.items():
-            if who in {book.who(k) for k in _split(r.get('known_by', ''))}:
-                scene = (r.get('scene_id') or '').strip()
-                put(fid, (scene, 0) if scene in book.order else None, scene or 'the ledger',
-                    r.get('quote') or r.get('statement') or '', False)
+    for fid, r in facts.items():
+        if who in {book.who(k) for k in _split(r.get('known_by', ''))}:
+            scene = (r.get('scene_id') or '').strip()
+            put(fid, (scene, 0) if scene in book.order else None, scene or 'the ledger',
+                r.get('quote') or r.get('statement') or '', False)
     for sid, brief in book.briefs.items():
         if sid not in book.order or book.who(book.pov(sid)) != who:
             continue
-        for fid in _split(brief.get('knowledge_in', '')):
-            put(fid, (sid, START), sid, f'knowledge_in of {sid}\'s brief', True)
+        entering = _split(brief.get('knowledge_in', ''))
+        for fid in entering:
+            put(fid, (sid, START), sid, f'{KNOWN_BY_START} of {sid}\'s brief', False)
         for fid in _split(brief.get('knowledge_out', '')):
-            put(fid, (sid, 0), sid, f'knowledge_out of {sid}\'s brief', True)
+            if fid not in entering:
+                put(fid, (sid, 0), sid, f'knowledge_out of {sid}\'s brief', True)
     for sid, recs in book.records.items():
         for r in recs:
             if r.type == 'knows' and r.value == 'learns' and r.verified \
@@ -1055,9 +1085,12 @@ def offered_facts(book: Book) -> tuple[list[tuple[str, str]], int]:
 def check_knowledge(book: Book) -> tuple[list[Finding], list[str]]:
     """KNO: the POV acts on, says or thinks a fact (`knows uses`) before a
     scene or brief shows them learning it (`learned_at(shown_only=True)`).
-    Not a finding, a note: a fact the ledger alone places later (`known_by`
-    says who knows, not when: #648's review CR-4), one never shown learned,
-    and one a scene before without typed state might teach (CR-5). Exempt:
+    Advisory (`ADVISORY_CHECKS`): the gate reports it and never stops on it.
+    Not a finding, a note: a fact only the ledger or a later brief's
+    `knowledge_in` places later (`known_by` says who knows, not when:
+    #648's review CR-4; `knowledge_in` that it's known by then), one never
+    shown learned, and one a scene before without typed state might teach
+    (CR-5). Exempt:
     an off-present scene (a vision may show what isn't known yet). A scene
     without a POV character isn't checked, and says so."""
     sid = book.scene_id
@@ -1087,7 +1120,9 @@ def check_knowledge(book: Book) -> tuple[list[Finding], list[str]]:
                                   or not book.before((sid, r.index), known.at)):
             continue   # known by now
         if shown is None:
-            why = (f'the ledger places it in {known.source}' if known else
+            why = (f'{known.words}: known by then, not when learned'
+                   if known and known.words.startswith(KNOWN_BY_START) else
+                   f'the ledger places it in {known.source}' if known else
                    f'known by {facts[r.item].get("known_by") or "no one named"}')
             unshown.append(f'{r.item} ({why})')
             continue
@@ -1105,8 +1140,9 @@ def check_knowledge(book: Book) -> tuple[list[Finding], list[str]]:
                      + ', '.join(sorted(set(unknown))[:5]))
     if unshown:
         notes.append(f'knowledge: {len(unshown)} fact(s) acted on that no scene or brief shows '
-                     f'the POV learning first (the ledger\'s known_by says who knows, not '
-                     f'when), not a finding: ' + '; '.join(unshown[:5]))
+                     f'the POV learning first (the ledger\'s known_by says who knows, and a '
+                     f'brief\'s knowledge_in that it is known by then, not when), not a '
+                     f'finding: ' + '; '.join(unshown[:5]))
     if gapped:
         notes.append(f'knowledge: {len(gapped)} fact(s) acted on before the scene that shows '
                      f'them learned, with an earlier scene whose typed state wasn\'t read, not '

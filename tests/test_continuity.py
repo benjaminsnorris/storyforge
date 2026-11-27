@@ -961,6 +961,49 @@ class TestKnowledge:
         f, _ = continuity.check_knowledge(b)
         assert codes(f) == ['KNO'] and "knowledge_out of s3's brief" in f[0].established_quote
 
+    def test_a_later_brief_s_knowledge_in_is_a_note(self):
+        # E4, 2026-11-27 (waking-maren and advocate's brief): knowledge_in says
+        # the fact is known by the scene's start, not that it is learned there
+        b = make_book('s1', {'s1': [R('knows', 'Mara', 'dreams-recur', 'uses',
+                                      quote='same minute, her body snapping awake')],
+                             's2': []},
+                      rows=[fact('dreams-recur', 's2', 'mara')],
+                      briefs={'s2': {'knowledge_in': 'dreams-recur',
+                                     'knowledge_out': 'dreams-recur'}})
+        f, notes = continuity.check_knowledge(b)
+        assert f == []
+        assert any("dreams-recur (knowledge_in of s2's brief: known by then, not when "
+                   "learned)" in n for n in notes), notes
+
+    def test_a_carried_knowledge_out_is_not_learning_there(self):
+        # the schema makes knowledge_out cumulative: an item also in the
+        # brief's knowledge_in is carried, not learned in that scene
+        b = make_book('s1', {'s1': [R('knows', 'Mara', 'mill-flooded', 'uses')], 's2': []},
+                      rows=[fact('mill-flooded', 's2', 'mara')],
+                      briefs={'s2': {'knowledge_in': 'mill-flooded',
+                                     'knowledge_out': 'mill-flooded;mill-rebuilt'}})
+        assert continuity.check_knowledge(b)[0] == []
+
+    def test_a_later_knowledge_in_does_not_hide_an_earlier_learning(self):
+        b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
+                             's3': []},
+                      rows=[fact('mill-flooded', 's3', 'mara')],
+                      briefs={'s1': {'knowledge_out': 'mill-flooded'},
+                              's3': {'knowledge_in': 'mill-flooded'}})
+        assert continuity.check_knowledge(b)[0] == []
+
+    def test_knowledge_findings_are_advisory(self):
+        b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
+                             's3': []},
+                      rows=[fact('mill-flooded', 's3', 'mara')],
+                      briefs={'s3': {'knowledge_out': 'mill-flooded'}})
+        [f] = continuity.check_knowledge(b)[0]
+        assert continuity.is_advisory(f)
+        life = make_book('s3', {'s1': [R('alive', 'Oren', value='dead', quote='Oren fell')],
+                                's2': [], 's3': [R('at', 'Oren', 'harbour', quote='Oren waved')]})
+        [g] = continuity.check_life(life)[0]
+        assert not continuity.is_advisory(g)
+
     def test_learned_earlier_by_a_brief(self):
         b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
                              's3': []},
@@ -1685,6 +1728,29 @@ class TestGate:
         assert not result.passed and codes(result.findings) == ['PHY']
         assert any('(typed state, life)' in line for line in gate.report_lines(result))
         assert os.path.isfile(tmp_path / 'logs' / f'gate-state-{SCENE}.json')
+
+    def test_a_knowledge_finding_is_advisory(self, project_dir, tmp_path, monkeypatch):
+        """E4, 2026-11-27: the typed knowledge check was in 11 of 24 gate
+        stops and the only cause of 9, all false. It is reported and
+        recorded, and never stops the scene or goes to the fix."""
+        kno = continuity._finding('knowledge', 'Pell met him there', 'act1-sc03',
+                                  "knowledge_out of act1-sc03's brief",
+                                  'Pell acts on map-stolen before learning it',
+                                  fact_id='map-stolen')
+        monkeypatch.setattr(continuity, 'check_continuity', lambda *a, **k: (
+            continuity.ContinuityResult(SCENE, findings=[kno])))
+        result = self._gate(project_dir, tmp_path, [])
+        assert result.passed and result.committed
+        assert result.findings == [] and gate.problems_to_fix(result) == []
+        assert [f.fact_id for f in result.advisory] == ['map-stolen']
+        lines = gate.report_lines(result)
+        [line] = [x for x in lines if x.startswith('ADVISORY')]
+        assert 'typed knowledge check' in line and 'Pell met him there' in line
+        assert not gate.blocking_lines(lines)
+        [row] = gate.advisories(project_dir)[SCENE]
+        assert row['source'] == 'map-stolen' and gate.is_knowledge_row(row)
+        summary = gate.advisory_summary(project_dir)
+        assert 'typed knowledge check' in summary[0] and 'broken promise' not in summary[0]
 
     def test_notes_are_reported_and_never_block(self, project_dir, tmp_path):
         result = self._gate(project_dir, tmp_path,
