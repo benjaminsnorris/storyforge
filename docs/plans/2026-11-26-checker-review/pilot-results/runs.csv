@@ -7,7 +7,7 @@ diomedes-spears-ares|open|yes|BLK Q21 (also source has it); BLK Q20|real; real|0
 diomedes-spears-ares|tandem-nothink|yes|BLK Q20; BLK Q21 (also source has it)|real; real|0.652|141|44|26
 andromache-mourns-a-living-man|tandem|yes|TRT Andromache a bound captive at Thebe, against her sheet [open checker]|unlabelled, judged real|0.476|96|19|7
 andromache-mourns-a-living-man|open|yes|TRT the same|unlabelled, judged real|0.458|86|18|7
-andromache-mourns-a-living-man|tandem-nothink|yes|EXTRACTION misquote (a quote joining two lines); TRT the same [open checker]; KNO "He took everything else in the city" against the lyre fact [questions]|false (extraction); real; false|0.464|91|17|6
+andromache-mourns-a-living-man|tandem-nothink|yes|EXTRACTION misquote (two adjacent lines; the second's opening quotation mark dropped); TRT the same [open checker]; KNO "He took everything else in the city" against the lyre fact [questions]|false (extraction); real; false|0.464|91|17|6
 diomedes-and-odysseus-raid|tandem|no|-|-|0.863|186|33|20
 diomedes-and-odysseus-raid|open|no|-|-|0.667|167|20|13
 diomedes-and-odysseus-raid|tandem-nothink|no|-|-|0.770|158|23|18

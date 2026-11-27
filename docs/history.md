@@ -1016,8 +1016,8 @@ Report E of the checker review (`docs/plans/2026-11-26-checker-review/`, section
 - **Recordings.** Nothing re-recorded. E3 replays from its existing cassettes. `gate-set` and `gate-set-questions` are stale as on main.
 - **The pilot (2026-11-26): thinking stays on** (PILOT.md, "Results"; `docs/plans/2026-11-26-checker-review/pilot-results/`). Eight *Wrath Like Smoke* scenes' pre-fix prose was re-gated with `--tandem` and with `--tandem --no-extract-thinking`.
   - *State rows.* No end-of-scene state was lost: all 28 thinking-on state rows in the scenes' last quarter have a thinking-off row (8 matched by hand).
-  - *A misquote.* Thinking off made one blocking `EXTRACTION` misquote (`andromache-mourns-a-living-man`: a quote joining two lines that aren't adjacent). The 16 thinking-on extractions (tandem and open) made none.
-  - *Stops.* They differed in three scenes, mostly from the blocking read's and the open checker's run-to-run variance.
+  - *A misquote.* Thinking off made one blocking `EXTRACTION` misquote (`andromache-mourns-a-living-man`: a quote across two adjacent lines that dropped the second line's opening quotation mark). The 16 thinking-on extractions (tandem and open) made none.
+  - *Stops.* They differed in three scenes, mostly from the run-to-run variance of the blocking read, the open checker and the question layer.
   - *The saving.* Extraction output fell from 6,298 to 3,130 tokens a call, and the gate's Sonnet spend from $1.68 to $1.41 for eight scenes. The median gate wall time fell only from 147 s to 137 s, since extraction now runs beside the other calls (46035d1bd).
   - The rule keeps thinking on only if a real finding or stop differs or a state is lost. A stop differed, so `EXTRACT_THINK` stays True and nothing is re-recorded.
 
@@ -1043,9 +1043,9 @@ Report D of the checker review (`docs/plans/2026-11-26-checker-review/`, section
 - **The pilot (2026-11-26): `tandem` stays the default** (PILOT.md, "Results"). Eight scenes' pre-fix prose was gated in each mode.
   - *Questions-only findings.* 6 over the 16 tandem-mode runs (thinking on and off), all false, and no real catch the open checker missed. They were 2 promises worded as the later state (Q36/Q37's pattern), 3 #769 source facts and 1 knowledge fact.
   - *False stops added over `open`.* 0 with thinking on and 1 with thinking off (`polydamas-reads-the-eagle`, stopped by a source fact alone; `open` passed it). The rule allows at most 1, and the 0.48 control rate predicted 3 or 4.
-  - *Cost.* $5.91 tandem against $5.00 open for the eight. The questions' share is small; most of the gap is the first run's cold cache.
+  - *Cost.* $5.91 tandem against $5.00 open for the eight. About half the $0.91 gap is the first tandem run ($1.28 against $0.83 for the same scene in open, on a cold cache); the other seven scenes make the rest, $0.46.
   - *Disagreements.* The two checkers disagreed on no dispute (16 tandem NOTEs).
-  - *The fixes (#732–#748).* None of the 24 runs made a false possession, injury, life, same-scene `ends` or earlier-scene-promise finding; report A's first runs of the eight scenes had 12.
+  - *The fixes (#732–#748).* None of the 24 runs made a false possession, injury, life, same-scene `ends` or earlier-scene-promise finding; report A's first runs of the eight scenes had 10.
   - *Recall.* The real catches were found only intermittently by the blocking read: Q22 in 3 of 8 runs, Q7 and Q79 in 5 of 8. The input is byte-identical to Nov 16, so this is the read's own variance, not a fix. It fails the recall half of "fixes confirmed": #774, and the redraft is held on it.
 
 ## A claim a character makes in speech was treated as narration (#749)

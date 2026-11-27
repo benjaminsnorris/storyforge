@@ -5,7 +5,7 @@ The raw results of [PILOT.md](../PILOT.md)'s run, summarized. The decisions and 
 - **Set-up.** storyforge 1.205.0 (main at 360a6996b). The book was a remote-less clone of iliad-adult main (85251a5), then `source import` (unchanged) and `cleanup`, which filled 231 `death_scene`s; tagged `pilot-base`. Each run started from that tag with `STORYFORGE_COST_THRESHOLD=1.25`. No re-check ran: each run added only its scene's three gate ledger rows.
 - **Pre-fix prose.** Rebuilt from the session logs as the runbook says. Every first-run quote in report A §2 for the eight scenes is in the rebuilt files (18 of 18). The blocking read's input tokens match the Nov 16 logged calls exactly (3,517 and 3,543 on `aphrodite-drives-helen-to-bed`), so the prose is byte-identical.
 - **Runs.** 24 gate runs (`tandem`, `open`, `tandem --no-extract-thinking` on each scene), plus 15 calls of the blocking read alone (5 per scene, 2 readings each) on the three scenes whose real catches were missed.
-- **Spend.** $17.04 against the $13 estimate and the $20 stop: tandem $5.91, open $5.00, thinking off $5.08, blocking read alone $1.04 (priced from logged usage; a direct call writes no ledger row). The open checker's first run cost $1.01 (a cold cache); later scenes cost $0.36–0.90 a run.
+- **Spend.** $17.04 against the $13 estimate and the $20 stop: tandem $5.91, open $5.00, thinking off $5.08, blocking read alone $1.04 (priced from logged usage; a direct call writes no ledger row). The first run cost $1.28 (its Opus calls $1.01, on a cold cache); the other runs cost $0.36–1.01 each, their Opus calls $0.23–0.62.
 
 ## Files
 

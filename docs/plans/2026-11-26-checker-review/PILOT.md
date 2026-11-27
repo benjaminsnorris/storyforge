@@ -135,7 +135,7 @@ Run on storyforge 1.205.0 (main 360a6996b, after #768 and #773) against a remote
 ### Decisions
 
 1. **Fixes confirmed: no.** The rule has two halves.
-   - *Passed: the false stops are gone.* No run of the 24 made a possession, injury, life, same-scene-`ends` or earlier-scene-promise finding. Report A's first runs of these scenes had 12. Q8's promise was not asked as an earlier scene's.
+   - *Passed: the false stops are gone.* No run of the 24 made a possession, injury, life, same-scene-`ends` or earlier-scene-promise finding. Report A's first runs of these scenes had 10 (Q23, Q33, Q34, Q35, Q55, Q56, Q72, Q84, Q85, Q86). Q8's promise was not asked as an earlier scene's.
    - *Failed: recall.* Q20, Q21 and Q80 were found in every run, but Q7 in 2 of 3, Q79 in 1 of 3 and **Q22 in none**. The blocking read alone, run 5 more times, found Q22 3 of 5, Q7 3 of 5 and Q79 4 of 5. Each is caught by about 0.2–0.3 of single readings.
    - Not caused by any fix. The blocking request is byte-identical to Nov 16, with the same prompt and model, so this is the read's own run-to-run recall.
    - Filed as **#774** against #626 (the blocking read). **Hold the redraft** until Ben decides it.
@@ -145,8 +145,8 @@ Run on storyforge 1.205.0 (main 360a6996b, after #768 and #773) against a remote
    - At most 1, so keep `tandem`. The control rate of 0.48 predicted 3 or 4.
 3. **Extraction thinking: keep it on.** The rule is "no end-of-scene state lost, and no real finding or stop differs".
    - *State rows: none lost.* All 28 thinking-on state rows in the scenes' last quarter have a thinking-off row; 8 needed checking by hand.
-   - *Stops: they differ in three scenes.* `aphrodite-drives-helen-to-bed` passed with thinking on and stopped on Q7 with it off. Most of the difference is the blocking read's and the open checker's variance: `open`, also thinking on, varies the same way.
-   - *One difference is the extraction's own.* Thinking off made a blocking `EXTRACTION` misquote on `andromache-mourns-a-living-man`, a quote joining two lines that aren't adjacent. The 16 thinking-on extractions made none.
+   - *Stops: they differ in three scenes.* `aphrodite-drives-helen-to-bed` passed with thinking on and stopped on Q7 with it off. Most of the difference is the run-to-run variance of the blocking read, the open checker and the question layer: `open`, also thinking on, varies the same way.
+   - *One difference is the extraction's own.* Thinking off made a blocking `EXTRACTION` misquote on `andromache-mourns-a-living-man`, a quote across two adjacent lines that dropped the second line's opening quotation mark. The 16 thinking-on extractions made none.
    - *The saving is small.* Extraction output fell from 6,298 to 3,130 tokens a call. The gate's Sonnet spend fell from $1.68 to $1.41 for the eight scenes, and the median gate wall time from 147 s to 137 s, since extraction now runs beside the other calls.
 4. **#769's source facts** are listed as their own category below. The 64 asked a run made 3 false findings, all one fact: Zeus's order that Hector hold back until Agamemnon is wounded, from Book 11, asked in Books 12 and 13 after the condition is met. They caused 1 false stop. The momentary combat states, such as "brandishes two spears", made none. **#775** proposes filtering by kind (conditional orders and constraints), not age. It is not implemented.
 
