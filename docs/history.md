@@ -1014,6 +1014,12 @@ Report E of the checker review (`docs/plans/2026-11-26-checker-review/`, section
     - About 15 are continuity facts, most of them the scene's last beat: Hank carries Claire out; Voss carries Tam's coat to his carriage; Vael's journal is on Voss's desk; Voss leaves the documents for Thane; Fen Aldric leaves for the stair; Haddon's man lies restrained; Marren is gone; Nora's arm stays cold after the murkwolves; Kael has now been told; the detective never played the seventh voicemail. A couple are names probably already in the registries.
   - *Effort `low` with adaptive thinking* was worse: 205 rows (−38%), median 10 s.
 - **Recordings.** Nothing re-recorded. E3 replays from its existing cassettes. `gate-set` and `gate-set-questions` are stale as on main.
+- **The pilot (2026-11-26): thinking stays on** (PILOT.md, "Results"; `docs/plans/2026-11-26-checker-review/pilot-results/`). Eight *Wrath Like Smoke* scenes' pre-fix prose was re-gated with `--tandem` and with `--tandem --no-extract-thinking`.
+  - *State rows.* No end-of-scene state was lost: all 28 thinking-on state rows in the scenes' last quarter have a thinking-off row (8 matched by hand).
+  - *A misquote.* Thinking off made one blocking `EXTRACTION` misquote (`andromache-mourns-a-living-man`: a quote joining two lines that aren't adjacent). The 16 thinking-on extractions (tandem and open) made none.
+  - *Stops.* They differed in three scenes, mostly from the blocking read's and the open checker's run-to-run variance.
+  - *The saving.* Extraction output fell from 6,298 to 3,130 tokens a call, and the gate's Sonnet spend from $1.68 to $1.41 for eight scenes. The median gate wall time fell only from 147 s to 137 s, since extraction now runs beside the other calls (46035d1bd).
+  - The rule keeps thinking on only if a real finding or stop differs or a state is lost. A stop differed, so `EXTRACT_THINK` stays True and nothing is re-recorded.
 
 ## Both checkers on a scene's first gate run, the questions alone after it (#738)
 
@@ -1034,6 +1040,13 @@ Report D of the checker review (`docs/plans/2026-11-26-checker-review/`, section
 - **Never worse.** Carried findings are the same targets as the run before's (`_persists`), so they are never new; untouched ones are `ALONE` on both sides of the count. The re-check can no longer bring new open-checker findings from reading variance, which is the point.
 - **Tests run the open checker alone** (conftest `_gate_check_open`) unless marked `check_method_default`, since tandem adds the question layer's calls and needs the continuity checks; `tests/test_gate_tandem.py` covers the method.
 - **Recordings.** No replayed suite changes: `gate-set` and `gate-set-questions` force their method (`evals/gate_set/runner.py`), `recheck-set` makes no gate call, and `e2-carol-checker` calls the checker directly. E4 and E8 gate as `write` does, so a re-record of them records tandem; both are stale on main before any gate call. The union's recall is the join of the two gate-set suites (report D); the resolved prompt has no labelled eval yet (no recorded set has fixes with labelled outcomes; E8 would, and is stale). Not measured anywhere: the open checker's window mode past `FULL_MAX_WORDS`.
+- **The pilot (2026-11-26): `tandem` stays the default** (PILOT.md, "Results"). Eight scenes' pre-fix prose was gated in each mode.
+  - *Questions-only findings.* 6 over the 16 tandem-mode runs (thinking on and off), all false, and no real catch the open checker missed. They were 2 promises worded as the later state (Q36/Q37's pattern), 3 #769 source facts and 1 knowledge fact.
+  - *False stops added over `open`.* 0 with thinking on and 1 with thinking off (`polydamas-reads-the-eagle`, stopped by a source fact alone; `open` passed it). The rule allows at most 1, and the 0.48 control rate predicted 3 or 4.
+  - *Cost.* $5.91 tandem against $5.00 open for the eight. The questions' share is small; most of the gap is the first run's cold cache.
+  - *Disagreements.* The two checkers disagreed on no dispute (16 tandem NOTEs).
+  - *The fixes (#732–#748).* None of the 24 runs made a false possession, injury, life, same-scene `ends` or earlier-scene-promise finding; report A's first runs of the eight scenes had 12.
+  - *Recall.* The real catches were found only intermittently by the blocking read: Q22 in 3 of 8 runs, Q7 and Q79 in 5 of 8. The input is byte-identical to Nov 16, so this is the read's own variance, not a fix. It fails the recall half of "fixes confirmed": #774, and the redraft is held on it.
 
 ## A claim a character makes in speech was treated as narration (#749)
 
@@ -1059,3 +1072,9 @@ On *Wrath Like Smoke*'s Nov 8 draft, 4 of the open checker's 5 false findings an
 - **Never silent.** A book with no `source:` block is unchanged: no questions, no note. A free adaptation, a scene the map invents or doesn't map, or a source table that can't be read asks none, and the notes say why; `entering_state`'s own notes (no ledger, no cast, a source scene with no `seq`) are passed on.
 - **On the real book** (read-only, *Wrath Like Smoke*'s pilot scenes): the seven mapped scenes ask 6 to 10 source facts each, five of them at the limit (`andromache-mourns-a-living-man` is invented, so it asks none and says so). `patroclus-quenches-the-fire` asks Patroclus in Achilles's armour. Many are momentary combat states ("Hector brandishes two spears" from book 5, asked in book 7), and some are reported speech ("Patroclus reports that Diomedes has been hit"), the ledger's limits #747 named. They cost ledger facts their place under the cap. Whether they add false stops is the pilot's to measure (PILOT.md, decision 2).
 - **Recordings.** The question prompt changes only for a faithful adaptation, and no recorded suite is one (the gate sets are built from E1's novels), so nothing new misses. `question-set` and `gate-set-questions` already miss on main from #749 and #738.
+- **The pilot (2026-11-26).**
+  - *Asked.* 64 source facts in the eight scenes, each tandem run (10 at most a scene; `andromache-mourns-a-living-man` is unmapped).
+  - *Findings.* 3, all false and all one fact: Zeus's order that Hector hold back until Agamemnon is wounded (`iliad:jove-sends-iris-to-hector`). It was asked in Books 12 and 13, after the source and the book have wounded Agamemnon. It is a `knowledge` row of kind `capability-constraint`, with no `ends`.
+  - *Stops.* 1 false stop.
+  - *The momentary combat states* ("brandishes two spears") made no finding.
+  - #775 proposes filtering by kind (conditional orders and constraints), not by age; not implemented.

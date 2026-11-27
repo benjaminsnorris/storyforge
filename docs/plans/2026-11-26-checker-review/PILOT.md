@@ -128,6 +128,78 @@ Summary rows per mode: false stops (a scene stopped only by false findings), rea
 - **Keep `tandem`** if the questions-only findings add at most 1 false stop over `open` across the eight, or if they add a real catch `open` missed and at most 2 false stops. **Switch to `open`** if they add 2 or more false stops and no real catch. At 0.48 per control scene, the eval rate would predict 3 or 4 false stops in eight.
 - **Turn thinking off** only if no end-of-scene state change is lost in any of the eight scenes, and no real finding or stop differs. Otherwise keep it on. The speed (about 42 s down to 16 s) and about $3 over the book are not worth a lost state change.
 
+## Results (run 2026-11-26)
+
+Run on storyforge 1.205.0 (main 360a6996b, after #768 and #773) against a remote-less clone of iliad-adult main, with `source import` and `cleanup` applied (231 `death_scene`s filled). All 24 runs and the extra blocking reads cost **$17.04**, against the $13 estimate. Raw results: [pilot-results/](pilot-results/README.md).
+
+### Decisions
+
+1. **Fixes confirmed: no.** The rule has two halves.
+   - *Passed: the false stops are gone.* No run of the 24 made a possession, injury, life, same-scene-`ends` or earlier-scene-promise finding. Report A's first runs of these scenes had 12. Q8's promise was not asked as an earlier scene's.
+   - *Failed: recall.* Q20, Q21 and Q80 were found in every run, but Q7 in 2 of 3, Q79 in 1 of 3 and **Q22 in none**. The blocking read alone, run 5 more times, found Q22 3 of 5, Q7 3 of 5 and Q79 4 of 5. Each is caught by about 0.2–0.3 of single readings.
+   - Not caused by any fix. The blocking request is byte-identical to Nov 16, with the same prompt and model, so this is the read's own run-to-run recall.
+   - Filed as **#774** against #626 (the blocking read). **Hold the redraft** until Ben decides it.
+2. **Check method: keep `tandem`.**
+   - *Questions-only findings:* 6 over the 16 tandem-mode runs, all false, and no real catch the open checker missed. They were 2 promises worded as the later state (Q36/Q37's pattern: `hector-has-ajax-belt`, `ajax-has-hector-sword`), 3 #769 source entering-state facts, and 1 knowledge fact read against "He took everything else in the city".
+   - *False stops they add over `open`:* 0 with thinking on, 1 with thinking off. That one is `polydamas-reads-the-eagle`, stopped only by a source entering-state fact; `open` passed the scene.
+   - At most 1, so keep `tandem`. The control rate of 0.48 predicted 3 or 4.
+3. **Extraction thinking: keep it on.** The rule is "no end-of-scene state lost, and no real finding or stop differs".
+   - *State rows: none lost.* All 28 thinking-on state rows in the scenes' last quarter have a thinking-off row; 8 needed checking by hand.
+   - *Stops: they differ in three scenes.* `aphrodite-drives-helen-to-bed` passed with thinking on and stopped on Q7 with it off. Most of the difference is the blocking read's and the open checker's variance: `open`, also thinking on, varies the same way.
+   - *One difference is the extraction's own.* Thinking off made a blocking `EXTRACTION` misquote on `andromache-mourns-a-living-man`, a quote joining two lines that aren't adjacent. The 16 thinking-on extractions made none.
+   - *The saving is small.* Extraction output fell from 6,298 to 3,130 tokens a call. The gate's Sonnet spend fell from $1.68 to $1.41 for the eight scenes, and the median gate wall time from 147 s to 137 s, since extraction now runs beside the other calls.
+4. **#769's source facts** are listed as their own category below. The 64 asked a run made 3 false findings, all one fact: Zeus's order that Hector hold back until Agamemnon is wounded, from Book 11, asked in Books 12 and 13 after the condition is met. They caused 1 false stop. The momentary combat states, such as "brandishes two spears", made none. **#775** proposes filtering by kind (conditional orders and constraints), not age. It is not implemented.
+
+### Per run
+
+Verdicts: R real, F false, D debatable, U unlabelled (judged by reading the prose, as given). `[Q]` marks a questions-only finding and `[O]` the open checker's. Extraction rows are given as total (state).
+
+| Scene | Mode | Blocking findings | Verdicts | Stopped? On what | Cost $ | Wall s | Extract rows |
+|---|---|---|---|---|---|---|---|
+| hector-duels-ajax | tandem | BLK spear held after the throw (new); PRM `hector-has-ajax-belt` [Q] | R; F | yes, on R | 1.28 | 169 | 26 (10) |
+| hector-duels-ajax | open | BLK spear (new); BLK Ajax has no free hand for the belt (Q40's kind) | R; R | yes, on R | 0.83 | 135 | 30 (13) |
+| hector-duels-ajax | tandem-nothink | BLK Agamemnon "first" to stand, already up; PRM `ajax-has-hector-sword` [Q] | D; F | yes, on D and F | 0.74 | 163 | 29 (14) |
+| diomedes-spears-ares | tandem | BLK Q20, Q21 (Q22 missed); no possession, no `ends` halt | R; R | yes, on R | 0.75 | 163 | 38 (20) |
+| diomedes-spears-ares | open | BLK Q20, Q21 (Q22 missed) | R; R | yes, on R | 0.76 | 174 | 41 (17) |
+| diomedes-spears-ares | tandem-nothink | BLK Q20, Q21 (Q22 missed) | R; R | yes, on R | 0.65 | 141 | 44 (26) |
+| andromache-mourns-a-living-man | tandem | TRT Andromache a bound captive at Thebe, against her sheet [O] | U, judged R | yes, on R | 0.48 | 96 | 19 (7) |
+| andromache-mourns-a-living-man | open | TRT the same | U, judged R | yes, on R | 0.46 | 86 | 18 (7) |
+| andromache-mourns-a-living-man | tandem-nothink | EXTRACTION misquote; TRT the same [O]; KNO "He took everything else in the city" against the lyre fact [Q] | F; R; F | yes, on R | 0.46 | 91 | 17 (6) |
+| diomedes-and-odysseus-raid | tandem | none | | passed | 0.86 | 186 | 33 (20) |
+| diomedes-and-odysseus-raid | open | none | | passed | 0.67 | 167 | 20 (13) |
+| diomedes-and-odysseus-raid | tandem-nothink | none | | passed | 0.77 | 158 | 23 (18) |
+| polydamas-reads-the-eagle | tandem | BLK Sarpedon's hands on two shoulders while he tightens straps | D | yes, on D | 0.52 | 111 | 18 (14) |
+| polydamas-reads-the-eagle | open | none | | passed | 0.52 | 78 | 16 (13) |
+| polydamas-reads-the-eagle | tandem-nothink | PHY source fact: Zeus's order to hold back [Q] | F (source entering state) | **yes, on F alone** | 0.50 | 132 | 17 (14) |
+| idomeneus-fights-at-the-ships | tandem | BLK second spear; BLK Q83 | D; D | yes, on D | 1.01 | 253 | 40 (16) |
+| idomeneus-fights-at-the-ships | open | BLK Q83 | D | yes, on D | 0.90 | 169 | 32 (14) |
+| idomeneus-fights-at-the-ships | tandem-nothink | BLK Q83; PHY source fact: Zeus's order [Q] | D; F (source entering state) | yes, on D and F | 0.90 | 195 | 36 (26) |
+| hector-breaks-the-gate | tandem | TIM Q80 [O]; BLK Q81; PHY source fact: Zeus's order [Q] (Q79 missed) | R; R; F (source entering state) | yes, on R | 0.55 | 130 | 14 (11) |
+| hector-breaks-the-gate | open | TIM Q80; BLK Q81; BLK Q79 | R; R; R | yes, on R | 0.50 | 97 | 18 (17) |
+| hector-breaks-the-gate | tandem-nothink | TIM Q80 [O]; BLK doors on torn hinges; BLK Q81 (Q79 missed) | R; D; R | yes, on R | 0.56 | 119 | 18 (16) |
+| aphrodite-drives-helen-to-bed | tandem | none (Q7 missed) | | passed | 0.47 | 74 | 18 (9) |
+| aphrodite-drives-helen-to-bed | open | BLK Q7 | R | yes, on R | 0.36 | 62 | 17 (11) |
+| aphrodite-drives-helen-to-bed | tandem-nothink | PRM `paris-rescued-by-aphrodite`, this scene's own fact [O and Q]; BLK Q7 | D; R | yes, on R | 0.51 | 78 | 17 (11) |
+
+- **Tandem NOTEs.** All 16 tandem runs said only "the open checker (2 readings) and the questions both read it". The two checkers disagreed on no dispute.
+- **Q36/Q37.** Neither promise is now asked as another scene's (#740). But one of the two pair facts (`hector-has-ajax-belt`, `ajax-has-hector-sword`) stops the scene as a questions-only broken promise in each tandem run, worded as the later state. The scene also stopped on other findings, so neither was a false stop here. In a fix loop, though, it would hold the scene after the real finding is fixed.
+- **Advisory promises** (non-blocking) are not counted. Most were the brief's book-level facts that no scene shows, such as "Pandarus broke the truce oath".
+
+### Summary per mode
+
+| | tandem | open | tandem, thinking off |
+|---|---|---|---|
+| False stops (stopped only by false findings) | 0 | 0 | 1 (polydamas, source entering state) |
+| Real catches kept, of Q7, Q20–22, Q79, Q80 | 3 of 6 (Q7, Q22, Q79 missed) | 5 of 6 (Q22 missed) | 4 of 6 (Q22, Q79 missed) |
+| New real catches | 2 (hector-duels-ajax spear; andromache's capture, unlabelled) | 3 (spear, Ajax's hands, andromache) | 1 (andromache) |
+| Questions-only findings (true / false) | 0 / 2 | n/a | 0 / 4 |
+| Source entering-state findings (#769; true / false) | 0 / 1 | n/a | 0 / 2 |
+| Scenes passed | 2 | 2 | 1 |
+| Total cost | $5.91 | $5.00 | $5.08 |
+| Median wall time | 147 s | 116 s | 137 s |
+
+Blocking-read recall across all runs ([blocking-recall.csv](pilot-results/blocking-recall.csv)): Q20 and Q21 8/8 runs, Q7 5/8, Q79 5/8, Q22 3/8.
+
 ## Cost
 
 Per scene and run: extraction about $0.13 with thinking on and about $0.05 off; the open checker about $0.30–0.60 (two readings; #741 made the second cheaper, and a warm one-hour cache helps the next run); the blocking read $0.07; typed state, questions and source check a few cents.
@@ -155,6 +227,8 @@ Keep `$OUT` until the decisions are recorded: in `docs/history.md` under #738 an
 In order.
 
 ### 1. Flip the defaults the pilot decides
+
+**Done (2026-11-26): nothing to flip.** The rules keep both defaults: `GATE_CHECK_METHOD` stays `tandem`, and `EXTRACT_THINK` stays True (see Results). `e3-extraction` does not join step 2.
 
 One small PR each, with a `docs/history.md` entry under #738 or #743 giving the pilot's numbers:
 
@@ -202,7 +276,9 @@ States checked 2026-11-26.
 |---|---|---|
 | #746 | open | Second half: fill `aliases` with patronymics and standing epithets at `source import` (`source.py`), from a series-repo table whose format isn't defined yet. The namesake guard itself merged (PR #754) |
 | #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings, which the author sets; iliad-adult PR 27 fixed the wrong Dolops and Melanippus ids in `ajax-holds-the-ships`). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
-| #769 | merged (PR #773) | The question layer asks the source's entering state with the brief's entering items (the latest 10 a scene, counted toward the cap of 30). It adds no recording miss: no recorded suite is an adaptation. Its acceptance case is a unit test, so the pilot is its first measurement: watch findings whose source is `source iliad:<scene>` |
+| #769 | merged (PR #773) | The question layer asks the source's entering state with the brief's entering items (the latest 10 a scene, counted toward the cap of 30). It adds no recording miss: no recorded suite is an adaptation. Its acceptance case is a unit test, so the pilot is its first measurement: watch findings whose source is `source iliad:<scene>`. **Measured by the pilot:** 64 asked a run, 3 false findings (one conditional order) and 1 false stop. #775 proposes filtering by kind |
+| #774 | open (from the pilot) | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. It fails the recall half of "fixes confirmed" and **holds step 5** until decided. If it changes `BLOCKING_READINGS`, the blocking calls in `blocking-set` and the gate sets change too, so decide it before step 2 |
+| #775 | open (from the pilot) | Leave conditional orders and constraints out of the source facts the question layer asks. It changes no recorded suite (none is an adaptation) |
 | #749 | merged (PR #768) | A claim in speech is not narration. Its recording misses are in step 2 |
 
 Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a judgement call for Ben or waits on something else:
@@ -215,5 +291,7 @@ Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a ju
 - **PR #767:** a recorded tandem eval (`gate-set-tandem`, replaying from the two gate sets' recordings) needs step 2 first.
 
 ### 5. Redraft *Wrath Like Smoke*
+
+**Held (2026-11-26)** on #774: the pilot's recall half of "fixes confirmed" failed.
 
 With the defaults decided and the evals green, redraft. Watch the first session's fix rounds, the stops per scene, and any finding of a kind the pilot cleared. The phantom-injury lines in iliad-adult PR 23 go with the redraft (README, "Decisions for Ben").
