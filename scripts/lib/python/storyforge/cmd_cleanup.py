@@ -1360,6 +1360,42 @@ def dedup_pipeline_reviews(project_dir: str) -> None:
 
 
 # ============================================================================
+# Deaths from the source (#745)
+# ============================================================================
+
+DEATHS_TITLE: Final = 'Checking death_scene against the source...'
+
+
+def plan_death_scenes(project_dir: str) -> StepPlan:
+    """Plan the blank characters.csv `death_scene` cells a faithful
+    adaptation's source fills (`source_deaths.plan_deaths`): one change per
+    character. What it didn't fill or couldn't check is the report's
+    (`_check_source_deaths`), counted in this step's summary. An author's
+    value (a scene, or `lives`) is never overwritten."""
+    from storyforge import source_deaths
+    plan = source_deaths.plan_deaths(project_dir)
+    changes = tuple(_change('fill', f.describe()) for f in plan.fills)
+
+    def apply() -> tuple[PlannedChange, ...]:
+        try:
+            done = {f.who for f in source_deaths.apply_fills(project_dir, plan.fills)}
+        except (OSError, UnicodeDecodeError) as exc:
+            log(f'WARNING: could not write reference/characters.csv '
+                f'({type(exc).__name__}: {exc}). Its death_scene cells are unchanged.')
+            return ()
+        if len(done) != len(plan.fills):
+            _warn_vanished(f'{len(plan.fills) - len(done)} blank death_scene cell(s)')
+        return tuple(c for c, f in zip(changes, plan.fills) if f.who in done)
+
+    warned = len(plan.of(source_deaths.WARNING))
+    summary = (_note(f'{len(plan.findings)} thing(s) about the source\'s deaths not filled or '
+                     f'not checked ({warned} to act on): see the report '
+                     f'(working/cleanup-report.csv, type source_death)')
+               if plan.findings else None)
+    return StepPlan(DEATHS_TITLE, changes, apply if changes else _no_op, summary=summary)
+
+
+# ============================================================================
 # storyforge.yaml migration
 # ============================================================================
 
@@ -2773,6 +2809,24 @@ def _check_world_table(project_dir: str) -> list[dict]:
     } for p in found]
 
 
+def _check_source_deaths(project_dir: str) -> list[dict]:
+    """Report the deaths a faithful adaptation's source records that
+    cleanup didn't fill into characters.csv's `death_scene`, or couldn't
+    check (#745; `source_deaths` says which, and how severe). A warning
+    stops once the author sets the cell: a scene, or `lives`. Never
+    repaired."""
+    from storyforge import source_deaths
+    return [{
+        'type': 'source_death', 'file': 'reference/characters.csv', 'category': 'integrity',
+        'detail': csv_safe(f.detail),
+        'action': ('Set death_scene in reference/characters.csv to the scene after which '
+                   'the character is dead, or `lives` if they live in this version (or fix '
+                   'the source map or source)' if f.severity == source_deaths.WARNING
+                   else 'Nothing to do unless it is wrong'),
+        'severity': f.severity,
+    } for f in source_deaths.plan_deaths(project_dir).findings]
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Report CRLF line endings in the CSVs and in `storyforge.yaml`.
 
@@ -3083,6 +3137,9 @@ def build_cleanup_report(project_dir: str) -> dict:
     # --- The world table's rows (#647) ---
     all_findings.extend(_check_world_table(project_dir))
 
+    # --- Deaths the source records that weren't filled (#745) ---
+    all_findings.extend(_check_source_deaths(project_dir))
+
     # --- Canon files (graphic-novel projects only) ---
     all_findings.extend(report_canon_files(project_dir))
 
@@ -3203,6 +3260,7 @@ def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
         plan_legacy_files(project_dir, disk),
         plan_loose_files(project_dir, disk),
         plan_pipeline_reviews(project_dir),
+        plan_death_scenes(project_dir),
     ]
     if scenes:
         plans.append(plan_scene_files(project_dir))

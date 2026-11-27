@@ -724,7 +724,7 @@ class TestTheReportSurvivesAnUnreadableFile:
 
 class TestAnUnreadableSceneFileIsSurvivable:
     """`plan_cleanup` builds every plan before the first one runs, so one
-    unreadable file costs all ten steps rather than the tail of them — and
+    unreadable file costs all eleven steps rather than the tail of them — and
     the report with them. Before the planner, the run still created directories
     and migrated the yaml before dying.
     """
@@ -734,12 +734,12 @@ class TestAnUnreadableSceneFileIsSurvivable:
         with open(path, 'wb') as f:
             f.write(b'# Malm\xf6\n\nThe prose.\n')
 
-    def test_the_other_nine_steps_still_run(self, project_dir):
+    def test_the_other_ten_steps_still_run(self, project_dir):
         self._bad_scene(project_dir)
 
         plans = cmd_cleanup.plan_cleanup(project_dir, scenes=True)
 
-        assert len(plans) == 10
+        assert len(plans) == 11
         assert any(p.changes for p in plans)
 
     def test_it_becomes_a_finding_rather_than_a_silent_skip(self, project_dir):
