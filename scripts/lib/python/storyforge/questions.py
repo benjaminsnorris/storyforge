@@ -1205,16 +1205,28 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
                                        r['subject'].strip()), order)
              for r in picked.facts if r['id'] not in ruled]
     # #769: the source's entering state, with the brief's entering items;
-    # one the brief, a dispute or a ledger fact already states isn't asked twice
+    # one the brief, a dispute or a ledger fact already states isn't asked
+    # twice. A ledger fact that states it is asked in its place, here, so
+    # the cap can't cut both
     from_source, source_notes = source_entering_questions(project_dir, scene_id)
     result.notes += source_notes
-    said = {_said(q.statement) for q in questions + facts}
+    said = {_said(q.statement) for q in questions}
+    ledger_said = {}
+    for q in facts:
+        ledger_said.setdefault(_said(q.statement), q)
     twice = []
     for q in from_source:
-        if _said(q.statement) in said:
+        key = _said(q.statement)
+        if key in said:
             twice.append(q.fact_id)
             continue
-        said.add(_said(q.statement))
+        said.add(key)
+        if key in ledger_said:
+            twice.append(q.fact_id)
+            mine = ledger_said.pop(key)
+            facts.remove(mine)
+            questions.append(mine)
+            continue
         questions.append(q)
     if twice:
         result.notes.append(f'{len(twice)} source entering fact(s) the brief or the ledger '

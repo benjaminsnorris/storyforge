@@ -1688,6 +1688,20 @@ class TestSourceEntering:
         r, _ = self._check(project_dir, rows)
         assert r.asked_fact_ids == ['dorren-cut']
 
+    def test_the_ledger_fact_that_states_one_takes_its_place_under_the_cap(
+            self, project_dir, monkeypatch):
+        # asked where the source fact would be, so the cap can't cut both
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
+        _with_source(project_dir)
+        rows = _add_rows(project_dir,
+                         {**TESSA_KIND, 'id': 'dorren-limps', 'type': 'physical',
+                          'subject': 'dorren-hayle', 'statement': 'Dorren limps'},
+                         {**TESSA_KIND, 'id': 'dorren-cut', 'subject': 'dorren-hayle',
+                          'statement': CUT})
+        r, _ = self._check(project_dir, rows)
+        assert r.asked_fact_ids == ['dorren-cut']
+        assert any(n.endswith('asked once: source:atlas:cut') for n in r.notes)
+
     def test_they_count_toward_the_cap(self, project_dir, monkeypatch):
         monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
         _with_source(project_dir)
@@ -1761,3 +1775,20 @@ class TestSourceEntering:
         r, _ = self._check(project_dir)
         assert any(n.startswith("the source's entering state: source atlas has no fact ledger")
                    for n in r.notes)
+
+    @pytest.mark.continuity
+    def test_the_gate_stops_on_one_and_reports_the_source_scene(self, project_dir, tmp_path,
+                                                                monkeypatch):
+        # through gate_scene: a finding whose established_scene is no scene
+        # of the book (`source atlas:s-office`) blocks and is reported as is
+        _with_source(project_dir)
+        result, calls = TestGate()._gate(
+            project_dir, tmp_path, monkeypatch,
+            lambda n: [ans(i, 'yes', 'Tessa mocked Dorren', 'Contradicted.')
+                       for i in range(1, n + 1)])
+        assert 'questions' in calls
+        assert not result.passed and not result.committed
+        mine = [f for f in result.findings if f.fact_id == 'source:atlas:cut']
+        assert [f.established_scene for f in mine] == ['source atlas:s-office']
+        assert any('contradicts source atlas:s-office [source:atlas:cut]' in line
+                   for line in gate.blocking_lines(gate.report_lines(result)))
