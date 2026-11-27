@@ -12,11 +12,15 @@ was drafted past. With `--keep-going` (#556) a scene stopped only by the
 check's findings is committed provisionally (`gate.commit_provisional`),
 so the scenes that depend on it are drafted too. A redraft that passes
 re-checks the later scenes depending on what it changed (Phase 4,
-`gate.recheck_pending`). With `--questions` every gate run the command
-makes (first runs, re-gates after a fix, re-checks) uses the question layer
-(`gate.GATE_CHECK_METHOD` `questions`, #649) instead of the open checker,
-set for the run only, as `check --questions` sets it; the forecast prices it
-(`gate.write_gate_cost_per_scene()`). Coaching levels coach and
+`gate.recheck_pending`). The gate checks with both checkers by default
+(`tandem`, #738): the open checker and the question layer on each scene's
+first run, the question layer alone on the re-checks after a fix, the open
+checker's findings standing where the fix left their words alone and asked
+again where it didn't. With `--questions` (#649) or `--open` every gate run
+the command makes (first runs, re-gates after a fix, re-checks) uses that
+checker alone (`gate.forced_check_method`, for the run only, as `check`
+sets it); the forecast prices the method (`gate.write_gate_cost_per_scene()`),
+and the messages pointing to `check --pending` carry its flag. Coaching levels coach and
 strict write briefs or constraints, not prose, and are not gated; only they
 take `--batch` (every scene at once through the Batch API). Prose is never
 drafted in parallel: on E4, drafting every scene at once (no earlier prose,
@@ -30,7 +34,8 @@ Usage:
     storyforge write --act 2                # Draft all scenes in act 2
     storyforge write --dry-run act1-sc01    # Build prompt and forecast, no API call
     storyforge write --keep-going           # Commit a gate failure provisionally, so its dependents draft too
-    storyforge write --session --questions  # Gate with yes/no questions, not the open checker (#649)
+    storyforge write --session --questions  # Gate with yes/no questions alone (#649)
+    storyforge write --session --open       # Gate with the open checker alone (#738)
     storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
 
@@ -125,30 +130,29 @@ def parse_args(argv):
                              'stops only itself and the scenes that depend on it. Halts, '
                              'extraction problems and bad replies are never committed '
                              'provisionally: they hold back the scenes that depend on them')
-    parser.add_argument('--questions', action='store_true',
-                        help='Full coaching: the gate checks each drafted scene against the '
-                             'book with yes/no questions from the ledger and the brief\'s '
-                             'promises instead of the open checker, as `storyforge check '
-                             '--questions` does: its first run, the re-checks after a fix and '
-                             'the re-checks this run triggers. The forecast prices the '
-                             'question layer. Model: STORYFORGE_QUESTIONS_MODEL (default the '
-                             'extraction tier)')
+    from storyforge.cli import add_check_method_args
+    add_check_method_args(
+        parser, 'Full coaching: the gate checks each drafted scene against the '
+                'book with yes/no questions from the ledger and the brief\'s '
+                'promises alone, without the open checker, as `storyforge check '
+                '--questions` does: its first run, the re-checks after a fix and '
+                'the re-checks this run triggers. The forecast prices the '
+                'question layer. Model: STORYFORGE_QUESTIONS_MODEL (default the '
+                'extraction tier)')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
-    if not args.questions:
+    from storyforge.cli import check_method
+    method = check_method(args)
+    if not method:
         return _main(args)
-    # this run only, as `check --questions` does: an in-process caller after
-    # it keeps its own method
+    # this run only, as `check` does: an in-process caller after it keeps
+    # its own method
     from storyforge import gate
-    saved = gate.GATE_CHECK_METHOD
-    gate.GATE_CHECK_METHOD = 'questions'
-    try:
+    with gate.forced_check_method(method):
         return _main(args)
-    finally:
-        gate.GATE_CHECK_METHOD = saved
 
 
 def _main(args):
@@ -182,19 +186,21 @@ def _main(args):
         log('ERROR: --session writes prose: it takes full coaching, and neither --batch nor '
             '--interactive. Drop them, or drop --session.')
         sys.exit(1)
-    if args.questions and coaching != 'full':
-        log('ERROR: --questions sets how the gate checks a drafted scene; coaching coach and '
-            'strict write briefs or constraints, which are not gated. Drop --questions, or '
-            'draft prose at full coaching.')
+    from storyforge import gate
+    from storyforge.cli import check_method
+    flag = gate.CHECK_FLAGS.get(check_method(args) or '', '')
+    if flag and coaching != 'full':
+        log(f'ERROR: {flag} sets how the gate checks a drafted scene; coaching coach and '
+            f'strict write briefs or constraints, which are not gated. Drop {flag}, or '
+            f'draft prose at full coaching.')
         sys.exit(1)
-    if args.questions:
-        from storyforge import gate
-        if not gate.GATE_CONTINUITY:
-            # the question layer reads the typed state (`gate._gate_scene`
-            # raises without it): stop before anything is drafted or spent
-            log('ERROR: --questions needs the gate\'s continuity checks '
-                '(gate.GATE_CONTINUITY), which are off.')
-            sys.exit(1)
+    if (coaching == 'full' and gate.GATE_CHECK_METHOD in ('questions', 'tandem')
+            and not gate.GATE_CONTINUITY):
+        # the question layer reads the typed state (`gate._gate_scene`
+        # raises without it): stop before anything is drafted or spent
+        log(f'ERROR: {flag or "the gate (its default check, both checkers)"} needs the '
+            f'gate\'s continuity checks (gate.GATE_CONTINUITY), which are off.')
+        sys.exit(1)
     if args.stop_after is not None and (not args.session or args.stop_after < 0):
         log('ERROR: --stop-after takes a count of 0 or more, with --session.')
         sys.exit(1)
@@ -507,7 +513,7 @@ def _main(args):
             f'{gate_pending_path()}):')
         for entry in provisional:
             log(f'  {entry}')
-        log('Fix the prose and run `storyforge check --pending`, or accept a verified '
+        log(f'Fix the prose and run `{gate_pending_command()}`, or accept a verified '
             'contradiction with `storyforge check --accept <id>`.')
     if failed or recheck_open or uncommitted or provisional or not bookkept:
         sys.exit(1)
@@ -987,7 +993,7 @@ def _held_up_front(project_dir: str, to_draft: list[str],
         for sid, lines in held.items():
             _log_held(sid, lines, 'ERROR')
         log('Nothing to draft: every scene asked for waits on an earlier scene that did not '
-            'pass the gate. Fix its prose and run `storyforge check --pending` (or '
+            f'pass the gate. Fix its prose and run `{gate_pending_command()}` (or '
             '`storyforge check <id>`), or redraft it with '
             '`storyforge write --scenes <id> --force`.')
         sys.exit(1)
@@ -1220,7 +1226,7 @@ def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] 
             + (f', or accept its contradictions (`storyforge check --accept {run.failed}`)'
                if run.result is not None
                and any(f.kind == 'contradiction' for f in run.result.findings) else '')
-            + ', then `storyforge check --pending`.')
+            + f', then `{gate_pending_command()}`.')
     return run
 
 
@@ -1566,6 +1572,13 @@ def gate_source_fix_path() -> str:
 def gate_source_notes_path() -> str:
     from storyforge import gate
     return gate.SOURCE_NOTES_PATH
+
+
+def gate_pending_command() -> str:
+    """`storyforge check --pending` with the run's check-method flag, if
+    it forced one (#738, `gate.pending_command`)."""
+    from storyforge import gate
+    return gate.pending_command()
 
 
 def gate_pending_path() -> str:
@@ -2682,7 +2695,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         recheck_open.append(
             f'{len(recheck_deferred)} scene(s) listed for a re-check, not run: over the cost '
             f'threshold ({", ".join(recheck_deferred)}). They stay in {gate_pending_path()}; '
-            f'run `storyforge check --pending`, with STORYFORGE_COST_THRESHOLD raised if needed.')
+            f'run `{gate_pending_command()}`, with STORYFORGE_COST_THRESHOLD raised if needed.')
     return DraftOutcome(drafted_count, total_words, failed, recheck_open, uncommitted,
                         provisional)
 

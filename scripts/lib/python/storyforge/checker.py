@@ -199,6 +199,14 @@ class Finding:
     #: which of the check's readings made it (`check_scene(readings=)`);
     #: its exchange is in that reading's log
     reading: int = 1
+    #: #738: under the gate's `tandem` method, which checker made it
+    #: (`gate.OPEN`, `gate.QUESTIONS`, or both, `gate.BOTH`); '' otherwise
+    checker: str = ''
+    #: #738: an open-checker finding of the scene's first run standing in a
+    #: re-check that made no open reading: `gate.UNTOUCHED` (its words were
+    #: left alone by the fix) or `gate.STILL_THERE` (asked again in the
+    #: fixed prose); '' otherwise
+    carried: str = ''
 
     @property
     def source(self) -> str:

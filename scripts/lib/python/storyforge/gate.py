@@ -35,7 +35,10 @@ For one scene's prose, `gate_scene` runs:
    --questions`), the question layer (`questions.check_questions`) checks
    the scene in the open checker's place: narrow yes/no questions from the
    ledger about who is in the scene, each asked twice, a finding only when
-   both say yes and the quote verifies.
+   both say yes and the quote verifies. With `tandem` (#738, the default)
+   both check a scene's first run, and the question layer alone the
+   re-checks after a fix, the open checker's first-run findings standing
+   where the fix left their words alone and asked again where it didn't.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
@@ -72,6 +75,7 @@ import os
 import re
 import unicodedata
 from collections.abc import Callable, Set
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import NamedTuple, Protocol
@@ -114,9 +118,62 @@ GATE_CONTINUITY = True
 #: question layer takes the scene's cast from its typed state, so it needs
 #: `GATE_CONTINUITY`. What it doesn't do (brief promises, filling the quotes
 #: of registry facts the prose establishes) is said in
-#: `GateResult.question_notes`
-CHECK_METHODS = ('open', 'questions')
-GATE_CHECK_METHOD = 'open'
+#: `GateResult.question_notes`. Or `tandem` (#738), the default (Ben,
+#: 2026-11-26): both checkers on a scene's first gate run, the question
+#: layer alone after it (see `OPEN` below). A pilot comparing both modes'
+#: catches and false stops on about six scenes may switch it back to
+#: `open` (the question layer stopped about 0.48 of gate-set-questions'
+#: controls, and a false stop sends a scene into the fix loop, #740); `storyforge check --open` / `--questions` and
+#: `write --open` / `--questions` force one for a run
+#: (`forced_check_method`)
+CHECK_METHODS = ('open', 'questions', 'tandem')
+GATE_CHECK_METHOD = 'tandem'
+#: #738, the `tandem` method. A gate run that is handed no earlier open
+#: reading (`gate_scene(open_from=)`) is a *first run*: the open checker
+#: (`GATE_READINGS` readings) and the question layer both check it, and
+#: their findings are the union, each tagged with its checker
+#: (`Finding.checker`: `OPEN`, `QUESTIONS`, or `BOTH` when both made it).
+#: Every gate run of prose the process hasn't open-read is one: a draft's
+#: or a redraft's first run, and a re-check or `check --pending` of
+#: unchanged prose (the book around it may have changed, which is what the
+#: open checker reads). A run that is handed one (`open_from`: the re-check
+#: after a fix, its partial-fix retry, a re-roll or re-extraction of the
+#: same prose) makes no open reading: the question layer checks it, and the
+#: open checker's findings on the prose before stand where the fix left
+#: their words alone (`UNTOUCHED`) and are asked again in the fixed prose
+#: where it didn't (`questions.ask_resolved`: `STILL_THERE`, or resolved and
+#: noted; `_carry_open`). How the two rule on one dispute or ending:
+#: `_join_rulings`
+OPEN, QUESTIONS, BOTH = 'open', 'questions', 'open, questions'
+UNTOUCHED, STILL_THERE = 'untouched', 'still there'
+#: The flag that forces each method for a `check` or `write` run
+CHECK_FLAGS = {'open': '--open', 'questions': '--questions', 'tandem': '--tandem'}
+#: The flag the run forced its method with ('' for none), for the commands
+#: a message points to (`pending_command`)
+_method_flag = ''
+
+
+@contextmanager
+def forced_check_method(method: str):
+    """Run the block with `GATE_CHECK_METHOD` set to `method` (one of
+    `CHECK_METHODS`), as `check` and `write` do for a run forced with
+    `CHECK_FLAGS[method]`, and put both back after, however it ends (an
+    in-process caller after it keeps its own method)."""
+    global GATE_CHECK_METHOD, _method_flag
+    if method not in CHECK_METHODS:
+        raise ValueError(f'{method!r} is not one of {", ".join(CHECK_METHODS)}')
+    saved = GATE_CHECK_METHOD, _method_flag
+    GATE_CHECK_METHOD, _method_flag = method, CHECK_FLAGS[method]
+    try:
+        yield
+    finally:
+        GATE_CHECK_METHOD, _method_flag = saved
+
+
+def pending_command() -> str:
+    """`storyforge check --pending`, with the flag the run forced its check
+    method with (#738), so the scenes it leaves are checked the same way."""
+    return 'storyforge check --pending' + (f' {_method_flag}' if _method_flag else '')
 
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
@@ -334,6 +391,21 @@ class GateResult:
     #: #677: the ledger fact ids the question layer asked about
     #: (`QuestionResult.asked_fact_ids`), in order, each once
     asked_fact_ids: list[str] = field(default_factory=list)
+    #: #738: under `tandem`, which checkers read this run, what became of
+    #: the first run's open findings on a re-check, and where the two
+    #: checkers ruled a dispute or an ending differently; for the log and
+    #: the report, never blocking
+    check_notes: list[str] = field(default_factory=list)
+    #: #738: under `tandem`, the open checker's findings standing in this
+    #: run (its own reading's, or those carried from the run before), on
+    #: `open_prose`, for a later run of the same process to carry
+    #: (`_carry_open`); None when no open reading is behind this run
+    open_findings: 'list[Finding] | None' = field(default=None, repr=False, compare=False)
+    open_prose: str = field(default='', repr=False, compare=False)
+    #: #738: under `tandem`, the open checker's rulings on disputes and
+    #: endings standing in this run (`OpenRulings`: its own reading's, or
+    #: those carried), for a re-check to carry (`_carry_rulings`)
+    open_rulings: 'OpenRulings | None' = field(default=None, repr=False, compare=False)
     #: #736: on the re-check after a fix, whether extraction was carried from
     #: the run before it or read again, and why (`_extract`'s note), for the
     #: log; '' on a run that isn't a fix's re-check
@@ -1834,7 +1906,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                introduced_by: str | None = None,
                before: Snapshot | None = None,
                standing: 'GateResult | None' = None,
-               carry: 'GateResult | None' = None) -> GateResult:
+               carry: 'GateResult | None' = None,
+               open_from: 'GateResult | None' = None) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -1844,7 +1917,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
             return _gate_scene(project_dir, scene_id, command=command, prose=prose,
                                log_dir=log_dir, extract_model=extract_model,
                                check_model=check_model, introduced_by=introduced_by,
-                               before=before, standing=standing, carry=carry)
+                               before=before, standing=standing, carry=carry,
+                               open_from=open_from)
         finally:
             _log_spend(meter, project_dir, 'gate', scene_id)
 
@@ -1865,7 +1939,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 introduced_by: str | None = None,
                 before: Snapshot | None = None,
                 standing: 'GateResult | None' = None,
-                carry: 'GateResult | None' = None) -> GateResult:
+                carry: 'GateResult | None' = None,
+                open_from: 'GateResult | None' = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -1891,6 +1966,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     (`_carry_of`, `_extract`), so there is no extraction or persistence
     call; the rows are made again from them by code, and the check, the
     blocking read and the typed state read this prose as ever.
+
+    `open_from` (#738) is an earlier run of this process whose open reading
+    stands for this one under `tandem` (the run before a fix, a re-roll or
+    a re-extraction): no open reading is made, and its open findings are
+    carried (`_carry_open`). Ignored by the other methods, and by a run
+    with no open reading behind it (`open_findings` None), which reads.
 
     `before` is the book before the pass that wrote `prose` (`snapshot`;
     None: a new scene or advisor mode; a re-check through `gate_unchanged`
@@ -1981,13 +2062,19 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             r['resolves'] = ''
 
     result = GateResult(scene_id, problems={k: [] for k in COMMITMENT_PROBLEMS + ('rejected',)})
-    if GATE_CHECK_METHOD not in CHECK_METHODS:
-        raise GateError(f'GATE_CHECK_METHOD is {GATE_CHECK_METHOD!r}, not one of '
+    method = GATE_CHECK_METHOD
+    if method not in CHECK_METHODS:
+        raise GateError(f'GATE_CHECK_METHOD is {method!r}, not one of '
                         f'{", ".join(CHECK_METHODS)}')
-    if GATE_CHECK_METHOD == 'questions' and not GATE_CONTINUITY:
+    if method in ('questions', 'tandem') and not GATE_CONTINUITY:
         raise GateError(f'{scene_id}: the question layer asks about who is in the scene, '
                         f'from its typed state, so it needs the continuity checks '
                         f'(GATE_CONTINUITY)')
+    tandem = method == 'tandem'
+    # #738: a tandem run handed an earlier open reading makes none
+    carry_open = tandem and open_from is not None and open_from.open_findings is not None
+    read_open = method == 'open' or (tandem and not carry_open)
+    ask = method in ('questions', 'tandem')
     skip, why_not = (blocking_read_before(project_dir, scene_id, prose)
                      if GATE_BLOCKING and command == 'recheck' else (False, ''))
     what = 'stage sheet' if GATE_BLOCKING_METHOD == 'stage-sheet' else 'blocking read'
@@ -2038,9 +2125,14 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         result.halts = audit.halting_conditions(result.proposed, rows)
     disputes = _disputes(result, rows)
     endings = _endings(result, rows)
-    if GATE_CHECK_METHOD == 'questions':
+    if not read_open:
         # filled after the typed state is read (`_ask_questions`)
         result.check = CheckResult(scene_id)
+        if carry_open:
+            # where the open reading would have put its findings: before
+            # the shared layers', so one slip is not two (#738's review CR-4)
+            _carry_open(scene_id, prose, open_from, disputes, log_dir, result,
+                        endings=endings)
     else:
         try:
             result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
@@ -2052,6 +2144,15 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             error = GateError(str(e))
             error.run = getattr(e, 'run', None)
             raise error from e
+        if tandem:
+            for f in result.check.findings + result.check.unverified:
+                f.checker = OPEN
+            result.open_findings = result.check.findings + result.check.unverified
+            result.open_prose = prose
+            result.open_rulings = OpenRulings.of(result.check, disputes, endings)
+            result.check_notes.append(
+                f'first run: the open checker ({GATE_READINGS} reading(s)) and the questions '
+                f'both read it')
     if skip:
         # #631: a re-check runs because an earlier scene changed; the
         # blocking check takes the scene alone, so on the gated prose it can
@@ -2075,9 +2176,13 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         log(f'  {scene_id}: {result.blocking_note}')
     if GATE_CONTINUITY:
         records = _merge_continuity(scene_id, state, result)
-        if GATE_CHECK_METHOD == 'questions':
+        if ask:
             _ask_questions(project_dir, scene_id, prose, rows, records, disputes, log_dir,
-                           result, endings=endings)
+                           result, endings=endings,
+                           tandem=(READ if read_open else CARRIED) if tandem else '')
+    if result.check_notes:
+        from storyforge.common import log
+        log(f'  {scene_id}: tandem: ' + '; '.join(result.check_notes))
     # #642: a `must` line's words, checked by code
     result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check,
                                                     short_lines=result.short_must))
@@ -4025,7 +4130,8 @@ def _partial_fix(project_dir: str, scene_id: str, command: str, current: str,
         prose = apply_edits(current, good)
         run = gate_scene(project_dir, scene_id, command=command, prose=prose,
                          log_dir=log_dir, extract_model=extract_model,
-                         check_model=check_model, before=before, carry=before_run)
+                         check_model=check_model, before=before, carry=before_run,
+                         open_from=before_run)
     except GateError:
         return None
     notes: list[str] = []
@@ -4241,11 +4347,12 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             try:
                 # #736: a fix's re-check carries the facts of the run before
                 # it (`_carry_of`); a re-gate of the same prose (nothing to
-                # fix) is there to read them again
+                # fix) is there to read them again. #738: under tandem
+                # neither makes an open reading; the run before's stands
                 again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                                    log_dir=next_dir, extract_model=extract_model,
                                    check_model=check_model, before=before,
-                                   carry=result if to_fix else None)
+                                   carry=result if to_fix else None, open_from=result)
             except GateError as e:
                 if n == 1:
                     raise
@@ -4517,7 +4624,7 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
                            log_dir=run_dir, extract_model=extract_model,
                            check_model=check_model, before=before,
                            introduced_by=introduced_by,
-                           standing=run if kept else None)
+                           standing=run if kept else None, open_from=run)
     except GateError as e:
         return run, fallback_dir, Reextraction.of(run, error=str(e))
     except Exception as e:   # a bug or an I/O failure: say it, keep the fixes
@@ -4615,9 +4722,306 @@ QUESTION_LAYER_GAPS = (
 )
 
 
+#: #738: what a tandem re-check doesn't do, beside the questions' notes:
+#: the open checker read the prose before the fix, not the words it put in
+TANDEM_RECHECK_GAP = (
+    'the words the fix put in were not read by the open checker: contradictions there with '
+    'earlier prose that no ledger fact records, and with the reference bibles and the '
+    'calendar, were not looked for (the open checker read the scene\'s first run; its '
+    'findings there stand where the fix left their words alone and were asked again where '
+    'it didn\'t)')
+#: #738: `_ask_questions(tandem=)`: beside the open checker's own reading
+#: (a first run) or the findings carried from it (a re-check)
+READ, CARRIED = 'read', 'carried'
+#: #738: why an open finding carried into a re-check is unverified: the
+#: fix changed its words, the scene was found to have it still, and no
+#: asking gave words of the fixed prose that have it
+CARRIED_UNPLACED = ('found by the open checker on the prose before the fix and still there '
+                    'by the re-check\'s asking, which gave no words of the fixed prose for it')
+
+
+def _from_open(f: Finding) -> bool:
+    return f.checker in (OPEN, BOTH)
+
+
+@dataclass
+class OpenRulings:
+    """#738: the open checker's rulings in a tandem run, by fact id, for a
+    re-check to carry: the disputes and endings it was asked (each with
+    the claim extraction read, `Dispute.claim`, whose words place it in the
+    prose), which disputes it cleared and which endings it found the scene
+    shows. A dispute it ruled a contradiction is a finding
+    (`GateResult.open_findings`), carried as findings are."""
+    disputes: dict[str, str] = field(default_factory=dict)
+    cleared: set[str] = field(default_factory=set)
+    endings: dict[str, str] = field(default_factory=dict)
+    ended: set[str] = field(default_factory=set)
+
+    @classmethod
+    def of(cls, check: CheckResult, disputes: list[Dispute],
+           endings: list[Dispute]) -> 'OpenRulings':
+        """The open checker's own reading's rulings (`check`, before the
+        question layer joins it)."""
+        return cls({d.fact_id: d.claim for d in disputes}, {d.fact_id for d in check.cleared},
+                   {d.fact_id: d.claim for d in endings}, {d.fact_id for d in check.ended})
+
+
+def _words_untouched(text: str, diff: '_Diff | None') -> bool:
+    """#738: whether `text` lies in words the fix left alone, in the prose
+    before it (`_place` `ALONE`); always on the same prose (`diff` None).
+    Words not found there can't be shown untouched: no."""
+    if diff is None:
+        return True
+    return bool(text.strip()) and _place(*_side(text, diff, before=True)) == ALONE
+
+
+def _carry_rulings(run: 'GateResult', disputes: list[Dispute], endings: list[Dispute],
+                   diff: '_Diff | None', result: 'GateResult') -> None:
+    """#738: the open checker's first-run rulings (`run.open_rulings`) a
+    re-check keeps: each on a dispute or ending this run asks again with
+    the same claim, whose words the fix left alone (`_words_untouched`).
+    One asked again whose words the fix changed (or whose claim changed)
+    is not carried, and the notes say so; the questions alone rule it.
+    The kept ones are this run's `open_rulings`, for the next."""
+    view = run.open_rulings or OpenRulings()
+    out = OpenRulings()
+    lost = []
+    for kind, asked, ruled, now in (('dispute', view.disputes, view.cleared, disputes),
+                                    ('ending', view.endings, view.ended, endings)):
+        for d in now:
+            if d.fact_id not in asked:
+                continue
+            claim = asked[d.fact_id]
+            if claim == d.claim and _words_untouched(claim, diff):
+                (out.disputes if kind == 'dispute' else out.endings)[d.fact_id] = claim
+                if d.fact_id in ruled:
+                    (out.cleared if kind == 'dispute' else out.ended).add(d.fact_id)
+            else:
+                lost.append(f'{kind} on {d.fact_id}')
+    result.open_rulings = out
+    if lost:
+        result.check_notes.append(
+            f'the open checker\'s first-run ruling on {len(lost)} item(s) not carried, the '
+            f'fix changed the words it ruled on (the questions alone rule them): '
+            + ', '.join(lost))
+
+
+def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dispute],
+                log_dir: str, result: 'GateResult', endings: list[Dispute] = ()) -> None:
+    """#738: a tandem run that makes no open reading carries `run`'s open
+    findings (`open_findings`, on `open_prose`) into its check, where the
+    open reading would have put them (before the shared layers' findings,
+    so a continuity finding on the same words is one slip, not two). One
+    whose scene quote lies in words the fix left alone (`_in_untouched_text`,
+    on the prose before it; all of them, on the same prose) stands as it was
+    (`UNTOUCHED`). The rest (words changed or next to a change, a quote not
+    in the prose, a broken promise with no words) are asked again in this
+    prose (`questions.ask_resolved`): resolved, it is dropped and named in
+    `check_notes`; otherwise it stands (`STILL_THERE`), on the words the
+    asking gave (verified), or with none: unverified (`CARRIED_UNPLACED`)
+    for a contradiction, a broken promise as it was. A ruling on a dispute
+    this run's extraction no longer raises doesn't stand (#734's review
+    CR-4, as `_carry_standing`). Its rulings on disputes and endings carry
+    too (`_carry_rulings`). What stands is this run's `open_findings`, for
+    the next. A failed asking is a `GateError`."""
+    from dataclasses import replace
+
+    from storyforge.questions import QuestionError, ask_resolved, resolve_model
+    earlier = list(run.open_findings or [])
+    gone = {d.fact_id for d in _disputes(run, [])} - {d.fact_id for d in disputes}
+    stale = [f for f in earlier if f.fact_id in gone and not f.established_scene]
+    live = [f for f in earlier if not _among(f, stale)]
+    diff = None if run.open_prose == prose else _diff(run.open_prose, prose)
+    kept, again = [], []
+    for f in live:
+        if diff is None or (f.scene_quote and _in_untouched_text(f, diff, before=True)):
+            kept.append(replace(f, checker=OPEN, carried=UNTOUCHED))
+        else:
+            again.append(f)
+    still, resolved = [], []
+    notes = []
+    if again:
+        try:
+            got = ask_resolved(scene_id, prose, again, model=resolve_model(),
+                               log_file=os.path.join(log_dir, f'gate-resolved-{scene_id}.json'))
+        except QuestionError as e:
+            raise GateError(str(e)) from e
+        resolved = got.resolved
+        for f, quote in got.standing:
+            if quote:
+                # words of this prose that verify: the old quote's problem is gone
+                still.append(replace(f, scene_quote=quote, checker=OPEN, carried=STILL_THERE,
+                                     problem=''))
+            elif f.kind == 'broken-promise':
+                still.append(replace(f, scene_quote='', checker=OPEN, carried=STILL_THERE))
+            else:
+                still.append(replace(f, checker=OPEN, carried=STILL_THERE,
+                                     problem=f.problem or CARRIED_UNPLACED))
+        notes = [f'asking whether they are still there: {n}' for n in got.notes]
+    for f in kept + still:
+        (result.check.unverified if f.problem else result.check.findings).append(f)
+    result.open_findings, result.open_prose = kept + still, prose
+    if not earlier:
+        said = 're-check: no open reading; the open checker found nothing on the prose before'
+    else:
+        said = (f're-check: no open reading; of the open checker\'s {len(earlier)} finding(s) '
+                f'on the prose before, {len(kept)} stand (their words untouched)')
+        if again:
+            said += (f', {len(again)} asked again in this prose: {len(still)} still there, '
+                     f'{len(resolved)} resolved' + (f' ({_finding_names(resolved)})'
+                                                    if resolved else ''))
+        if stale:
+            said += (f', {len(stale)} dropped: rulings on disputes this run\'s extraction no '
+                     f'longer raises ({_finding_names(stale)})')
+    result.check_notes += [said] + notes
+    _carry_rulings(run, disputes, list(endings), diff, result)
+
+
+def _same_check(a: Finding, b: Finding) -> bool:
+    """#738: whether the open checker's finding `a` and the question
+    layer's `b` are one problem: a contradiction with the same code on
+    overlapping words about the same thing (the same fact id, or
+    `checker.same_target` with a fact needed: the same source and
+    established words), so two facts broken in one sentence stay two; or
+    the same broken promise (`same_target`). When in doubt, two."""
+    from storyforge.checker import same_target
+    from storyforge.continuity import overlaps
+    if a.kind != b.kind:
+        return False
+    if a.kind == 'broken-promise':
+        return same_target(a, b, need_fact=True)
+    if a.code != b.code or not overlaps(a.scene_quote, b.scene_quote):
+        return False
+    return bool(a.fact_id and a.fact_id == b.fact_id) or same_target(a, b, need_fact=True)
+
+
+def _join_tandem(result: 'GateResult', got, disputes: list[Dispute],
+                 endings: list[Dispute], open_read: bool) -> None:
+    """#738: the question layer's answer `got` joined to a tandem run's
+    check, which holds the open checker's reading (`open_read`) or the
+    findings carried from it, and the shared layers' findings.
+
+    - Findings: the union. A question finding the open checker also made
+      (`_same_check`) is one, tagged `BOTH`; one on a shared layer's words
+      and code is left out, as in `questions` mode; the rest are tagged
+      `QUESTIONS`.
+    - Brief reports: `kept` by fact, the rest without repeats.
+    - Rulings (`_join_rulings`), with the facts the questions found
+      contradicted read before any is left out as a repeat."""
+    from storyforge.continuity import overlaps
+    check = result.check
+    q_found = {f.fact_id for f in list(got.findings) + list(got.unverified) if f.fact_id}
+    opened = [f for f in check.findings + check.unverified if _from_open(f)]
+    shared = [f for f in check.findings + check.unverified if not f.checker]
+    for found, into in ((got.findings, check.findings), (got.unverified, check.unverified)):
+        for f in found:
+            same = next((g for g in opened if _same_check(g, f)), None)
+            if same is not None:
+                same.checker = BOTH
+                continue
+            if f.kind == 'contradiction' and any(
+                    g.code == f.code and overlaps(g.scene_quote, f.scene_quote)
+                    for g in shared):
+                continue
+            f.checker = QUESTIONS
+            into.append(f)
+    kept = {rid for rid, _ in check.kept}
+    check.kept += [(rid, q) for rid, q in got.kept if rid not in kept]
+    kept = {rid for rid, _ in check.kept}
+    check.kept_unverified = [k for k in check.kept_unverified if k[0] not in kept]
+    listed = {k[0] for k in check.kept_unverified}
+    check.kept_unverified += [k for k in got.kept_unverified
+                              if k[0] not in kept and k[0] not in listed]
+    departed = {f.fact_id for f in check.plan_departures}
+    check.plan_departures += [f for f in got.plan_departures if f.fact_id not in departed]
+    check.unknown_brief_items = list(dict.fromkeys(check.unknown_brief_items
+                                                   + list(got.unknown_brief_items)))
+    check.stale_brief_items = list(dict.fromkeys(check.stale_brief_items
+                                                 + list(got.stale_brief_items)))
+    view = result.open_rulings or OpenRulings()
+    _join_rulings(result, got, disputes, endings, view, q_found, open_read)
+
+
+def _join_rulings(result: 'GateResult', got, disputes: list[Dispute],
+                  endings: list[Dispute], view: OpenRulings, q_found: set[str],
+                  open_read: bool) -> None:
+    """#738: how a tandem run's two checkers rule on one dispute or ending.
+    `view` is the open checker's rulings: its own reading's on a first run
+    (`open_read`), on a re-check those carried from the first run where
+    the fix left their words alone (`_carry_rulings`). `q_found` is every
+    fact the questions found contradicted, those left out as repeats too.
+
+    - A dispute either checker reported as a contradiction (a finding
+      naming its fact, carried ones included) is a contradiction: a
+      blocking finding from either stands.
+    - Otherwise it is cleared when either cleared it, and else unruled,
+      which blocks. One checker clearing what the other left unruled is
+      cleared: the one that ruled read the scene and found no
+      contradiction, and clearing keeps the plan's fact in the ledger.
+    - An ending is recorded only when both say the scene shows it ending
+      (#734: every reading of the open checker must, and two askings of the
+      questions); either alone records nothing, and the end is held as a
+      no is. On a re-check, one the open checker's view of didn't carry
+      (asked now for the first time, or the fix changed its words) is the
+      questions' alone, and a recorded one says so.
+
+    Every disagreement, and every ruling one checker alone made on a
+    re-check, is a `check_notes` line, so it is never silent."""
+    check = result.check
+    checked = [f for f in check.findings + check.unverified if f.checker]
+    found = {f.fact_id for f in checked if f.fact_id} | q_found
+    by_open = {f.fact_id for f in checked if _from_open(f) and f.fact_id}
+    q_cleared = {d.fact_id for d in got.cleared}
+    first = 'the open checker' if open_read else 'the open checker on the first run'
+    cleared, unruled, notes = [], [], []
+    for d in disputes:
+        rid = d.fact_id
+        seen = rid in view.disputes
+        if rid in found:
+            if rid in by_open and rid not in q_found and rid in q_cleared:
+                notes.append(f'dispute on {rid}: {first} found it contradicted, the '
+                             f'questions cleared it; the finding stands')
+            elif rid in q_found and rid not in by_open and rid in view.cleared:
+                notes.append(f'dispute on {rid}: the questions found it contradicted, {first} '
+                             f'cleared it; the finding stands')
+            continue
+        if rid in view.cleared or rid in q_cleared:
+            cleared.append(d)
+            if rid not in q_cleared:
+                notes.append(f'dispute on {rid}: {first} cleared it, the questions gave no '
+                             f'ruling; cleared')
+            elif seen and rid not in view.cleared:
+                notes.append(f'dispute on {rid}: the questions cleared it, {first} gave no '
+                             f'ruling; cleared')
+        else:
+            unruled.append(d)
+    check.cleared, check.unruled = cleared, unruled
+    q_ended = {d.fact_id for d in got.ended}
+    ended = []
+    for d in endings:
+        rid = d.fact_id
+        if rid not in view.endings:
+            # a re-check: the open checker's view didn't carry
+            if rid in q_ended:
+                ended.append(d)
+                notes.append(f'ending of {rid}: recorded on the questions\' answer alone; the '
+                             f'open checker\'s view was not read again on this re-check')
+            continue
+        if (rid in view.ended) != (rid in q_ended):
+            who, other = ((first, 'the questions') if rid in view.ended
+                          else ('the questions', first))
+            notes.append(f'ending of {rid}: {who} found the scene shows it ending, '
+                         f'{other} did not; not recorded')
+        elif rid in q_ended:
+            ended.append(d)
+    check.ended = ended
+    result.check_notes += notes
+
+
 def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
                    records: list, disputes: list[Dispute], log_dir: str,
-                   result: 'GateResult', endings: list[Dispute] = ()) -> None:
+                   result: 'GateResult', endings: list[Dispute] = (),
+                   tandem: str = '') -> None:
     """The question layer in place of the open checker (#649): its
     contradictions join the check's (one on the same words with the same
     code as one the blocking check or the continuity checks already made is
@@ -4627,7 +5031,13 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
     `disputes` become the check's `cleared` and `unruled`; and its notes,
     with what it doesn't check (`QUESTION_LAYER_GAPS`), go to
     `result.question_notes`, logged and reported. A failure is a
-    `GateError`."""
+    `GateError`.
+
+    With `tandem` (#738: `READ`, beside the open checker's reading of this
+    prose; `CARRIED`, beside the findings carried from it) it is joined to
+    the open checker's instead (`_join_tandem`), and the notes say what a
+    re-check doesn't read (`TANDEM_RECHECK_GAP`) in place of
+    `QUESTION_LAYER_GAPS`, which a first run's open reading covers."""
     from storyforge.common import log
     from storyforge.continuity import overlaps
     from storyforge.questions import QuestionError, check_questions
@@ -4637,6 +5047,14 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
                               log_file=os.path.join(log_dir, f'gate-questions-{scene_id}.json'))
     except QuestionError as e:
         raise GateError(str(e)) from e
+    if tandem:
+        _join_tandem(result, got, disputes, list(endings), open_read=tandem == READ)
+        result.question_notes = list(got.notes) + ([] if tandem == READ
+                                                   else [TANDEM_RECHECK_GAP])
+        result.asked_fact_ids += [i for i in dict.fromkeys(got.asked_fact_ids)
+                                  if i not in result.asked_fact_ids]
+        log(f'  {scene_id}: questions: ' + '; '.join(got.notes))
+        return
     have = result.check.findings + result.check.unverified
     for f in got.findings:
         if f.kind != 'contradiction' or not any(
@@ -4737,10 +5155,22 @@ def blocking_lines(lines: list[str]) -> list[str]:
     return [line for line in lines if not line.startswith(_NOT_BLOCKING)]
 
 
+#: #738: a tandem finding's tags in a report line, by `Finding.checker`
+#: and `Finding.carried`
+_CHECKER_TAG = {OPEN: 'open checker', QUESTIONS: 'questions',
+                BOTH: 'open checker and questions'}
+_CARRIED_TAG = {UNTOUCHED: 'from the first run; its words untouched by the fix',
+                STILL_THERE: 'from the first run; still there after the fix'}
+
+
 def _from_reading(f: Finding) -> str:
     """Which reading made `f`, past the first (its exchange is in
-    gate-check-<scene>.rN.json, beside the first reading's log)."""
-    return f' [reading {f.reading}]' if f.reading > 1 else ''
+    gate-check-<scene>.rN.json, beside the first reading's log); under
+    `tandem` (#738), which checker, and whether it was carried from the
+    first run."""
+    tags = [f'reading {f.reading}'] if f.reading > 1 else []
+    tags += [t for t in (_CHECKER_TAG.get(f.checker), _CARRIED_TAG.get(f.carried)) if t]
+    return ''.join(f' [{t}]' for t in tags)
 
 
 def applied_lines(result: GateResult) -> list[str]:
@@ -4914,6 +5344,9 @@ def report_lines(result: GateResult) -> list[str]:
     if result.question_notes:
         lines.append('NOTE (questions: what was asked, and what was not checked): '
                      + _one_line('; '.join(result.question_notes)))
+    if result.check_notes:
+        lines.append('NOTE (tandem: which checkers read it, and where they disagree): '
+                     + _one_line('; '.join(result.check_notes)))
     if result.steady:
         lines.append(f'NOTE (kept as they were, read from paragraphs the prose has unchanged): '
                      f'{len(result.steady)} fact(s)')
@@ -5572,14 +6005,26 @@ RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKI
 #: forecast, not measured on a gated book
 QUESTIONS_GATE_COST_PER_SCENE = 0.3 + 0.02 + (0.05 if GATE_BLOCKING else 0)
 
+#: Under `tandem` (#738) a first run is the open checker's run and the
+#: question layer's calls (as above, $0.02 rounded up). Every gate run a
+#: forecast counts is priced as a first run: a re-check or `check
+#: --pending` is one, and the re-checks after a fix (the question layer and
+#: one small `questions.ask_resolved` call, about $0.01, in place of the
+#: open readings) are inside `WRITE_GATE_FIX_SHARE`, which prices them at
+#: a first run's share, so the forecast errs high there
+TANDEM_GATE_COST_PER_SCENE = RECHECK_COST_PER_SCENE + 0.02
+
 
 def recheck_cost_per_scene() -> float:
     """What one gate run is forecast to cost under the run's check method:
-    `RECHECK_COST_PER_SCENE` for the open checker, else
-    `QUESTIONS_GATE_COST_PER_SCENE` (read when called, so `check
-    --questions`'s forecast and threshold stops price what it runs)."""
-    return (QUESTIONS_GATE_COST_PER_SCENE if GATE_CHECK_METHOD == 'questions'
-            else RECHECK_COST_PER_SCENE)
+    `RECHECK_COST_PER_SCENE` for the open checker,
+    `QUESTIONS_GATE_COST_PER_SCENE` for the questions,
+    `TANDEM_GATE_COST_PER_SCENE` for both (#738) (read when called, so
+    `check --questions`'s forecast and threshold stops price what it
+    runs)."""
+    return {'questions': QUESTIONS_GATE_COST_PER_SCENE,
+            'tandem': TANDEM_GATE_COST_PER_SCENE}.get(GATE_CHECK_METHOD,
+                                                      RECHECK_COST_PER_SCENE)
 
 
 #: The share `write`'s forecast adds to a gate run for the fixes, their
@@ -5680,7 +6125,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                 f'bring this run to about ${run.forecast:.2f} (${run.spent_before:.2f} of it '
                 f'spent or owed before the re-checks), over the cost threshold '
                 f'(${cost_threshold():g}): not run. They stay in {PENDING_PATH}; run '
-                f'`storyforge check --pending` (with STORYFORGE_COST_THRESHOLD raised if '
+                f'`{pending_command()}` (with STORYFORGE_COST_THRESHOLD raised if '
                 f'needed).')
             return run
         if not announced:
