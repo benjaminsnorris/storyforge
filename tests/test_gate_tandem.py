@@ -416,6 +416,20 @@ class TestCarryOpen:
         assert result.open_findings == []
         assert f'1 dropped: {gate.TOOK_OUT}' in result.check_notes[0]
 
+    def test_punctuation_alone_takes_no_words_out(self, monkeypatch, tmp_path):
+        # #783's review ID-1: the words are all there, so it is asked again
+        f = _f(quote='Far away, the lamp burned', checker=gate.OPEN)
+        after = PROSE.replace('Far away, the lamp', 'Far away; the lamp')
+        result, asked = self._carry(monkeypatch, tmp_path, [f], PROSE, after)
+        assert asked == [f] and gate.TOOK_OUT not in result.check_notes[0]
+
+    def test_an_unverified_finding_whose_words_went_is_dropped(self, monkeypatch, tmp_path):
+        f = _f(checker=gate.OPEN, problem='the quote is short')
+        result, asked = self._carry(monkeypatch, tmp_path, [f], PROSE,
+                                    PROSE.replace(LAMP, 'a candle guttered'))
+        assert asked == [] and result.check.unverified == []
+        assert f'1 dropped: {gate.TOOK_OUT}' in result.check_notes[0]
+
     def test_a_failed_asking_is_a_gate_error(self, monkeypatch, tmp_path):
         def boom(again):
             raise questions.QuestionError('s1: refused')

@@ -4848,8 +4848,8 @@ TANDEM_RECHECK_GAP = (
     'the words the fix put in were not read by the open checker: contradictions there with '
     'earlier prose that no ledger fact records, and with the reference bibles and the '
     'calendar, were not looked for (the open checker read the scene\'s first run; its '
-    'findings there stand where the fix left their words alone and were asked again where '
-    'it didn\'t)')
+    'findings there stand where the fix left their words alone, are dropped where it took '
+    'their words out, and were asked again where it changed words next to them)')
 #: #738: `_ask_questions(tandem=)`: beside the open checker's own reading
 #: (a first run) or the findings carried from it (a re-check)
 READ, CARRIED = 'read', 'carried'
@@ -4930,14 +4930,19 @@ def _carry_rulings(run: 'GateResult', disputes: list[Dispute], endings: list[Dis
 TOOK_OUT = 'the fix took out the words they were found on'
 
 
-def _took_out(f: Finding, before: str, after: str) -> bool:
+def _took_out(f: Finding, diff: '_Diff') -> bool:
     """Whether the fix took out `f`'s words: a contradiction whose scene
-    quote is in `before` (the prose its finding was carried on) and not in
-    `after`. A broken promise (no words of its own) or a quote that wasn't
-    in `before` either can't be told so, and is asked again."""
-    from storyforge.quotes import quote_in
+    quote's words (`_quote_spans`, by words as the fix's diff reads them, so
+    an edit to punctuation alone takes nothing out; #783's review ID-1) are
+    in the prose before the fix and not after it. A broken promise (no
+    words of its own) or a quote that wasn't in the prose before either
+    can't be told so, and is asked again. One word of the quote changed
+    is enough: the finding was read on words that are gone (#783's review
+    ID-2: a rewording that keeps the slip passes this re-check unless the
+    question layer or the blocking read finds it)."""
     return (f.kind != 'broken-promise' and bool(f.scene_quote.strip())
-            and quote_in(before, f.scene_quote) and not quote_in(after, f.scene_quote))
+            and bool(_quote_spans(f.scene_quote, diff.before))
+            and not _quote_spans(f.scene_quote, diff.after))
 
 
 def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dispute],
@@ -4976,7 +4981,7 @@ def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dis
     for f in live:
         if diff is None or (f.scene_quote and _in_untouched_text(f, diff, before=True)):
             kept.append(replace(f, checker=OPEN, carried=UNTOUCHED))
-        elif _took_out(f, run.open_prose, prose):
+        elif _took_out(f, diff):
             took_out.append(f)
         else:
             again.append(f)
