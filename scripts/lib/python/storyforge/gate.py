@@ -170,10 +170,37 @@ def forced_check_method(method: str):
         GATE_CHECK_METHOD, _method_flag = saved
 
 
+#: The flag that forces each extraction thinking setting (`EXTRACT_THINK`)
+#: for a `check`, `write` or `revise` run
+EXTRACT_THINK_FLAGS = {True: '--extract-thinking', False: '--no-extract-thinking'}
+#: The flag of a forced setting that differs from the code's, for the
+#: commands a message points to (`pending_command`); '' for none
+_think_flag = ''
+
+
+@contextmanager
+def forced_extract_think(think: bool | None):
+    """Run the block with `EXTRACT_THINK` set to `think`, as `check`,
+    `write` and `revise` do for a run forced with `EXTRACT_THINK_FLAGS`
+    (`cli.add_extract_thinking_args`), and put it back after, however it
+    ends. None changes nothing. `pending_command` carries the flag when the
+    setting differs from the code's."""
+    global EXTRACT_THINK, _think_flag
+    saved = EXTRACT_THINK, _think_flag
+    if think is not None:
+        EXTRACT_THINK = bool(think)
+        _think_flag = EXTRACT_THINK_FLAGS[EXTRACT_THINK] if EXTRACT_THINK != saved[0] else ''
+    try:
+        yield
+    finally:
+        EXTRACT_THINK, _think_flag = saved
+
+
 def pending_command() -> str:
     """`storyforge check --pending`, with the flag the run forced its check
-    method with (#738), so the scenes it leaves are checked the same way."""
-    return 'storyforge check --pending' + (f' {_method_flag}' if _method_flag else '')
+    method with (#738) and its extraction thinking flag when that differs
+    from the code's setting, so the scenes it leaves are checked the same way."""
+    return ' '.join(['storyforge check --pending'] + [f for f in (_method_flag, _think_flag) if f])
 
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
@@ -474,7 +501,8 @@ def _subjects(project_dir: str) -> dict[str, str]:
 #: and the rows lost were mostly a scene's final state changes, which the
 #: continuity checks rely on (docs/history.md, #743). Revisit after a real
 #: book run. False re-keys every recording of the call (re-record E3 and
-#: the gate sets)
+#: the gate sets). `check`, `write` and `revise` take `--extract-thinking` /
+#: `--no-extract-thinking` to set it for one run (`forced_extract_think`)
 EXTRACT_THINK = True
 #: The answer budget of the gate's extraction call (`api.THINKING_ALLOWANCE`
 #: is added for thinking; with it off, headroom for the answer). It is part of the
@@ -511,6 +539,9 @@ class _Extracted:
     #: #736's review CR-1: set by `_carry_of`: the continuity checks' state
     #: codes among the findings sent to the fix
     state_codes: frozenset = frozenset()
+    #: `EXTRACT_THINK` when it was read: a request with another setting is
+    #: another request, so it isn't carried (`_carry_reason`)
+    think: bool = True
 
 
 def _word_offsets(text: str) -> tuple[str, list[tuple[int, int]]]:
@@ -579,6 +610,8 @@ def _carry_reason(carry: _Extracted, prose: str, context: str, model: str) -> st
     the rows are made again from its replies by code, against `prose`."""
     if carry.model != model:
         return 'the extraction model differs'
+    if carry.think != EXTRACT_THINK:
+        return 'the extraction thinking setting differs'
     if carry.context != context:
         return ('the facts in force, the registries or the scene\'s details changed since it '
                 'was read')
@@ -668,7 +701,8 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     if read_out is not None:
         read_out.append((_Extracted(source, context, model, copy.deepcopy(found),
                                     copy.deepcopy(verdict.kept),
-                                    copy.deepcopy(verdict.dropped)), note))
+                                    copy.deepcopy(verdict.dropped),
+                                    think=EXTRACT_THINK), note))
     dropped.extend((e['statement'], why) for e, why in verdict.dropped)
     ends = [] if ends is None else ends
     out = commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,

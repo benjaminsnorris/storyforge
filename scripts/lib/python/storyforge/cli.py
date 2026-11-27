@@ -74,6 +74,28 @@ def check_method(args) -> str | None:
     return None
 
 
+def add_extract_thinking_args(parser: argparse.ArgumentParser) -> None:
+    """#743: the flags that set whether the gate's extraction call (and its
+    #734 retry) lets the model think for the run (`gate.EXTRACT_THINK_FLAGS`),
+    one at most: `--extract-thinking` (the default) or `--no-extract-thinking`.
+    `extract_think(args)` reads them."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--extract-thinking', dest='extract_think', action='store_const',
+                       const=True, default=None,
+                       help='The default: let the model think in the gate\'s extraction call')
+    group.add_argument('--no-extract-thinking', dest='extract_think', action='store_const',
+                       const=False,
+                       help='Ask the model not to think in the gate\'s extraction call for '
+                            'this run (faster and cheaper; measured to read fewer rows, '
+                            'mostly a scene\'s last state changes)')
+
+
+def extract_think(args) -> bool | None:
+    """The extraction thinking setting `add_extract_thinking_args`' flags
+    force, or None."""
+    return getattr(args, 'extract_think', None)
+
+
 def apply_coaching_override(args) -> None:
     """Set STORYFORGE_COACHING env var if --coaching was passed."""
     if hasattr(args, 'coaching') and args.coaching:

@@ -5358,6 +5358,109 @@ class TestExtractionThinking:
         monkeypatch.setattr(gate, 'EXTRACT_THINK', False)
         assert self._run(project_dir, tmp_path, monkeypatch) == [{'type': 'disabled'}] * 2
 
+    @pytest.mark.parametrize('think,sent', [(False, [{'type': 'disabled'}] * 2),
+                                            (True, ['not sent'] * 2)])
+    def test_the_run_flag_sets_the_extraction_and_its_retry(
+            self, project_dir, tmp_path, monkeypatch, think, sent):
+        """`--extract-thinking` / `--no-extract-thinking` set it for a run
+        (`gate.forced_extract_think`), whatever the code's setting."""
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', not think)
+        with gate.forced_extract_think(think):
+            assert self._run(project_dir, tmp_path, monkeypatch) == sent
+        assert gate.EXTRACT_THINK is (not think)
+
+
+class TestExtractThinkingFlag:
+    """`--extract-thinking` / `--no-extract-thinking` on every command that
+    runs the gate: `check`, `write`, `revise` (#743's follow-up, the pilot)."""
+
+    def test_forced_setting_is_put_back_and_named_when_it_differs(self, monkeypatch):
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', True)
+        with gate.forced_extract_think(None):
+            assert gate.EXTRACT_THINK is True
+            assert gate.pending_command() == 'storyforge check --pending'
+        with gate.forced_extract_think(True):   # the code's own: nothing to carry
+            assert gate.pending_command() == 'storyforge check --pending'
+        with pytest.raises(RuntimeError):
+            with gate.forced_extract_think(False):
+                assert gate.EXTRACT_THINK is False
+                assert gate.pending_command() == (
+                    'storyforge check --pending --no-extract-thinking')
+                with gate.forced_check_method('open'):
+                    assert gate.pending_command() == (
+                        'storyforge check --pending --open --no-extract-thinking')
+                raise RuntimeError('boom')
+        assert gate.EXTRACT_THINK is True
+        assert gate.pending_command() == 'storyforge check --pending'
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', False)
+        with gate.forced_extract_think(True):
+            assert gate.pending_command() == 'storyforge check --pending --extract-thinking'
+
+    @pytest.mark.parametrize('cmd', ['check', 'write', 'revise'])
+    def test_one_flag_at_most_and_none_by_default(self, cmd, capsys):
+        from storyforge import cmd_check, cmd_revise, cmd_write
+        from storyforge.cli import extract_think
+        parse = {'check': cmd_check.parse_args, 'write': cmd_write.parse_args,
+                 'revise': cmd_revise.parse_args}[cmd]
+        with pytest.raises(SystemExit):
+            parse(['--extract-thinking', '--no-extract-thinking'])
+        assert extract_think(parse(['--no-extract-thinking'])) is False
+        assert extract_think(parse(['--extract-thinking'])) is True
+        assert extract_think(parse([])) is None
+
+    @pytest.mark.parametrize('argv,think,pending', [
+        (['--no-extract-thinking'], False, 'storyforge check --pending --no-extract-thinking'),
+        ([], True, 'storyforge check --pending')])
+    def test_check_runs_under_the_flag(self, project_dir, monkeypatch, argv, think, pending):
+        from storyforge import cmd_check
+        seen = []
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '100')
+        monkeypatch.setattr(cmd_check, 'detect_project_root', lambda: project_dir)
+        monkeypatch.setattr(cmd_check, '_check_scenes',
+                            lambda *a, **k: seen.append((gate.EXTRACT_THINK,
+                                                         gate.pending_command()))
+                            or (_ for _ in ()).throw(SystemExit(7)))
+        monkeypatch.setattr('storyforge.git.create_branch', lambda *a, **k: True)
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', True)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(argv + [SCENE])
+        assert e.value.code == 7
+        assert seen == [(think, pending)]
+        assert gate.EXTRACT_THINK is True
+
+    def test_write_and_revise_run_under_the_flag(self, monkeypatch):
+        from storyforge import cmd_revise, cmd_write
+        seen = []
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', True)
+        monkeypatch.setattr(cmd_write, '_main', lambda args: seen.append(
+            (gate.EXTRACT_THINK, cmd_write.gate_pending_command())))
+        monkeypatch.setattr(cmd_revise, '_main', lambda argv: seen.append(
+            (gate.EXTRACT_THINK, cmd_revise._pending_command())))
+        cmd_write.main(['--no-extract-thinking', '--open', SCENE])
+        cmd_write.main([SCENE])
+        cmd_revise.main(['--no-extract-thinking'])
+        cmd_revise.main([])
+        assert seen == [
+            (False, 'storyforge check --pending --open --no-extract-thinking'),
+            (True, 'storyforge check --pending'),
+            (False, 'storyforge check --pending --no-extract-thinking'),
+            (True, 'storyforge check --pending')]
+        assert gate.EXTRACT_THINK is True
+
+    @pytest.mark.parametrize('flag', ['--extract-thinking', '--no-extract-thinking'])
+    def test_accept_and_blocking_take_no_flag(self, project_dir, monkeypatch, capsys, flag):
+        from storyforge import cmd_check
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setattr(cmd_check, 'detect_project_root', lambda: project_dir)
+        for argv in (['--accept', SCENE, flag], ['--blocking', flag]):
+            with pytest.raises(SystemExit) as e:
+                cmd_check.main(argv)
+            assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert '--accept takes its own scene list' in out
+        assert f'--blocking makes no extraction call; {flag}' in out
+
 
 class TestCarryFactsAcrossFixRounds:
     """#736: every fix round re-ran extraction and persistence, a re-roll of
@@ -5588,6 +5691,16 @@ class TestCarryReason:
         carry = self._carry('one two three')
         assert 'changed since it was read' in gate._carry_reason(carry, self.PROSE, 'd', 'm')
         assert 'model differs' in gate._carry_reason(carry, self.PROSE, 'c', 'n')
+
+    def test_another_thinking_setting_does_not(self, monkeypatch):
+        """A request with another `EXTRACT_THINK` is another request (#743's
+        flag: a run can set it)."""
+        carry = self._carry('one two three')
+        assert carry.think is True
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', True)
+        assert gate._carry_reason(carry, self.PROSE, 'c', 'm') == ''
+        with gate.forced_extract_think(False):
+            assert 'thinking setting differs' in gate._carry_reason(carry, self.PROSE, 'c', 'm')
 
     def test_words_put_in_with_a_state_fact_do_not(self):
         """CR-1 (#736's review)."""

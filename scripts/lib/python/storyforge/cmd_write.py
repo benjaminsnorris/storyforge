@@ -139,20 +139,23 @@ def parse_args(argv):
                 'the re-checks this run triggers. The forecast prices the '
                 'question layer. Model: STORYFORGE_QUESTIONS_MODEL (default the '
                 'extraction tier)')
+    from storyforge.cli import add_extract_thinking_args
+    add_extract_thinking_args(parser)
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
-    from storyforge.cli import check_method
+    from storyforge.cli import check_method, extract_think
     method = check_method(args)
-    if not method:
-        return _main(args)
     # this run only, as `check` does: an in-process caller after it keeps
-    # its own method
+    # its own method and extraction thinking setting
     from storyforge import gate
-    with gate.forced_check_method(method):
-        return _main(args)
+    with gate.forced_extract_think(extract_think(args)):
+        if not method:
+            return _main(args)
+        with gate.forced_check_method(method):
+            return _main(args)
 
 
 def _main(args):

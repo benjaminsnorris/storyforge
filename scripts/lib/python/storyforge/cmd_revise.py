@@ -116,6 +116,8 @@ def parse_args(argv):
                         help='Exclude reader annotations from revision plan')
     parser.add_argument('pass_num', nargs='?', type=int, default=0,
                         help='Start from this pass number (1-indexed; default: first pending)')
+    from storyforge.cli import add_extract_thinking_args
+    add_extract_thinking_args(parser)
     return parser.parse_args(argv)
 
 
@@ -661,10 +663,17 @@ def _exit_if_over_threshold(forecast: float, not_done: str, advice: str) -> None
         sys.exit(1)
 
 
+def _pending_command() -> str:
+    """`storyforge check --pending` with the run's extraction thinking flag
+    when it differs from the code's (`gate.pending_command`)."""
+    from storyforge import gate
+    return gate.pending_command()
+
+
 def _log_recheck_budget() -> None:
     log(f'  The re-checks after each gated scene get what is left of the '
         f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
-        f'any left over stay pending for `storyforge check --pending`.')
+        f'any left over stay pending for `{_pending_command()}`.')
 
 
 def _note_recheck(rechecks_open: list[str], after: str, run) -> None:
@@ -898,7 +907,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
                            f'{run.why}; listed in {gate.PENDING_PATH})')
             elif run.over_budget:
                 trouble = (f'{", ".join(run.left)} (listed for a re-check after {sid}, not '
-                           f'run: over the cost threshold; `storyforge check --pending`)')
+                           f'run: over the cost threshold; `{_pending_command()}`)')
     return failed + ungated + ([trouble] if trouble else [])
 
 
@@ -945,7 +954,7 @@ def _log_deferred(project_dir: str, after: str, deferred: frozenset[str]) -> Non
     if held:
         log(f'  Re-checks deferred so far to a later pass of this plan, which may rewrite '
             f'and gate them (any left are re-checked after the last pass; if the run '
-            f'stops, `storyforge check --pending`): {len(held)} scene(s) '
+            f'stops, `{_pending_command()}`): {len(held)} scene(s) '
             f'({", ".join(held[:8])}' + (' ...' if len(held) > 8 else '') + ')')
 
 
@@ -964,7 +973,7 @@ def _final_rechecks(project_dir: str, log_dir: str) -> str:
                 f'listed in {gate.PENDING_PATH})')
     if run.over_budget:
         return (f'{", ".join(run.left)} (listed for a re-check, not run: over the cost '
-                f'threshold; `storyforge check --pending`)')
+                f'threshold; `{_pending_command()}`)')
     return ''
 
 
@@ -992,7 +1001,7 @@ def pass_gate_advice(resume: str) -> str:
     return ('The revised prose is kept and committed. Each scene named above is listed in '
             'working/gate-pending.csv (an ERROR above names any that could not be): fix the '
             'prose of each the gate did not pass (or redraft it with `storyforge write --force '
-            '--scenes <id>`), run `storyforge check --pending` (it checks every listed scene, '
+            f'--scenes <id>`), run `{_pending_command()}` (it checks every listed scene, '
             f'those left ungated too), then {resume}.')
 
 
@@ -1050,13 +1059,17 @@ def _not_reached(rest: list[str]) -> list[str]:
     return out
 
 
-REDRAFT_ADVICE = (
-    'Their briefs were rewritten. For each scene named above: one the gate did not '
-    'pass was redrafted and is listed in working/gate-pending.csv: fix its prose and run '
-    '`storyforge check <id>`. A later scene whose re-check failed after a redraft is '
-    'listed there too: fix it and run `storyforge check --pending`. Any other (no reply, an earlier scene it depends on waiting on the gate, '
-    'or not reached) still has its old prose: once the scenes it depends on pass the gate, '
-    'redraft it with `storyforge write --force --coaching full --scenes <id>`.')
+def redraft_advice() -> str:
+    """What to do after a redraft the gate stopped, with the run's flags in
+    the `check --pending` it names (`gate.pending_command`)."""
+    return (
+        'Their briefs were rewritten. For each scene named above: one the gate did not '
+        'pass was redrafted and is listed in working/gate-pending.csv: fix its prose and run '
+        '`storyforge check <id>`. A later scene whose re-check failed after a redraft is '
+        f'listed there too: fix it and run `{_pending_command()}`. Any other (no reply, an '
+        'earlier scene it depends on waiting on the gate, '
+        'or not reached) still has its old prose: once the scenes it depends on pass the gate, '
+        'redraft it with `storyforge write --force --coaching full --scenes <id>`.')
 
 
 def _report_redraft_error(e: 'RedraftError') -> None:
@@ -1064,7 +1077,7 @@ def _report_redraft_error(e: 'RedraftError') -> None:
     not redraft or the gate did not pass. Their passes are already
     completed, so re-running revise would not."""
     log(f'ERROR: {e}')
-    log(REDRAFT_ADVICE)
+    log(redraft_advice())
 
 
 def _count_passes(rows):
@@ -2334,7 +2347,7 @@ def _redraft_or_halt(project_dir: str, scene_ids: list[str]) -> int:
         return _redraft_scenes(project_dir, scene_ids)
     except RedraftError as e:
         log(f'ERROR: {e}')
-        log(REDRAFT_ADVICE)
+        log(redraft_advice())
         log('Nothing is committed: a scene the gate passed has its facts in '
             'reference/commitments.csv, and one it did not pass is listed in '
             'working/gate-pending.csv. To undo the whole run instead, restore with '
@@ -3430,8 +3443,11 @@ def main(argv=None):
     """`_main`, metered: the cost threshold is one budget for the session
     (`costs.RunBudget`), so the re-checks after each gated scene get only
     what the passes, redrafts and gate runs before them left."""
-    from storyforge import api
-    with api.metered() as meter, _budget_scope(meter):
+    from storyforge import api, gate
+    from storyforge.cli import extract_think
+    # the run's extraction thinking setting (#743), for this run only
+    think = extract_think(parse_args(argv or []))
+    with api.metered() as meter, _budget_scope(meter), gate.forced_extract_think(think):
         return _main(argv)
 
 
@@ -4675,7 +4691,7 @@ Rules:
         _report_redraft_error(redraft_error)
     if recheck_left:
         log(f'ERROR: the passes are in, but a re-check they owed did not finish: '
-            f'{recheck_left}. Fix it and run `storyforge check --pending`.')
+            f'{recheck_left}. Fix it and run `{_pending_command()}`.')
     if redraft_error or recheck_left:
         log('============================================')
         sys.exit(1)
