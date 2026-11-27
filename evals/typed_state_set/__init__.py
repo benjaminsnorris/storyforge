@@ -197,16 +197,24 @@ def materialize(path: str, run: dict, dest: str) -> str:
 # ============================================================================
 
 @contextmanager
-def logged_reply(items: list[dict]):
+def logged_reply(items: list[dict], holds_format: int | None = None):
     """While active, the typed-state extraction call returns `items` (the
-    logged reply's records) instead of calling a model."""
+    logged reply's records) instead of calling a model, and the extraction
+    says they are in `holds_format` (the logged file's; default today's: a
+    reply read with the prompt before #748 is compared by its rules)."""
     from storyforge import typed_state
-    saved = typed_state._call
+    saved, extract = typed_state._call, typed_state.extract
     typed_state._call = lambda *a, **k: [dict(it) for it in items]
+    if holds_format is not None:
+        def _extract(*a, **k):
+            got = extract(*a, **k)
+            got.holds_format = holds_format
+            return got
+        typed_state.extract = _extract
     try:
         yield
     finally:
-        typed_state._call = saved
+        typed_state._call, typed_state.extract = saved, extract
 
 
 def replay(project: str, scene: str):
@@ -222,7 +230,7 @@ def replay(project: str, scene: str):
         raise ReplayError(f'{scene}: its typed state is not of its prose')
     items = [{'type': r.type, 'who': r.who, 'item': r.item, 'value': r.value,
               'detail': r.detail, 'quote': r.quote} for r in data['records']]
-    with logged_reply(items):
+    with logged_reply(items, data['holds_format']):
         # the model the reply came from: it only names the prompt here, and
         # resolving the default would ask the API for its model list
         return continuity.check_continuity(project, scene, prose=prose, reuse=False,
