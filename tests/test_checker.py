@@ -1038,7 +1038,10 @@ class TestOneCachePrefix:
         schemas = []
         for kw in ({}, {'disputes': [self.D]}, {'endings': [self.E]},
                    {'disputes': [self.D], 'endings': [self.E]}):
-            _, bodies = _run(project_dir, [_answer()], **kw)
+            reply = _answer()
+            reply['content'][0]['text'] = json.dumps(
+                {'findings': [], 'kept': [], 'cleared': [], 'ended': []})
+            _, bodies = _run(project_dir, [reply], **kw)
             schemas.append(bodies[0]['output_config'])
         assert all(s == schemas[0] for s in schemas)
         assert {'cleared', 'ended'} <= set(schemas[0]['format']['schema']['required'])
@@ -1049,7 +1052,10 @@ class TestOneCachePrefix:
             {'findings': [], 'kept': [], 'cleared': ['village-vanished'], 'ended': []})
         result, _ = _run(project_dir, [reply], disputes=[self.D])
         assert result.cleared == [self.D] and result.unruled == []
-        result, _ = _run(project_dir, [_answer()], disputes=[self.D])
+        reply = _answer()
+        reply['content'][0]['text'] = json.dumps(
+            {'findings': [], 'kept': [], 'cleared': [], 'ended': []})
+        result, _ = _run(project_dir, [reply], disputes=[self.D])
         assert result.cleared == [] and result.unruled == [self.D]
 
     def test_an_answer_for_a_fact_not_asked_about_is_not_read(self, project_dir):
@@ -1080,3 +1086,15 @@ class TestOneCachePrefix:
         assert after[0] == before[0]
         assert 'Entirely new words.' in after[1]['text']
         assert '- village-vanished:' in after[1]['text'] and '- wound:' in after[1]['text']
+
+    def test_a_list_asked_for_must_be_in_the_reply(self, project_dir):
+        """#764's review SF-1: a reply missing `cleared` or `ended` when the
+        prompt asked for it is not the schema, never an empty ruling."""
+        with pytest.raises(CheckError, match='not the schema'):
+            _run(project_dir, [_answer()], disputes=[self.D])
+        with pytest.raises(CheckError, match='not the schema'):
+            _run(project_dir, [_answer()], endings=[self.E])
+
+    def test_a_list_not_asked_for_may_be_missing(self, project_dir):
+        result, _ = _run(project_dir, [_answer()])
+        assert result.cleared == [] and result.unruled == [] and result.ended == []

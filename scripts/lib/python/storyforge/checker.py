@@ -46,11 +46,17 @@ the book it sees.
   finding against it names `scenes.csv` (`CALENDAR`) as its
   `established_scene` and quotes a dated scene's line in the scene list
   (`Book.in_calendar`).
-- Caching: the bibles and the last earlier scene each carry a 5-minute
-  breakpoint (the API takes no longer one after a shorter one, and
-  drafting's are 5 minutes), so a check within five minutes of the last
-  reads the story so far from cache. In `write`, drafting and extraction
-  come between two checks, so a slow scene writes the prefix again.
+- Caching: the bibles and the last earlier scene each carry a 1-hour
+  breakpoint (`session.CACHE_TTL`, #741: drafting, voice review and the
+  gate's other layers often come more than five minutes between checks),
+  so a check reads the story so far from cache. The user message holds the
+  third, 5-minute, after the 1-hour ones as the API requires: reading 1
+  breaks after what a fix leaves unchanged (title line, brief, character
+  sheets, scene list; `prompt_parts`), so a re-check reads that part from
+  cache; a later reading breaks before its reading note. The automatic
+  breakpoint at the end is the fourth, the API's limit. Every scene is
+  asked for one reply schema, since `output_config` comes ahead of the
+  system prompt and a different one misses the whole cache.
 - Size: `FULL_MAX_WORDS` was sized for drafting; the check adds the scene,
   the scene list and its tool results. A book near the cap can overflow
   the model's context, which is an API error (`CheckError`), not a
@@ -65,8 +71,9 @@ the book it sees.
   the bibles and the story so far from the first's cache. Each reading
   after the first says which it is, so it is its own request (the
   recordings are keyed by the request).
-- Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
-  a tool loop that never ends raises `CheckError`. There is no partial
+- Fails loud: a refusal, a reply cut off, a reply that isn't the schema
+  (`cleared` missing when disputes were asked, `ended` when endings were),
+  or a tool loop that never ends raises `CheckError`. There is no partial
   result: a reading that fails fails the check.
 """
 
@@ -1039,11 +1046,13 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
     try:
         data = json.loads(extract_text(run.response))
         items, kept = data['findings'], data['kept']
-        # The schema requires both. Read as empty when missing, that is no
-        # ruling: a dispute not cleared is `unruled` and blocks, and a state
-        # not said to end stays in force. An id the prompt didn't list is
-        # never read (`_rule_disputes`, `result.ended` take listed ones only)
-        cleared, ended = set(data.get('cleared', [])), set(data.get('ended', []))
+        # The schema requires both. A list the prompt asked for (it has
+        # disputes, or endings) must be in the reply: one missing is not the
+        # schema, never an empty ruling. One it didn't ask for may be
+        # missing, and its ids are never read (`_rule_disputes`,
+        # `result.ended` take listed ones only)
+        cleared = set(data['cleared'] if disputes else data.get('cleared', []))
+        ended = set(data['ended'] if endings else data.get('ended', []))
     except (ValueError, KeyError, TypeError) as e:
         raise CheckError(f'{where}: the checker\'s reply is not the schema ({e})') from e
 
