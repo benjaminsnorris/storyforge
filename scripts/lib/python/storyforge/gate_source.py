@@ -56,7 +56,8 @@ healing told in the source is in front of the ruling on "he is back at the
 front". Retrieval only: a quote still has to come from the source prose.
 
 Cost: only facts new to the scene are sent, an unchanged re-check makes no
-call, a fix round with the same facts reuses the ruling (`_MEMO`), source
+call, a fix round with the same facts reuses the ruling (`_MEMO`; #736:
+also when it has fewer contradictions and findings, `_from_earlier`), source
 prose is cut at `MAX_SCENE_PROSE_CHARS` a scene and `MAX_SOURCE_CHARS` a
 call, and `write`'s forecast adds `COST_PER_SCENE`.
 
@@ -172,6 +173,53 @@ class SourceReview:
     has_it: list[tuple[int, str, str]] = field(default_factory=list)
     #: what wasn't checked, and why
     notes: list[str] = field(default_factory=list)
+    #: #736: index into `notes` → the item it is about (`('c', key)` a
+    #: contradiction, `('f', key)` a finding, `('scene', id)` an earlier
+    #: scene's source), so a ruling reused for fewer items (`_from_earlier`)
+    #: keeps only their notes; a note not here is about the whole call
+    about: dict = field(default_factory=dict, repr=False, compare=False)
+    #: #736: the earlier scenes whose source was left out for the budget
+    #: (`MAX_SOURCE_CHARS`): a call with fewer contradictions might show it
+    unshown: set = field(default_factory=set, repr=False, compare=False)
+
+    def note(self, text: str, about=None) -> None:
+        self.notes.append(text)
+        if about is not None:
+            self.about[len(self.notes) - 1] = about
+
+
+def _from_earlier(key: tuple) -> 'SourceReview | None':
+    """#736: a ruling made earlier in this process (`_MEMO`) that covers the
+    call `key` would make: the same scene and facts (the same order), and
+    every contradiction and finding of `key` among those it ruled on, none
+    of them against an earlier scene whose source was left out for the
+    budget there. The fix loop's re-check carries its facts (`gate._extract`),
+    and its findings are the run before's or fewer, so a call would only ask
+    again what was answered. Its rulings and notes, cut to `key`'s items
+    and indexed by them; None when none covers it."""
+    scene, facts, contradictions, findings = key
+    for (s, f, cs, fs), earlier in _MEMO.items():
+        if s != scene or f != facts or not (set(contradictions) <= set(cs)
+                                            and set(findings) <= set(fs)):
+            continue
+        if any(c[1] in earlier.unshown for c in contradictions):
+            continue
+        out = SourceReview(departs=list(earlier.departs), ruled=set(earlier.ruled))
+        c_at = {c: cs.index(c) for c in contradictions}
+        f_at = {x: fs.index(x) for x in findings}
+        out.backs_scene = [(n, why) for n, c in enumerate(contradictions)
+                           for i, why in earlier.backs_scene if i == c_at[c]]
+        out.has_it = [(n, quote, why) for n, x in enumerate(findings)
+                      for i, quote, why in earlier.has_it if i == f_at[x]]
+        scenes = {c[1] for c in contradictions}
+        for i, text in enumerate(earlier.notes):
+            about = earlier.about.get(i)
+            if (about is None or (about[0] == 'c' and about[1] in c_at)
+                    or (about[0] == 'f' and about[1] in f_at)
+                    or (about[0] == 'scene' and about[1] in scenes)):
+                out.note(text, about)
+        return out
+    return None
 
 
 @dataclass(frozen=True)
@@ -254,7 +302,8 @@ def has_source_prose(project_dir: str, refs: list[tuple[str, str]]) -> bool:
 
 #: (scene, facts sent, contradictions sent, findings sent) → the ruling, for
 #: this process: a fix round re-gating the same facts doesn't pay again
-#: (#557's review)
+#: (#557's review), nor (#736, `_from_earlier`) one with the same facts and
+#: fewer contradictions or findings
 _MEMO: dict[tuple, 'SourceReview'] = {}
 
 
@@ -436,12 +485,16 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
     from storyforge.api import extract_text, invoke_to_file, is_truncated
     from storyforge.source import SourceError
     out = SourceReview()
+    c_keys = tuple((c.scene_quote, c.established_scene, c.established_quote)
+                   for c in contradictions)
+    f_keys = tuple((f.scene_quote, f.established_quote, f.explanation) for f in findings)
     key = (scene_id, tuple((f.get('statement', ''), f.get('quote', '')) for f in facts),
-           tuple((c.scene_quote, c.established_scene, c.established_quote)
-                 for c in contradictions),
-           tuple((f.scene_quote, f.established_quote, f.explanation) for f in findings))
+           c_keys, f_keys)
     if key in _MEMO:
         return _MEMO[key]
+    earlier_ruling = _from_earlier(key)
+    if earlier_ruling is not None:
+        return earlier_ruling
     refs = list(ctx.refs[scene_id])
     try:
         if not has_source_prose(project_dir, ctx.refs[scene_id]):
@@ -455,16 +508,18 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
             if sid in earlier or sid in unshown:
                 continue
             if sid not in ctx.refs:
-                out.notes.append(f'{sid} is not mapped to the source: its contradiction with '
-                                 f'{scene_id} is ruled on from {scene_id}\'s source alone')
+                out.note(f'{sid} is not mapped to the source: its contradiction with '
+                         f'{scene_id} is ruled on from {scene_id}\'s source alone',
+                         ('scene', sid))
                 unshown.add(sid)
                 continue
             text = _source_text(project_dir, ctx.refs[sid])
             if len(text) > budget:
-                out.notes.append(f'the source behind {sid} would pass {MAX_SOURCE_CHARS} '
-                                 f'characters: its contradiction is ruled on from '
-                                 f'{scene_id}\'s source alone')
+                out.note(f'the source behind {sid} would pass {MAX_SOURCE_CHARS} '
+                         f'characters: its contradiction is ruled on from '
+                         f'{scene_id}\'s source alone', ('scene', sid))
                 unshown.add(sid)
+                out.unshown.add(sid)
                 continue
             budget -= len(text)
             earlier[sid] = text
@@ -523,10 +578,10 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
             if _quoted(quote, shown):
                 out.backs_scene.append((n - 1, f'{why} (the source: "{_one_line(quote)}")'))
             else:
-                out.notes.append(f'the source was said to back {scene_id} against '
-                                 f'{contradictions[n - 1].established_scene}, but its quote '
-                                 f'is not words of the source sent ("{_one_line(quote)[:120]}"): '
-                                 f'the contradiction stands')
+                out.note(f'the source was said to back {scene_id} against '
+                         f'{contradictions[n - 1].established_scene}, but its quote '
+                         f'is not words of the source sent ("{_one_line(quote)[:120]}"): '
+                         f'the contradiction stands', ('c', c_keys[n - 1]))
         for item in reply.get('findings') or []:
             n = int(item['n'])
             if item['verdict'] != 'source-has-it' or not 1 <= n <= len(findings):
@@ -535,10 +590,10 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
             if _quoted(quote, this_prose):
                 out.has_it.append((n - 1, _one_line(quote), why))
             else:
-                out.notes.append(f'the source was said to have "'
-                                 f'{_one_line(findings[n - 1].scene_quote)[:80]}", but its '
-                                 f'quote is not words of the source this scene adapts '
-                                 f'("{_one_line(quote)[:120]}"): not listed')
+                out.note(f'the source was said to have "'
+                         f'{_one_line(findings[n - 1].scene_quote)[:80]}", but its '
+                         f'quote is not words of the source this scene adapts '
+                         f'("{_one_line(quote)[:120]}"): not listed', ('f', f_keys[n - 1]))
     except (RuntimeError, ValueError, KeyError, TypeError) as e:
         raise SourceReviewError(f'{scene_id}: the source check failed: {e}') from e
     _MEMO[key] = out
