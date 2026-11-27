@@ -25,14 +25,15 @@ Everything marked **proposal** is for Ben to confirm or change before the run.
 ```bash
 git -C ~/Developer/storyforge fetch origin
 git -C ~/Developer/storyforge worktree add ~/Developer/sf-pilot origin/main
-SF=~/Developer/sf-pilot/storyforge
+PY=python3.12   # storyforge needs Python 3.10-3.13; a bare python3 may be 3.9
+sf() { "$PY" ~/Developer/sf-pilot/storyforge "$@"; }   # a function, so it works in zsh and bash
 OUT=~/Developer/iliad-adult-pilot-results; mkdir -p "$OUT"
 
 # throwaway clone, next to the book so ../homer resolves; no remote, so nothing is pushed
 git clone -q ~/Developer/iliad-adult ~/Developer/iliad-adult-pilot
 cd ~/Developer/iliad-adult-pilot && git remote remove origin
-$SF cleanup --dry-run      # if it lists death_scene fills (#745), the book hasn't had them yet:
-$SF cleanup                # apply them here (the redraft will have them); commits locally
+sf cleanup --dry-run      # if it lists death_scene fills (#745), the book hasn't had them yet:
+sf cleanup                # apply them here (the redraft will have them); commits locally
 git tag pilot-base
 export STORYFORGE_COST_THRESHOLD=1.25   # one scene's run fits; the re-checks after it mostly don't
 ```
@@ -48,7 +49,7 @@ The pre-fix prose is what the gate first read: the session writer's reply, plus 
 ```bash
 SID=hector-duels-ajax
 SESS=$(ls -d ~/Developer/iliad-adult/working/logs/session/*/ | while read d; do ls "$d" | grep -q "write-$SID.json" && echo "$d"; done | tail -1)
-PYTHONPATH=~/Developer/sf-pilot/scripts/lib/python python3 - "$SESS" "$SID" "$OUT/$SID.prefix.md" <<'EOF'
+PYTHONPATH=~/Developer/sf-pilot/scripts/lib/python $PY - "$SESS" "$SID" "$OUT/$SID.prefix.md" <<'EOF'
 import glob, json, os, sys
 from storyforge.api import extract_text_from_file
 from storyforge.session import parse_reply
@@ -66,7 +67,7 @@ print(out, len(prose.split()), 'words')
 EOF
 ```
 
-**Check before spending.** Every first-run (`.`) quote that the scene's rows in report A §2 list must appear in the rebuilt file (`grep -F`). If one is missing, the rebuild is wrong: the author's voice-review keeps weren't passed as `protected`, or the session folder is the wrong one. Don't run that scene until it's fixed.
+**Check before spending.** Every first-run (`.`) quote that the scene's rows in report A §2 list must appear in the rebuilt file (`grep -F`). If one is missing, the rebuild is wrong. The usual cause is the wrong session folder or reply (a later session that wrote the scene again), or a review or revise reply from another run. Don't run that scene until it's fixed.
 
 ## The scenes
 
@@ -92,10 +93,11 @@ For each scene: three runs, each from `pilot-base`. Copy the outputs out before 
 ```bash
 cd ~/Developer/iliad-adult-pilot
 run() {   # run MODE_DIR FLAG
-  git reset -q --hard pilot-base && git clean -fdxq   # also clears working/ (logs, cost ledger)
+  git reset -q --hard pilot-base && git clean -fdxq   # puts back the tracked cost ledger and clears working/'s ignored logs
   cp "$OUT/$SID.prefix.md" "scenes/$SID.md"
-  /usr/bin/time -p $SF check "$SID" "$2" 2> "$OUT/$SID.$1.time"
-  mkdir -p "$OUT/$SID.$1" && cp -R working/check-report.md working/logs/check working/costs/ledger.csv "$OUT/$SID.$1/"
+  /usr/bin/time -p "$PY" ~/Developer/sf-pilot/storyforge check "$SID" "$2" 2> "$OUT/$SID.$1.time"
+  mkdir -p "$OUT/$SID.$1" && cp -R working/check-report.md working/logs/check "$OUT/$SID.$1/"
+  diff <(git show pilot-base:working/costs/ledger.csv) working/costs/ledger.csv | sed -n 's/^> //p' > "$OUT/$SID.$1/costs.csv"   # this run's rows only
 }
 run tandem --tandem
 run open --open
@@ -109,7 +111,7 @@ There is no flag or environment variable for `EXTRACT_THINK`; it is a constant. 
 
 ## What to record
 
-From each run's `check-report.md` (findings are tagged `[open checker]`, `[questions]` or `[open checker and questions]` under tandem), its `logs/check/<scene>/<stamp>/` folder, `ledger.csv` (`cost_usd`, `duration_s` per call) and the `time` file:
+From each run's `check-report.md` (findings are tagged `[open checker]`, `[questions]` or `[open checker and questions]` under tandem), its `logs/check/<scene>/<stamp>/` folder, `costs.csv` (the cost ledger's rows this run added, since the ledger is tracked and holds the book's earlier spend: `cost_usd`, `duration_s` per call) and the `time` file:
 
 | Scene | Mode | Findings (code, checker, Q# if in A) | Real / false / debatable / unlabelled | Stopped? On what | Tandem NOTEs | Cost $ | Wall s | Extract rows (state) |
 |---|---|---|---|---|---|---|---|---|
@@ -164,19 +166,22 @@ Bump the version (patch for each).
 
 ### 2. Consolidated eval re-record (Ben pre-approved about $130)
 
-After step 1 and after #768 (and #769, if it lands first), since each changes the requests. Forecast first. Every run is refused past the monthly budget without `--over-budget`. If the forecasts add up to more than $130, stop and ask: E4 and E8 are stale at their first drafting prompt, so their top-up is close to a full re-record (about $75 and $165 for three runs).
+After step 1 and after #768 (and #769, if it lands first), since each changes the requests. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
+
+- **Forecast by hand first:** sum `usd_if_live` for each suite in `evals/baseline.json`, times 3 for the frozen ones (`gate-set`, `gate-set-questions`, `e4-generation`, `e8-revision-safety`). A suite with no figure counts as $0 (the stale gate sets have none), so the sum is a lower bound. Use the figures below for those two.
+- **Run the suites one at a time, cheapest first, and check the spend after each** (the run's summary, or `cost.usd_spent` in `evals/results/latest.json`). Stop and ask Ben once the running total would pass $130. E4 and E8 are stale at their first drafting prompt, so their top-up is close to a full re-record (about $75 and $165 for three runs). Pass `--over-budget` only to a suite that the running total still has room for.
 
 ```bash
 R=(--over-budget "Ben approved the consolidated re-record (checker review, 2026-11-26)")
-python3 evals/run.py --mode auto --suite gate-set --runs 3 "${R[@]}"            # private; about $100 in full
-python3 evals/run.py --mode auto --suite gate-set-questions --runs 3 "${R[@]}"  # private; frozen, so --runs 3 is required; $35 was its full recording
-python3 evals/run.py --mode auto --suite e2-carol-checker "${R[@]}"             # about $6
-python3 evals/run.py --mode auto --suite question-set "${R[@]}"                 # cents
-python3 evals/run.py --mode auto --suite e5-roundtrip "${R[@]}"                 # about $4.50
-python3 evals/run.py --mode auto --suite recheck-set "${R[@]}"                  # about $8
-python3 evals/run.py --mode auto --suite e4-generation --runs 3 "${R[@]}"
-python3 evals/run.py --mode auto --suite e8-revision-safety --runs 3 "${R[@]}"
-python3 evals/run.py --baseline        # replay everything, write evals/baseline.json
+$PY evals/run.py --mode auto --suite question-set "${R[@]}"                 # cents
+$PY evals/run.py --mode auto --suite e5-roundtrip "${R[@]}"                 # about $4.50
+$PY evals/run.py --mode auto --suite e2-carol-checker "${R[@]}"             # about $6
+$PY evals/run.py --mode auto --suite recheck-set "${R[@]}"                  # about $8
+$PY evals/run.py --mode auto --suite gate-set-questions --runs 3 "${R[@]}"  # private; frozen, so --runs 3 is required; $35 was its full recording
+$PY evals/run.py --mode auto --suite gate-set --runs 3 "${R[@]}"            # private; about $100 in full
+$PY evals/run.py --mode auto --suite e4-generation --runs 3 "${R[@]}"
+$PY evals/run.py --mode auto --suite e8-revision-safety --runs 3 "${R[@]}"
+$PY evals/run.py --baseline        # replay everything, write evals/baseline.json
 ```
 
 - **Where the recordings live.** `gate-set`, `gate-set-questions` (and `blocking-set`, `typed-state-set`) record into the private storyforge-evals clone (`STORYFORGE_PRIVATE_EVALS_DIR`, default `~/Developer/evals`). The rest record into this repo's `evals/fixtures/cassettes/` (E4 and E8 runs 2 and 3 into `fixtures/e6/run2`, `run3`). Commit each repo's recordings on a branch, open a PR in each, and merge both together: a storyforge main whose suites expect recordings the private repo doesn't have yet reads as unavailable.
@@ -188,7 +193,7 @@ PR #753 left these out because the set is frozen. Report A §2's `blocking` rows
 
 - **What to add:** each one as a case in storyforge-evals `blocking-set/` (the case files and the build script there, and `blocking-set/README.md` for how cases are found). Skip any that duplicate one of the 70 Wrath cases already in the set (match by quote). Label the 9 debatable ones so they can stay out of recall.
 - **The prose.** Many quotes are in fix-round prose, which isn't in the book's git history. Rebuild it as above, then apply each logged `gate-fix-<scene>.json` edit in order (`session.parse_reply`/`gate.apply_edits`; report A's replay matched the committed prose byte for byte this way).
-- **Record:** `python3 evals/run.py --mode record --suite blocking-set --runs 3 "${R[@]}"`. Then replay run 1, copy the private `results/latest.json` to `baseline-cases.json`, and set `FLOORS` and `RECORDED` (`blocking_set.fingerprint` / `.recordings`) in `evals/suites/blocking_set.py` (evals/README.md, "Private suites"). Raise `MIN_CASES` with the new size. As in step 2, both repos merge together.
+- **Record:** `$PY evals/run.py --mode record --suite blocking-set --runs 3 "${R[@]}"`. Then replay run 1, copy the private `results/latest.json` to `baseline-cases.json`, and set `FLOORS` and `RECORDED` (`blocking_set.fingerprint` / `.recordings`) in `evals/suites/blocking_set.py` (evals/README.md, "Private suites"). Raise `MIN_CASES` with the new size. As in step 2, both repos merge together.
 
 ### 4. Open follow-ups
 
