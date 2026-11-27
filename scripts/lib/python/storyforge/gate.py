@@ -6121,8 +6121,8 @@ def held_facts(project_dir: str, scene_ids: list[str] | None = None) -> dict[str
 #: (E8, 2026-11-01); rounded up. The blocking read (#626) is
 #: `blocking.BLOCKING_READINGS` more calls on the scene alone (three since
 #: #774), at `blocking.COST_PER_READING` each (about $0.035-0.04, rounded
-#: up). The continuity checks' typed
-#: state extraction (#648, `GATE_CONTINUITY`) is one more small-model call
+#: up). The continuity checks' typed state extraction (#648,
+#: `GATE_CONTINUITY`) is one more small-model call
 #: on the scene (none when its saved file is current), about $0.01 a scene
 #: at the extraction tier: covered by the rounding.
 _BLOCKING_COST = BLOCKING_READINGS * BLOCKING_COST_PER_READING if GATE_BLOCKING else 0
