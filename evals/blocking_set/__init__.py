@@ -358,7 +358,9 @@ def score(cases: list[dict], scenes: list[dict],
     scene, verified or not (the gate stops on both), per 10,000 words of
     clean prose; and `left_flagged`, the `left` readings a verified finding
     catches (a count of readings, not of findings: an unverified finding
-    has no place, so it can't land on one). A verified finding on a case
+    has no place, so it can't land on one). `debatable` cases are in
+    neither: reported (`debatable_cases`, `debatable_flagged`), never in
+    recall or the false alarms. A verified finding on a case
     scene that lands on no case is `unlabelled`: a slip no one labelled or
     a false alarm, so it is counted, never scored.
 
