@@ -154,13 +154,17 @@ they carry counts and case ids, never a quote; per-case outcomes and findings
 go to the private repo (gitignored there).
 
 `blocking-set` measures today's blocking read (`storyforge.blocking`, #626,
-two readings per scene) against 118 known blocking slips (34 that gawain's
-readers and Ben found, 10 from gawain's blocking run, 74 from Wrath's last gate
-run, each with its fix verdict), 13 readings people judged plausible and left
-alone, and 14 clean scenes (`evals/blocking_set`; how each case was found:
+two readings per scene) against 147 known blocking slips (34 that gawain's
+readers and Ben found, 10 from gawain's blocking run, 74 from Wrath's Nov 8
+gate run, each with its fix verdict, and 29 that report A judged real among
+the blocking read's findings on Wrath's 2026-11-16/17 overnight gate run), 13
+readings people judged plausible and left alone, 9 findings report A judged
+debatable (`verdict: debatable`: out of recall and never a false alarm), and
+14 clean scenes (`evals/blocking_set`; how each case was found:
 `blocking-set/README.md` in storyforge-evals). It reports recall overall, per
 category (`recall_hands`, `_posture`, `_sightline`, `_worn`, `_position`,
-`_light`, `_other`), per book (`recall_book_gawain`, `_wrath`) and per finder
+`_light`, `_other`), per book (`recall_book_gawain`, `_wrath`, `_wrath-gate` for the overnight
+run's first-gated prose, `_wrath-gate-fix` for its fix-round prose) and per finder
 (`recall_found_by_readers` is the independent measure; the `tool` cases were
 found by the same read), false alarms per 10,000 words of clean prose, and
 `left_flagged` (left readings a verified finding lands on). Each of those is
@@ -178,7 +182,13 @@ The suite is **frozen** (#645): `auto` and `record` replay it, and a miss is
 the monthly budget): `cassettes/blocking-set/` and `cassettes/run2/`,
 `run3/` beside the set, with run 1's per-case outcomes frozen in
 `baseline-cases.json` there (storyforge-evals `blocking-set-baseline`).
-`FLOORS` hold run 1's values. Over the three runs:
+`FLOORS` hold run 1's values. **Extended 2026-11-27** with report A's 38
+findings (PILOT.md, "What's left", step 3): their 28 scenes topped up as three
+runs ($6.65, `--mode auto --runs 3`; the other scenes' requests are
+unchanged, so their recordings replay and their numbers stand). On the larger
+set, run 1 / 2 / 3: recall 0.6027 / 0.6438 / 0.6301, the overnight run's real
+slips 16 / 18 / 16 of 29, flags 122 / 128 / 118. Over the first three runs
+(the table is the 2026-11-09 set):
 
 | metric | run 1 | run 2 | run 3 |
 |---|---|---|---|
@@ -190,7 +200,7 @@ the monthly budget): `cassettes/blocking-set/` and `cassettes/run2/`,
 
 The small categories (6 to 12 cases each) move most between runs:
 sightline 0.33 / 0.67 / 0.75, other 0.58 / 0.92 / 0.83, posture 0.91 / 0.55
-/ 0.82, light 0.33 / 0.50 / 0.17. The stage sheet's recall of 0.22 and 15.65
+/ 0.82, light 0.33 / 0.50 / 0.17. The stage sheet's recall of 0.22 and 13.54
 false alarms per 10k (its `FLOORS` in `evals/suites/blocking_set_sheet.py`)
 are far from the read's, so the read stays the gate's default.
 
@@ -239,8 +249,8 @@ blocking-set-sheet --runs 3`), and without the private checkout it is
 `stale` (unavailable), not an error. Its harness (`check_all`,
 `floor_gates`, the outcomes file) is `blocking-set`'s, in
 `evals/blocking_set/runner.py`, so the two suites score, match and gate
-identically. The recordings so far are the main run only (made before the
-suite was frozen).
+identically. Recorded as three runs on 2026-11-27 ($3.50, on the set with
+report A's findings added): recall 0.2192 / 0.2055 / 0.2192.
 
 ## The gate set (#677)
 

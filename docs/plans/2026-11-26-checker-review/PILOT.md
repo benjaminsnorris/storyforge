@@ -288,6 +288,20 @@ $PY evals/run.py --baseline        # replay everything, write evals/baseline.jso
 
 ### 3. Add the blocking read's 38 findings to `blocking-set` (#744 follow-up; about $20, approved)
 
+**Done (2026-11-27), $10.15.** storyforge-evals has the cases and recordings; this repo has the floors and the `debatable` verdict.
+
+- **The set.** All 38 are now cases: 29 real (`verdict: fixed`) and 9 debatable (`verdict: debatable`, a new verdict: out of recall, never a false alarm). None duplicates a Nov 8 case by quote; that was a different draft. Q92 is the Nov 8 `wrath-031` slip written again.
+- **Two books.** `wrath-gate` is the first-gated prose: 24 scenes, 34 cases. A later run's finding is kept there when its line was already in that prose. `wrath-gate-fix` is fix-round prose: 4 scenes, holding Q40, Q70, Q96 and Q114, which are only in text a fix wrote.
+- **The prose** was rebuilt by storyforge-evals `blocking-set/rebuild_wrath_gate.py`:
+  - from the session reply plus the voice revision, then each fix round's `gate-fix` edits;
+  - a partial fix's kept edits are found by trying every subset;
+  - from the overnight branch `storyforge/write-20261116-2234`.
+  - All 28 versions match report A's replay byte for byte, and every scene's last version matches its committed scene. The five pilot scenes' first-gated prose also matches the pilot's `prefix.md` files.
+- **Recorded.** The 28 new scenes were topped up as three runs (`--mode auto --runs 3`, $6.65). The other scenes' requests are unchanged, so their recordings and numbers stand. The stage sheet, which shares the set, was recorded as three runs ($3.50; until now it had one).
+- **Floors** are run 1's: recall 0.6027 on 146, and `wrath-gate` 12 of 25, `wrath-gate-fix` 4 of 4. Run 1's per-case outcomes are frozen in `baseline-cases.json`. `RECORDED` and `MIN_CASES` (130) are set.
+- **For #774.** Scoring each reading on its own, the 29 real cases are caught by 0.45 of single readings and by 0.575 of 2-reading runs. Readings are independent or slightly better within a case, but 7 of the 29 were never seen in 6 readings. Projected recall is 0.63–0.70 at 3 readings and 0.67–0.75 at 4. The table and a recommendation are on #774.
+
+
 PR #753 left these out because the set is frozen. Report A §2's `blocking` rows are 38 distinct findings: 29 real, 9 debatable.
 
 - **What to add:** each one as a case in storyforge-evals `blocking-set/` (the case files and the build script there, and `blocking-set/README.md` for how cases are found). Skip any that duplicate one of the 70 Wrath cases already in the set (match by quote). Label the 9 debatable ones so they can stay out of recall.
@@ -303,7 +317,7 @@ States checked 2026-11-26.
 | #746 | open | Second half: fill `aliases` with patronymics and standing epithets at `source import` (`source.py`), from a series-repo table whose format isn't defined yet. The namesake guard itself merged (PR #754) |
 | #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings, which the author sets; iliad-adult PR 27 fixed the wrong Dolops and Melanippus ids in `ajax-holds-the-ships`). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
 | #769 | merged (PR #773) | The question layer asks the source's entering state with the brief's entering items (the latest 10 a scene, counted toward the cap of 30). It adds no recording miss: no recorded suite is an adaptation. Its acceptance case is a unit test, so the pilot is its first measurement: watch findings whose source is `source iliad:<scene>`. **Measured by the pilot:** 64 asked a run, 3 false findings (one conditional order) and 1 false stop. #775 proposes filtering by kind |
-| #774 | open (from the pilot) | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. It fails the recall half of "fixes confirmed" and **holds step 5** until decided. If it changes `BLOCKING_READINGS`, the blocking calls in `blocking-set` and the gate sets change too, so decide it before step 2 |
+| #774 | open (from the pilot) | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. It fails the recall half of "fixes confirmed" and **holds step 5** until decided. If it changes `BLOCKING_READINGS`, the blocking calls in `blocking-set` and the gate sets change too, so decide it before step 2's deferred suites. Recall by number of readings, measured on `blocking-set` (step 3), is on the issue |
 | #775 | open (from the pilot) | Leave conditional orders and constraints out of the source facts the question layer asks. It changes no recorded suite (none is an adaptation) |
 | #749 | merged (PR #768) | A claim in speech is not narration. Its recording misses are in step 2 |
 
