@@ -1,0 +1,25 @@
+scene|mode|stopped|blocking_findings|verdicts|cost_usd|wall_s|extract_rows|extract_state_rows
+hector-duels-ajax|tandem|yes|BLK spear held after it was thrown (new); PRM hector-has-ajax-belt [questions] (Q37's pattern)|real; false|1.278|169|26|10
+hector-duels-ajax|open|yes|BLK spear held after it was thrown (new); BLK Ajax has no free hand for the belt (Q40's kind)|real; real|0.832|135|30|13
+hector-duels-ajax|tandem-nothink|yes|BLK Agamemnon "first" to stand when already up (source has it); PRM ajax-has-hector-sword [questions] (Q36's pattern)|debatable; false|0.735|163|29|14
+diomedes-spears-ares|tandem|yes|BLK Q21 (also source has it); BLK Q20|real; real|0.750|163|38|20
+diomedes-spears-ares|open|yes|BLK Q21 (also source has it); BLK Q20|real; real|0.761|174|41|17
+diomedes-spears-ares|tandem-nothink|yes|BLK Q20; BLK Q21 (also source has it)|real; real|0.652|141|44|26
+andromache-mourns-a-living-man|tandem|yes|TRT Andromache a bound captive at Thebe, against her sheet [open checker]|unlabelled, judged real|0.476|96|19|7
+andromache-mourns-a-living-man|open|yes|TRT the same|unlabelled, judged real|0.458|86|18|7
+andromache-mourns-a-living-man|tandem-nothink|yes|EXTRACTION misquote (two adjacent lines; the second's opening quotation mark dropped); TRT the same [open checker]; KNO "He took everything else in the city" against the lyre fact [questions]|false (extraction); real; false|0.464|91|17|6
+diomedes-and-odysseus-raid|tandem|no|-|-|0.863|186|33|20
+diomedes-and-odysseus-raid|open|no|-|-|0.667|167|20|13
+diomedes-and-odysseus-raid|tandem-nothink|no|-|-|0.770|158|23|18
+polydamas-reads-the-eagle|tandem|yes|BLK Sarpedon's hands on two shoulders while tightening straps|debatable|0.519|111|18|14
+polydamas-reads-the-eagle|open|no|-|-|0.520|78|16|13
+polydamas-reads-the-eagle|tandem-nothink|yes|PHY source iliad:jove-sends-iris-to-hector, Zeus's order to hold back until Agamemnon is wounded [questions] (also source has it)|false (source entering state)|0.501|132|17|14
+idomeneus-fights-at-the-ships|tandem|yes|BLK second spear (Q83's count); BLK Q83|debatable; debatable|1.008|253|40|16
+idomeneus-fights-at-the-ships|open|yes|BLK Q83|debatable|0.902|169|32|14
+idomeneus-fights-at-the-ships|tandem-nothink|yes|BLK Q83; PHY source iliad:jove-sends-iris-to-hector, the same order [questions] (also source has it)|debatable; false (source entering state)|0.895|195|36|26
+hector-breaks-the-gate|tandem|yes|TIM Q80 [open checker]; BLK Q81; PHY source iliad:jove-sends-iris-to-hector, the same order [questions]|real; real; false (source entering state)|0.546|130|14|11
+hector-breaks-the-gate|open|yes|TIM Q80; BLK Q81; BLK Q79|real; real; real|0.502|97|18|17
+hector-breaks-the-gate|tandem-nothink|yes|TIM Q80 [open checker]; BLK doors swing on torn hinges (source has it); BLK Q81|real; debatable; real|0.557|119|18|16
+aphrodite-drives-helen-to-bed|tandem|no|- (Q7 missed)|-|0.470|74|18|9
+aphrodite-drives-helen-to-bed|open|yes|BLK Q7|real|0.358|62|17|11
+aphrodite-drives-helen-to-bed|tandem-nothink|yes|PRM paris-rescued-by-aphrodite, this scene's own fact [open checker and questions]; BLK Q7|debatable; real|0.511|78|17|11
