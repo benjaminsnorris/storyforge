@@ -72,6 +72,8 @@ The smallest set that should be merged before *Wrath Like Smoke* is drafted agai
 
 Then a pilot before the full run: re-gate about six existing scenes' pre-fix prose with the fixed gate (about $5) and confirm the false stops are gone.
 
+**[PILOT.md](PILOT.md)** is the runbook: eight scenes, `tandem` against `open`, extraction thinking on and off, the decision rules, and the cost (about $13). Its last section, [What's left after the pilot](PILOT.md#whats-left-after-the-pilot), lists the default flips, the consolidated eval re-record, the `blocking-set` additions, the open follow-ups and the redraft.
+
 ## Decided on 2026-11-26
 
 These were open questions in the review and are now settled (homer PR 5, iliad-adult PR 24):
