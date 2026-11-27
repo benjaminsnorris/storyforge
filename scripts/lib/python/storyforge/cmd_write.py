@@ -116,8 +116,10 @@ def parse_args(argv):
                              'cost forecast and threshold check cover those N scenes')
     parser.add_argument('--keep-going', action='store_true',
                         help='Full coaching: a scene the gate still stops on only for the '
-                             'check\'s findings is committed provisionally (its facts less '
-                             'those stating the findings) and listed for the author, so the '
+                             'check\'s findings is committed provisionally (its facts, '
+                             'those stating the findings recorded as disputed, in force once '
+                             'check --accept accepts their finding) and listed for the '
+                             'author, so the '
                              'later scenes that depend on it are drafted too; provisional '
                              'scenes hold nothing back. Without it a failing scene still '
                              'stops only itself and the scenes that depend on it. Halts, '
@@ -1125,7 +1127,7 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
                 log(f'  Not committed provisionally: {e}')
             else:
                 for line in gate.report_lines(out.result):
-                    if line.startswith(('COMMITTED', 'NOTE (not recorded: states what')):
+                    if line.startswith(('COMMITTED', 'NOTE (recorded as disputed')):
                         log(f'  {line}')
                 report_changes(out.result)
                 return False, f'provisional: {why}'

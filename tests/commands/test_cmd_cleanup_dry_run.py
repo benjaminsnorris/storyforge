@@ -167,6 +167,32 @@ def _needs_scene_cleanup() -> str:
     return root
 
 
+def _needs_death_scene() -> str:
+    """A faithful adaptation whose source's ledger kills Telemachus in the
+    source scene the book's `sailing` adapts, with his death_scene blank."""
+    from storyforge import source
+    from source_helpers import NAME_MAP, SOURCE_FILES
+    base = tempfile.mkdtemp()
+    for rel, text in SOURCE_FILES.items():
+        _write(os.path.join(base, 'odyssey'), rel, text)
+    _write(os.path.join(base, 'odyssey'), 'reference/commitments.csv',
+           'id|scene_id|type|subject|statement|quote|known_by\n'
+           'telemachus-dies|ship-sails|physical|telemachus|Killed by a stray arrow.||\n')
+    root = os.path.join(base, 'p')
+    _write(root, 'storyforge.yaml', ONLY_THE_COMPOSED_CHANGE + (
+        'source:\n  projects:\n    - slug: odyssey\n      path: ../odyssey\n'
+        '  name_map: reference/names.csv\n  mode: faithful\n'))
+    _write(root, 'reference/names.csv', NAME_MAP)
+    source.import_source(root, source.read_config(root), 'odyssey')
+    _write(root, 'reference/scenes.csv', 'id|seq|title\nsailing|1|Sailing\n')
+    _write(root, 'reference/source-map.csv',
+           'scene_id|source_scenes|treatment|note\nsailing|ship-sails|dramatize|\n')
+    _write(root, 'reference/characters.csv',
+           'id|name|aliases|role|death_scene|pronouns\n'
+           'telemachus|Telemachus||protagonist||he\n')
+    return root
+
+
 #: One arrangement per mutating step: the builder, and the title of the step it
 #: is meant to give work to. Named so a failure says which step's preview lied.
 #:
@@ -192,6 +218,7 @@ ARRANGEMENTS = {
     'loose_files': (_needs_loose_files, 'Reorganizing loose files...'),
     'pipeline_reviews': (_needs_dedup, 'Deduplicating pipeline reviews...'),
     'scene_files': (_needs_scene_cleanup, 'Cleaning scene files...'),
+    'death_scenes': (_needs_death_scene, cc.DEATHS_TITLE),
 }
 
 
@@ -205,6 +232,9 @@ ARRANGEMENTS = {
 #: directory in particular is in this table because it was reported nowhere at
 #: all, and a boolean cannot tell that apart from a step with one thing to say.
 TRANSCRIPTS = {
+    'death_scenes': [
+        'Would fill death_scene sailing for telemachus in reference/characters.csv '
+        '(the source kills them in odyssey:ship-sails)'],
     'act_column': [
         'Would add act column to reference/scenes.csv, copied from part',
         'Would rename part to act in reference/spine.csv',

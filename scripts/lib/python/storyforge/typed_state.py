@@ -488,16 +488,21 @@ def current_state(project_dir: str, scene_id: str, prose: str | None = None, *,
 # Records from what the book already has
 # ============================================================================
 
+#: characters.csv `death_scene` for a character the author has decided lives
+#: (#745): no death, and `storyforge cleanup` fills nothing from the source
+LIVES = 'lives'
+
+
 def registry_deaths(project_dir: str) -> list[Record]:
     """characters.csv's `death_scene` as `alive` records (`origin`
-    `registry`), each by the end of its scene."""
+    `registry`), each by the end of its scene. `LIVES` is no death."""
     from storyforge.elaborate import _read_csv
     path = os.path.join(project_dir, 'reference', 'characters.csv')
     out = []
     for row in _read_csv(path):
         who = (row.get('id') or '').strip()
         scene = (row.get('death_scene') or '').strip()
-        if who and scene:
+        if who and scene and scene.lower() != LIVES:
             out.append(Record('alive', who=who, value='dead', scene_id=scene,
                               quote=f'death_scene {scene}', origin='registry', index=END))
     return out

@@ -994,6 +994,21 @@ class TestKeepGoing:
         monkeypatch.setattr(gate, 'commit_provisional', commit)
         return done
 
+    def test_the_disputed_facts_are_logged(self, setup, monkeypatch, capsys):
+        """#735 (T-7): the facts a provisional commit recorded as disputed."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': False})
+        self._provisional(monkeypatch)
+        real = gate.commit_provisional
+
+        def commit(project_dir, result, reason):
+            real(project_dir, result, reason)
+            result.disputed = [('Pandarus is dead', None)]
+        monkeypatch.setattr(gate, 'commit_provisional', commit)
+        with pytest.raises(SystemExit):
+            main(['--keep-going', '--scenes', 'act1-sc01'])
+        assert 'NOTE (recorded as disputed' in capsys.readouterr().out
+
     def test_a_failing_scene_is_committed_provisionally_and_the_run_goes_on(
             self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})

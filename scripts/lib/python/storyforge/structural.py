@@ -755,7 +755,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
             death_scene = (row.get('death_scene') or '').strip()
             if char_id:
                 char_roles[char_id] = role
-                if death_scene:
+                if death_scene and death_scene.lower() != 'lives':   # typed_state.LIVES
                     dead_characters.add(char_id)
                     name = (row.get('name') or '').strip()
                     if name:

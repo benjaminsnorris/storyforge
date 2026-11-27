@@ -143,7 +143,8 @@ def update_field(path, row_id, field, value, key_col='id'):
     lines = _read_lines(path)
     if not lines:
         return
-    headers = lines[0].split(DELIMITER)
+    # a spreadsheet export's byte-order mark is kept, and isn't the id (#745)
+    headers = lines[0].lstrip('\ufeff').split(DELIMITER)
     try:
         fcol = headers.index(field)
         kcol = headers.index(key_col)
