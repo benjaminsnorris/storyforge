@@ -190,12 +190,19 @@ def _main(args):
             '--interactive. Drop them, or drop --session.')
         sys.exit(1)
     from storyforge import gate
-    from storyforge.cli import check_method
+    from storyforge.cli import check_method, extract_think
     flag = gate.CHECK_FLAGS.get(check_method(args) or '', '')
     if flag and coaching != 'full':
         log(f'ERROR: {flag} sets how the gate checks a drafted scene; coaching coach and '
             f'strict write briefs or constraints, which are not gated. Drop {flag}, or '
             f'draft prose at full coaching.')
+        sys.exit(1)
+    think = extract_think(args)
+    if think is not None and coaching != 'full':
+        think_flag = gate.EXTRACT_THINK_FLAGS[think]
+        log(f'ERROR: {think_flag} sets the gate\'s extraction of a drafted scene; coaching '
+            f'coach and strict write briefs or constraints, which are not gated. Drop '
+            f'{think_flag}, or draft prose at full coaching.')
         sys.exit(1)
     if (coaching == 'full' and gate.GATE_CHECK_METHOD in ('questions', 'tandem')
             and not gate.GATE_CONTINUITY):

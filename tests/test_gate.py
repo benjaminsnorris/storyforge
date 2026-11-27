@@ -5461,6 +5461,21 @@ class TestExtractThinkingFlag:
         assert '--accept takes its own scene list' in out
         assert f'--blocking makes no extraction call; {flag}' in out
 
+    @pytest.mark.parametrize('flag', ['--extract-thinking', '--no-extract-thinking'])
+    @pytest.mark.parametrize('coaching', ['coach', 'strict'])
+    def test_write_refuses_it_below_full_coaching(self, project_dir, monkeypatch, capsys,
+                                                 flag, coaching):
+        """CR-1 (#771's review): coach and strict aren't gated."""
+        from storyforge import cmd_write
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', True)
+        with pytest.raises(SystemExit) as e:
+            cmd_write.main([flag, '--dry-run', '--coaching', coaching, '--scenes', SCENE])
+        assert e.value.code == 1
+        assert f'ERROR: {flag} sets the gate\'s extraction' in capsys.readouterr().out
+        assert gate.EXTRACT_THINK is True
+
 
 class TestCarryFactsAcrossFixRounds:
     """#736: every fix round re-ran extraction and persistence, a re-roll of
