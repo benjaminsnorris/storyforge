@@ -1196,3 +1196,95 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
                            f'{result.promises_asked} about brief promises asked, '
                            f'{len(present)} subject(s) present')
     return result
+
+
+# ============================================================================
+# Is a first run's finding still there? (#738)
+# ============================================================================
+
+RESOLVED_PROMPT = """You check whether a revised scene of a novel still has problems another checker found in an earlier draft of it. Each question gives one problem: the earlier draft's words, what they contradicted or what the scene's brief promised, and why it was a problem.
+
+Answer `yes` when the scene as it now reads still has the problem: the same conflict with the same fact, in the old words or in new ones, or the brief's item still not delivered. Put in `quote` the scene's words that have it now, copied exactly: the shortest clause that shows it (empty for an item the scene leaves out). Answer `no` only when the scene clearly no longer has it: the words are gone, or changed so that they agree with the fact, or the item is now delivered; with `no`, `quote` is empty. If you can't tell, answer `yes`. Give a one-sentence reason in `why`.
+
+## Scene: {scene_id}
+
+{prose}
+
+## Problems found in the earlier draft
+
+{questions}"""
+
+
+@dataclass
+class Resolved:
+    """`ask_resolved`'s answer, by finding (the objects passed in)."""
+    #: the findings both askings said the scene no longer has
+    resolved: list[Finding] = field(default_factory=list)
+    #: (finding, quote) for each the scene still has, or may have: the
+    #: quote is of the scene as it now reads, '' when no asking gave one
+    #: found in it
+    standing: list[tuple[Finding, str]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def _resolved_block(n: int, f: Finding) -> str:
+    if f.kind == 'broken-promise':
+        said = (f' Its nearest words then: "{f.scene_quote}".' if f.scene_quote else '')
+        return (f'{n}. A broken promise ({f.fact_id}): the brief promises '
+                f'"{f.established_quote}".{said} Why: {f.explanation}\n'
+                f'   Question: Does the scene still fail to deliver it?')
+    against = ('the scene itself' if f.code == 'BLK'
+               else f.source if f.established_scene else f'the ledger fact {f.fact_id}'
+               if f.fact_id else 'the ledger')
+    return (f'{n}. A contradiction ({f.code}): the earlier draft said "{f.scene_quote}", but '
+            f'{against} has "{f.established_quote}". Why: {f.explanation}\n'
+            f'   Question: Does the scene still have this problem?')
+
+
+def build_resolved_prompt(scene_id: str, prose: str, findings: list[Finding],
+                          asking: int = 1) -> str:
+    """The problems, numbered from 1 in `findings`' order; a later asking
+    lists them in reverse and says which it is (`yes_no`)."""
+    order = list(enumerate(findings, start=1))
+    if asking > 1:
+        order.reverse()
+    return _independent(RESOLVED_PROMPT.format(
+        scene_id=scene_id, prose=prose.strip(),
+        questions='\n\n'.join(_resolved_block(n, f) for n, f in order)), asking)
+
+
+def ask_resolved(scene_id: str, prose: str, findings: list[Finding], *, model: str,
+                 log_file: str = '') -> Resolved:
+    """#738: whether `prose` (a scene after a fix) still has each of
+    `findings` (the open checker's, on the prose before the fix), asked
+    twice in one call per asking (`yes_no.ask`) on the question layer's
+    model. A finding is resolved only when both askings say no; anything
+    else stands (a wrong "resolved" passes prose with the error, a wrong
+    "still there" costs a fix round or a look), with the first quote an
+    asking that said yes gave that is in the prose (`quotes.quote_in`).
+    No third asking: a split stands, as a dispute is cleared only by two
+    noes.
+
+    Raises:
+        QuestionError: a refusal, an API failure, or a reply cut off or off
+            the schema twice running.
+    """
+    result = Resolved()
+    count = len(findings)
+    if not count:
+        return result
+    answers = yes_no.ask(lambda n: build_resolved_prompt(scene_id, prose, findings, n), count,
+                         model=model, log_file=log_file, tokens=max_tokens(count),
+                         schema=SCHEMA, label=f'resolved {scene_id}',
+                         what=f'{scene_id}: whether the first run\'s findings are still there',
+                         error=QuestionError, fields=('quote', 'why'))
+    gone, split = yes_no.agreed(answers, count, 'no')
+    for n, f in enumerate(findings, start=1):
+        if n in gone:
+            result.resolved.append(f)
+            continue
+        quote, _ = _verified([a[n] for a in answers if a[n]['answer'] == 'yes'], prose)
+        result.standing.append((f, quote))
+    if split:
+        result.notes.append(f'{split} split answer(s): they stand (only two noes clear one)')
+    return result
