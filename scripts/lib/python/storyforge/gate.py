@@ -4926,6 +4926,20 @@ def _carry_rulings(run: 'GateResult', disputes: list[Dispute], endings: list[Dis
             + ', '.join(lost))
 
 
+#: Why `_carry_open` drops a carried open finding without asking
+TOOK_OUT = 'the fix took out the words they were found on'
+
+
+def _took_out(f: Finding, before: str, after: str) -> bool:
+    """Whether the fix took out `f`'s words: a contradiction whose scene
+    quote is in `before` (the prose its finding was carried on) and not in
+    `after`. A broken promise (no words of its own) or a quote that wasn't
+    in `before` either can't be told so, and is asked again."""
+    from storyforge.quotes import quote_in
+    return (f.kind != 'broken-promise' and bool(f.scene_quote.strip())
+            and quote_in(before, f.scene_quote) and not quote_in(after, f.scene_quote))
+
+
 def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dispute],
                 log_dir: str, result: 'GateResult', endings: list[Dispute] = ()) -> None:
     """#738: a tandem run that makes no open reading carries `run`'s open
@@ -4934,8 +4948,14 @@ def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dis
     so a continuity finding on the same words is one slip, not two). One
     whose scene quote lies in words the fix left alone (`_in_untouched_text`,
     on the prose before it; all of them, on the same prose) stands as it was
-    (`UNTOUCHED`). The rest (words changed or next to a change, a quote not
-    in the prose, a broken promise with no words) are asked again in this
+    (`UNTOUCHED`). One whose scene quote was in the prose before the fix and
+    is gone from this prose is dropped (`TOOK_OUT`), named in `check_notes`:
+    the fix took out the words it was found on, and an asking would read
+    the new prose against the old explanation (E4 run 3, `pewter-town`,
+    2026-11-27: a calendar finding re-anchored by an asking on words the
+    fix wrote, then carried untouched after its evidence was gone). The
+    rest (words next to a change, a quote not in the prose before either,
+    a broken promise with no words) are asked again in this
     prose (`questions.ask_resolved`): resolved, it is dropped and named in
     `check_notes`; otherwise it stands (`STILL_THERE`), on the words the
     asking gave (verified), or with none: unverified (`CARRIED_UNPLACED`)
@@ -4952,10 +4972,12 @@ def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dis
     stale = [f for f in earlier if f.fact_id in gone and not f.established_scene]
     live = [f for f in earlier if not _among(f, stale)]
     diff = None if run.open_prose == prose else _diff(run.open_prose, prose)
-    kept, again = [], []
+    kept, again, took_out = [], [], []
     for f in live:
         if diff is None or (f.scene_quote and _in_untouched_text(f, diff, before=True)):
             kept.append(replace(f, checker=OPEN, carried=UNTOUCHED))
+        elif _took_out(f, run.open_prose, prose):
+            took_out.append(f)
         else:
             again.append(f)
     still, resolved = [], []
@@ -4990,6 +5012,8 @@ def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dis
             said += (f', {len(again)} asked again in this prose: {len(still)} still there, '
                      f'{len(resolved)} resolved' + (f' ({_finding_names(resolved)})'
                                                     if resolved else ''))
+        if took_out:
+            said += (f', {len(took_out)} dropped: {TOOK_OUT} ({_finding_names(took_out)})')
         if stale:
             said += (f', {len(stale)} dropped: rulings on disputes this run\'s extraction no '
                      f'longer raises ({_finding_names(stale)})')

@@ -198,10 +198,10 @@ class TestFixLoop:
         assert '1 stand (their words untouched)' in report
         assert gate.TANDEM_RECHECK_GAP in result.question_notes
 
-    def test_a_finding_in_edited_words_is_asked_again_and_resolved(self, tandem, tmp_path):
+    def test_a_finding_next_to_edited_words_is_asked_again_and_resolved(self, tandem,
+                                                                         tmp_path):
         book = _Book()
-        fixed = PROSE.replace('mocked', 'thanked').replace(
-            'the lamp burned in the window', 'the lamp burned on the stair')
+        fixed = PROSE.replace('mocked', 'thanked').replace('all night long', 'until dawn')
         out = self._run(tandem, tmp_path, book, fixed)
         assert book.calls.count('open') == gate.GATE_READINGS
         assert book.calls.count('resolved') == 2   # asked twice
@@ -215,19 +215,33 @@ class TestFixLoop:
                                            f'gate-resolved-{SCENE}.json'))
 
     def test_one_still_there_stands_on_the_words_the_asking_gave(self, tandem, tmp_path):
-        new = 'the lamp burned on the sill of the tower'
+        new = f'{LAMP} until dawn'
         book = _Book(resolved=lambda n: [ans(1, 'yes', new, 'Still a window.')])
-        fixed = PROSE.replace('mocked', 'thanked').replace(LAMP, new)
+        fixed = PROSE.replace('mocked', 'thanked').replace('all night long', 'until dawn')
         out = self._run(tandem, tmp_path, book, fixed, fixed)
         [lamp] = out.result.findings
         assert (lamp.carried, lamp.scene_quote, lamp.problem) == (gate.STILL_THERE, new, '')
         assert '[from the first run; still there after the fix]' in '\n'.join(
             gate.report_lines(out.result))
 
+    def test_a_finding_whose_words_the_fix_took_out_is_dropped_unasked(self, tandem,
+                                                                        tmp_path):
+        # E4 run 3, pewter-town (2026-11-27): the fix rewrote the calendar
+        # finding's sentence; asked again with its old explanation it was
+        # "still there" on words the fix wrote, then carried untouched
+        book = _Book(resolved=lambda n: [ans(1, 'yes', 'the lamp burned on the sill',
+                                             'still night')])
+        fixed = PROSE.replace('mocked', 'thanked').replace(LAMP, 'the lamp burned on the sill')
+        out = self._run(tandem, tmp_path, book, fixed)
+        assert 'resolved' not in book.calls
+        assert out.result.passed and out.prose == fixed
+        notes = '; '.join(out.result.check_notes)
+        assert f'1 dropped: {gate.TOOK_OUT} (PHY vs act1-sc01)' in notes
+
     def test_a_split_answer_stands(self, tandem, tmp_path):
         book = _Book(resolved=lambda n: [ans(1, 'no')] if not book.resolved_prompts[1:]
                      else [ans(1, 'yes', 'nowhere in it')])
-        fixed = PROSE.replace('mocked', 'thanked').replace(LAMP, 'the lamp burned on the sill')
+        fixed = PROSE.replace('mocked', 'thanked').replace('all night long', 'until dawn')
         out = self._run(tandem, tmp_path, book, fixed, fixed)
         # the yes gave no words of the prose: unverified, still blocking
         assert not out.result.passed
@@ -391,6 +405,16 @@ class TestCarryOpen:
         assert result.check_notes == ['re-check: no open reading; the open checker found '
                                       'nothing on the prose before']
         assert result.open_findings == []
+
+    def test_took_out_needs_the_words_before_and_none_after(self, monkeypatch, tmp_path):
+        gone = _f(checker=gate.OPEN)
+        never = _f(quote='words never in either', checker=gate.OPEN)
+        promise = _f('broken-promise', 'PRM', LAMP, 'outcome', '', gate.OPEN)
+        after = PROSE.replace(LAMP, 'a candle guttered')
+        result, asked = self._carry(monkeypatch, tmp_path, [gone, never, promise], PROSE, after)
+        assert asked == [never, promise] and result.check.findings == []
+        assert result.open_findings == []
+        assert f'1 dropped: {gate.TOOK_OUT}' in result.check_notes[0]
 
     def test_a_failed_asking_is_a_gate_error(self, monkeypatch, tmp_path):
         def boom(again):
