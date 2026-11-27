@@ -60,6 +60,8 @@ print(dump_schema_markdown())
 | `motif-taxonomy.csv` | id, name, aliases, tier | motifs |
 | `mice-threads.csv` | id, name, type, aliases | mice_threads |
 
+`characters.csv` also has `death_scene` (the scene id after which the character is dead, read by the continuity life check; blank for no recorded death; `lives` for someone the source kills who lives in this version, #745) and `pronouns`. In a faithful adaptation `storyforge cleanup` fills a blank `death_scene` from the source and never changes one the author wrote.
+
 ### world.csv — directions, light, distances and speeds (optional)
 
 `reference/world.csv` (`storyforge.world_table`, #647; shared with #648's continuity checks: geography and sky, and travel) holds the few world facts the blocking and continuity checks need. Columns `kind|name|value|note`, one fact a row. Without the file the defaults apply; with it, a malformed row stops the stage sheet check and `storyforge cleanup` reports it (never repaired).
