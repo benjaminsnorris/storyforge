@@ -20,9 +20,8 @@ registries are moved into the ledger first (``harness.migrate_tree``). A fact th
 would have carried in from earlier scenes may therefore read as missing.
 
 **The gate's thinking setting.** The commitments call sends the gate's
-extraction setting (``gate.EXTRACT_THINK``: thinking off, #743), so E3
-measures the call the gate makes; ``storyforge extract``'s phase 4 still
-lets the model think.
+extraction setting (``gate.EXTRACT_THINK``, #743; on, so no thinking setting
+is sent, as phase 4 sends none), so E3 measures the call the gate makes.
 
 Gate (plan, Phase 2): recall >= 0.85.
 """

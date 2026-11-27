@@ -72,5 +72,7 @@ def test_the_commitments_call_thinks_as_the_gate_extraction_does(monkeypatch, pr
     monkeypatch.setattr(persistence, 'judge',
                         lambda *a, **k: persistence.Verdict(kept=[], dropped=[]))
     e3.extract(project_dir, 'act1-sc01')
-    assert sent == {'knowledge': True, 'physical': True, 'commitments': gate.EXTRACT_THINK}
-    assert gate.EXTRACT_THINK is False
+    assert sent == {'knowledge': True, 'physical': True, 'commitments': True}
+    monkeypatch.setattr(gate, 'EXTRACT_THINK', False)
+    e3.extract(project_dir, 'act1-sc01')
+    assert sent == {'knowledge': True, 'physical': True, 'commitments': False}
