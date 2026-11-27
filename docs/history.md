@@ -1136,7 +1136,7 @@ The pilot found Q7, Q22 and Q79 in only some runs, failing the recall half of "f
 PILOT.md step 2's deferred suites, after #774 merged (`BLOCKING_READINGS = 3`): `gate-set-questions`, `e4-generation` and `gate-set`, three runs each, cheapest first (`--mode auto --runs 3`, `--over-budget "Ben approved gate-set-questions, gate-set, e4-generation after #774, 2026-11-27"`, cap $300). Spent **$184.94**: `gate-set-questions` $27.90 (forecast about $35), `e4-generation` $65.31 (about $75), `gate-set` $91.72 (about $100–130). Their requests had also changed under #741, #749 and #768, so a move is not the third reading's alone. Floors are run 1's; runs 1 / 2 / 3 below, against the old floor (run 1). `e8-revision-safety` stays stale (deferred, about $166).
 
 - **`gate-set-questions`.**
-  - `recall` 0.413 → **0.3696** (0.3696 / 0.3696 / 0.3696; the old runs were 0.413 / 0.3696 / 0.3913): 2 of 46, the old runs' low end. `recall_per_case` 0.4689 → 0.4222, `recall_seeded` 0.4872 → 0.4359, `recall_asked` 0.5625 → 0.5.
+  - `recall` 0.413 → **0.3696** (0.3696 / 0.3696 / 0.3696; the old runs were 0.413 / 0.413 / 0.3696): 2 of 46, the old runs' low end. `recall_per_case` 0.4689 → 0.4222, `recall_seeded` 0.4872 → 0.4359, `recall_asked` 0.5625 → 0.5.
   - `stop_rate_control` 0.4839 → **0.6129** (0.6129 / 0.6774 / 0.6129; old runs 0.4839 / 0.6452 / 0.5806): more controls stopped, inside the old spread but at its top.
   - `stop_rate_positive` 0.7391 → 0.8043; `false_alarm_on_fact` 2 → 1 (1 / 2 / 1).
 - **`gate-set`.**
