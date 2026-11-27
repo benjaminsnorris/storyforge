@@ -187,8 +187,13 @@ findings (PILOT.md, "What's left", step 3): their 28 scenes topped up as three
 runs ($6.65, `--mode auto --runs 3`; the other scenes' requests are
 unchanged, so their recordings replay and their numbers stand). On the larger
 set, run 1 / 2 / 3: recall 0.6027 / 0.6438 / 0.6301, the overnight run's real
-slips 16 / 18 / 16 of 29, flags 122 / 128 / 118. Over the first three runs
-(the table is the 2026-11-09 set):
+slips 16 / 18 / 16 of 29, flags 122 / 128 / 118. **Three readings**
+(2026-11-27, #774): reading 3 is a new request, so every case scene was
+topped up as three runs ($13.36; readings 1 and 2 replay). Run 1 / 2 / 3:
+recall 0.6712 / 0.6781 / 0.6781, the overnight run's real slips 19 / 19 / 18
+of 29, readers' 0.3824 / 0.4412 / 0.4118, false alarms per 10k 2.12 / 1.69 /
+2.12, flags 150 / 142 / 141; the floors are run 1's. Over the first three
+runs (the table is the 2026-11-09 set, at two readings):
 
 | metric | run 1 | run 2 | run 3 |
 |---|---|---|---|
