@@ -8,7 +8,7 @@ Everything marked **proposal** is for Ben to confirm or change before the run.
 
 1. **The fixed gate no longer makes the false stops the review found.** Re-gate the first-gated (pre-fix) prose of eight *Wrath Like Smoke* scenes and compare with the review's verdicts ([A](A-log-census.md) §2, [B](B-typed-state.md)).
 2. **The gate's default check method:** `tandem` (the default since #738, PR #767) or `open`. The thing to watch is the question layer's false stops: it stopped about 0.48 of `gate-set-questions`' controls. Switching is one line, `gate.GATE_CHECK_METHOD`.
-3. **Extraction thinking** (#743, PR #765): `gate.EXTRACT_THINK = True` (the default) or `False`. Thinking off was faster and cheaper, but it lost about 15 of 333 continuity rows on 13 prompts, mostly a scene's last state changes. E3 was 42/7/0 with it off and 43/5/1 with it on (`docs/history.md`, #743).
+3. **Extraction thinking** (#743, PR #765): `gate.EXTRACT_THINK = True` (the default) or `False`; `check` takes `--extract-thinking` / `--no-extract-thinking` to set it for one run. Thinking off was faster and cheaper, but it lost about 15 of 333 continuity rows on 13 prompts, mostly a scene's last state changes. E3 was 42/7/0 with it off and 43/5/1 with it on (`docs/history.md`, #743).
 
 ## Limits
 
@@ -20,7 +20,7 @@ Everything marked **proposal** is for Ben to confirm or change before the run.
 
 - `~/Developer/iliad-adult` (the book) with its `working/logs/session/` and `working/logs/gate/` from the 2026-11-16/17 overnight run. They are gitignored, so they exist only on the machine that ran it.
 - The source project at the path in the book's `storyforge.yaml` `source:` block (`../homer`). The path is relative, so the throwaway clone must sit next to the book.
-- A storyforge checkout of current `origin/main`, and `ANTHROPIC_API_KEY`.
+- A storyforge checkout of current `origin/main` (one whose `storyforge check --help` lists `--no-extract-thinking`), and `ANTHROPIC_API_KEY`.
 
 ```bash
 git -C ~/Developer/storyforge fetch origin
@@ -92,22 +92,20 @@ For each scene: three runs, each from `pilot-base`. Copy the outputs out before 
 
 ```bash
 cd ~/Developer/iliad-adult-pilot
-run() {   # run MODE_DIR FLAG
+run() {   # run MODE_DIR FLAG...
+  local mode=$1; shift
   git reset -q --hard pilot-base && git clean -fdxq   # puts back the tracked cost ledger and clears working/'s ignored logs
   cp "$OUT/$SID.prefix.md" "scenes/$SID.md"
-  /usr/bin/time -p "$PY" ~/Developer/sf-pilot/storyforge check "$SID" "$2" 2> "$OUT/$SID.$1.time"
-  mkdir -p "$OUT/$SID.$1" && cp -R working/check-report.md working/logs/check "$OUT/$SID.$1/"
-  diff <(git show pilot-base:working/costs/ledger.csv) working/costs/ledger.csv | sed -n 's/^> //p' > "$OUT/$SID.$1/costs.csv"   # this run's rows only
+  /usr/bin/time -p "$PY" ~/Developer/sf-pilot/storyforge check "$SID" "$@" 2> "$OUT/$SID.$mode.time"
+  mkdir -p "$OUT/$SID.$mode" && cp -R working/check-report.md working/logs/check "$OUT/$SID.$mode/"
+  diff <(git show pilot-base:working/costs/ledger.csv) working/costs/ledger.csv | sed -n 's/^> //p' > "$OUT/$SID.$mode/costs.csv"   # this run's rows only
 }
 run tandem --tandem
 run open --open
-# thinking off: a local one-line edit in the pilot checkout only, reverted straight after
-sed -i '' 's/^EXTRACT_THINK = True$/EXTRACT_THINK = False/' ~/Developer/sf-pilot/scripts/lib/python/storyforge/gate.py
-run tandem-nothink --tandem
-git -C ~/Developer/sf-pilot checkout -- scripts/lib/python/storyforge/gate.py
+run tandem-nothink --tandem --no-extract-thinking
 ```
 
-There is no flag or environment variable for `EXTRACT_THINK`; it is a constant. Do the edit in the `sf-pilot` worktree, never in a shared checkout. Running all eight scenes thinking-off back to back is cheaper than toggling per scene. A `--extract-think` flag is a possible follow-up if this comparison is ever repeated.
+`--no-extract-thinking` sets `gate.EXTRACT_THINK` to False for that run only (the extraction call and its #734 retry); nothing in the checkout is edited, and the other runs keep the default (thinking on). A message pointing to `check --pending` from that run carries the flag.
 
 ## What to record
 
@@ -117,7 +115,7 @@ From each run's `check-report.md` (findings are tagged `[open checker]`, `[quest
 |---|---|---|---|---|---|---|---|---|
 | hector-duels-ajax | tandem | | | | | | | |
 | hector-duels-ajax | open | | | | | | | |
-| hector-duels-ajax | tandem-nothink | | | | | | | |
+| hector-duels-ajax | tandem-nothink (`--tandem --no-extract-thinking`) | | | | | | | |
 
 Summary rows per mode: false stops (a scene stopped only by false findings), real catches kept (of Q7, Q20–22, Q79, Q80), new real catches, questions-only findings (true/false), total cost, median wall time.
 
@@ -160,7 +158,7 @@ In order.
 One small PR each, with a `docs/history.md` entry under #738 or #743 giving the pilot's numbers:
 
 - `gate.GATE_CHECK_METHOD = 'open'`, only if the rule above says switch. Also update the comment above it, `cmd_check`'s docstring, `cli.add_check_method_args`' help ("the default") and the skills that name the default.
-- `gate.EXTRACT_THINK = False`, only if the rule says so. This re-keys E3 and the gate sets' extraction requests, so add `e3-extraction` to the re-record below (about $2.80).
+- `gate.EXTRACT_THINK = False`, only if the rule says so. This re-keys E3 and the gate sets' extraction requests, so add `e3-extraction` to the re-record below (about $2.80). Also update the comment above it and `cli.add_extract_thinking_args`' help ("the default"). Not flipping it still leaves `--no-extract-thinking` (and `--extract-thinking` once off is the default) on `check`, `write` and `revise` for a one-off run; that needs no re-record, since the default's requests are unchanged.
 
 Bump the version (patch for each).
 
