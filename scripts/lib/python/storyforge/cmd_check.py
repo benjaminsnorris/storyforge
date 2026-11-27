@@ -201,6 +201,8 @@ def parse_args(argv):
                 'Contradictions with prose no ledger fact records are not looked '
                 'for. Model: STORYFORGE_QUESTIONS_MODEL (default the extraction '
                 'tier).')
+    from storyforge.cli import add_extract_thinking_args
+    add_extract_thinking_args(parser)
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -224,16 +226,17 @@ def main(argv=None):
     from storyforge.git import commit_and_push, create_branch
     ledger.exit_if_not_migrated(project_dir)
     ledger.exit_if_unordered(project_dir)
-    from storyforge.cli import check_method
+    from storyforge.cli import check_method, extract_think
     method = check_method(args)
     flag = gate.CHECK_FLAGS[method] if method else ''
+    think = extract_think(args)
     if args.accept:
         if (args.positional or args.scenes or args.act or args.from_seq or args.pending
                 or args.keep_going or args.stop_at_first or args.stage_sheet
-                or method):
+                or method or think is not None):
             log('ERROR: --accept takes its own scene list; name no others with it '
-                '(and no --stage-sheet, --tandem, --open or --questions: accepting reads '
-                'nothing).')
+                '(and no --stage-sheet, --tandem, --open, --questions, --extract-thinking or '
+                '--no-extract-thinking: accepting reads nothing).')
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
         return
@@ -248,18 +251,22 @@ def main(argv=None):
             log('ERROR: --blocking reads the scenes you name (or every scene); it takes no '
                 '--pending, --keep-going or --stop-at-first.')
             sys.exit(1)
+        if think is not None:
+            log(f'ERROR: --blocking makes no extraction call; '
+                f'{gate.EXTRACT_THINK_FLAGS[think]} sets the gate\'s. Use one.')
+            sys.exit(1)
         sys.exit(_blocking_report(args, project_dir))
-    if not (args.stage_sheet or method):
-        return _check_named(args, project_dir)
     # this run only: an in-process caller after it keeps its own methods
+    # and extraction thinking setting
     saved = gate.GATE_BLOCKING_METHOD
     if args.stage_sheet:
         gate.GATE_BLOCKING_METHOD = 'stage-sheet'
     try:
-        if not method:
-            return _check_named(args, project_dir)
-        with gate.forced_check_method(method):
-            return _check_named(args, project_dir)
+        with gate.forced_extract_think(think):
+            if not method:
+                return _check_named(args, project_dir)
+            with gate.forced_check_method(method):
+                return _check_named(args, project_dir)
     finally:
         gate.GATE_BLOCKING_METHOD = saved
 
