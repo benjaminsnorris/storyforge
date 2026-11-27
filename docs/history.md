@@ -1078,3 +1078,26 @@ On *Wrath Like Smoke*'s Nov 8 draft, 4 of the open checker's 5 false findings an
   - *Stops.* 1 false stop.
   - *The momentary combat states* ("brandishes two spears") made no finding.
   - #775 proposes filtering by kind (conditional orders and constraints), not by age; not implemented.
+
+## The blocking set gains report A's findings, and the read's recall by readings (#744, #774; 2026-11-27)
+
+PILOT.md step 3. Report A's 38 blocking-read findings on *Wrath Like Smoke*'s overnight gate run are now cases in the private `blocking-set`: 29 real, and 9 debatable.
+
+- **A `debatable` verdict.** A finding a reviewer could call either way can't be `fixed` (it would be in recall) or `left` (a flag on it would count as a false alarm). `blocking_set.VERDICTS` gains `debatable`. It is reported as `debatable_cases` and `debatable_flagged`, and is never in recall or the false alarms (`test_a_debatable_case_is_out_of_recall_and_no_false_alarm`).
+- **Prose that git doesn't have.** The gate read the session writer's reply plus the voice revision, and then fix-round edits. None of that was committed. storyforge-evals `rebuild_wrath_gate.py` rebuilds it from the gitignored logs:
+  - A partial fix (#556) doesn't log which edits it kept, so every subset is tried. The one path whose last prose is the committed scene is taken.
+  - All 28 versions matched report A's replay byte for byte.
+  - The rebuilt prose is committed beside the set, so a rebuild doesn't need the logs.
+- **Books by prose state.** `wrath-gate` holds the first-gated prose and `wrath-gate-fix` the fix-round prose, so a scene can appear in both, and each gets its own per-book recall. The prompt keeps the real scene id.
+- **Recorded as a top-up** ($6.65): only the new scenes' requests are new. The old scenes' recordings, and gawain's and Nov 8 Wrath's numbers, are unchanged. The stage sheet was recorded as three runs ($3.50).
+- **Floors moved,** because the set is bigger:
+  - recall 0.6154 → 0.6027 (`wrath-gate` 0.48, `wrath-gate-fix` 1.0);
+  - recall_found_by_tool 0.7349 → 0.6875;
+  - flags 99 → 122;
+  - the sheet's recall 0.2222 → 0.2192, false alarms 15.65 → 13.54 per 10k (its first three-run recording).
+- **What it says for #774.** Each reading was scored alone from the recordings. The 29 real cases:
+  - are caught by 0.454 of single readings, and by 0.575 of runs at 2 readings;
+  - project to 0.63–0.70 at 3 readings and 0.67–0.75 at 4;
+  - show no sign that readings repeat each other: over all 146 real cases, 160 runs had both readings hit, against 170 expected if independent;
+  - include 7 never seen in 6 readings.
+  - The same requests gave the pilot Q22 3/16 and the set 5/6, so one case's rate varies between sessions more than these samples show. `BLOCKING_READINGS` is unchanged, pending Ben.
