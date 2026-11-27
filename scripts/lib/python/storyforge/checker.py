@@ -905,6 +905,7 @@ Report only a real contradiction, both sides quoted:
 - `scene_quote`: the scene's exact words that break it, copied verbatim.
 - `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from the story so far or a tool result (or a reference file's name and its exact words, or `{CALENDAR}` and a calendar line); for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
 - Not a contradiction: a character who lies, misremembers or is mistaken where the text signals it; a change the story shows happening; a vision, dream or story-within-the-story that the narrative frames as such; figurative language; anything you could not find established. When in doubt, leave it out: a false report costs the author more than a miss.
+- Not a contradiction either: two tellings of something no scene of the book shows happening (an old story, backstory, an event before the book or off its page) that differ on who did it, how or where, when either telling is a character's words in speech. Characters tell the past their own way, and the book keeps conflicting accounts in speech as they are. Still report a character's account of an event a scene of this book shows on the page that the page contradicts, and a name, kinship, age, date or elapsed time said in speech that the book rules out.
 {promise_rules}
 Return every finding, and an empty list when the scene is clean."""
     return stable, rest

@@ -58,7 +58,12 @@ ORIGINS = ('plan', 'prose', 'author', 'migrated')
 #: `planned`: a fact a brief plans (the briefs stage's own rows, #568): not
 #: established, so the checker never holds prose to it; the gate makes it
 #: binding when the prose establishes it (`fill_quote`)
-STATUSES = ('binding', 'pending', 'rejected', 'superseded', 'planned')
+#: `claim` (#749): what a character says in speech about the past, not shown
+#: on the page (`extract.CLAIM`; `known_by` is the speaker): recorded as their
+#: account, never binding, so no check holds a scene to it and nothing
+#: supersedes or ends through it
+CLAIM = 'claim'
+STATUSES = ('binding', 'pending', 'rejected', 'superseded', 'planned', CLAIM)
 MUTABLE = ('state', 'fixed')
 
 #: Free-text columns; `;`-joined id lists are the array columns

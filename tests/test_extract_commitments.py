@@ -75,7 +75,7 @@ class TestParse:
             {'statement': ''}), 'sc1')
         assert got == [{'type': 'relationship', 'subject': 'fred',
                         'statement': 'Fred is the nephew.', 'quote': '',
-                        'mutable': 'fixed', 'supersedes': '', 'ends': []}]
+                        'mutable': 'fixed', 'supersedes': '', 'ends': [], 'claimed_by': ''}]
 
     def test_reads_the_states_a_commitment_ends(self):
         got = parse_commitments_response(_reply(

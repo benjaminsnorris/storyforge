@@ -1775,7 +1775,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge import ledger, persistence
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps
-    from storyforge.extract import (COMMITMENT_PROBLEMS, COMMITMENTS_SCHEMA, ID_PREFIX,
+    from storyforge.extract import (CLAIM, COMMITMENT_PROBLEMS, COMMITMENTS_SCHEMA, ID_PREFIX,
                                     MAX_KNOWN_COMMITMENTS, MISQUOTE, NO_QUOTE,
                                     build_commitments_prompt,
                                     commitment_rows, known_for_scene,
@@ -1907,6 +1907,13 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             log(f'  WARNING: {len(problems[kind])} {what}: '
                 + '; '.join(problems[kind][:20])
                 + (' ...' if len(problems[kind]) > 20 else ''))
+    if problems[CLAIM]:
+        # #749: set aside, never silently
+        log(f'  NOTE: {len(problems[CLAIM])} character account(s) in speech of something '
+            f'before their scene and not shown in it, recorded as that character\'s claim '
+            f'(status claim), not as a fact of the world: '
+            + '; '.join(problems[CLAIM][:20])
+            + (' ...' if len(problems[CLAIM]) > 20 else ''))
     log(f'  Phase 4: {written} commitment(s) written'
         + (f'; {dropped} judged not to last beyond their scene and not recorded '
            f'(listed above, per scene)' if dropped else ''))

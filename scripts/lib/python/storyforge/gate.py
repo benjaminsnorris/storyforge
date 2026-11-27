@@ -84,7 +84,8 @@ from storyforge import audit, ledger, persistence
 from storyforge.blocking import BLOCKING_CODE, BlockingError, check_blocking
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
                                check_scene)
-from storyforge.extract import ENDS_HERE, ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE, UNOFFERED
+from storyforge.extract import (CLAIM, ENDS_HERE, ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE,
+                                UNOFFERED)
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
@@ -183,8 +184,11 @@ UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected'
 #: G-028, #556, an extraction slip that stopped an unattended run)
 #: `ENDS_MOVED` (#621), `ID_PREFIX` (#620), `UNOFFERED` (#634) and
 #: `ENDS_HERE` (#734) are links applied, and reported as a NOTE
+#: `CLAIM` (#749): a character's spoken account of the past, recorded as
+#: their claim and never as a binding fact, is a NOTE: set aside, never
+#: silently
 REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced', 'ends fixed',
-            ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE)
+            ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE, CLAIM)
 #: What a report line says each `REPORTED` kind means, where its name alone
 #: doesn't (#564: `NOTE (cap): scene (62)` said nothing of what was cut)
 _REPORTED_LABEL = {
@@ -198,6 +202,10 @@ _REPORTED_LABEL = {
                'commitment of the scene that supersedes it, never on the plan\'s row',
     'cap': 'facts in force left out of what extraction was offered, over the cap '
            '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
+    CLAIM: 'a character\'s account in speech of something before the scene and not shown '
+           'in it: recorded as their claim (status claim), not as a fact of the world, so no '
+           'check holds a scene to it and it changes no fact; conflicting accounts in speech '
+           'are kept (#749)',
 }
 #: Scenes this process's gate runs offered only part of the facts in force,
 #: with how many were left out (`prompts.ledger_window_summary`)
@@ -229,6 +237,10 @@ class GateResult:
     scene_id: str
     #: the scene's commitments, as they would be (or were) committed
     proposed: list[dict[str, str]] = field(default_factory=list)
+    #: #749: the scene's claims in speech (`extract.CLAIM`, status
+    #: `ledger.CLAIM`), committed beside `proposed` as what a character
+    #: said, never binding; each is listed in `problems[CLAIM]`
+    claims: list[dict[str, str]] = field(default_factory=list)
     halts: list[audit.Halt] = field(default_factory=list)
     #: extraction's problems (`extract.COMMITMENT_PROBLEMS` → strings):
     #: `UNRESOLVED` block the commit; `disagrees` and `ends registry` go to
@@ -2049,7 +2061,13 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     held_rows = [copy.deepcopy(r) for r in rows if ledger.is_commitment(r)
                  and r.get('status') == 'pending'
                  and (r.get('scene_id') or '').strip() == scene_id]
-    old = {r['id'] for r in old_rows} | {r['id'] for r in held_rows}
+    # #749: the claims in speech an earlier version recorded are replaced
+    # too; never in force, so nothing changes by their going
+    claim_rows = [copy.deepcopy(r) for r in rows if ledger.is_commitment(r)
+                  and r.get('status') == ledger.CLAIM
+                  and (r.get('scene_id') or '').strip() == scene_id]
+    old = ({r['id'] for r in old_rows} | {r['id'] for r in held_rows}
+           | {r['id'] for r in claim_rows})
     ended_before = ledger.ended_by(rows, scene_id)
     rows = [r for r in rows if r['id'] not in old]
     # ... and the ends the earlier version set: this version's extraction
@@ -2105,7 +2123,11 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                                               log_dir))
     from storyforge.runner import together
     got = together(*calls)
-    result.proposed = got.pop(0)
+    extracted = got.pop(0)
+    # #749: a claim in speech is committed as what was said, apart from the
+    # facts the run checks and commits as binding
+    result.proposed = [r for r in extracted if r.get('status') != ledger.CLAIM]
+    result.claims = [r for r in extracted if r.get('status') == ledger.CLAIM]
     result._extracted, result.extract_note = read[0]
     if result.extract_note:
         from storyforge.common import log
@@ -2187,7 +2209,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         _carry_standing(result.check, standing, disputes)
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
-                                 names, name_notes, order, prose, command, held_rows)
+                                 names, name_notes, order, prose, command, held_rows,
+                                 claim_rows)
     _apply_source(result, project_dir, scene_id, prose, order, log_dir,
                   extract_model or select_model('evaluation'), old_rows)
     _note_advisory(project_dir, scene_id, command, result, prose=prose)
@@ -2254,6 +2277,9 @@ class _CommitContext:
     #: the scene's commitments an earlier provisional commit recorded as
     #: disputed (#735, `is_held`): replaced on commit, their ids carried
     held: list[dict[str, str]] = field(default_factory=list)
+    #: #749: the scene's claims in speech an earlier commit recorded:
+    #: replaced on commit, their ids carried to the same claim read again
+    claims: list[dict[str, str]] = field(default_factory=list)
 
 
 #: A pending row's command for a scene `write --keep-going` committed
@@ -2374,7 +2400,8 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
         fixed_toward_source = _write_commit(project_dir, result, holding, rows, old_rows,
                                             order, ended_before, revised_rejection, names,
                                             name_notes, prose, command, scene_id,
-                                            loaded=ctx.loaded, held=ctx.held)
+                                            loaded=ctx.loaded, held=ctx.held,
+                                            claims=ctx.claims)
     except BaseException:
         vars(result).update(saved)
         rows[:] = saved_rows
@@ -2386,10 +2413,12 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
 
 def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_before,
                   revised_rejection, names, name_notes, prose, command, scene_id,
-                  loaded=(), held=()) -> bool:
+                  loaded=(), held=(), claims=()) -> bool:
     """`_commit`'s changes to `result` and `rows`, ending in the ledger
     write; returns whether the scene was fixed toward its source. `held`:
-    the scene's disputed commitments before (#735), whose ids carry."""
+    the scene's disputed commitments before (#735), whose ids carry;
+    `claims`: its claims in speech before (#749), whose ids carry to the
+    same claim read again."""
     _source_supersede(result, rows)
     fixed_toward_source = _keep_superseded(project_dir, result, rows, prose)
     # #558's second review: the kept facts go through the hold-back too,
@@ -2401,7 +2430,9 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
     # one's id goes to the same fact read again, disputed or not
     _carry_ids(result.proposed + result.disputed_rows, list(old_rows) + list(held),
                result.steady)
-    new = rows + result.proposed + result.disputed_rows
+    if result.claims:
+        _carry_ids(result.claims, list(claims), [])
+    new = rows + result.proposed + result.disputed_rows + result.claims
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)

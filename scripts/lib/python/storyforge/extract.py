@@ -847,6 +847,8 @@ If all three are yes, record it as one declarative sentence with its quote. Ther
 
 Always capture: names and their spellings; pronouns and gender; ages and dates; who is related to whom and how; who knows what, and who told them; injuries, illness, and possessions; where a person or object is when it carries past the scene (who holds the key, where the body lies, where someone is held or has gone); the time of day and day the scene occurs; elapsed time stated relative to another event ("three weeks ago," "eight days ago"); counts and quantities (how many survivors, how many records, how many guards); distances and travel times; stated rules of the world; anything a character promises or threatens; anything the narrator states as fact about the past; information conveyed in dialogue.
 
+A character's account in speech is that character's claim, not a fact about the world, when it is the only support for a commitment and tells of something that happened before this scene and isn't shown in it: an old story, backstory, who did what in the past. Record it, with claimed_by naming the speaker: characters tell the past their own way, and two of them may tell it differently. These are never claims: narration, a character's thoughts and memories, the story's present, a promise, threat or plan, a name, a kinship, an age, a date or an elapsed time.
+
 Never capture:
 - staging: who stands, sits, crosses the room or turns to the door, where people are as the scene ends, unless it carries past the scene (someone locked in, left behind, hiding, gone to another place);
 - set dressing: furniture, decor, food on the table, passing weather and light, unless it is a named object, a stated rule, something the story returns to, or what fixes the time of day;
@@ -879,6 +881,7 @@ COMMITMENTS_SCHEMA = _object({
         'mutable': {'type': 'string', 'enum': ['state', 'fixed']},
         'supersedes': {'type': 'string'},
         'ends': _ID_LIST,
+        'claimed_by': {'type': 'string'},
     })},
 })
 
@@ -938,22 +941,25 @@ Location: {skeleton.get('location', '')}
 - mutable: "state" if it can change later in the story (an injury, who holds the key, where someone is, what they know), "fixed" if it should hold for the whole book (a name, an age, a sister's name, a backstory event)
 - supersedes: the id of the earlier commitment above that this one replaces with a new value (a key changing hands, a new location), or blank. Copy each id you name, here and in ends, exactly as it is listed above; never make one up from a scene and words
 - ends: the ids of other earlier commitments above marked "state" that stop being true because of this one (he can grip a rope again once the wound has healed; she has left the house), or an empty list. A "registry" one you name is reported to the author rather than ended
+- claimed_by: for a character's claim (a spoken account of something that happened before this scene and isn't shown in it, as above), the id from the registries above of the character who says it; blank for everything else. A claim supersedes and ends nothing
 
 Record each commitment once. Don't restate an earlier or already-recorded commitment the scene only repeats. Answer with a JSON object holding the list `commitments` (an empty list is valid only when the scene truly commits to nothing)."""
 
 
 def parse_commitments_response(response: str, scene_id: str) -> list[dict[str, str]]:
     """Phase 4's structured reply (``COMMITMENTS_SCHEMA``) as a list of
-    ``{type, subject, statement, quote, mutable, supersedes, ends}`` (``ends``
-    a list of ids), dropping entries with no statement. Raises ValueError on
-    an unreadable reply."""
+    ``{type, subject, statement, quote, mutable, supersedes, ends,
+    claimed_by}`` (``ends`` a list of ids; ``claimed_by`` the speaker of a
+    claim in speech, #749, '' for anything else), dropping entries with no
+    statement. Raises ValueError on an unreadable reply."""
     data = _json_answer(response, COMMITMENTS_SCHEMA)
     out = []
     for item in data['commitments']:
         if not isinstance(item, dict):
             continue
         entry = {k: str(item.get(k) or '').strip()
-                 for k in ('type', 'subject', 'statement', 'quote', 'mutable', 'supersedes')}
+                 for k in ('type', 'subject', 'statement', 'quote', 'mutable', 'supersedes',
+                           'claimed_by')}
         ends = item.get('ends') or []
         entry['ends'] = [str(e).strip() for e in ends if str(e).strip()] \
             if isinstance(ends, list) else []
@@ -1076,6 +1082,13 @@ UNOFFERED = 'unoffered'
 ENDS_HERE = 'ends here'
 #: An `Ending`'s kind for an offered state ended here
 OFFERED_END = 'ends'
+#: A commitment whose only support is a character's spoken account of
+#: something before the scene and not shown in it (`claimed_by`; #749,
+#: Wrath Like Smoke: Poseidon tells who built Laomedon's wall two ways, and
+#: the gate raised it). Recorded as that character's claim (`ledger.CLAIM`
+#: status, `known_by` the speaker), never a binding fact: it supersedes and
+#: ends nothing, and no check holds a scene to it. Reported, never silent
+CLAIM = 'claim'
 
 
 @dataclass
@@ -1091,7 +1104,7 @@ class Ending:
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
 COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
                        'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced',
-                       ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE)
+                       ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE, CLAIM)
 
 #: How alike (`difflib` ratio) the words of an id that isn't in the ledger
 #: must be to those of one fact of the same scene for `_nearest_id` to
@@ -1199,6 +1212,14 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     (the gate), an `Ending` of kind `ENDS_HERE`: a claim the caller has the
     checker rule on before it records anything; without them (phase 4,
     which edits only its own rows) it is `ends registry`.
+
+    A claim (`claimed_by` set; #749) is a row of status `ledger.CLAIM`, its
+    `known_by` the speaker (resolved through `subjects`, as a subject is):
+    a character's account of the past in speech, recorded as what they
+    said and never as a fact about the world. Its `supersedes` and `ends`
+    are not applied (a claim changes no fact), and every claim is listed in
+    `CLAIM` with the links it named, so none is set aside silently. Its
+    quote is checked like any other.
     """
     from .common import csv_safe
     from . import ledger
@@ -1274,7 +1295,16 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
             else:
                 problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
         row['subject'] = subject
-        if item['supersedes']:
+        speaker = ' '.join(item.get('claimed_by', '').replace('|', ',').split())
+        if speaker:
+            # #749: what a character says happened, not what happened
+            row.update(status=ledger.CLAIM, known_by=subjects.get(speaker.lower(), speaker))
+            links = ([f'supersedes {item["supersedes"]}'] if item['supersedes'] else []) \
+                + [f'ends {gone}' for gone in item['ends']]
+            problems[CLAIM].append(
+                f'{scene_id}: {row["known_by"]}: "{csv_safe(item["statement"])}"'
+                + (f' ({", ".join(csv_safe(x) for x in links)}: not applied)' if links else ''))
+        elif item['supersedes']:
             ref, could = _link(item['supersedes'])
             target = offered.get(ref)
             if could:
@@ -1288,7 +1318,7 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                 problems['disagrees'].append(f'{scene_id}: {ref} (prose: {row["id"]})')
             else:
                 problems['supersedes'].append(f'{scene_id}: {ref}')
-        for gone in item['ends']:
+        for gone in ([] if speaker else item['ends']):
             gone, could = _link(gone)
             if could:
                 problems['ends'].append(f'{scene_id}: {gone} (matches {", ".join(could)}; '
