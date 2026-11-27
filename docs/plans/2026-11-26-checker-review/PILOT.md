@@ -125,6 +125,7 @@ Summary rows per mode: false stops (a scene stopped only by false findings), rea
 ## Decision rules (proposals)
 
 - **Fixes confirmed:** across the eight scenes, no stop rests on a false possession, injury, life, same-scene-`ends` or earlier-scene-promise finding, and Q7, Q20–22, Q79 and Q80 are all found. A false namesake or speech finding counts against #746 or #749, not this. If the rule fails, file it against the issue named and hold the redraft.
+  - **Changed 2026-11-27 (Ben, #774):** the recall half is judged by recall on `blocking-set` (its gates pass at their floors, `recall_book_wrath-gate` among them), not by every one of Q7, Q20–22 and Q79 being found in each run. A single case is caught by a fraction of readings (0.2–0.8), so requiring all of them in one run fails on chance. Q80 (the open checker's) is unchanged.
 - **Keep `tandem`** if the questions-only findings add at most 1 false stop over `open` across the eight, or if they add a real catch `open` missed and at most 2 false stops. **Switch to `open`** if they add 2 or more false stops and no real catch. At 0.48 per control scene, the eval rate would predict 3 or 4 false stops in eight.
 - **Turn thinking off** only if no end-of-scene state change is lost in any of the eight scenes, and no real finding or stop differs. Otherwise keep it on. The speed (about 42 s down to 16 s) and about $3 over the book are not worth a lost state change.
 
@@ -139,6 +140,7 @@ Run on storyforge 1.205.0 (main 360a6996b, after #768 and #773) against a remote
    - *Failed: recall.* Q20, Q21 and Q80 were found in every run, but Q7 in 2 of 3, Q79 in 1 of 3 and **Q22 in none**. The blocking read alone, run 5 more times, found Q22 3 of 5, Q7 3 of 5 and Q79 4 of 5. Each is caught by about 0.2–0.3 of single readings.
    - Not caused by any fix. The blocking request is byte-identical to Nov 16, with the same prompt and model, so this is the read's own run-to-run recall.
    - Filed as **#774** against #626 (the blocking read). **Hold the redraft** until Ben decides it.
+   - **Decided 2026-11-27 (Ben, #774):** three blocking readings (`BLOCKING_READINGS = 3`), and the recall half judged by `blocking-set` recall (the rule above). The redraft hold lifts when #774's PR merges, with `blocking-set` topped up to three readings and passing its floors.
 2. **Check method: keep `tandem`.**
    - *Questions-only findings:* 6 over the 16 tandem-mode runs, all false, and no real catch the open checker missed. They were 2 promises worded as the later state (Q36/Q37's pattern: `hector-has-ajax-belt`, `ajax-has-hector-sword`), 3 #769 source entering-state facts, and 1 knowledge fact read against "He took everything else in the city".
    - *False stops they add over `open`:* 0 with thinking on, 1 with thinking off. That one is `polydamas-reads-the-eagle`, stopped only by a source entering-state fact; `open` passed the scene.
@@ -263,6 +265,8 @@ Bump the version (patch for each).
   | **Total** | **about $375–405** | **past the $130 pre-approval, of which $17.39 is spent** |
 
   A third blocking reading would add about $0.035 a scene to each (half the two-reading read's $0.07, "Cost" above). Ben chooses what to record, and with what budget.
+
+  **Ben's decision (2026-11-27):** after #774 merges, record `gate-set-questions`, `gate-set` and `e4-generation` (3 runs each, cap $300); `e8-revision-safety` stays deferred.
 - **`baseline.json`** holds the four re-recorded suites' new entries. `--baseline` refuses while `gate-set` and `gate-set-questions` are stale with no old measurement to carry. Run it once those are recorded.
 
 After step 1 and after #768, since each changes the requests. #769 adds no miss of its own (no recorded suite is an adaptation), so it doesn't hold this step. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
@@ -317,7 +321,7 @@ States checked 2026-11-26.
 | #746 | open | Second half: fill `aliases` with patronymics and standing epithets at `source import` (`source.py`), from a series-repo table whose format isn't defined yet. The namesake guard itself merged (PR #754) |
 | #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings, which the author sets; iliad-adult PR 27 fixed the wrong Dolops and Melanippus ids in `ajax-holds-the-ships`). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
 | #769 | merged (PR #773) | The question layer asks the source's entering state with the brief's entering items (the latest 10 a scene, counted toward the cap of 30). It adds no recording miss: no recorded suite is an adaptation. Its acceptance case is a unit test, so the pilot is its first measurement: watch findings whose source is `source iliad:<scene>`. **Measured by the pilot:** 64 asked a run, 3 false findings (one conditional order) and 1 false stop. #775 proposes filtering by kind |
-| #774 | open (from the pilot) | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. It fails the recall half of "fixes confirmed" and **holds step 5** until decided. If it changes `BLOCKING_READINGS`, the blocking calls in `blocking-set` and the gate sets change too, so decide it before step 2's deferred suites. Recall by number of readings, measured on `blocking-set` (step 3), is on the issue |
+| #774 | decided 2026-11-27: three readings | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. Ben chose `BLOCKING_READINGS = 3`, and "fixes confirmed" now judges recall on `blocking-set`. It **holds step 5** until its PR merges. If it changes `BLOCKING_READINGS`, the blocking calls in `blocking-set` and the gate sets change too, so decide it before step 2's deferred suites. Recall by number of readings, measured on `blocking-set` (step 3), is on the issue |
 | #775 | open (from the pilot) | Leave conditional orders and constraints out of the source facts the question layer asks. It changes no recorded suite (none is an adaptation) |
 | #749 | merged (PR #768) | A claim in speech is not narration. Its recording misses are in step 2 |
 
@@ -332,6 +336,6 @@ Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a ju
 
 ### 5. Redraft *Wrath Like Smoke*
 
-**Held (2026-11-26)** on #774: the pilot's recall half of "fixes confirmed" failed.
+**Held (2026-11-26)** on #774: the pilot's recall half of "fixes confirmed" failed. Ben decided #774 on 2026-11-27 (three readings; recall judged on `blocking-set`), so the hold lifts once that PR merges.
 
 With the defaults decided and the evals green, redraft. Watch the first session's fix rounds, the stops per scene, and any finding of a kind the pilot cleared. The phantom-injury lines in iliad-adult PR 23 go with the redraft (README, "Decisions for Ben").

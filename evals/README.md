@@ -154,7 +154,7 @@ they carry counts and case ids, never a quote; per-case outcomes and findings
 go to the private repo (gitignored there).
 
 `blocking-set` measures today's blocking read (`storyforge.blocking`, #626,
-two readings per scene) against 147 known blocking slips (34 that gawain's
+`BLOCKING_READINGS` readings per scene: three since #774, two before) against 147 known blocking slips (34 that gawain's
 readers and Ben found, 10 from gawain's blocking run, 74 from Wrath's Nov 8
 gate run, each with its fix verdict, and 29 that report A judged real among
 the blocking read's findings on Wrath's 2026-11-16/17 overnight gate run), 13

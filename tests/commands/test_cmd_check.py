@@ -478,9 +478,9 @@ class TestKeepGoing:
         """One budget across the run: the forecast was within it, but the
         first scene actually cost more, so the rest would go over."""
         project_dir, _ = project
-        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3.5')   # three scenes' forecast fits (#774)
         self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
-        assert 3 * gate.RECHECK_COST_PER_SCENE <= 3
+        assert 3 * gate.recheck_cost_per_scene() <= 3.5
         seen = _fake_gate(monkeypatch, {}, spend=80_000)   # $2.00 a scene
         with pytest.raises(SystemExit) as e:
             cmd_check.main(['--pending', '--keep-going'])
@@ -489,7 +489,7 @@ class TestKeepGoing:
         assert set(gate.pending(project_dir)) == {SCENE, 'act2-sc01'}
         out = capsys.readouterr().out
         assert f'checking {SCENE} and the 1 scene(s) after it would bring this run to about ' \
-            in out and 'over the cost threshold ($3): stopped' in out
+            in out and 'over the cost threshold ($3.5): stopped' in out
         assert f'not checked, still pending: {SCENE}, act2-sc01' in out
 
 
@@ -748,9 +748,10 @@ class TestCheckBudget:
         """T-1: with --stop-at-first too: exit 1, the rest still pending, no
         --accept advice, and the report says what wasn't checked."""
         project_dir, _ = project
-        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3.5')   # three scenes' forecast fits (#774)
         for sid in ('act1-sc01', SCENE, 'act2-sc01'):
             gate.mark_pending(project_dir, sid, 'draft', 'stale')
+        assert 3 * gate.recheck_cost_per_scene() <= 3.5
         seen = _fake_gate(monkeypatch, {}, spend=80_000)   # $2.00 a scene
         with pytest.raises(SystemExit) as e:
             cmd_check.main(['--pending', '--stop-at-first'])

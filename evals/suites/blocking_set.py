@@ -1,5 +1,5 @@
 """The blocking set (#646): today's blocking read (`storyforge.blocking`,
-two readings per scene) against known blocking slips from *A Year and a
+`BLOCKING_READINGS` readings per scene, three since #774) against known blocking slips from *A Year and a
 Day* (gawain) and *Wrath Like Smoke* (iliad-adult), and clean scenes for
 false alarms. See ``evals/blocking_set``.
 
