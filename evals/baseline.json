@@ -15,25 +15,25 @@
     {
       "by_code": {},
       "cost": {
-        "calls": 241,
-        "input_tokens": 1017432,
-        "output_tokens": 246236,
-        "replayed_calls": 241,
+        "calls": 361,
+        "input_tokens": 1527708,
+        "output_tokens": 367608,
+        "replayed_calls": 361,
         "unpriced_calls": 0,
-        "usd_if_live": 8.9944,
+        "usd_if_live": 13.463,
         "usd_spent": 0.0
       },
       "description": "Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; private set",
-      "duration_s": 0.47,
+      "duration_s": 0.57,
       "error": null,
       "frozen": true,
       "gates": [
         {
-          "actual": 0.6027,
+          "actual": 0.6712,
           "name": "recall",
           "op": "==",
           "passed": true,
-          "threshold": 0.6027
+          "threshold": 0.6712
         },
         {
           "actual": 0.7442,
@@ -43,67 +43,67 @@
           "threshold": 0.7442
         },
         {
-          "actual": 0.8,
+          "actual": 0.8667,
           "name": "recall_posture",
           "op": "==",
           "passed": true,
-          "threshold": 0.8
+          "threshold": 0.8667
         },
         {
-          "actual": 0.375,
+          "actual": 0.5625,
           "name": "recall_sightline",
           "op": "==",
           "passed": true,
-          "threshold": 0.375
+          "threshold": 0.5625
         },
         {
-          "actual": 0.4615,
+          "actual": 0.5385,
           "name": "recall_worn",
           "op": "==",
           "passed": true,
-          "threshold": 0.4615
+          "threshold": 0.5385
         },
         {
-          "actual": 0.5789,
+          "actual": 0.6316,
           "name": "recall_position",
           "op": "==",
           "passed": true,
-          "threshold": 0.5789
+          "threshold": 0.6316
         },
         {
-          "actual": 0.3333,
+          "actual": 0.5,
           "name": "recall_light",
           "op": "==",
           "passed": true,
-          "threshold": 0.3333
+          "threshold": 0.5
         },
         {
-          "actual": 0.5333,
+          "actual": 0.6667,
           "name": "recall_other",
           "op": "==",
           "passed": true,
-          "threshold": 0.5333
+          "threshold": 0.6667
         },
         {
-          "actual": 0.4318,
+          "actual": 0.5,
           "name": "recall_book_gawain",
           "op": "==",
           "passed": true,
-          "threshold": 0.4318
+          "threshold": 0.5
         },
         {
-          "actual": 0.726,
+          "actual": 0.7808,
           "name": "recall_book_wrath",
           "op": "==",
           "passed": true,
-          "threshold": 0.726
+          "threshold": 0.7808
         },
         {
-          "actual": 0.48,
+          "actual": 0.6,
           "name": "recall_book_wrath-gate",
           "op": "==",
           "passed": true,
-          "threshold": 0.48
+          "threshold": 0.6
         },
         {
           "actual": 1.0,
@@ -113,25 +113,25 @@
           "threshold": 1.0
         },
         {
-          "actual": 0.3235,
+          "actual": 0.3824,
           "name": "recall_found_by_readers",
           "op": "==",
           "passed": true,
-          "threshold": 0.3235
+          "threshold": 0.3824
         },
         {
-          "actual": 0.6875,
+          "actual": 0.7589,
           "name": "recall_found_by_tool",
           "op": "==",
           "passed": true,
-          "threshold": 0.6875
+          "threshold": 0.7589
         },
         {
-          "actual": 1.27,
+          "actual": 2.12,
           "name": "false_alarms_per_10k",
           "op": "==",
           "passed": true,
-          "threshold": 1.27
+          "threshold": 2.12
         },
         {
           "actual": 1,
@@ -141,11 +141,11 @@
           "threshold": 1
         },
         {
-          "actual": 122,
+          "actual": 150,
           "name": "flags",
           "op": "==",
           "passed": true,
-          "threshold": 122
+          "threshold": 150
         },
         {
           "actual": 146,
@@ -167,44 +167,44 @@
         "cases_posture": 15,
         "cases_sightline": 16,
         "cases_worn": 13,
-        "caught": 88,
-        "clean_flags": 3,
+        "caught": 98,
+        "clean_flags": 5,
         "clean_scenes": 14,
         "clean_words": 23640,
         "debatable_cases": 9,
-        "debatable_flagged": 3,
-        "false_alarms_per_10k": 1.27,
-        "flags": 122,
+        "debatable_flagged": 4,
+        "false_alarms_per_10k": 2.12,
+        "flags": 150,
         "left_cases": 13,
         "left_flagged": 1,
-        "recall": 0.6027,
-        "recall_book_gawain": 0.4318,
-        "recall_book_wrath": 0.726,
-        "recall_book_wrath-gate": 0.48,
+        "recall": 0.6712,
+        "recall_book_gawain": 0.5,
+        "recall_book_wrath": 0.7808,
+        "recall_book_wrath-gate": 0.6,
         "recall_book_wrath-gate-fix": 1.0,
-        "recall_found_by_readers": 0.3235,
-        "recall_found_by_tool": 0.6875,
+        "recall_found_by_readers": 0.3824,
+        "recall_found_by_tool": 0.7589,
         "recall_hands": 0.7442,
-        "recall_light": 0.3333,
-        "recall_other": 0.5333,
-        "recall_position": 0.5789,
-        "recall_posture": 0.8,
-        "recall_sightline": 0.375,
-        "recall_worn": 0.4615,
-        "unlabelled_flags": 26,
-        "unlabelled_per_10k": 1.42,
+        "recall_light": 0.5,
+        "recall_other": 0.6667,
+        "recall_position": 0.6316,
+        "recall_posture": 0.8667,
+        "recall_sightline": 0.5625,
+        "recall_worn": 0.5385,
+        "unlabelled_flags": 39,
+        "unlabelled_per_10k": 2.13,
         "unverified_flags": 0
       },
       "mode": "replay",
       "notes": [
-        "missed (58): gawain-001, gawain-002, gawain-004, gawain-005, gawain-006, gawain-009, gawain-010, gawain-011, gawain-014, gawain-015, gawain-017, gawain-018, gawain-021, gawain-022, gawain-023, gawain-025, gawain-026, gawain-027, gawain-028, gawain-029, gawain-031, gawain-033, gawain-034, gawain-036, gawain-043, wrath-005, wrath-006, wrath-016, wrath-017, wrath-023, wrath-025, wrath-030, wrath-035, wrath-038, wrath-039, wrath-043, wrath-049, wrath-053, wrath-054, wrath-059, wrath-062, wrath-065, wrath-068, wrath-069, wrath-070, wrath-gate-005, wrath-gate-009, wrath-gate-013, wrath-gate-014, wrath-gate-018, wrath-gate-019, wrath-gate-020, wrath-gate-021, wrath-gate-024, wrath-gate-029, wrath-gate-031, wrath-gate-033, wrath-gate-034",
+        "missed (48): gawain-001, gawain-002, gawain-004, gawain-006, gawain-009, gawain-010, gawain-014, gawain-015, gawain-017, gawain-018, gawain-021, gawain-022, gawain-023, gawain-025, gawain-026, gawain-027, gawain-028, gawain-029, gawain-031, gawain-033, gawain-034, gawain-043, wrath-005, wrath-016, wrath-017, wrath-023, wrath-025, wrath-035, wrath-038, wrath-039, wrath-043, wrath-049, wrath-053, wrath-054, wrath-059, wrath-065, wrath-069, wrath-070, wrath-gate-009, wrath-gate-014, wrath-gate-018, wrath-gate-019, wrath-gate-020, wrath-gate-021, wrath-gate-029, wrath-gate-031, wrath-gate-033, wrath-gate-034",
         "flagged a reading left as plausible: gawain-057",
-        "debatable cases (not in recall, no false alarm): 3 of 9 flagged",
+        "debatable cases (not in recall, no false alarm): 4 of 9 flagged",
         "book-scope cases (need other scenes; not in recall): 0 of 1 caught",
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:53:06+00:00",
+      "started_at": "2026-11-27T13:49:48+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
@@ -220,7 +220,7 @@
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 2.95,
+      "duration_s": 2.93,
       "error": null,
       "frozen": true,
       "gates": [
@@ -400,15 +400,15 @@
         "flagged a reading left as plausible: gawain-050",
         "debatable cases (not in recall, no false alarm): 2 of 9 flagged",
         "book-scope cases (need other scenes; not in recall): 0 of 1 caught",
-        "side by side with the read (its last run): caught by both 25, only here 7, only by the read 63, of 146",
-        "only the read caught: gawain-003, gawain-007, gawain-008, gawain-012, gawain-016, gawain-019, gawain-020, gawain-030, gawain-032, gawain-035, gawain-038, gawain-039, gawain-040, gawain-041, wrath-002, wrath-003, wrath-004, wrath-007, wrath-009, wrath-012, wrath-015, wrath-018, wrath-019, wrath-020, wrath-026, wrath-027, wrath-028, wrath-031, wrath-032, wrath-034, wrath-037, wrath-041, wrath-042, wrath-044, wrath-045, wrath-046, wrath-047, wrath-050, wrath-055, wrath-056, wrath-057, wrath-058, wrath-060, wrath-061, wrath-064, wrath-066, wrath-067, wrath-071, wrath-072, wrath-073, wrath-gate-001, wrath-gate-002, wrath-gate-010, wrath-gate-011, wrath-gate-015, wrath-gate-fix-001, wrath-gate-017, wrath-gate-fix-002, wrath-gate-025, wrath-gate-026, wrath-gate-030, wrath-gate-fix-003, wrath-gate-032",
+        "side by side with the read (its last run): caught by both 25, only here 7, only by the read 73, of 146",
+        "only the read caught: gawain-003, gawain-005, gawain-007, gawain-008, gawain-011, gawain-012, gawain-016, gawain-019, gawain-020, gawain-030, gawain-032, gawain-035, gawain-036, gawain-038, gawain-039, gawain-040, gawain-041, wrath-002, wrath-003, wrath-004, wrath-006, wrath-007, wrath-009, wrath-012, wrath-015, wrath-018, wrath-019, wrath-020, wrath-026, wrath-027, wrath-028, wrath-030, wrath-031, wrath-032, wrath-034, wrath-037, wrath-041, wrath-042, wrath-044, wrath-045, wrath-046, wrath-047, wrath-050, wrath-055, wrath-056, wrath-057, wrath-058, wrath-060, wrath-061, wrath-062, wrath-064, wrath-066, wrath-067, wrath-068, wrath-071, wrath-072, wrath-073, wrath-gate-001, wrath-gate-002, wrath-gate-005, wrath-gate-010, wrath-gate-011, wrath-gate-013, wrath-gate-015, wrath-gate-fix-001, wrath-gate-017, wrath-gate-024, wrath-gate-fix-002, wrath-gate-025, wrath-gate-026, wrath-gate-030, wrath-gate-fix-003, wrath-gate-032",
         "only this caught: gawain-023, gawain-027, gawain-029, gawain-043, wrath-005, wrath-038, wrath-054",
         "left readings flagged: here 1, by the read 1",
         "91 scene(s) had something the sheet could not check (counts per scene, private: not_checked in results/latest-stage-sheet.json)",
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:53:07+00:00",
+      "started_at": "2026-11-27T13:49:49+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
