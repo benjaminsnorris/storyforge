@@ -925,7 +925,6 @@ The checker review of *Wrath Like Smoke*'s overnight run (2026-11-16/17, `docs/p
 
   The rule (the coordinator's, for PR #754): recall at least 0.413 on run 1, then the fewest false alarms summed over three runs, then the lower cap. Three tie at 7; of the two at cap 30, the new order has the better recall over the runs and fewer control stops, so it was kept. **None returns to the old 4:** the extra false alarms come with the PR's other changes, not with the order or the cap (every new configuration has 7 or 8), and which of them causes it wasn't separated. The cap of 60 bought one more catch in run 2 for one more false alarm. A cap-30 run asks exactly the first call of a cap-60 run, so it replayed from those recordings for nothing.
 
-
 ## A provisional commit kept the true fact behind a false finding out of the ledger (#735)
 
 Report E of the checker review (`docs/plans/2026-11-26-checker-review/`, section 4) found *Wrath Like Smoke*'s ledger missing Pandarus's death, Aeneas's return to the fight, the lot falling to Ajax and Diomedes handing the spoils to Odysseus. Each was extracted, then held back at a provisional commit (`write --keep-going`) as "states what stopped the commit", and the finding was false (Pandarus's: Homer's own oddity at 5.290). A missing fact is a question the question checker can never ask, and a death the dead-character check can't see.
