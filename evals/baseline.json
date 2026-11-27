@@ -1122,31 +1122,22 @@
     {
       "by_code": {
         "PRM": {
-          "broken_promises": 2
-        },
-        "REL": {
-          "contradictions": 1
-        },
-        "TIM": {
-          "contradictions": 4
-        },
-        "WLD": {
-          "contradictions": 1
+          "broken_promises": 0
         }
       },
-      "carried_over": true,
       "cost": {
-        "calls": 481,
-        "input_tokens": 2198214,
-        "output_tokens": 434604,
-        "replayed_calls": 481,
+        "calls": 755,
+        "input_tokens": 3907380,
+        "output_tokens": 1384732,
+        "replayed_calls": 755,
         "unpriced_calls": 0,
-        "usd_if_live": 24.7895,
+        "usd_if_live": 21.3904,
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 9.22,
+      "duration_s": 9.24,
       "error": null,
+      "frozen": true,
       "gates": [
         {
           "actual": 23,
@@ -1157,75 +1148,106 @@
         }
       ],
       "metrics": {
-        "bps": 0.095,
-        "bps_all": 0.087,
-        "broken_promises": 2,
-        "broken_promises_all": 2,
-        "checker_flags": 1,
-        "contradictions": 6,
-        "contradictions_all": 7,
-        "contradictions_in_failed": 1,
+        "bps": 0.0,
+        "bps_all": 0.13,
+        "broken_musts": 0,
+        "broken_musts_all": 0,
+        "broken_promises": 0,
+        "broken_promises_all": 3,
+        "checker_flags": 2,
+        "contradictions": 0,
+        "contradictions_all": 8,
+        "contradictions_in_failed": 2,
         "contradictions_passed": 6,
-        "cp10k": 2.871,
-        "cp10k_all": 3.104,
-        "cp10k_checker_all": 0.443,
-        "cp10k_passed": 2.761,
-        "gate_catch_rate": 0.143,
+        "cp10k": 0.0,
+        "cp10k_all": 3.425,
+        "cp10k_checker_all": 0.856,
+        "cp10k_passed": 3.116,
+        "gate_advisory": 63,
+        "gate_catch_rate": 0.167,
         "gate_caught": 1,
-        "gate_failed": 1,
-        "gate_false_alarm": 0,
-        "gate_fixed": 12,
-        "gate_missed": 6,
-        "length_drift": 0.062,
+        "gate_failed": 4,
+        "gate_false_alarm": 3,
+        "gate_fixed": 15,
+        "gate_missed": 5,
+        "length_drift": 0.096,
         "refused": 0,
         "scenes": 23,
-        "scenes_passed": 22,
-        "scenes_to_first_gate_failure": 21,
+        "scenes_passed": 19,
+        "scenes_to_first_gate_failure": 2,
         "target_words_all": 21370,
-        "voi": 4.804,
+        "voi": 4.75,
         "voi_author": 4.652,
-        "words": 20902,
-        "words_all": 22550
+        "words": 1766,
+        "words_all": 23355
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 955 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    TIM: The scene implies Claire has been held longer than nine days, since she has lost count of the days past nine, but the reference fixes her captivity at nine days",
-        "harmons-hands: 788 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "waking-maren: 1040 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "waking-hank: 1065 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "the-school: 912 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "advocate: 984 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    REL: The scene has Maren call Delgado by the first name 'Danny', which merges him with Danny Vasquez, who is listed in the character list as a separate person.",
-        "maren-runs: 950 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "engineer: 951 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "name-surfaces: 819 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "voicemail: 922 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    TIM: Marie's first voicemail, left when Claire was already missing with her car still at work, is dated eleven days ago, but earlier scenes and the reference fix Cla",
-        "missing-persons: 1436 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    TIM: The scene says Maren holds a sensory inventory of Claire's 'last nine days', but Marie's first voicemail reporting Claire missing was timestamped eleven days ag",
-        "driving-west: 780 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "pewter-town: 1329 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "diner: 1099 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "two-hours: 1117 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "plan: 971 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "dark-road: 869 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    WLD: The scene puts Harmon's drive at an unmarked gap with no mailbox, a quarter mile before box 4718, with the cattle guard forty yards down it; earlier scenes plac",
-        "building: 1101 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "twelve-minutes: 917 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "claire: 1077 words, 0 contradiction(s), 2 broken promise(s), gate clean\n    PRM goal: The scene ends with Maren holding Claire, who is still zip-tied to the chair: the ties are never cut and Claire is never brought out of the building, so the ext\n    PRM knowledge_out: Claire is still bound inside the building at the end of the scene, so she has not yet been recovered from captivity.",
-        "drive: 820 words, 1 contradiction(s), 0 broken promise(s), gate caught\n    TIM: Hank tells 911 that Claire was held for eleven days, but the reference material and earlier scenes put her captivity at nine days, and this same scene says nine",
-        "bench: 1175 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    PHY: The charge nurse is said to have cut Claire's scrubs off, but Claire was wearing jeans in captivity and when she was rescued.",
-        "eleven-days: 473 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
-        "checker voicemail: a Friday 1 day(s) after waking-maren's Tuesday",
-        "gate: 23 scene(s) gated, 12 fixed, 1 still failing after the fixes (write would stop at the first; E4 drafts on): drive",
-        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or character-bible.md): TIM contradicts character-bible.md: \"Said there was a woman who'd been held for eleven days and they wer",
-        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or prep): PHY contradicts prep: \"He called 911 from his phone on the dash.\" — Here Hank calls on his own phone and gives his nam",
-        "  drive: NOTE (facts in force left out of what extraction was offered, over the cap (extract.MAX_KNOWN_COMMITMENTS); the scene's people and place kept first): drive (187)",
-        "  drive: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
-        "  drive: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep 36h; physical_state_in: operational fatigue; physical_state_in: somatic contamination residue; physical_state",
-        "  drive: NOTE (not recorded, judged not to last beyond the scene): Claire lies across the truck's bench seat with her head in Maren's lap and her knees bent, with Rook beside her. (Her position on the seat in ",
+        "claires-cold: 926 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "harmons-hands: 840 words, 0 contradiction(s), 0 broken promise(s), gate false alarm",
+        "waking-maren: 1031 words, 0 contradiction(s), 1 broken promise(s), gate clean (after write would have stopped)\n    PRM physical_state_out: She wakes in bed at 2:47 and only reaches the kitchen afterward; the scene ends with the stove clock (three minutes fast) reading 2:58, so the kitchen moment is",
+        "waking-hank: 961 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "the-school: 994 words, 0 contradiction(s), 0 broken promise(s), gate false alarm (after write would have stopped)",
+        "advocate: 1130 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    PHY: The scene puts the dream-echo of the dead ring finger and pinky, and the man's thumb rubbing two dead fingers, on Maren's left hand, but the earlier scenes plac",
+        "maren-runs: 1008 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "engineer: 922 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "name-surfaces: 808 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "voicemail: 998 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "missing-persons: 1407 words, 2 contradiction(s), 0 broken promise(s), gate caught (after write would have stopped)\n    KNO: Maren knows about the lanyard photo the abductor held in the parking lot, but that detail surfaced only in Hank's perpetrator dream; Maren dreams from the victi\n    TIM: Claire is still nine days missing after Maren's fourth night of dreams, but Claire had already counted nine days during the third-night dream, and at least a da",
+        "driving-west: 857 words, 0 contradiction(s), 0 broken promise(s), gate false alarm (after write would have stopped)",
+        "pewter-town: 1462 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "diner: 1140 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "two-hours: 1231 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    TIM: Hank says Harmon loosened the right tie \"tonight\", but that loosening happened in an earlier night's dream; Hank stayed awake all of last night without dreaming",
+        "plan: 1009 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    KNO: The scene calls the name Hank signed a 'dead man's name', but Dale Harmon is alive: they have just identified him as the man currently holding Claire, and nobod",
+        "dark-road: 875 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "building: 1073 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "twelve-minutes: 977 words, 2 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    PHY: This scene puts the four-dial combination padlock on the hasp door, but earlier scenes place the combination padlock on the main door and only a heavy-gauge has\n    KNO: The scene says Maren spoke four words at the side wall, but in the previous scene she said five: 'She's in there. She's alive.'",
+        "claire: 1151 words, 0 contradiction(s), 1 broken promise(s), gate clean (after write would have stopped)\n    PRM goal: The scene ends with Maren catching Claire inside the building after cutting the ties; Claire is never brought out of the room, so the extraction does not happen",
+        "drive: 927 words, 1 contradiction(s), 1 broken promise(s), gate missed (after write would have stopped)\n    PHY: Claire's ankles are zip-tied to the chair legs, but the previous scene had her pitch forward out of the chair the moment her wrists were freed, and earlier Harm\n    PRM key_actions: Maren cuts all the zip ties, wrists in the earlier scene and ankles here, while Hank stays at the door and only carries Claire.",
+        "bench: 1118 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "eleven-days: 510 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "checker eleven-days: the text says \"eleven days\" (about 11 day(s)), but the calendar puts it 0 day(s) on",
+        "checker plan: a Saturday 1 day(s) after voicemail's Thursday",
+        "gate: 23 scene(s) gated, 15 fixed, 4 still failing after the fixes (write would stop at the first; E4 drafts on): harmons-hands, the-school, missing-persons, driving-west",
+        "  harmons-hands: CONTRADICTION: BLK breaks the scene's own blocking: \"The ring finger and the pinky come away stiff and pale gray, the nails darker.\" — (unclear) He checks the right hand first and 'knows the left is b",
+        "  harmons-hands: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
+        "  harmons-hands: NOTE (brief items in words, no ledger fact; checked as words): knowledge_in: none-established; physical_state_out: hands burning with involuntary somatic residue; physical_state_out: internal partitio",
+        "  harmons-hands: NOTE (not recorded, judged not to last beyond the scene): The captor loosened the zip tie at her wrist by exactly one notch, enough for circulation but not comfort. (The one-notch loosening is a one-o",
+        "  harmons-hands: NOTE (continuity, not checked or advisory): place: 2 presence record(s) at a place locations.csv doesn't name (or the scene names none), not compared",
+        "  harmons-hands: NOTE (questions: what was asked, and what was not checked): 24 question(s) about facts and disputes and 15 about brief promises asked, 4 subject(s) present; 4 fact(s) with no subject, so their presenc",
+        "  harmons-hands: NOTE (tandem: which checkers read it, and where they disagree): first run: the open checker (2 reading(s)) and the questions both read it",
+        "  the-school: CONTRADICTION: BLK breaks the scene's own blocking: \"Then the second crack, south of the window, the mirror of the first. Then the pier between the two windows, where they met.\" — (contradiction) The ",
+        "  the-school: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
+        "  the-school: NOTE (not recorded, judged not to last beyond the scene): The district's facilities man left the gym side door propped with cardboard and a note saying the heat is on a timer. (Incidental set dressing",
+        "  the-school: NOTE (continuity, not checked or advisory): 1 earlier scene(s)' typed state not read: harmons-hands (its typed state is of earlier prose); possession: 1 object(s) named without an owner, read as the h",
+        "  the-school: NOTE (questions: what was asked, and what was not checked): 17 question(s) about facts and disputes and 3 about brief promises asked, 3 subject(s) present; 11 fact(s) with no subject, so their presenc",
+        "  the-school: NOTE (tandem: which checkers read it, and where they disagree): re-check: no open reading; the open checker found nothing on the prose before",
+        "  missing-persons: CONTRADICTION [open checker] [from the first run; its words untouched by the fix]: TIM contradicts waking-maren: \"She'd made it at six, after the fourth night, after 2:47 again and the hood and the ch",
+        "  missing-persons: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
+        "  missing-persons: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep 4 nights; physical_state_in: somatic dissociation from recurring dreams; physical_state_out: decision-committ",
+        "  missing-persons: NOTE (continuity, not checked or advisory): 1 earlier scene(s)' typed state not read: harmons-hands (its typed state is of earlier prose); knowledge: 2 fact(s) acted on before the scene that shows the",
+        "  missing-persons: NOTE (questions: what was asked, and what was not checked): 30 question(s) about facts and disputes and 13 about brief promises asked, 12 subject(s) present; 19 fact(s) with no subject, so their prese",
+        "  missing-persons: NOTE (tandem: which checkers read it, and where they disagree): re-check: no open reading; of the open checker's 2 finding(s) on the prose before, 1 stand (their words untouched), 1 asked again in thi",
+        "  driving-west: CONTRADICTION: BLK breaks the scene's own blocking: \"Bend was still dark at six-ten.\" — (contradiction) The phone call happens at eight o'clock, before he finishes the coffee and packs, yet he is driv",
+        "  driving-west: CONTRADICTION: BLK breaks the scene's own blocking: \"He took it off and laid it on the console between the seats, palm down, and it kept going against the plastic.\" — (impossible) The driver sits on t",
+        "  driving-west: ADVISORY (a broken promise; not blocking: the brief is a plan and the prose stands. Amend the brief, or mark the beat `must:` to require it; listed in working/gate-advisory.csv) [questions]: PRM the b",
+        "  driving-west: ADVISORY (a broken promise; not blocking: the brief is a plan and the prose stands. Amend the brief, or mark the beat `must:` to require it; listed in working/gate-advisory.csv) [questions]: PRM the b",
+        "  driving-west: ADVISORY (a broken promise; not blocking: the brief is a plan and the prose stands. Amend the brief, or mark the beat `must:` to require it; listed in working/gate-advisory.csv) [questions]: PRM the b",
+        "  driving-west: ADVISORY (a broken promise; not blocking: the brief is a plan and the prose stands. Amend the brief, or mark the beat `must:` to require it; listed in working/gate-advisory.csv) [questions]: PRM the b",
+        "  driving-west: ADVISORY (a broken promise; not blocking: the brief is a plan and the prose stands. Amend the brief, or mark the beat `must:` to require it; listed in working/gate-advisory.csv) [questions]: PRM the b",
+        "  driving-west: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
+        "  driving-west: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep three hours, tremor in hands, running on residual adrenaline and contaminated dream-knowledge; physical_state",
+        "  driving-west: NOTE (not recorded, judged not to last beyond the scene): Hank pours his coffee into a steel thermos and leaves the mug in the sink. (Thermos and mug left in the sink are momentary domestic detail, th",
+        "  driving-west: NOTE (continuity, not checked or advisory): 2 earlier scene(s)' typed state not read: harmons-hands (its typed state is of earlier prose); missing-persons (its typed state is of earlier prose); posses",
+        "  driving-west: NOTE (questions: what was asked, and what was not checked): 30 question(s) about facts and disputes and 11 about brief promises asked, 8 subject(s) present; 20 fact(s) with no subject, so their presen",
+        "  driving-west: NOTE (tandem: which checkers read it, and where they disagree): re-check: no open reading; the open checker found nothing on the prose before",
         "cp10k, contradictions, broken_promises, bps and words count the scenes write would have drafted: up to the first refusal, or through the first gate failure, inclusive (before this measure they counted every scene; those figures are now *_all). scenes, length_drift and voi cover every drafted scene. The *_all figures count every drafted scene (the scenes after the first failure are drafted from a ledger missing its facts). cp10k_passed is the rate in the scenes the gate passed, anywhere in the act (what write would commit). gate_caught / gate_missed / gate_false_alarm are per scene against the judge's contradictions, over every drafted scene.",
         "The gate's checker and the judge are both Opus continuity reviews, so part of a CP10k drop may be the two agreeing; the human spot-check is still owed.",
         "Prior prose: full.",
         "Judge stands in for the plan's human spot-check (still owed). Drafted sequentially and gated, as write does by default; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-11-08T08:16:57+00:00",
+      "stale": null,
+      "started_at": "2026-11-27T19:06:54+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -1641,54 +1663,293 @@
       "suite": "e9-reference"
     },
     {
-      "by_code": {},
+      "by_code": {
+        "KNO": {
+          "caught": 2,
+          "positives": 3,
+          "recall": 0.6667
+        },
+        "PHY": {
+          "caught": 3,
+          "positives": 8,
+          "recall": 0.375
+        },
+        "REL": {
+          "caught": 1,
+          "positives": 1,
+          "recall": 1.0
+        },
+        "TIM": {
+          "caught": 7,
+          "positives": 14,
+          "recall": 0.5
+        },
+        "TRT": {
+          "caught": 12,
+          "positives": 20,
+          "recall": 0.6
+        }
+      },
       "cost": {
-        "calls": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "replayed_calls": 0,
+        "calls": 800,
+        "input_tokens": 2853255,
+        "output_tokens": 1683150,
+        "replayed_calls": 800,
         "unpriced_calls": 0,
-        "usd_if_live": 0.0,
+        "usd_if_live": 41.8455,
         "usd_spent": 0.0
       },
       "description": "The gate (open checker) alone on E8's recorded, judged replays; private set",
-      "duration_s": 0.0,
+      "duration_s": 41.98,
       "error": null,
       "frozen": true,
-      "gates": [],
-      "metrics": {},
+      "gates": [
+        {
+          "actual": 0.5435,
+          "name": "recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.5435
+        },
+        {
+          "actual": 0.5244,
+          "name": "recall_per_case",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.5244
+        },
+        {
+          "actual": 10,
+          "name": "cases_caught",
+          "op": "==",
+          "passed": true,
+          "threshold": 10
+        },
+        {
+          "actual": 0.9348,
+          "name": "stop_rate_positive",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.9348
+        },
+        {
+          "actual": 6,
+          "name": "false_alarm_on_fact",
+          "op": "==",
+          "passed": true,
+          "threshold": 6
+        },
+        {
+          "actual": 0.8065,
+          "name": "stop_rate_control",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.8065
+        },
+        {
+          "actual": 0,
+          "name": "unfinished",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 46,
+          "name": "positives",
+          "op": ">=",
+          "passed": true,
+          "threshold": 40
+        }
+      ],
+      "metrics": {
+        "cases": 15,
+        "cases_caught": 10,
+        "caught": 25,
+        "controls": 31,
+        "false_alarm_on_fact": 6,
+        "inherited_on_positive": 0,
+        "positives": 46,
+        "recall": 0.5435,
+        "recall_per_case": 0.5244,
+        "stop_rate_control": 0.8065,
+        "stop_rate_positive": 0.9348,
+        "stopped_control": 25,
+        "stopped_positive": 43,
+        "unfinished": 0
+      },
       "mode": "replay",
-      "notes": [],
-      "stale": "unavailable on this machine, so nothing was measured or spent: gate-set is not recorded yet (no recordings at /Users/cadencedev/Developer/evals/gate-set/cassettes/gate-set); it is recorded when the question layer is a candidate to replace the open checker (#677): python3 evals/run.py --mode record --suite gate-set --runs 3 --over-budget \"<who approved, why>\" (the first recording has no forecast in the baseline; later ones drop --over-budget while the budget allows)",
-      "started_at": "2026-11-15T20:03:55+00:00",
-      "status": "stale",
-      "suite": "gate-set",
-      "unavailable": true
+      "notes": [
+        "missed (21): governor-022-72ec7272, governor-024-9a736727, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, lantern-folk-020-56160318, shared-dark-030-482f789c, shared-dark-037-facec288, shared-dark-041-795f038c, shared-dark-041-7ef1b840, thornwall-020-21146a65, thornwall-024-718a3574, thornwall-024-9933d88f, thornwall-024-a4ac8b76, thornwall-025-08d5410f, thornwall-025-0e15835e, thornwall-025-289102b3, thornwall-025-b1cf8864, thornwall-025-d1ded18b, thornwall-025-edcbfbdd",
+        "a finding on a control's correct statement of the fact: governor-018-3fc5a808, governor-018-bd27293c, governor-023-07f75dbc, governor-025-2edc3822, governor-026-0e79a746, governor-026-84413638",
+        "labels are E8's Opus judge on one known error per item: a stop for another reason is not scored (stopped_* counts it), and recall_per_case weighs each case the same",
+        "per-item outcomes (private): gate-set/results/latest.json in the storyforge-evals repo"
+      ],
+      "stale": null,
+      "started_at": "2026-11-27T19:07:03+00:00",
+      "status": "pass",
+      "suite": "gate-set"
     },
     {
-      "by_code": {},
+      "by_code": {
+        "KNO": {
+          "caught": 1,
+          "positives": 3,
+          "recall": 0.3333
+        },
+        "PHY": {
+          "caught": 3,
+          "positives": 8,
+          "recall": 0.375
+        },
+        "REL": {
+          "caught": 1,
+          "positives": 1,
+          "recall": 1.0
+        },
+        "TIM": {
+          "caught": 7,
+          "positives": 14,
+          "recall": 0.5
+        },
+        "TRT": {
+          "caught": 5,
+          "positives": 20,
+          "recall": 0.25
+        }
+      },
       "cost": {
-        "calls": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "replayed_calls": 0,
+        "calls": 732,
+        "input_tokens": 4078254,
+        "output_tokens": 2025712,
+        "replayed_calls": 732,
         "unpriced_calls": 0,
-        "usd_if_live": 0.0,
+        "usd_if_live": 15.1639,
         "usd_spent": 0.0
       },
       "description": "The gate with the question layer (#649) alone on E8's recorded, judged replays; private set",
-      "duration_s": 0.0,
+      "duration_s": 40.2,
       "error": null,
       "frozen": true,
-      "gates": [],
-      "metrics": {},
+      "gates": [
+        {
+          "actual": 0.3696,
+          "name": "recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.3696
+        },
+        {
+          "actual": 0.4222,
+          "name": "recall_per_case",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.4222
+        },
+        {
+          "actual": 9,
+          "name": "cases_caught",
+          "op": "==",
+          "passed": true,
+          "threshold": 9
+        },
+        {
+          "actual": 0.8043,
+          "name": "stop_rate_positive",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.8043
+        },
+        {
+          "actual": 1,
+          "name": "false_alarm_on_fact",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 0.6129,
+          "name": "stop_rate_control",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.6129
+        },
+        {
+          "actual": 0,
+          "name": "unfinished",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0.4359,
+          "name": "recall_seeded",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.4359
+        },
+        {
+          "actual": 0.5,
+          "name": "recall_asked",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.5
+        },
+        {
+          "actual": 32,
+          "name": "asked_positives",
+          "op": "==",
+          "passed": true,
+          "threshold": 32
+        },
+        {
+          "actual": 23,
+          "name": "asked_controls",
+          "op": "==",
+          "passed": true,
+          "threshold": 23
+        },
+        {
+          "actual": 46,
+          "name": "positives",
+          "op": ">=",
+          "passed": true,
+          "threshold": 40
+        }
+      ],
+      "metrics": {
+        "asked_controls": 23,
+        "asked_positives": 32,
+        "cases": 15,
+        "cases_caught": 9,
+        "caught": 17,
+        "controls": 31,
+        "false_alarm_on_fact": 1,
+        "inherited_on_positive": 0,
+        "positives": 46,
+        "recall": 0.3696,
+        "recall_asked": 0.5,
+        "recall_per_case": 0.4222,
+        "recall_seeded": 0.4359,
+        "seeded_positives": 39,
+        "stop_rate_control": 0.6129,
+        "stop_rate_positive": 0.8043,
+        "stopped_control": 19,
+        "stopped_positive": 37,
+        "unfinished": 0
+      },
       "mode": "replay",
-      "notes": [],
-      "stale": "unavailable on this machine, so nothing was measured or spent: gate-set-questions is not recorded yet (no recordings at /Users/cadencedev/Developer/evals/gate-set/cassettes/gate-set-questions); it is recorded when the question layer is a candidate to replace the open checker (#677): python3 evals/run.py --mode record --suite gate-set-questions --runs 3 --over-budget \"<who approved, why>\" (the first recording has no forecast in the baseline; later ones drop --over-budget while the budget allows)",
-      "started_at": "2026-11-15T20:03:55+00:00",
-      "status": "stale",
-      "suite": "gate-set-questions",
-      "unavailable": true
+      "notes": [
+        "missed (29): governor-018-34a56c56, governor-022-72ec7272, governor-023-91e0565d, governor-024-15d53afc, governor-024-34a56c56, governor-024-5009b603, governor-024-788d20d8, governor-024-9a736727, governor-024-c453ca99, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, lantern-folk-020-56160318, shared-dark-030-482f789c, shared-dark-037-44eb69f4, shared-dark-037-49fb8847, thornwall-020-21146a65, thornwall-020-7c0b5377, thornwall-020-dc6e0648, thornwall-024-718a3574, thornwall-024-9933d88f, thornwall-024-a4ac8b76, thornwall-025-08d5410f, thornwall-025-0e15835e, thornwall-025-289102b3, thornwall-025-b1cf8864, thornwall-025-d1ded18b, thornwall-025-edcbfbdd",
+        "a finding on a control's correct statement of the fact: governor-022-15fc1d00",
+        "labels are E8's Opus judge on one known error per item: a stop for another reason is not scored (stopped_* counts it), and recall_per_case weighs each case the same",
+        "each case gated with its own fact in the ledger (facts.json; recall_seeded); gated without one (its book doesn't state the fact outside the gated scene; why_none): lantern-folk-020, thornwall-020, thornwall-024",
+        "seeded but not asked (the question layer didn't select the fact: its subject not in the scene, or past the cap; recall_asked leaves them out) (9): governor-022-738e063a, governor-024-15d53afc, governor-024-c453ca99, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, shared-dark-040-ab321575, shared-dark-041-795f038c",
+        "per-item outcomes (private): gate-set/results/latest-questions.json in the storyforge-evals repo"
+      ],
+      "stale": null,
+      "started_at": "2026-11-27T19:07:45+00:00",
+      "status": "pass",
+      "suite": "gate-set-questions"
     },
     {
       "by_code": {

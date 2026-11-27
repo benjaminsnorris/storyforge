@@ -48,11 +48,18 @@ FLOORS: dict[str, float | None] = {
     # 0.4839/0.6129/0.5484: recall held, false alarms rose (4 to 7 over the
     # three runs). Of 46 positives, 39 are seeded and 32 asked about their
     # fact. Merged with #756 (ending questions; replays, no new calls): one
-    # control fewer stops, 0.5161 to 0.4839
-    'recall': 0.413, 'recall_per_case': 0.4689, 'cases_caught': 9,
-    'stop_rate_positive': 0.7391, 'false_alarm_on_fact': 2, 'stop_rate_control': 0.4839,
+    # control fewer stops, 0.5161 to 0.4839.
+    # Re-recorded 2026-11-27 after #774 (three blocking readings) and the
+    # requests #741, #749 and #768 changed: three runs, $27.90. Run 1 below;
+    # runs 1-3: recall 0.3696 / 0.3696 / 0.3696, false alarms 1 / 2 / 1,
+    # control stops 0.6129 / 0.6774 / 0.6129, positive stops 0.8043 /
+    # 0.8043 / 0.7609. Control stops rose (0.4839 to 0.6129, inside the
+    # old runs' 0.48-0.65) and recall fell 2 of 46 (the old runs' low end);
+    # not attributed to one change
+    'recall': 0.3696, 'recall_per_case': 0.4222, 'cases_caught': 9,
+    'stop_rate_positive': 0.8043, 'false_alarm_on_fact': 1, 'stop_rate_control': 0.6129,
     'unfinished': 0,
-    'recall_seeded': 0.4872, 'recall_asked': 0.5625, 'asked_positives': 32,
+    'recall_seeded': 0.4359, 'recall_asked': 0.5, 'asked_positives': 32,
     'asked_controls': 23,
 }
 
