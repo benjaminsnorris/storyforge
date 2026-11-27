@@ -1130,3 +1130,20 @@ The pilot found Q7, Q22 and Q79 in only some runs, failing the recall half of "f
 - **Cost.** One more Opus call per scene, about $0.035 on Wrath. Forecasts now price each reading at `blocking.COST_PER_READING` ($0.05, rounded up): `check --blocking` $0.15 a scene (was a flat $0.10), and the gate's `RECHECK_COST_PER_SCENE` $1.10 (was $1.00, whose flat $0.05 for the read under-priced two readings). Wall time doesn't grow: the readings run at once.
 - **Recordings.** Reading 3's prompt says "independent reading 3", so it is a new request and readings 1 and 2 still replay. `blocking-set` is topped up with the third reading; `gate-set`, `gate-set-questions` and `e4-generation` are re-recorded after this (PILOT.md step 2); `e8-revision-safety` stays stale. The stage sheet (`blocking-set-sheet`) makes no blocking-read call and replays unchanged.
 - **Measured at three readings** (`blocking-set` topped up as three runs, $13.36): the 29 real slips were caught in 19 / 19 / 18 of 29, a single-run recall of **0.644** (0.655 / 0.655 / 0.621) against **0.575** at two, inside the projected 0.63–0.70. On all 146 real in-scene cases, recall 0.6712 / 0.6781 / 0.6781 (was 0.6027 / 0.6438 / 0.6301); slips people found 0.38 / 0.44 / 0.41 (was 0.32 / 0.38 / 0.41 on the 2026-11-09 runs). The cost is more flags: false alarms on clean prose 1.27 → 2.12 per 10k words in run 1 (1.69 and 2.12 in runs 2 and 3), flags 122 → 150. Floors are run 1's; `recall_book_wrath-gate` 0.48 → 0.60.
+
+## The blocking-read suites re-recorded at three readings (#774; 2026-11-27)
+
+PILOT.md step 2's deferred suites, after #774 merged (`BLOCKING_READINGS = 3`): `gate-set-questions`, `e4-generation` and `gate-set`, three runs each, cheapest first (`--mode auto --runs 3`, `--over-budget "Ben approved gate-set-questions, gate-set, e4-generation after #774, 2026-11-27"`, cap $300). Spent **$184.94**: `gate-set-questions` $27.90 (forecast about $35), `e4-generation` $65.31 (about $75), `gate-set` $91.72 (about $100–130). Their requests had also changed under #741, #749 and #768, so a move is not the third reading's alone. Floors are run 1's; runs 1 / 2 / 3 below, against the old floor (run 1). `e8-revision-safety` stays stale (deferred, about $166).
+
+- **`gate-set-questions`.**
+  - `recall` 0.413 → **0.3696** (0.3696 / 0.3696 / 0.3696; the old runs were 0.413 / 0.3696 / 0.3913): 2 of 46, the old runs' low end. `recall_per_case` 0.4689 → 0.4222, `recall_seeded` 0.4872 → 0.4359, `recall_asked` 0.5625 → 0.5.
+  - `stop_rate_control` 0.4839 → **0.6129** (0.6129 / 0.6774 / 0.6129; old runs 0.4839 / 0.6452 / 0.5806): more controls stopped, inside the old spread but at its top.
+  - `stop_rate_positive` 0.7391 → 0.8043; `false_alarm_on_fact` 2 → 1 (1 / 2 / 1).
+- **`gate-set`.**
+  - `recall` 0.5652 → 0.5435 (0.5435 / 0.5217 / 0.5652; old runs 0.5652 / 0.5 / 0.5652), `recall_per_case` 0.5411 → 0.5244: within the old spread.
+  - `stop_rate_control` 0.7419 → 0.8065 (0.8065 / 0.7097 / 0.7742); `false_alarm_on_fact` 5 → 6 (6 / 3 / 6); `stop_rate_positive` 0.9565 → 0.9348.
+- **`e4-generation`** (gated only on its scene count; these are reported):
+  - **The gate stops more.** `gate_false_alarm` 0 → 3 (3 / 5 / 4), `gate_failed` 1 → 4 (4 / 12 / 8), `scenes_passed` 22 → 19 of 23 (19 / 11 / 15). The first stop is now scene 2, `harmons-hands`, a false alarm (`scenes_to_first_gate_failure` 21 → 2), so `write` would stop there and the headline `words` / `cp10k` cover two scenes. A false alarm here is a gate stop the judge found no contradiction in; the judge doesn't read blocking, so a blocking finding counts as one even when real. Not attributed further.
+  - `gate_caught` 1 / 7 / 4, `gate_missed` 5 / 4 / 2, `gate_fixed` 15 / 19 / 19 (was 12).
+  - The drafts: `contradictions_all` 7 → 8 (8 / 11 / 8), `cp10k_all` 3.10 → 3.43 (3.43 / 4.84 / 3.50), `cp10k_passed` 2.76 → 3.12, `broken_promises_all` 2 → 3, `voi` 4.80 → 4.75, `length_drift` 0.062 → 0.096. Spread in `evals/e6/spread.json`.
+- **`baseline.json`.** Only these three suites' entries were replaced, from a replay of run 1; `--baseline` refuses while `e8-revision-safety` is stale.

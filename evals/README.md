@@ -300,7 +300,9 @@ scene and a verdict on one known error, an E1 `tool-introduced` case.
   `gate-set-questions`, seeded with each case's fact, #723). `gate-set` was
   topped up after #713 changed the typed-state extraction ($1.00), and
   `gate-set-questions` after a name written surname first ("Erdel, Tam")
-  started to count as present (2026-11-17, $0.02). `FLOORS`
+  started to count as present (2026-11-17, $0.02). **Re-recorded
+  2026-11-27** after #774's third blocking reading (and #741, #749, #768):
+  `gate-set-questions` $27.90, `gate-set` $91.72, three runs each. `FLOORS`
   are run 1's, so missing recordings are the harness's error (a misplaced
   directory). Before a suite's first recording a replay is `stale`
   (unavailable, "not recorded yet", with the record command).
