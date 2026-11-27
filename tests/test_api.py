@@ -125,6 +125,68 @@ class TestInvokeOutputSchema:
         assert 'output_config' not in mock_req.call_args[0][1]
 
 
+def _takes(*kinds):
+    """A catalog entry for model 'm' whose thinking types are `kinds`."""
+    return {'id': 'm', 'capabilities': {'thinking': {'supported': True, 'types': {
+        k: {'supported': k in kinds} for k in ('enabled', 'adaptive', 'disabled',
+                                               'between_tools')}}}}
+
+
+class TestThinkingOff:
+    """#743: `think=False` asks the model not to think, in the form the
+    catalog says the model takes; the default sends no thinking setting."""
+    REPLY = {'content': [{'type': 'text', 'text': 'ok'}],
+             'usage': {'input_tokens': 1, 'output_tokens': 1}}
+
+    @pytest.fixture(autouse=True)
+    def _fresh_warnings(self, monkeypatch):
+        from storyforge import api
+        monkeypatch.setattr(api, '_thinking_stays_on', set())
+
+    def _sent(self, monkeypatch, entry, tmp_path=None, **kwargs):
+        from storyforge import api, common
+        monkeypatch.setattr(common, '_catalog', [entry] if entry else [])
+        with patch('storyforge.api._api_request', return_value=self.REPLY) as req:
+            if tmp_path is None:
+                api.invoke('hello', 'm', max_tokens=100, label='extract s1', **kwargs)
+            else:
+                api.invoke_to_file('hello', 'm', str(tmp_path / 'r.json'), 100,
+                                   label='extract s1', **kwargs)
+        return req.call_args[0][1]
+
+    def test_disabled_where_the_model_takes_it(self, monkeypatch, tmp_path):
+        entry = _takes('adaptive', 'disabled')
+        assert self._sent(monkeypatch, entry, think=False)['thinking'] == {'type': 'disabled'}
+        assert self._sent(monkeypatch, entry, tmp_path, think=False)['thinking'] == {
+            'type': 'disabled'}
+
+    def test_disabled_is_preferred_when_both_are_listed(self, monkeypatch):
+        entry = _takes('adaptive', 'disabled', 'between_tools')
+        assert self._sent(monkeypatch, entry, think=False)['thinking'] == {'type': 'disabled'}
+
+    def test_between_tools_where_disabled_is_refused(self, monkeypatch):
+        body = self._sent(monkeypatch, _takes('adaptive', 'between_tools'), think=False)
+        assert body['thinking'] == {'type': 'between_tools'}
+
+    def test_by_default_no_thinking_setting_is_sent(self, monkeypatch, capsys):
+        assert 'thinking' not in self._sent(monkeypatch, _takes('adaptive', 'disabled'))
+        assert 'thinking' not in self._sent(monkeypatch, _takes('adaptive'))
+        assert 'WARNING' not in capsys.readouterr().out
+
+    @pytest.mark.parametrize('entry, why', [
+        (_takes('adaptive'), 'lists no way to turn it off'),
+        ({'id': 'm'}, 'lists no way to turn it off'),
+        (None, 'does not list it'),
+    ])
+    def test_a_model_that_cannot_stop_thinking_is_warned_about_once(self, monkeypatch,
+                                                                    capsys, entry, why):
+        assert 'thinking' not in self._sent(monkeypatch, entry, think=False)
+        assert 'thinking' not in self._sent(monkeypatch, entry, think=False)
+        err = capsys.readouterr().out
+        assert err.count('WARNING') == 1
+        assert 'extract s1' in err and why in err and 'runs with thinking' in err
+
+
 class TestInvokeApiConsecutiveFailures:
     @patch('storyforge.api._api_request')
     @patch('storyforge.api.get_api_key', return_value='test-key')
