@@ -39,6 +39,11 @@ NAME = 'typed-state-set'
 #: serious injury carried only when its scene shows it lasting; a death and
 #: a presence bind one character id; a presence in the death's paragraph is
 #: the death): injury keeps the one debatable finding, life makes none.
+#: #748 changed the extraction prompt (owners named, one record per
+#: handover), which this set can't measure: it replays the logged replies.
+#: A one-off re-extraction of its 43 scenes (docs/history.md, #748) made 0
+#: possession findings once a person's own bare kind stopped blocking
+#: across scenes.
 FLOORS: dict[str, float | None] = {
     'findings': 1, 'false_alarms': 0, 'debatable_found': 1, 'real_kept': 0,
     'unlabelled': 0,
