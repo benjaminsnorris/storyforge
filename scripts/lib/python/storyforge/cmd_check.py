@@ -12,7 +12,7 @@ Usage:
     storyforge check --stage-sheet act1-sc03   # blocking by the stage sheet, not the read (#647)
     storyforge check --blocking --stage-sheet  # ... the stage sheet alone, reported
     storyforge check --questions act1-sc03     # yes/no questions alone, no open checker (#649)
-    storyforge check --open act1-sc03          # the open checker alone, no questions (#738)
+    storyforge check --tandem act1-sc03        # both checkers, the union (#738)
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -117,13 +117,14 @@ prose no ledger fact records, or with the bibles, aren't looked for (each
 scene's report says so); the cost forecast prices the question layer
 (`gate.recheck_cost_per_scene()`).
 
-Tandem (#738), the default: each scene's gate run is checked by both the
+Tandem (#738, `--tandem`): each scene's gate run is checked by both the
 open checker and the questions, their findings the union, each tagged in
 the report with the checker that made it, and every place they rule a
 dispute or an ending differently noted (`NOTE (tandem: ...)`). `check`
-never fixes, so each run it makes is a first run. `--open` forces the open
-checker alone, `--questions` the questions alone, for the run; the
-messages pointing to `check --pending` carry the flag.
+never fixes, so each run it makes is a first run. The open checker alone
+stays the default (`--open` names it) until a pilot compares the two
+modes' catches and false stops; `--questions` forces the questions alone,
+for the run; the messages pointing to `check --pending` carry the flag.
 
 A broken promise (a brief item the prose doesn't deliver) doesn't stop a
 scene (#642): the brief is a plan and the prose stands. It is reported

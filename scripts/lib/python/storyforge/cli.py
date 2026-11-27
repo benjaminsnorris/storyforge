@@ -49,20 +49,20 @@ def resolve_filter_args(args) -> tuple[str, str | None, str | None]:
 
 def add_check_method_args(parser: argparse.ArgumentParser, questions_help: str) -> None:
     """#738: the flags that force how the gate checks a scene against the
-    book for the run (`gate.CHECK_FLAGS`), one at most: `--tandem` (the
-    default: both checkers on a scene's first run, the questions alone on
-    the re-checks after a fix), `--open` (the open checker on every run),
+    book for the run (`gate.CHECK_FLAGS`), one at most: `--tandem` (both
+    checkers on a scene's first run, the questions alone on the re-checks
+    after a fix), `--open` (the open checker on every run; the default),
     `--questions` (`questions_help`). `check_method(args)` reads them."""
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--tandem', action='store_true',
-                       help='The default: check a scene\'s first gate run with both the open '
+                       help='Check a scene\'s first gate run with both the open '
                             'checker and the yes/no questions (the union of their findings), '
                             'and each re-check after a fix with the questions alone, the open '
                             'checker\'s findings standing where the fix left their words '
                             'alone and asked again where it did not')
     group.add_argument('--open', action='store_true',
-                       help='Check every gate run with the open checker alone (two readings '
-                            'against the book; no yes/no questions)')
+                       help='The default: check every gate run with the open checker alone (two '
+                            'readings against the book; no yes/no questions)')
     group.add_argument('--questions', action='store_true', help=questions_help)
 
 
