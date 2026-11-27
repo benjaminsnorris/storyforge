@@ -165,7 +165,7 @@ Bump the version (patch for each).
 
 ### 2. Consolidated eval re-record (Ben pre-approved about $130)
 
-After step 1 and after #768 (and #769, if it lands first), since each changes the requests. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
+After step 1 and after #768, since each changes the requests. #769 adds no miss of its own (no recorded suite is an adaptation), so it doesn't hold this step. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
 
 - **Forecast by hand first:** sum `usd_if_live` for each suite in `evals/baseline.json`, times 3 for the frozen ones (`gate-set`, `gate-set-questions`, `e4-generation`, `e8-revision-safety`). A suite with no figure counts as $0 (the stale gate sets have none), so the sum is a lower bound. Use the figures below for those two.
 - **Run the suites one at a time, cheapest first, and check the spend after each** (the run's summary, or `cost.usd_spent` in `evals/results/latest.json`). Stop and ask Ben once the running total would pass $130. E4 and E8 are stale at their first drafting prompt, so their top-up is close to a full re-record (about $75 and $165 for three runs). Pass `--over-budget` only to a suite that the running total still has room for.
@@ -201,9 +201,9 @@ States checked 2026-11-26.
 | Issue | State | What's left |
 |---|---|---|
 | #746 | open | Second half: fill `aliases` with patronymics and standing epithets at `source import` (`source.py`), from a series-repo table whose format isn't defined yet. The namesake guard itself merged (PR #754) |
-| #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings; Dolops and Melanippus warn because the book's `ajax-holds-the-ships` puts the wrong namesakes on stage). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
-| #769 | open (filed with this page) | Wire `source.entering_state(project_dir, refs, source.scene_cast(project_dir, scene_id, refs))` into the question layer's brief entering items, with refs from `gate_source.setup(project_dir).refs[scene_id]` (#747 and #754 are merged) |
-| #749 | PR #768 open | A claim in speech is not narration. Its recording misses are in step 2 |
+| #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings, which the author sets; iliad-adult PR 27 fixed the wrong Dolops and Melanippus ids in `ajax-holds-the-ships`). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
+| #769 | merged (PR #773) | The question layer asks the source's entering state with the brief's entering items (the latest 10 a scene, counted toward the cap of 30). It adds no recording miss: no recorded suite is an adaptation. Its acceptance case is a unit test, so the pilot is its first measurement: watch findings whose source is `source iliad:<scene>` |
+| #749 | merged (PR #768) | A claim in speech is not narration. Its recording misses are in step 2 |
 
 Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a judgement call for Ben or waits on something else:
 
