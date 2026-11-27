@@ -93,16 +93,13 @@ def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=N
     def fake(path, body, **k):
         if 'tools' in body:
             reply = {'findings': list(findings), 'kept': list(kept)}
-            schema = body['output_config']['format']['schema']
-            if 'cleared' in schema['properties']:
-                prompt = _prompt_text(body['messages'][0]['content'])
+            # one schema for every scene (#741): answer the sections asked
+            prompt = _prompt_text(body['messages'][0]['content'])
+            if '## Facts the plan recorded that this scene may change' in prompt:
                 asked = [line.split(':')[0][2:] for line in prompt.split(
                     'may change\n\n')[1].split('\n\n')[1].split('\n') if line.startswith('- ')]
                 reply['cleared'] = asked if cleared is None else list(cleared)
-            if 'ended' in schema['properties']:
-                prompt = body['messages'][0]['content']
-                if not isinstance(prompt, str):
-                    prompt = ''.join(b['text'] for b in prompt)
+            if '## States this scene may end' in prompt:
                 claims = re.findall(r'^- (\S+): the plan records .*; extraction read it ending',
                                     prompt, re.M)
                 reply['ended'] = claims if ended is None else list(ended)
@@ -4915,8 +4912,8 @@ class TestEndsAStateSetUpHere:
         with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
             gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path / 'logs'),
                        extract_model='m', check_model='m')
-        schema = prompts[0]['output_config']['format']['schema']['properties']
-        assert 'ended' in schema and 'cleared' not in schema
+        from storyforge.checker import SCHEMA
+        assert prompts[0]['output_config']['format']['schema'] == SCHEMA   # #741: one schema
         text = prompts[0]['messages'][0]['content']
         text = text if isinstance(text, str) else ''.join(b['text'] for b in text)
         assert '## States this scene may end' in text

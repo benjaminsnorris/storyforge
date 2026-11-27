@@ -46,11 +46,17 @@ the book it sees.
   finding against it names `scenes.csv` (`CALENDAR`) as its
   `established_scene` and quotes a dated scene's line in the scene list
   (`Book.in_calendar`).
-- Caching: the bibles and the last earlier scene each carry a 5-minute
-  breakpoint (the API takes no longer one after a shorter one, and
-  drafting's are 5 minutes), so a check within five minutes of the last
-  reads the story so far from cache. In `write`, drafting and extraction
-  come between two checks, so a slow scene writes the prefix again.
+- Caching: the bibles and the last earlier scene each carry a 1-hour
+  breakpoint (`session.CACHE_TTL`, #741: drafting, voice review and the
+  gate's other layers often come more than five minutes between checks),
+  so a check reads the story so far from cache. The user message holds the
+  third, 5-minute, after the 1-hour ones as the API requires: reading 1
+  breaks after what a fix leaves unchanged (title line, brief, character
+  sheets, scene list; `prompt_parts`), so a re-check reads that part from
+  cache; a later reading breaks before its reading note. The automatic
+  breakpoint at the end is the fourth, the API's limit. Every scene is
+  asked for one reply schema, since `output_config` comes ahead of the
+  system prompt and a different one misses the whole cache.
 - Size: `FULL_MAX_WORDS` was sized for drafting; the check adds the scene,
   the scene list and its tool results. A book near the cap can overflow
   the model's context, which is an API error (`CheckError`), not a
@@ -65,8 +71,9 @@ the book it sees.
   the bibles and the story so far from the first's cache. Each reading
   after the first says which it is, so it is its own request (the
   recordings are keyed by the request).
-- Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
-  a tool loop that never ends raises `CheckError`. There is no partial
+- Fails loud: a refusal, a reply cut off, a reply that isn't the schema
+  (`cleared` missing when disputes were asked, `ended` when endings were),
+  or a tool loop that never ends raises `CheckError`. There is no partial
   result: a reading that fails fails the check.
 """
 
@@ -120,6 +127,12 @@ REFERENCE_DOCS = ('character-bible.md', 'world-bible.md', 'systems-bible.md', 'b
 #: `timeline_day` and `time_of_day`)
 CALENDAR = 'scenes.csv'
 
+#: The reply schema, the same for every scene (#741): `output_config` comes
+#: ahead of the system prompt, so a schema that changed with the scene (one
+#: with `cleared` when extraction raised disputes, with `ended` when it read
+#: states ending) missed the whole cache, bibles and story included, on
+#: every switch (14 of 18 on Wrath, about $1 each). `cleared` and `ended`
+#: answer the prompt's own sections; a scene without them leaves them empty.
 SCHEMA = {
     'type': 'object',
     'properties': {
@@ -144,31 +157,18 @@ SCHEMA = {
             'required': ['fact_id', 'quote'],
             'additionalProperties': False,
         }},
+        'cleared': {'type': 'array', 'items': {'type': 'string'},
+                    'description': 'The ids of the facts under "Facts the plan recorded '
+                                   'that this scene may change" that the scene does not '
+                                   'contradict. Empty when the prompt has no such section.'},
+        'ended': {'type': 'array', 'items': {'type': 'string'},
+                  'description': 'The ids of the states under "States this scene may end" '
+                                 'that the scene clearly shows ending. Empty when the prompt '
+                                 'has no such section.'},
     },
-    'required': ['findings', 'kept'],
+    'required': ['findings', 'kept', 'cleared', 'ended'],
     'additionalProperties': False,
 }
-
-#: SCHEMA plus `cleared`: the disputes the checker found are no contradiction.
-#: Only sent when there are disputes, so a scene without any asks what it
-#: always asked
-DISPUTE_SCHEMA = {**SCHEMA,
-                  'properties': {**SCHEMA['properties'],
-                                 'cleared': {'type': 'array', 'items': {'type': 'string'}}},
-                  'required': SCHEMA['required'] + ['cleared']}
-
-
-def schema_for(disputes, endings) -> dict:
-    """The reply schema: `SCHEMA`, plus `cleared` with disputes, plus
-    `ended` with endings (#734's review: the states the scene shows ending,
-    a ruling of its own). Each is added only when asked, so a scene without
-    them sends what it always sent."""
-    out = DISPUTE_SCHEMA if disputes else SCHEMA
-    if not endings:
-        return out
-    return {**out, 'properties': {**out['properties'],
-                                  'ended': {'type': 'array', 'items': {'type': 'string'}}},
-            'required': out['required'] + ['ended']}
 
 
 @dataclass
@@ -814,26 +814,49 @@ def _reading_note(reading: int) -> str:
 
 def prompt_content(book: Book, at: str, brief_text: str,
                    disputes: list[Dispute] | None = None,
-                   reading: int = 1, endings: list[Dispute] | None = None) -> str | list[dict]:
-    """The user message of a reading: `build_prompt`'s text. Reading 1 sends
-    it whole, as it always has. A later reading sends the same text with its
-    reading note as a block of its own, after a cache breakpoint: the rest is
-    what reading 1 just sent, so it is read from cache and only the note is
-    written (#741: on Wrath reading 2 wrote all 33k tokens of the message
-    again, about $0.16 a reading). The breakpoint is the request's fourth,
-    with the two in the system prompt and the automatic one at its end."""
+                   reading: int = 1, endings: list[Dispute] | None = None) -> list[dict]:
+    """The user message of a reading: `build_prompt`'s text, in blocks with
+    cache breakpoints (#741). Each request has room for one more breakpoint
+    besides the two in the system prompt and the automatic one at its end,
+    the API's limit of four.
+
+    Reading 1 breaks after the part that stays the same while a scene is
+    fixed (`prompt_parts`: its brief, character sheets and scene list), so
+    a re-check of rewritten prose reads that part from cache and writes
+    only the prose and what follows. A later reading breaks before its
+    reading note, a block of its own: everything before it is what reading
+    1 just sent, so it is read from cache and only the note is written (on
+    Wrath reading 2 wrote all 33k tokens of the message again, about $0.16
+    a reading)."""
+    stable, rest = prompt_parts(book, at, brief_text, disputes, endings)
+    mark = {'type': 'ephemeral'}
     note = _reading_note(reading)
-    text = build_prompt(book, at, brief_text, disputes, reading, endings)
     if not note:
-        return text
-    head = text[:-len(note)]
-    return [{'type': 'text', 'text': head, 'cache_control': {'type': 'ephemeral'}},
+        return [{'type': 'text', 'text': stable, 'cache_control': mark},
+                {'type': 'text', 'text': rest}]
+    return [{'type': 'text', 'text': stable},
+            {'type': 'text', 'text': rest, 'cache_control': mark},
             {'type': 'text', 'text': note}]
 
 
 def build_prompt(book: Book, at: str, brief_text: str,
                  disputes: list[Dispute] | None = None, reading: int = 1,
                  endings: list[Dispute] | None = None) -> str:
+    """The user message of a reading as the model reads it (the text of
+    `prompt_content`'s blocks, joined)."""
+    return ''.join(b['text'] for b in prompt_content(book, at, brief_text, disputes,
+                                                     reading, endings))
+
+
+def prompt_parts(book: Book, at: str, brief_text: str,
+                 disputes: list[Dispute] | None = None,
+                 endings: list[Dispute] | None = None) -> tuple[str, str]:
+    """The user message without its reading note, in two parts. The first
+    holds what a fix of the prose leaves as it was: the scene's title line,
+    its brief, the cast's character sheets and the scene list (two thirds of
+    the message on Wrath, mostly sheets). The second holds what a fix
+    changes: the prose, the disputes and endings extraction read in it, and
+    the instructions, which stay last, after everything they ask about."""
     s = book.scenes.get(at, {})
     promise_rules = '' if "## The brief's promises" not in brief_text else (
         "\n**Broken promises.** Each item under \"The brief's promises\" is a promise. "
@@ -847,18 +870,21 @@ def build_prompt(book: Book, at: str, brief_text: str,
         'full clause or sentence). A fact that holds entering the scene and is '
         'contradicted is a contradiction, not a broken promise: for one written in '
         'words, `fact_id` is its brief field and `established_quote` the item.\n')
-    return f"""You are checking one scene of a novel for continuity, the way a careful reader would notice a slip.
+    stable = f"""You are checking one scene of a novel for continuity, the way a careful reader would notice a slip.
 
 ## Scene being checked: {at}
 
 Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('location') or '-'}{'; ' + book.when(at) if book.when(at) else ''}
-
-{book.prose[at]}
-{brief_text}{_sheets_text(book)}{_disputes_text(disputes or [])}{_endings_text(endings or [])}
+{brief_text}{_sheets_text(book)}
 ## Every scene, in reading order
 
 {_scene_index(book, at)}
+"""
+    rest = f"""
+## The text of {at}
 
+{book.prose[at]}
+{_disputes_text(disputes or [])}{_endings_text(endings or [])}
 ## What to report
 
 **Contradictions.** Report each place where this scene contradicts something the book establishes elsewhere: in another scene (earlier or later), in the reference material, or in the ledger of recorded facts. {_reference_note(book)} Codes: PHY a physical state (injury, possession, where a person or object is), TIM time (dates, ages, elapsed time, time of day, durations), KNO who knows what, REL how people are related or connected, TRT a fixed trait (name, appearance, history, habit), WLD a rule or fact of the world, PRM a promise or threat a character made.{_calendar_note(book, at)}
@@ -872,7 +898,8 @@ Report only a real contradiction, both sides quoted:
 - `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from the story so far or a tool result (or a reference file's name and its exact words, or `{CALENDAR}` and a calendar line); for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
 - Not a contradiction: a character who lies, misremembers or is mistaken where the text signals it; a change the story shows happening; a vision, dream or story-within-the-story that the narrative frames as such; figurative language; anything you could not find established. When in doubt, leave it out: a false report costs the author more than a miss.
 {promise_rules}
-Return every finding, and an empty list when the scene is clean.{_reading_note(reading)}"""
+Return every finding, and an empty list when the scene is clean."""
+    return stable, rest
 
 
 # ============================================================================
@@ -1008,7 +1035,7 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
                        model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
                        label=f'check {where}', system=_system(book),
-                       output_schema=schema_for(disputes, endings),
+                       output_schema=SCHEMA,
                        log_file=log_file)
     except RuntimeError as e:   # RefusalError, ToolLoopError, an API failure
         error = CheckError(f'{where}: {e}')
@@ -1019,8 +1046,13 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
     try:
         data = json.loads(extract_text(run.response))
         items, kept = data['findings'], data['kept']
-        cleared = set(data['cleared']) if disputes else set()
-        ended = set(data['ended']) if endings else set()
+        # The schema requires both. A list the prompt asked for (it has
+        # disputes, or endings) must be in the reply: one missing is not the
+        # schema, never an empty ruling. One it didn't ask for may be
+        # missing, and its ids are never read (`_rule_disputes`,
+        # `result.ended` take listed ones only)
+        cleared = set(data['cleared'] if disputes else data.get('cleared', []))
+        ended = set(data['ended'] if endings else data.get('ended', []))
     except (ValueError, KeyError, TypeError) as e:
         raise CheckError(f'{where}: the checker\'s reply is not the schema ({e})') from e
 
