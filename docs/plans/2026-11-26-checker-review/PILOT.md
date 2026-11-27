@@ -241,7 +241,7 @@ Bump the version (patch for each).
 
 ### 2. Consolidated eval re-record (Ben pre-approved about $130)
 
-**Partly done (2026-11-27).** Only the suites with no blocking-read call were re-recorded, since #774 may change `BLOCKING_READINGS`. That would re-key every blocking call, so recording those suites first would pay twice.
+**Done but for `e8-revision-safety` (2026-11-27).** The blocking-read suites were recorded after #774 merged: `gate-set-questions` $27.90, `e4-generation` $65.31, `gate-set` $91.72, three runs each ($184.94 of the $300 cap; floors from run 1, what moved in `docs/history.md`, "The blocking-read suites re-recorded at three readings"). **Only `e8-revision-safety` remains** (deferred by Ben, about $166). Before that, only the suites with no blocking-read call were re-recorded, since #774 may change `BLOCKING_READINGS`. That would re-key every blocking call, so recording those suites first would pay twice.
 
 - **Which suites make the call.** In the code, `blocking.check_blocking` is reached only through `gate.gate_scene`, `check --blocking`, the blocking set and `voice_sample`; in the evals, only through the gate and the blocking set. In the recordings, the blocking prompt is in `e4-generation`, `e8-revision-safety`, `gate-set`, `gate-set-questions` and `blocking-set`, and in no other cassette.
 - **Re-recorded, $17.39 in all** (`--mode auto`, cheapest first, the reason line below):
@@ -267,7 +267,7 @@ Bump the version (patch for each).
   A third blocking reading would add about $0.035 a scene to each (half the two-reading read's $0.07, "Cost" above). Ben chooses what to record, and with what budget.
 
   **Ben's decision (2026-11-27):** after #774 merges, record `gate-set-questions`, `gate-set` and `e4-generation` (3 runs each, cap $300); `e8-revision-safety` stays deferred.
-- **`baseline.json`** holds the four re-recorded suites' new entries. `--baseline` refuses while `gate-set` and `gate-set-questions` are stale with no old measurement to carry. Run it once those are recorded.
+- **`baseline.json`** holds the re-recorded suites' new entries (the four above, then the three blocking-read suites), each replaced by hand from a replay. `--baseline` refuses while `e8-revision-safety` is stale; run it once that is recorded.
 
 After step 1 and after #768, since each changes the requests. #769 adds no miss of its own (no recorded suite is an adaptation), so it doesn't hold this step. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
 
@@ -321,7 +321,7 @@ States checked 2026-11-26.
 | #746 | open | Second half: fill `aliases` with patronymics and standing epithets at `source import` (`source.py`), from a series-repo table whose format isn't defined yet. The namesake guard itself merged (PR #754) |
 | #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings, which the author sets; iliad-adult PR 27 fixed the wrong Dolops and Melanippus ids in `ajax-holds-the-ships`). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
 | #769 | merged (PR #773) | The question layer asks the source's entering state with the brief's entering items (the latest 10 a scene, counted toward the cap of 30). It adds no recording miss: no recorded suite is an adaptation. Its acceptance case is a unit test, so the pilot is its first measurement: watch findings whose source is `source iliad:<scene>`. **Measured by the pilot:** 64 asked a run, 3 false findings (one conditional order) and 1 false stop. #775 proposes filtering by kind |
-| #774 | decided 2026-11-27: three readings | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. Ben chose `BLOCKING_READINGS = 3`, and "fixes confirmed" now judges recall on `blocking-set`. It **holds step 5** until its PR merges. If it changes `BLOCKING_READINGS`, the blocking calls in `blocking-set` and the gate sets change too, so decide it before step 2's deferred suites. Recall by number of readings, measured on `blocking-set` (step 3), is on the issue |
+| #774 | merged (PR #779) | The blocking read finds real catches only intermittently: Q22 3/8 runs, Q7 5/8, Q79 5/8. Ben chose `BLOCKING_READINGS = 3`, and "fixes confirmed" now judges recall on `blocking-set`. Measured at three readings: single-run recall on the 29 real slips 0.644, against 0.575 at two. Step 2's blocking-read suites are recorded at three readings |
 | #775 | open (from the pilot) | Leave conditional orders and constraints out of the source facts the question layer asks. It changes no recorded suite (none is an adaptation) |
 | #749 | merged (PR #768) | A claim in speech is not narration. Its recording misses are in step 2 |
 
@@ -336,6 +336,8 @@ Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a ju
 
 ### 5. Redraft *Wrath Like Smoke*
 
-**Held (2026-11-26)** on #774: the pilot's recall half of "fixes confirmed" failed. Ben decided #774 on 2026-11-27 (three readings; recall judged on `blocking-set`), so the hold lifts once that PR merges.
+**Clear (2026-11-27).** The hold on #774 lifted when PR #779 merged: three readings, and `blocking-set` passes its floors at them (single-run recall on the overnight run's 29 real slips 0.644, against 0.575 at two). Step 2's suites are recorded except `e8-revision-safety`, which Ben deferred.
+
+**Watch before and during the redraft:** at three readings `e4-generation`'s gate stops more. Gate false alarms (a stop the judge found no contradiction in; the judge doesn't read blocking) went 0 → 3 / 5 / 4 over three runs, scenes passed 22 → 19 / 11 / 15 of 23, and the first stop is now scene 2. The gate sets' control stops rose too (`gate-set-questions` 0.48 → 0.61, inside its old spread). Not attributed: those suites' other requests changed as well. If the redraft's first session stops on many blocking findings that aren't real, that is the cost of the third reading, and Ben decides whether it is worth it.
 
 With the defaults decided and the evals green, redraft. Watch the first session's fix rounds, the stops per scene, and any finding of a kind the pilot cleared. The phantom-injury lines in iliad-adult PR 23 go with the redraft (README, "Decisions for Ben").

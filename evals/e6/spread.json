@@ -60,7 +60,7 @@
       "claim": "what the gate stops on: CP10k in the gate's passed scenes 3.42 -> 2.09 (#480)",
       "claimed_delta": 1.33,
       "metric": "cp10k_passed",
-      "range": 2.436,
+      "range": 1.694,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -76,7 +76,7 @@
       "claim": "a second fix round: still failing after the fixes 3 -> 4 (#482)",
       "claimed_delta": 1,
       "metric": "gate_failed",
-      "range": 2,
+      "range": 8,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -84,7 +84,7 @@
       "claim": "a second fix round: fixed 9 -> 10 (#482)",
       "claimed_delta": 1,
       "metric": "gate_fixed",
-      "range": 2,
+      "range": 4,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -92,7 +92,7 @@
       "claim": "a second fix round: CP10k in passed scenes 2.09 -> 2.17 (#482)",
       "claimed_delta": 0.08000000000000007,
       "metric": "cp10k_passed",
-      "range": 2.436,
+      "range": 1.694,
       "suite": "e4-generation",
       "within_noise": true
     }
@@ -115,9 +115,9 @@
       "run3": "3fb62cd707582d5c11fda49ac55599e25ca08749"
     },
     "e4-generation": {
-      "run1": "d3536986e7a288942a2c06a04cdce945c91e9d80",
-      "run2": "d3536986e7a288942a2c06a04cdce945c91e9d80",
-      "run3": "d3536986e7a288942a2c06a04cdce945c91e9d80"
+      "run1": "046ab0fd2449655c3947c901b683a76cd4c93b55",
+      "run2": "046ab0fd2449655c3947c901b683a76cd4c93b55",
+      "run3": "046ab0fd2449655c3947c901b683a76cd4c93b55"
     },
     "e8-revision-safety": {
       "run1": "3fb62cd707582d5c11fda49ac55599e25ca08749",
@@ -1110,31 +1110,17 @@
           0
         ]
       },
-      "TIM.contradictions": {
-        "max": 1,
-        "mean": 1.0,
-        "min": 1,
-        "missing_in": [
-          "run1",
-          "run2"
-        ],
-        "range": 0,
-        "sd": 0.0,
-        "values": [
-          1
-        ]
-      },
       "WLD.contradictions": {
         "max": 1,
         "mean": 1.0,
         "min": 1,
         "missing_in": [
-          "run1"
+          "run1",
+          "run3"
         ],
         "range": 0,
         "sd": 0.0,
         "values": [
-          1,
           1
         ]
       },
@@ -1151,15 +1137,39 @@
         ]
       },
       "bps_all": {
-        "max": 0.13,
-        "mean": 0.101333,
-        "min": 0.087,
-        "range": 0.043,
-        "sd": 0.024826,
+        "max": 0.174,
+        "mean": 0.144667,
+        "min": 0.13,
+        "range": 0.044,
+        "sd": 0.025403,
         "values": [
-          0.087,
-          0.087,
-          0.13
+          0.13,
+          0.13,
+          0.174
+        ]
+      },
+      "broken_musts": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "broken_musts_all": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
         ]
       },
       "broken_promises": {
@@ -1175,207 +1185,219 @@
         ]
       },
       "broken_promises_all": {
-        "max": 3,
-        "mean": 2.333333,
-        "min": 2,
+        "max": 4,
+        "mean": 3.333333,
+        "min": 3,
         "range": 1,
         "sd": 0.57735,
         "values": [
-          2,
-          2,
-          3
+          3,
+          3,
+          4
         ]
       },
       "checker_flags": {
-        "max": 1,
-        "mean": 0.333333,
-        "min": 0,
-        "range": 1,
-        "sd": 0.57735,
-        "values": [
-          1,
-          0,
-          0
-        ]
-      },
-      "contradictions": {
         "max": 2,
         "mean": 1.0,
         "min": 0,
         "range": 2,
         "sd": 1.0,
         "values": [
+          2,
+          1,
+          0
+        ]
+      },
+      "contradictions": {
+        "max": 1,
+        "mean": 0.333333,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
           0,
           1,
-          2
+          0
         ]
       },
       "contradictions_all": {
-        "max": 9,
-        "mean": 8.666667,
+        "max": 11,
+        "mean": 9.0,
         "min": 8,
-        "range": 1,
-        "sd": 0.57735,
+        "range": 3,
+        "sd": 1.732051,
         "values": [
           8,
-          9,
-          9
+          11,
+          8
         ]
       },
       "contradictions_in_failed": {
-        "max": 6,
-        "mean": 3.666667,
-        "min": 1,
+        "max": 7,
+        "mean": 4.666667,
+        "min": 2,
         "range": 5,
         "sd": 2.516611,
         "values": [
-          4,
-          6,
-          1
+          2,
+          7,
+          5
         ]
       },
       "contradictions_passed": {
-        "max": 8,
-        "mean": 5.0,
-        "min": 3,
-        "range": 5,
-        "sd": 2.645751,
-        "values": [
-          4,
-          3,
-          8
-        ]
-      },
-      "cp10k": {
-        "max": 1.89,
-        "mean": 1.021667,
-        "min": 0.0,
-        "range": 1.89,
-        "sd": 0.954284,
-        "values": [
-          0.0,
-          1.175,
-          1.89
-        ]
-      },
-      "cp10k_all": {
-        "max": 3.999,
-        "mean": 3.872333,
-        "min": 3.621,
-        "range": 0.378,
-        "sd": 0.217663,
-        "values": [
-          3.621,
-          3.999,
-          3.997
-        ]
-      },
-      "cp10k_checker_all": {
-        "max": 0.453,
-        "mean": 0.151,
-        "min": 0.0,
-        "range": 0.453,
-        "sd": 0.26154,
-        "values": [
-          0.453,
-          0.0,
-          0.0
-        ]
-      },
-      "cp10k_passed": {
-        "max": 4.133,
-        "mean": 2.665333,
-        "min": 1.697,
-        "range": 2.436,
-        "sd": 1.292488,
-        "values": [
-          2.166,
-          1.697,
-          4.133
-        ]
-      },
-      "gate_catch_rate": {
-        "max": 0.571,
-        "mean": 0.349,
-        "min": 0.143,
-        "range": 0.428,
-        "sd": 0.214448,
-        "values": [
-          0.333,
-          0.571,
-          0.143
-        ]
-      },
-      "gate_caught": {
-        "max": 4,
-        "mean": 2.333333,
-        "min": 1,
-        "range": 3,
-        "sd": 1.527525,
-        "values": [
-          2,
-          4,
-          1
-        ]
-      },
-      "gate_failed": {
-        "max": 5,
-        "mean": 4.0,
-        "min": 3,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          4,
-          5,
-          3
-        ]
-      },
-      "gate_false_alarm": {
-        "max": 2,
-        "mean": 1.666667,
-        "min": 1,
-        "range": 1,
-        "sd": 0.57735,
-        "values": [
-          2,
-          1,
-          2
-        ]
-      },
-      "gate_fixed": {
-        "max": 10,
-        "mean": 8.666667,
-        "min": 8,
-        "range": 2,
-        "sd": 1.154701,
-        "values": [
-          10,
-          8,
-          8
-        ]
-      },
-      "gate_missed": {
         "max": 6,
         "mean": 4.333333,
         "min": 3,
         "range": 3,
         "sd": 1.527525,
         "values": [
+          6,
           4,
+          3
+        ]
+      },
+      "cp10k": {
+        "max": 5.893,
+        "mean": 1.964333,
+        "min": 0.0,
+        "range": 5.893,
+        "sd": 3.402325,
+        "values": [
+          0.0,
+          5.893,
+          0.0
+        ]
+      },
+      "cp10k_all": {
+        "max": 4.844,
+        "mean": 3.922,
+        "min": 3.425,
+        "range": 1.419,
+        "sd": 0.799287,
+        "values": [
+          3.425,
+          4.844,
+          3.497
+        ]
+      },
+      "cp10k_checker_all": {
+        "max": 0.856,
+        "mean": 0.432,
+        "min": 0.0,
+        "range": 0.856,
+        "sd": 0.428056,
+        "values": [
+          0.856,
+          0.44,
+          0.0
+        ]
+      },
+      "cp10k_passed": {
+        "max": 3.799,
+        "mean": 3.006667,
+        "min": 2.105,
+        "range": 1.694,
+        "sd": 0.852276,
+        "values": [
+          3.116,
+          3.799,
+          2.105
+        ]
+      },
+      "gate_advisory": {
+        "max": 67,
+        "mean": 64.666667,
+        "min": 63,
+        "range": 4,
+        "sd": 2.081666,
+        "values": [
+          63,
+          64,
+          67
+        ]
+      },
+      "gate_catch_rate": {
+        "max": 0.667,
+        "mean": 0.49,
+        "min": 0.167,
+        "range": 0.5,
+        "sd": 0.280155,
+        "values": [
+          0.167,
+          0.636,
+          0.667
+        ]
+      },
+      "gate_caught": {
+        "max": 7,
+        "mean": 4.0,
+        "min": 1,
+        "range": 6,
+        "sd": 3.0,
+        "values": [
+          1,
+          7,
+          4
+        ]
+      },
+      "gate_failed": {
+        "max": 12,
+        "mean": 8.0,
+        "min": 4,
+        "range": 8,
+        "sd": 4.0,
+        "values": [
+          4,
+          12,
+          8
+        ]
+      },
+      "gate_false_alarm": {
+        "max": 5,
+        "mean": 4.0,
+        "min": 3,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
           3,
-          6
+          5,
+          4
+        ]
+      },
+      "gate_fixed": {
+        "max": 19,
+        "mean": 17.666667,
+        "min": 15,
+        "range": 4,
+        "sd": 2.309401,
+        "values": [
+          15,
+          19,
+          19
+        ]
+      },
+      "gate_missed": {
+        "max": 5,
+        "mean": 3.666667,
+        "min": 2,
+        "range": 3,
+        "sd": 1.527525,
+        "values": [
+          5,
+          4,
+          2
         ]
       },
       "length_drift": {
-        "max": 0.068,
-        "mean": 0.063667,
-        "min": 0.059,
-        "range": 0.009,
-        "sd": 0.004509,
+        "max": 0.096,
+        "mean": 0.086,
+        "min": 0.08,
+        "range": 0.016,
+        "sd": 0.008718,
         "values": [
-          0.064,
-          0.059,
-          0.068
+          0.096,
+          0.08,
+          0.082
         ]
       },
       "refused": {
@@ -1403,27 +1425,27 @@
         ]
       },
       "scenes_passed": {
-        "max": 20,
-        "mean": 19.0,
-        "min": 18,
-        "range": 2,
-        "sd": 1.0,
+        "max": 19,
+        "mean": 15.0,
+        "min": 11,
+        "range": 8,
+        "sd": 4.0,
         "values": [
           19,
-          18,
-          20
+          11,
+          15
         ]
       },
       "scenes_to_first_gate_failure": {
-        "max": 11,
-        "mean": 9.666667,
-        "min": 9,
-        "range": 2,
-        "sd": 1.154701,
+        "max": 3,
+        "mean": 2.333333,
+        "min": 2,
+        "range": 1,
+        "sd": 0.57735,
         "values": [
-          9,
-          9,
-          11
+          2,
+          2,
+          3
         ]
       },
       "target_words_all": {
@@ -1439,15 +1461,15 @@
         ]
       },
       "voi": {
-        "max": 4.75,
-        "mean": 4.739,
-        "min": 4.717,
-        "range": 0.033,
-        "sd": 0.019053,
+        "max": 4.859,
+        "mean": 4.808,
+        "min": 4.75,
+        "range": 0.109,
+        "sd": 0.054836,
         "values": [
           4.75,
-          4.75,
-          4.717
+          4.815,
+          4.859
         ]
       },
       "voi_author": {
@@ -1463,27 +1485,27 @@
         ]
       },
       "words": {
-        "max": 10582,
-        "mean": 9098.0,
-        "min": 8200,
-        "range": 2382,
-        "sd": 1294.615001,
+        "max": 2870,
+        "mean": 2111.0,
+        "min": 1697,
+        "range": 1173,
+        "sd": 658.218049,
         "values": [
-          8200,
-          8512,
-          10582
+          1766,
+          1697,
+          2870
         ]
       },
       "words_all": {
-        "max": 22519,
-        "mean": 22372.333333,
-        "min": 22095,
-        "range": 424,
-        "sd": 240.31091,
+        "max": 23355,
+        "mean": 22980.0,
+        "min": 22709,
+        "range": 646,
+        "sd": 335.322233,
         "values": [
-          22095,
-          22503,
-          22519
+          23355,
+          22709,
+          22876
         ]
       }
     },
