@@ -45,8 +45,8 @@ FLOORS: dict[str, float | None] = {
     # 126 flags.
     # Re-recorded 2026-11-27 as three runs ($3.50) on the set with report A's
     # 38 findings added (PILOT.md step 3): run 1's values. Runs 1 / 2 / 3:
-    # recall 0.2192 / 0.2055 / 0.2192, false alarms 13.54 / 10.15 per 10k
-    # (run 3 not kept); the overnight run's first-gated prose 2 of 25. The
+    # recall 0.2192 / 0.2055 / 0.2192, false alarms 13.54 / 10.15 / 11.0 per
+    # 10k; the overnight run's first-gated prose 2 of 25. The
     # old scenes' numbers moved by run-to-run noise (gawain 0.2273 to
     # 0.2045, Wrath's Nov 8 0.2192 to 0.274): the sheet was recorded once
     # before, so this is its first spread

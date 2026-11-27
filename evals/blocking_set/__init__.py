@@ -235,8 +235,10 @@ def validate(cases: list[dict], scenes: list[dict]) -> list[str]:
         if scene is None:
             problems.append(f'{cid}: its scene is not in scenes.json')
             continue
-        if c.get('verdict') == 'fixed' and scene.get('role') != 'case':
-            problems.append(f'{cid}: a fixed slip in a scene whose role is not case')
+        if c.get('verdict') in ('fixed', 'debatable') and scene.get('role') != 'case':
+            # a clean scene's flags are false alarms: a slip (or a debatable
+            # finding) there would count its own catch as one
+            problems.append(f'{cid}: a {c["verdict"]} case in a scene whose role is not case')
         quotes, fix_quotes = c.get('quotes'), c.get('fix_quotes', [])
         if not (isinstance(quotes, list) and quotes):
             problems.append(f'{cid}: no quotes')

@@ -342,6 +342,12 @@ class TestScore:
         assert metrics['left_flagged'] == 0 and metrics['unlabelled_flags'] == 0
         assert {o['id']: o['caught'] for o in outcomes}['tale-006'] is True
 
+    def test_a_debatable_case_must_be_in_a_case_scene(self, tmp_path):
+        cs, scenes = _loaded(tmp_path, cases=[*CASES, _case('tale-006', scene='rain',
+                                                          quotes=(COAT,), verdict='debatable')])
+        assert any('tale-006: a debatable case in a scene whose role is not case' in p
+                   for p in blocking_set.validate(cs, scenes))
+
     def test_an_unverified_finding_catches_nothing(self, tmp_path):
         metrics, _ = self._score(tmp_path, {('tale', 'harbour'): [_flag(FREE_HAND, verified=False)],
                                             ('tale', 'rain'): []})
