@@ -241,7 +241,7 @@ Bump the version (patch for each).
 
 **Partly done (2026-11-27).** Only the suites with no blocking-read call were re-recorded, since #774 may change `BLOCKING_READINGS`. That would re-key every blocking call, so recording those suites first would pay twice.
 
-- **Which suites make the call.** In the code, `blocking.check_blocking` is reached only through `gate.gate_scene`, the blocking set and `voice_sample`. In the recordings, the blocking prompt is in `e4-generation`, `e8-revision-safety`, `gate-set`, `gate-set-questions` and `blocking-set`, and in no other cassette.
+- **Which suites make the call.** In the code, `blocking.check_blocking` is reached only through `gate.gate_scene`, `check --blocking`, the blocking set and `voice_sample`; in the evals, only through the gate and the blocking set. In the recordings, the blocking prompt is in `e4-generation`, `e8-revision-safety`, `gate-set`, `gate-set-questions` and `blocking-set`, and in no other cassette.
 - **Re-recorded, $17.39 in all** (`--mode auto`, cheapest first, the reason line below):
 
   | Suite | Spent | Forecast |
@@ -262,9 +262,8 @@ Bump the version (patch for each).
   | `e8-revision-safety` | about $166 | $55.35 a run in the baseline |
   | **Total** | **about $375–405** | **past the $130 pre-approval, of which $17.39 is spent** |
 
-  A third blocking reading would add about $0.035 a scene to each. Ben chooses what to record, and with what budget.
+  A third blocking reading would add about $0.035 a scene to each (half the two-reading read's $0.07, "Cost" above). Ben chooses what to record, and with what budget.
 - **`baseline.json`** holds the four re-recorded suites' new entries. `--baseline` refuses while `gate-set` and `gate-set-questions` are stale with no old measurement to carry. Run it once those are recorded.
-
 
 After step 1 and after #768, since each changes the requests. #769 adds no miss of its own (no recorded suite is an adaptation), so it doesn't hold this step. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
 
