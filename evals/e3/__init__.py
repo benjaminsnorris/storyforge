@@ -19,6 +19,11 @@ still offered as known ids, as extract offers them since F-123). The tree's
 registries are moved into the ledger first (``harness.migrate_tree``). A fact the chain
 would have carried in from earlier scenes may therefore read as missing.
 
+**The gate's thinking setting.** The commitments call sends the gate's
+extraction setting (``gate.EXTRACT_THINK``: thinking off, #743), so E3
+measures the call the gate makes; ``storyforge extract``'s phase 4 still
+lets the model think.
+
 Gate (plan, Phase 2): recall >= 0.85.
 """
 
@@ -137,13 +142,15 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str, str, int]:
         registries_text=format_registries_for_prompt(project_dir, exclude=('knowledge',)))
     from storyforge import persistence
     from storyforge.extract import parse_commitments_response
+    from storyforge.gate import EXTRACT_THINK
     out = []
-    for prompt, kind, schema, tokens in (
-            (knowledge_prompt, 'knowledge', KNOWLEDGE_SCHEMA, 1024),
-            (physical_prompt, 'physical', PHYSICAL_STATE_SCHEMA, 1024),
-            (commitments_prompt, 'commitments', COMMITMENTS_SCHEMA, 8000)):
+    for prompt, kind, schema, tokens, think in (
+            (knowledge_prompt, 'knowledge', KNOWLEDGE_SCHEMA, 1024, True),
+            (physical_prompt, 'physical', PHYSICAL_STATE_SCHEMA, 1024, True),
+            (commitments_prompt, 'commitments', COMMITMENTS_SCHEMA, 8000, EXTRACT_THINK)):
         response = extract_text(invoke(prompt, model, max_tokens=tokens,
-                                       label=f'e3 {kind} {scene_id}', output_schema=schema))
+                                       label=f'e3 {kind} {scene_id}', output_schema=schema,
+                                       think=think))
         if not response.strip():
             raise RuntimeError(f'empty {kind} extraction for {scene_id}')
         out.append(response)

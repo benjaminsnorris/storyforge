@@ -4845,6 +4845,36 @@ class TestExtractionCutOff:
         assert len(budgets) == 2
 
 
+class TestExtractionThinking:
+    """#743: adaptive thinking was half the extraction's output and most of
+    its latency, for about one fact in 28; the extraction call and its
+    retry ask the model not to think (the persistence check is unchanged)."""
+
+    def test_the_extraction_and_its_retry_ask_the_model_not_to_think(self, project_dir,
+                                                                     tmp_path, monkeypatch):
+        from storyforge import common
+        monkeypatch.setattr(common, '_catalog', [{'id': 'm', 'capabilities': {'thinking': {
+            'types': {'disabled': {'supported': True}}}}}])
+        sent, others, stops = [], [], iter(['max_tokens', 'end_turn'])
+
+        def fake(path, body, **k):
+            if _is_persistence(body) or 'tools' in body:
+                others.append(body.get('thinking'))
+                if 'tools' in body:
+                    return _text({'findings': [], 'kept': []})
+                return _persistence_reply(body, ())
+            sent.append(body.get('thinking'))
+            return _text({'commitments': [_commitment()]}, stop=next(stops))
+        assert gate.EXTRACT_THINK is False
+        with patch('storyforge.api._api_request', side_effect=fake):
+            result = gate_scene(project_dir, SCENE, command='draft',
+                                log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                check_model='m')
+        assert result.passed
+        assert sent == [{'type': 'disabled'}] * 2
+        assert others and not any(others)
+
+
 class TestCarryFactsAcrossFixRounds:
     """#736: every fix round re-ran extraction and persistence, a re-roll of
     about a quarter of the facts though a fix changes about 18 words. The

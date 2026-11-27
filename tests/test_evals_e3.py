@@ -54,3 +54,23 @@ def test_select_reports_exclusions(monkeypatch, tmp_path):
 def test_the_e3_suite_loads():
     names = {s.name for s in harness.discover(str(PLUGIN_DIR / 'evals' / 'suites'))}
     assert 'e3-extraction' in names
+
+
+def test_the_commitments_call_thinks_as_the_gate_extraction_does(monkeypatch, project_dir):
+    """#743: E3 measures the gate's extraction setting (`gate.EXTRACT_THINK`)
+    on the commitments call; the knowledge and physical-state calls keep
+    the default."""
+    from storyforge import api, gate, persistence
+    sent = {}
+
+    def fake(prompt, model, **k):
+        kind = k['label'].split()[1]
+        sent[kind] = k.get('think', True)
+        text = '{"commitments": []}' if kind == 'commitments' else '{}'
+        return {'content': [{'type': 'text', 'text': text}]}
+    monkeypatch.setattr(api, 'invoke', fake)
+    monkeypatch.setattr(persistence, 'judge',
+                        lambda *a, **k: persistence.Verdict(kept=[], dropped=[]))
+    e3.extract(project_dir, 'act1-sc01')
+    assert sent == {'knowledge': True, 'physical': True, 'commitments': gate.EXTRACT_THINK}
+    assert gate.EXTRACT_THINK is False
