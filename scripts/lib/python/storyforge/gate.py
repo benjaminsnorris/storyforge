@@ -35,7 +35,7 @@ For one scene's prose, `gate_scene` runs:
    --questions`), the question layer (`questions.check_questions`) checks
    the scene in the open checker's place: narrow yes/no questions from the
    ledger about who is in the scene, each asked twice, a finding only when
-   both say yes and the quote verifies. With `tandem` (#738, `--tandem`)
+   both say yes and the quote verifies. With `tandem` (#738, the default)
    both check a scene's first run, and the question layer alone the
    re-checks after a fix, the open checker's first-run findings standing
    where the fix left their words alone and asked again where it didn't.
@@ -118,17 +118,13 @@ GATE_CONTINUITY = True
 #: question layer takes the scene's cast from its typed state, so it needs
 #: `GATE_CONTINUITY`. What it doesn't do (brief promises, filling the quotes
 #: of registry facts the prose establishes) is said in
-#: `GateResult.question_notes`. Or `tandem` (#738): both checkers on a
-#: scene's first gate run, the question layer alone after it (see `OPEN`
-#: below). `open` stays the default (Ben, 2026-11-26): the default is
-#: switched only after a pilot re-gates about six scenes' pre-fix prose in
-#: each mode and compares catches and false stops (the question layer
-#: stopped about 0.48 of gate-set-questions' controls, and a false stop
-#: sends a scene into the fix loop, #740). `storyforge check --tandem` /
-#: `--questions` / `--open` and the same `write` flags force one for a run
+#: `GateResult.question_notes`. Or `tandem` (#738), the default: both
+#: checkers on a scene's first gate run, the question layer alone after it
+#: (see `OPEN` below); `storyforge check --open` / `--questions` and
+#: `write --open` / `--questions` force one for a run
 #: (`forced_check_method`)
 CHECK_METHODS = ('open', 'questions', 'tandem')
-GATE_CHECK_METHOD = 'open'
+GATE_CHECK_METHOD = 'tandem'
 #: #738, the `tandem` method. A gate run that is handed no earlier open
 #: reading (`gate_scene(open_from=)`) is a *first run*: the open checker
 #: (`GATE_READINGS` readings) and the question layer both check it, and

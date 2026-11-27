@@ -12,14 +12,14 @@ was drafted past. With `--keep-going` (#556) a scene stopped only by the
 check's findings is committed provisionally (`gate.commit_provisional`),
 so the scenes that depend on it are drafted too. A redraft that passes
 re-checks the later scenes depending on what it changed (Phase 4,
-`gate.recheck_pending`). The gate checks with the open checker by default.
-`--tandem` (#738) checks with both: the open checker and the question layer
-on each scene's first run, the question layer alone on the re-checks after
-a fix, the open checker's findings standing where the fix left their words
-alone and asked again where it didn't. With `--questions` (#649) or `--open`
-every gate run the command makes (first runs, re-gates after a fix,
-re-checks) uses that checker alone (`gate.forced_check_method`, each flag for the run only, as
-`check` sets it); the forecast prices the method (`gate.write_gate_cost_per_scene()`),
+`gate.recheck_pending`). The gate checks with both checkers by default
+(`tandem`, #738): the open checker and the question layer on each scene's
+first run, the question layer alone on the re-checks after a fix, the open
+checker's findings standing where the fix left their words alone and asked
+again where it didn't. With `--questions` (#649) or `--open` every gate run
+the command makes (first runs, re-gates after a fix, re-checks) uses that
+checker alone (`gate.forced_check_method`, for the run only, as `check`
+sets it); the forecast prices the method (`gate.write_gate_cost_per_scene()`),
 and the messages pointing to `check --pending` carry its flag. Coaching levels coach and
 strict write briefs or constraints, not prose, and are not gated; only they
 take `--batch` (every scene at once through the Batch API). Prose is never
@@ -35,7 +35,7 @@ Usage:
     storyforge write --dry-run act1-sc01    # Build prompt and forecast, no API call
     storyforge write --keep-going           # Commit a gate failure provisionally, so its dependents draft too
     storyforge write --session --questions  # Gate with yes/no questions alone (#649)
-    storyforge write --session --tandem     # Gate with both checkers (#738)
+    storyforge write --session --open       # Gate with the open checker alone (#738)
     storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
 
@@ -198,7 +198,7 @@ def _main(args):
             and not gate.GATE_CONTINUITY):
         # the question layer reads the typed state (`gate._gate_scene`
         # raises without it): stop before anything is drafted or spent
-        log(f'ERROR: {flag or "the gate's check method " + gate.GATE_CHECK_METHOD} needs the '
+        log(f'ERROR: {flag or "the gate (its default check, both checkers)"} needs the '
             f'gate\'s continuity checks (gate.GATE_CONTINUITY), which are off.')
         sys.exit(1)
     if args.stop_after is not None and (not args.session or args.stop_after < 0):

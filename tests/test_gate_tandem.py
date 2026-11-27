@@ -115,9 +115,8 @@ def _fixer(*proses):
 # ============================================================================
 
 @pytest.mark.check_method_default
-def test_the_open_checker_stays_the_default():
-    # Ben, 2026-11-26: tandem is forced with --tandem until a pilot
-    assert gate.GATE_CHECK_METHOD == 'open'
+def test_tandem_is_the_default():
+    assert gate.GATE_CHECK_METHOD == 'tandem'
     assert gate.CHECK_METHODS == ('open', 'questions', 'tandem')
 
 
@@ -753,7 +752,7 @@ class TestTandemEndToEnd:
 class TestReviewCommands:
     def test_write_refuses_the_default_without_continuity(self, project_dir, monkeypatch,
                                                          capsys):
-        # T-5: tandem as the default would need the typed state; --open doesn't
+        # T-5: the default tandem needs the typed state; --open doesn't
         from storyforge import cmd_write
         monkeypatch.setattr(gate, 'GATE_CHECK_METHOD', 'tandem')
         monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
@@ -762,11 +761,8 @@ class TestReviewCommands:
         with pytest.raises(SystemExit) as e:
             cmd_write.main(['--coaching', 'full', '--scenes', SCENE])
         assert e.value.code == 1
-        assert ('the gate\'s check method tandem needs the gate\'s continuity'
+        assert ('the gate (its default check, both checkers) needs the gate\'s continuity'
                 in capsys.readouterr().out)
-        with pytest.raises(SystemExit) as e:
-            cmd_write.main(['--tandem', '--coaching', 'full', '--scenes', SCENE])
-        assert e.value.code == 1 and '--tandem needs the gate' in capsys.readouterr().out
         # --open runs without the typed state: a dry run goes through
         cmd_write.main(['--open', '--dry-run', '--coaching', 'full', '--scenes', SCENE])
         assert 'continuity checks' not in capsys.readouterr().out
