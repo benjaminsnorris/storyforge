@@ -232,6 +232,9 @@ def run(ctx, method: str, floors: dict, min_cases: int,
     flagged_left = [o['id'] for c, o in zip(cases, outcomes) if c['verdict'] == 'left' and o['caught']]
     if flagged_left:
         notes.append(f'flagged a reading left as plausible: {", ".join(flagged_left)}')
+    if metrics['debatable_cases']:
+        notes.append(f'debatable cases (not in recall, no false alarm): '
+                     f'{metrics["debatable_flagged"]} of {metrics["debatable_cases"]} flagged')
     notes.append(f'book-scope cases (need other scenes; not in recall): '
                  f'{metrics["book_scope_caught"]} of {metrics["book_scope_cases"]} caught')
     if method == 'stage-sheet':

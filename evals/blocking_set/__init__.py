@@ -31,7 +31,10 @@ case came from):
        "scope": "scene",         # SCOPES: "book" needs facts from other scenes
        "verdict": "fixed",       # VERDICTS: "fixed" a real slip, fixed;
                                  # "left" a reading judged plausible and
-                                 # left alone (a flag on it is a false alarm)
+                                 # left alone (a flag on it is a false alarm);
+                                 # "debatable" a finding a reviewer could
+                                 # call either way (out of recall, and a flag
+                                 # on it is no false alarm)
        "quotes": ["<verbatim>", ...],     # the slip, then (when the source
                                           # gave one) what it's set against
        "fix_quotes": ["<verbatim>", ...], # optional: other lines the fix changed
@@ -82,7 +85,7 @@ CATEGORIES = ('hands', 'posture', 'sightline', 'worn', 'position', 'light', 'oth
 #: storyforge.blocking.KINDS, or '' (a source that gave none)
 KINDS = ('contradiction', 'impossible', 'unclear', '')
 SCOPES = ('scene', 'book')
-VERDICTS = ('fixed', 'left')
+VERDICTS = ('fixed', 'left', 'debatable')
 ROLES = ('case', 'clean')
 BOOK_ID = re.compile(r'^[a-z0-9-]+$')
 
@@ -391,6 +394,7 @@ def score(cases: list[dict], scenes: list[dict],
     in_scene = [c for c in fixed if c.get('scope', 'scene') == 'scene']
     book_scope = [c for c in fixed if c.get('scope', 'scene') == 'book']
     left = [c for c in cases if c['verdict'] == 'left']
+    debatable = [c for c in cases if c['verdict'] == 'debatable']
     clean = [k for k, s in by_key.items() if s['role'] == 'clean']
     case_keys = [k for k, s in by_key.items() if s['role'] == 'case']
     clean_words = sum(len(by_key[k]['text'].split()) for k in clean)
@@ -412,6 +416,8 @@ def score(cases: list[dict], scenes: list[dict],
         'book_scope_caught': sum(1 for c in book_scope if c['id'] in caught),
         'left_cases': len(left),
         'left_flagged': sum(1 for c in left if c['id'] in caught),
+        'debatable_cases': len(debatable),
+        'debatable_flagged': sum(1 for c in debatable if c['id'] in caught),
         'clean_scenes': len(clean),
         'clean_words': clean_words,
         'clean_flags': clean_flags,

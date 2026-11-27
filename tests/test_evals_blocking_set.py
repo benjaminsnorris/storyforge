@@ -327,6 +327,21 @@ class TestScore:
         assert metrics['left_flagged'] == 1            # COAT is a reading left as plausible
         assert metrics['unverified_flags'] == 1 and metrics['flags'] == 2
 
+    def test_a_debatable_case_is_out_of_recall_and_no_false_alarm(self, tmp_path):
+        # Report A's debatable blocking findings (#744 follow-up): a flag on
+        # one is counted apart, never a catch, a miss or a false alarm
+        cases = [*CASES, _case('tale-006', category='light', quotes=(CANDLE,),
+                               verdict='debatable')]
+        cases[2] = _case('tale-003', category='posture', quotes=('Ann sat on the step.',))
+        flags = {('tale', 'harbour'): [_flag(CANDLE)], ('tale', 'rain'): []}
+        cs, scenes = _loaded(tmp_path, cases=cases)
+        assert blocking_set.validate(cs, scenes) == []
+        metrics, outcomes = blocking_set.score(cs, scenes, flags)
+        assert metrics['debatable_cases'] == 1 and metrics['debatable_flagged'] == 1
+        assert metrics['cases'] == 3 and metrics['caught'] == 0
+        assert metrics['left_flagged'] == 0 and metrics['unlabelled_flags'] == 0
+        assert {o['id']: o['caught'] for o in outcomes}['tale-006'] is True
+
     def test_an_unverified_finding_catches_nothing(self, tmp_path):
         metrics, _ = self._score(tmp_path, {('tale', 'harbour'): [_flag(FREE_HAND, verified=False)],
                                             ('tale', 'rain'): []})
