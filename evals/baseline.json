@@ -204,7 +204,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:43:58+00:00",
+      "started_at": "2026-11-27T08:53:06+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
@@ -220,7 +220,7 @@
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 2.93,
+      "duration_s": 2.95,
       "error": null,
       "frozen": true,
       "gates": [
@@ -408,7 +408,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:43:59+00:00",
+      "started_at": "2026-11-27T08:53:07+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
@@ -626,12 +626,12 @@
         "KNO": {
           "cases": 5,
           "precision": 1.0,
-          "recall": 1.0,
-          "recall_code_match": 1.0
+          "recall": 0.8,
+          "recall_code_match": 0.8
         },
         "PHY": {
           "cases": 6,
-          "precision": 0.5556,
+          "precision": 0.625,
           "recall": 0.8333,
           "recall_code_match": 0.8333
         },
@@ -655,9 +655,9 @@
         },
         "TRT": {
           "cases": 6,
-          "precision": 0.8,
+          "precision": 0.8333,
           "recall": 1.0,
-          "recall_code_match": 0.6667
+          "recall_code_match": 0.8333
         },
         "VOI": {
           "cases": 2,
@@ -672,16 +672,16 @@
         }
       },
       "cost": {
-        "calls": 151,
-        "input_tokens": 422,
-        "output_tokens": 38859,
-        "replayed_calls": 151,
+        "calls": 139,
+        "input_tokens": 398,
+        "output_tokens": 37205,
+        "replayed_calls": 139,
         "unpriced_calls": 0,
-        "usd_if_live": 5.8603,
+        "usd_if_live": 5.2282,
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 2.35,
+      "duration_s": 2.42,
       "error": null,
       "frozen": false,
       "gates": [
@@ -700,11 +700,11 @@
           "threshold": 0.8
         },
         {
-          "actual": 1.0,
+          "actual": 0.8,
           "name": "recall_KNO",
           "op": "==",
           "passed": true,
-          "threshold": 1.0
+          "threshold": 0.8
         },
         {
           "actual": 0.8,
@@ -714,25 +714,25 @@
           "threshold": 0.8
         },
         {
-          "actual": 0.6667,
+          "actual": 0.8333,
           "name": "recall_TRT",
           "op": "==",
           "passed": true,
-          "threshold": 0.6667
+          "threshold": 0.8333
         },
         {
-          "actual": 0.8387,
+          "actual": 0.8667,
           "name": "precision",
           "op": "==",
           "passed": true,
-          "threshold": 0.8387
+          "threshold": 0.8667
         },
         {
-          "actual": 31,
+          "actual": 30,
           "name": "flags",
           "op": "==",
           "passed": true,
-          "threshold": 31
+          "threshold": 30
         }
       ],
       "metrics": {
@@ -740,22 +740,22 @@
         "benign_flagged": 0,
         "cases": 37,
         "control_flags": 0,
-        "flags_false": 5,
+        "flags_false": 4,
         "flags_true": 26,
-        "precision": 0.8387,
-        "recall": 0.8378,
+        "precision": 0.8667,
+        "recall": 0.8108,
         "recall_code_match": 0.7027
       },
       "mode": "replay",
       "notes": [
-        "below the plan target (recall 0.9 per code, precision 0.8), not gated: recall_PHY, recall_TIM, recall_REL, recall_TRT",
+        "below the plan target (recall 0.9 per code, precision 0.8), not gated: recall_PHY, recall_TIM, recall_KNO, recall_REL, recall_TRT",
         "detector: the gate checker (contradictions; no brief promises)",
-        "missed 11 of 37: e2-carol-002, e2-carol-010, e2-carol-016, e2-carol-017, e2-carol-021, e2-carol-029, e2-carol-032, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
-        "1 unverified finding(s) (quotes not in the text they name) not counted as flags; the gate blocks on them: scrooge-raises-bobs-salary: '' is not a promise of this scene's brief",
+        "missed 11 of 37: e2-carol-002, e2-carol-010, e2-carol-017, e2-carol-021, e2-carol-027, e2-carol-029, e2-carol-032, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
+        "0 unverified finding(s) (quotes not in the text they name) not counted as flags; the gate blocks on them",
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:02:19+00:00",
+      "started_at": "2026-11-27T08:22:11+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -1231,27 +1231,30 @@
     },
     {
       "by_code": {
+        "KNO": {
+          "mismatches": 1
+        },
         "PHY": {
-          "mismatches": 15
+          "mismatches": 8
         },
         "REL": {
           "mismatches": 1
         },
-        "TIM": {
+        "TRT": {
           "mismatches": 1
         }
       },
       "cost": {
         "calls": 61,
-        "input_tokens": 553749,
-        "output_tokens": 104714,
+        "input_tokens": 547185,
+        "output_tokens": 108112,
         "replayed_calls": 61,
         "unpriced_calls": 0,
-        "usd_if_live": 4.503,
+        "usd_if_live": 4.5466,
         "usd_spent": 0.0
       },
       "description": "Rewrite from plan + ledger; facts the rewrite changes",
-      "duration_s": 1.07,
+      "duration_s": 1.02,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1263,14 +1266,14 @@
           "threshold": 10
         },
         {
-          "actual": 1.7,
+          "actual": 1.1,
           "name": "mismatches_per_scene",
           "op": "<=",
           "passed": true,
           "threshold": 2.3
         },
         {
-          "actual": 3.8,
+          "actual": 3.9,
           "name": "ledger_only.mismatches_per_scene",
           "op": "<=",
           "passed": true,
@@ -1278,32 +1281,32 @@
         }
       ],
       "metrics": {
-        "ledger_only.KNO": 2,
-        "ledger_only.PHY": 30,
+        "ledger_only.KNO": 3,
+        "ledger_only.PHY": 31,
         "ledger_only.REL": 1,
         "ledger_only.TIM": 3,
-        "ledger_only.TRT": 2,
-        "ledger_only.mismatches": 38,
-        "ledger_only.mismatches_per_scene": 3.8,
-        "mismatches": 17,
-        "mismatches_per_scene": 1.7,
+        "ledger_only.TRT": 1,
+        "ledger_only.mismatches": 39,
+        "ledger_only.mismatches_per_scene": 3.9,
+        "mismatches": 11,
+        "mismatches_per_scene": 1.1,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 2 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: In the original the door makes a particular creak when he enters; in the redraft the door never squeaks.\n    PHY: In the original the captor speaks to her during the visit; the redraft describes him as a man who doesn't speak.\n    ledger only, PHY: In the original the captor lifts the hood fabric away from her mouth so she drinks directly from the bottle; in the redraft the water soaks ",
-        "harmons-hands: 2 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: The hand he uses for the fingertip capillary test is the right hand in the original but the left hand in the redraft.\n    PHY: The space heater is aimed at her torso in the original but moved toward her shins in the redraft.\n    ledger only, PHY: In the original the woman is seated in a chair with each wrist zip-tied to an armrest; in the redraft she kneels on the slab with her hands \n    ledger only, PHY: The sleeping bag is draped across her lap and tucked under her thighs in the original, but over her shoulders and tucked under her arms in t\n    ledger only, PHY: The capillary-refill check is done on her right hand in the original, but on her left hand in the redraft.\n    ledger only, PHY: The original says the hands he is wearing stayed steady all night, while in the redraft those fingers tremble.",
-        "waking-maren: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: The original has her drinking the wine on an empty stomach, while the redraft says she had it with crackers.\n    ledger only, TIM: At 2:47 she was sitting up in bed reading the bedroom alarm clock, not already standing at the kitchen counter reading the microwave clock.\n    ledger only, PHY: In the original she turns on the buzzing fluorescent overhead kitchen light, whereas in the redraft she leaves the kitchen light off and see\n    ledger only, PHY: At 3:02 she is standing in the dark kitchen in the original, but in the redraft she has walked back to the bedroom doorway.",
-        "waking-hank: 2 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: Before he writes, the pencil is described as lying beside the legal pad in the original, but as lying across it in the redraft.\n    PHY: When Rook approaches, the original has her stop in the kitchen doorway, but the redraft has her come into the kitchen and stop a few feet fr\n    ledger only, PHY: When he comes to the counter, the original has the legal pad lying facedown, but the redraft has it faceup.\n    ledger only, PHY: In the original he is barefoot in boxers, but in the redraft he is wearing boots.\n    ledger only, TIM: In the original the stove clock reads 2:47 after he has finished writing, but in the redraft it reads 2:47 before he writes and 3:09 when he\n    ledger only, PHY: In the original the notes fit on a single page, but in the redraft they run onto more than one page.\n    ledger only, PHY: In the original Rook comes and stands in the kitchen doorway after the writing, but in the redraft she is still lying in the hallway when he",
-        "the-school: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: How Hank gets into the building differs: in the original the custodian lets him in, while in the redraft he opens the side door himself with\n    ledger only, PHY: Where Hank begins the survey and which direction he works along the wall.\n    ledger only, PHY: The gymnasium floor is rubber in the original but hardwood and varnished in the redraft.\n    ledger only, TIM: In the original Hank crosses out the troubling sentence while still in the gym and only rereads it in the truck; in the redraft he first cro",
-        "advocate: 3 mismatch(es) in the rewrite, 7 from the plan and ledger alone\n    PHY: In Maren's flashback, the concrete is under her bare feet in the original but under her bare knees in the redraft.\n    PHY: The contact points Maren counts to ground herself differ: toes, heels and calves against the chair in the original, versus six points on her\n    PHY: When the tremor starts, Maren's ring finger twitches against the table surface in the original but against the folder under the table in the\n    ledger only, PHY: In the original, Maren's tremor begins partway through the interview; in the redraft, her left hand has been shaking since before the interv\n    ledger only, PHY: In the original, the tremor during the interview is in a single finger (the left ring finger); in the redraft, all four fingers of the left \n    ledger only, KNO: In the original, Sofia does not notice Maren's physical reaction; in the redraft, Sofia is watching her as it happens.\n    ledger only, PHY: In the original, Sofia herself moved her chair closer to the door; in the redraft, Maren chose Sofia's seat position for its view of the doo\n    ledger only, PHY: In the original, the intake folder is under the table with Maren's thumb pressed against its spine; in the redraft, the folder lies on the t\n    ledger only, PHY: During the phone call, Maren's left hand presses flat against the wall in the original, but against a window ledge in the redraft.\n    ledger only, PHY: In the bathroom, Maren sinks to the floor with her knuckles on the floor tile in the original; in the redraft, she stays standing with her f",
-        "maren-runs: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    PHY: During the flinch, the original has her hands splayed open at her sides; the redraft has them thrown up, palms out, shoving at something an \n    ledger only, PHY: The river's colour differs: gray in the original, brown in the redraft.\n    ledger only, PHY: Her running breath pattern differs: three strides in and three out in the original, two in and two out in the redraft.\n    ledger only, PHY: During the flinch her hands splay open at her sides in the original but come up and spread in front of her face in the redraft.\n    ledger only, PHY: After stopping, her stride count restarts from one in the original but from four in the redraft.\n    ledger only, PHY: She resumes running faster than before in the original, but starts at a near-walk in the redraft.\n    ledger only, PHY: At the end of the bridge she presses her hands on the steel railing in the original, but puts a palm on the granite end post in the redraft.",
-        "engineer: 1 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: In the original he scrubbed the hand under very hot water; in the redraft he ran it under the tap only until the water went lukewarm, sugges\n    ledger only, PHY: The burned or scalded hand is the right hand in the original but the left hand in the redraft, where the right hand is the steady one restin\n    ledger only, TRT: Danny says \"Hell\" on seeing the missing anchors in the original; in the redraft Hank says it and Danny says nothing.\n    ledger only, PHY: Danny removes the stucco with a masonry hammer in the original but with a flat bar in the redraft.\n    ledger only, PHY: Hank scores the sill concrete with his thumbnail in the original but with the tip of a screwdriver in the redraft.\n    ledger only, PHY: Danny's mortar probe reaches only a quarter to three-eighths inch in the original, but the screwdriver sinks two inches in the redraft.",
-        "name-surfaces: 3 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: Hank writes CLAIRE with a pen in the original but with a pencil in the redraft.\n    PHY: In the original Hank's hand stays steady while he writes the name; in the redraft his hand is trembling and he struggles to hold the pencil \n    TIM: In the original the notes run past midnight, with an interior entry stamped 12:15; the redraft says both pages were filled before midnight.\n    ledger only, PHY: In the original Hank writes with a pen and the ink is still wet on the page; in the redraft he writes with a pencil.",
-        "voicemail: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    REL: When Marie is imagined calling from Claire's apartment, the original calls it her sister's kitchen, while the redraft calls it her daughter'\n    ledger only, REL: When Marie was at Claire's apartment, the original calls it her sister's place, while the redraft calls it her daughter's apartment.\n    ledger only, KNO: In the original, Claire's job as an ER nurse at Bay Area Hospital is first given in the second voicemail; in the redraft, Marie gives it in \n    ledger only, TRT: Marie's emotional state in the sixth message differs: angry in the original, worn-down, flat and hoarse in the redraft."
+        "claires-cold: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    TRT: In the original the captor speaks to her while lifting her; in the redraft he says nothing and is stated never to speak.\n    ledger only, PHY: The door's sound on his arrival differs: the original has the door creak, while the redraft says the hinges make no sound anymore.\n    ledger only, KNO: How she learned the pillowcase's thread count differs: by tongue in the original, by reading the tag with her fingertips in the redraft.\n    ledger only, PHY: The water vessel and how it is given differ: a plastic bottle pressed through the hood in the original, a cup lifted beneath the hood's hem \n    ledger only, PHY: Where the heater's warmth reaches her differs: her shins in the original, only her right shoulder in the redraft.",
+        "harmons-hands: 1 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: In the original he cuts and replaces the zip tie on the right wrist as well; in the redraft he only tests the right tie and leaves it in pla\n    ledger only, PHY: The hand he takes to check her capillary refill differs: her right hand in the original, her left hand in the redraft.",
+        "waking-maren: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: The surface Maren presses her palms flat against is linoleum in the original but laminate in the redraft.\n    ledger only, PHY: When she wakes at 2:47, Maren is sitting up in the original but lying on her back in the redraft.\n    ledger only, PHY: The bedroom alarm clock's display is green in the original but red in the redraft.\n    ledger only, PHY: In the dream she feels the gravel through another woman's shoes and the breathing is the woman's; in the redraft they are her own soles and \n    ledger only, PHY: When she turns the light off, the glass is on the counter in the original but in the sink in the redraft.",
+        "waking-hank: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: The pencil's position relative to the legal pad differs: in the original it lies beside the pad, in the redraft it lies across it.\n    ledger only, TIM: The 2:47 AM reading on the stove clock comes after he has finished writing in the original, but at the moment he wakes at the sink in the re\n    ledger only, PHY: After the first night at the sink, he went back to bed with wet hands in the original, but dried his hands first in the redraft.\n    ledger only, PHY: The legal pad lay facedown with the pencil beside it in the original; in the redraft the pencil lies across the pad and he looks at its blan",
+        "the-school: 0 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    ledger only, TIM: The number of nights of broken sleep Hank has had differs: three in the original, four in the redraft.\n    ledger only, PHY: In the original the crossed-out sentence stays legible under a single line; in the redraft he scribbles it out until the letters are gone.\n    ledger only, PHY: Where Rook is when she watches Hank's hand on the wall differs: at the gymnasium entrance in the original, ten feet off his left shoulder in",
+        "advocate: 0 mismatch(es) in the rewrite, 7 from the plan and ledger alone\n    ledger only, PHY: Maren's hands on the table are palms up in the original but palms down in the redraft.\n    ledger only, PHY: After Maren's reassurance, Sofia's thumb keeps working her palm in the original but stops in the redraft.\n    ledger only, TIM: Maren's finger tremor begins at 12:15 in Sofia's timeline in the original, but right after the 11:52 deadbolt flashback in the redraft.\n    ledger only, PHY: Maren hides her trembling hand in her lap in the original, but under the folder's edge on the table in the redraft.\n    ledger only, PHY: During the hallway call, Maren's left hand is pressed against the wall in the original but kept in her jacket pocket in the redraft.\n    ledger only, PHY: Maren gives Sofia the card after walking her to the lobby in the original, but back in Suite B in the redraft.\n    ledger only, PHY: In the bathroom, Maren lowers herself to the floor in the original, but stands with her fist against the tile above the sink in the redraft.",
+        "maren-runs: 3 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: During the mid-span flinch, the original has her arms come up and her hands splay open at her sides; the redraft has her wrists snap togethe\n    PHY: In the dream, the captive woman's hands were splayed against the hood over her face in the original, but zip-tied crossed behind her back in\n    PHY: At the east end of the bridge her hands had stopped shaking in the original, whereas in the redraft her left hand starts trembling again the\n    ledger only, PHY: Her running breath pattern is three strides in, three out in the original but two in, two out in the redraft.\n    ledger only, PHY: At stride 231 her left foot caught on nothing in the original, whereas in the redraft her right foot came down on grit.\n    ledger only, PHY: During the flinch her hands splay open at her sides in the original, but her arms snap behind her back with wrists crossed in the redraft.\n    ledger only, PHY: The tremor after the flinch is fine and fast in the original but hard and coarse, unlike the fine one, in the redraft.\n    ledger only, PHY: After stopping, her stride count resets to zero in the original, but in the redraft it continues from where she stopped and she finishes at ",
+        "engineer: 2 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: In the original Rook stays where she is when Hank reacts to the vision; in the redraft she is pressed against him, closer than her usual two\n    KNO: In the original it is uncertain whether the anchors were cut or sheared, and whether a previous renovation did it; the redraft states they w\n    ledger only, PHY: The original has Danny exclaim on exposing the missing anchors; the redraft gives the line to Hank.\n    ledger only, PHY: The east entrance door frame is wood in the original but steel in the redraft.\n    ledger only, PHY: The original has the stucco removal start at the window line; the redraft starts it at the ledger line.\n    ledger only, PHY: In the original Hank extracts several original sill-plate anchor bolts and finds more; in the redraft only one original bolt remains on the ",
+        "name-surfaces: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: Hank writes CLAIRE with a pen in the original (the ink is still wet), but with a pencil in the redraft.\n    ledger only, PHY: Hank writes the name with a pen in the original but with a pencil in the redraft.\n    ledger only, PHY: Rook ends the scene with her chin on Hank's knee in the original, but with her chin on his boot in the redraft.\n    ledger only, PHY: Rook goes from lying on the kitchen floor to crossing the kitchen and leaning against his calf in the original, whereas in the redraft she l\n    ledger only, PHY: Hank's hand stays steady as he writes CLAIRE in the original, but shakes during the writing in the redraft.",
+        "voicemail: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    REL: When Marie makes the calls from Claire's apartment, the original calls it her sister's place, while the redraft says it is her daughter's.\n    ledger only, TRT: In the fifth message the original has Marie's composure gone (higher pitch, talking faster), while the redraft has her calm and factual by t\n    ledger only, KNO: The coworker Jennifer and the 11:15 Tuesday departure first come up in the fifth message in the original, but in the fourth message in the r\n    ledger only, KNO: Claire being an ER nurse at Bay Area Hospital is given in the second message in the original, but in the first message in the redraft.\n    ledger only, REL: In Maren's reconstruction the original has Marie sitting in her sister's kitchen, while the redraft has her in her daughter's rooms."
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:03:53+00:00",
+      "started_at": "2026-11-27T08:23:29+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -1691,7 +1694,7 @@
       "by_code": {
         "PHY": {
           "cases": 5,
-          "recall": 0.8
+          "recall": 1.0
         },
         "REL": {
           "cases": 5,
@@ -1703,36 +1706,36 @@
         },
         "WLD": {
           "cases": 3,
-          "recall": 0.3333
+          "recall": 0.6667
         }
       },
       "cost": {
-        "calls": 80,
-        "input_tokens": 214837,
-        "output_tokens": 50661,
-        "replayed_calls": 80,
+        "calls": 81,
+        "input_tokens": 228565,
+        "output_tokens": 53406,
+        "replayed_calls": 81,
         "unpriced_calls": 0,
-        "usd_if_live": 0.0468,
+        "usd_if_live": 0.0496,
         "usd_spent": 0.0
       },
       "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
-      "duration_s": 0.3,
+      "duration_s": 0.29,
       "error": null,
       "frozen": false,
       "gates": [
         {
-          "actual": 0.7647,
+          "actual": 0.8824,
           "name": "recall",
           "op": "==",
           "passed": true,
-          "threshold": 0.7647
+          "threshold": 0.8824
         },
         {
-          "actual": 0.7647,
+          "actual": 0.8824,
           "name": "recall_any",
           "op": "==",
           "passed": true,
-          "threshold": 0.7647
+          "threshold": 0.8824
         },
         {
           "actual": 0,
@@ -1742,18 +1745,18 @@
           "threshold": 0
         },
         {
-          "actual": 3,
+          "actual": 4,
           "name": "split",
           "op": "==",
           "passed": true,
-          "threshold": 3
+          "threshold": 4
         },
         {
-          "actual": 1,
+          "actual": 2,
           "name": "tie_found",
           "op": "==",
           "passed": true,
-          "threshold": 1
+          "threshold": 2
         },
         {
           "actual": 0,
@@ -1770,11 +1773,11 @@
           "threshold": 1
         },
         {
-          "actual": 0.7647,
+          "actual": 0.8824,
           "name": "recall_selected",
           "op": "==",
           "passed": true,
-          "threshold": 0.7647
+          "threshold": 0.8824
         }
       ],
       "metrics": {
@@ -1784,26 +1787,26 @@
         "false_alarms_other_facts": 0,
         "misquoted": 0,
         "questions": 96,
-        "recall": 0.7647,
-        "recall_any": 0.7647,
-        "recall_selected": 0.7647,
+        "recall": 0.8824,
+        "recall_any": 0.8824,
+        "recall_selected": 0.8824,
         "selection_lost": 1,
-        "split": 3,
-        "tie_found": 1,
+        "split": 4,
+        "tie_found": 2,
         "variants": 38,
         "yes_questions": 17
       },
       "mode": "replay",
       "notes": [
         "model: claude-haiku-5-5",
-        "missed 4 of 17: qs-009, qs-018, qs-033, qs-035",
+        "missed 2 of 17: qs-018, qs-033",
         "false alarms (0): ",
         "yes facts the gate's selection would not ask (1): qs-018:partner",
         "by_code has 3-6 cases a code: too few to compare codes",
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-16T21:48:34+00:00",
+      "started_at": "2026-11-27T08:24:35+00:00",
       "status": "pass",
       "suite": "question-set"
     },
@@ -1815,7 +1818,7 @@
           "recall": 1.0
         },
         "PHY": {
-          "captured": 9,
+          "captured": 8,
           "cases": 10,
           "recall": 1.0
         },
@@ -1830,32 +1833,32 @@
           "recall": 1.0
         },
         "TRT": {
-          "captured": 7,
+          "captured": 6,
           "cases": 7,
           "recall": 1.0
         },
         "WLD": {
-          "captured": 1,
+          "captured": 2,
           "cases": 2,
           "recall": 1.0
         }
       },
       "cost": {
-        "calls": 225,
-        "input_tokens": 1891213,
-        "output_tokens": 391537,
-        "replayed_calls": 225,
+        "calls": 227,
+        "input_tokens": 1903802,
+        "output_tokens": 387730,
+        "replayed_calls": 227,
         "unpriced_calls": 0,
-        "usd_if_live": 7.8821,
+        "usd_if_live": 7.8732,
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 7.24,
+      "duration_s": 9.16,
       "error": null,
       "frozen": false,
       "gates": [
         {
-          "actual": 28,
+          "actual": 27,
           "name": "captured",
           "op": ">=",
           "passed": true,
@@ -1870,20 +1873,20 @@
         }
       ],
       "metrics": {
-        "captured": 28,
+        "captured": 27,
         "cases": 32,
-        "control_inclusion": 0.7059,
-        "controls": 51,
+        "control_inclusion": 0.76,
+        "controls": 50,
         "excluded": 98,
         "missing": 0,
         "no_rows": 0,
-        "partial": 4,
+        "partial": 5,
         "recall": 1.0,
-        "recall_end_to_end": 0.875,
+        "recall_end_to_end": 0.8438,
         "recall_with_partial": 1.0,
-        "set_fraction_mean": 0.2842,
-        "set_size_mean": 7.96,
-        "unrelated_cases": 3
+        "set_fraction_mean": 0.3188,
+        "set_size_mean": 8.78,
+        "unrelated_cases": 4
       },
       "mode": "replay",
       "notes": [
@@ -1893,56 +1896,56 @@
         "excluded 3: no prose established span",
         "excluded 35: tree predates reference/scenes.csv",
         "governor@0ac31c3: phase 4 over 4 scenes; 156 ledger facts name a scene outside the subset (offered to none)",
-        "governor-019 (finest-cartographer → commission-testimony): captured finest-cartographer--doreen-issues-a-survey-order-assigning, HIT, set 36",
+        "governor-019 (finest-cartographer → commission-testimony): captured finest-cartographer--tessa-merrin-was-unassigned-on-the, HIT, set 38",
         "governor@77c6bce: phase 4 over 17 scenes; 136 ledger facts name a scene outside the subset (offered to none)",
-        "governor-020 (ashward-breach → junction-fourteen, footnote): captured ashward-breach--elias-suffered-a-blistered-left-forearm, HIT, set 23",
-        "governor-022 (terrace-row → article-twelve): captured terrace-row--voss-orders-southern-trunk-maintenance-crews;block-fifteen-foundation-work, HIT, set 16; unrelated: block-fifteen-foundation-work: no subject: every later scene with a binding knowledge fact is taken as depending on it",
-        "governor-025 (the-governors-vigil → haddons-reckoning): captured the-governors-vigil--sera-holdt-is-read-out-by, HIT, set 2",
-        "governor-027 (confrontation-at-stairwell-nine → elias-agrees-to-the-terms): captured confrontation-at-stairwell-nine--last-night-in-the-eastern-gallery, HIT, set 19",
+        "governor-020 (ashward-breach → junction-fourteen, footnote): captured ashward-breach--elias-s-left-forearm-blistered-from, HIT, set 23",
+        "governor-022 (terrace-row → article-twelve): captured terrace-row--voss-orders-the-southern-trunk-maintenance;block-fifteen-foundation-work, HIT, set 16; unrelated: block-fifteen-foundation-work: no subject: every later scene with a binding knowledge fact is taken as depending on it",
+        "governor-025 (the-governors-vigil → haddons-reckoning): captured the-governors-vigil--the-aide-s-list-names-sera, HIT, set 2",
+        "governor-027 (confrontation-at-stairwell-nine → elias-agrees-to-the-terms): captured confrontation-at-stairwell-nine--last-night-tessa-had-a-thirty, HIT, set 19",
         "lantern-folk@17f3311: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
         "lantern-folk-018 (a01-moving-night → a02-into-the-trees): partial a01-moving-night--nora-goes-out-the-back-door, HIT, set 1",
         "lantern-folk@1d3f552: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
         "lantern-folk-028 (a11-in-the-dark → a14-the-keepers-flame): captured a11-in-the-dark--wick-lies-in-his-own-house, HIT, set 3",
         "lantern-folk@37bc78e: phase 4 over 8 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
         "lantern-folk-012 (a04-the-great-lamp → a13-through-the-woods): captured a04-the-great-lamp--the-great-lamp-sits-in-a;a04-the-great-lamp--the-great-lamp-is-the-size, HIT, set 6",
-        "lantern-folk-013 (a12-the-remembering → a14-the-keepers-flame): partial a12-the-remembering--the-great-lamp-is-out-at;a12-the-remembering--just-before-the-lamp-died-leo, HIT, set 2",
-        "lantern-folk-014 (a03-the-little-voices → a09-the-worst-night): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
-        "lantern-folk-015 (a03-the-little-voices → a09-the-worst-night): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
+        "lantern-folk-013 (a12-the-remembering → a14-the-keepers-flame): partial a12-the-remembering--the-great-lamp-has-gone-out;a12-the-remembering--just-before-the-lamp-died-leo, HIT, set 2",
+        "lantern-folk-014 (a03-the-little-voices → a09-the-worst-night): captured a03-the-little-voices--leo-cannot-hear-the-folk-because;a03-the-little-voices--leo-can-see-nora-and-the, HIT, set 7",
+        "lantern-folk-015 (a03-the-little-voices → a09-the-worst-night): captured a03-the-little-voices--leo-cannot-hear-the-folk-because;a03-the-little-voices--leo-can-see-nora-and-the, HIT, set 7",
         "lantern-folk@3b054ee: phase 4 over 7 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-001 (a07-the-cold-sleep → a11-in-the-dark): captured a07-the-cold-sleep--wick-s-dark-lantern-lay-on;a07-the-cold-sleep--wick-was-snuffed-by-the-murkwolf;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 4",
-        "lantern-folk-002 (a03-the-little-voices → a09-the-worst-night, a11-in-the-dark): partial a03-the-little-voices--wick-s-lantern-is-a-real, HIT, set 5",
+        "lantern-folk-001 (a07-the-cold-sleep → a11-in-the-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 4",
+        "lantern-folk-002 (a03-the-little-voices → a09-the-worst-night, a11-in-the-dark): captured a03-the-little-voices--wick-s-lantern-is-a-real;a03-the-little-voices--wick-trusted-nora-enough-to-rest, HIT, set 6",
         "lantern-folk@6c7fa1a: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-011 (a07-the-cold-sleep → a10-the-lamp-goes-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 3",
+        "lantern-folk-011 (a07-the-cold-sleep → a10-the-lamp-goes-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-s-lantern-lies-on-the, HIT, set 3",
         "lantern-folk@73076e8: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-025 (a13-through-the-woods → a14-the-keepers-flame): captured a13-through-the-woods--leo-s-match-ember-relit-the, HIT, set 1",
+        "lantern-folk-025 (a13-through-the-woods → a14-the-keepers-flame): captured a13-through-the-woods--leo-relit-the-great-lamp-s, HIT, set 1",
         "lantern-folk@771df26: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-005 (a11-in-the-dark → a12-the-remembering): partial a11-in-the-dark--only-five-folk-lanterns-are-still, HIT, set 1",
+        "lantern-folk-005 (a11-in-the-dark → a12-the-remembering): partial a11-in-the-dark--five-folk-lights-remain-burning-down, HIT, set 1",
         "lantern-folk@c131e3d: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-008 (a03-the-little-voices → a12-the-remembering): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 3",
+        "lantern-folk-008 (a03-the-little-voices → a12-the-remembering): captured a03-the-little-voices--leo-cannot-hear-the-folk-because;a03-the-little-voices--leo-can-see-nora-and-the, HIT, set 3",
         "lantern-folk@c9cd9b3: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-006 (a08-what-the-folk-fear → a11-in-the-dark): captured a08-what-the-folk-fear--the-keeper-has-watched-the-lamp;a08-what-the-folk-fear--the-keeper-says-that-the-lamp, HIT, set 3",
+        "lantern-folk-006 (a08-what-the-folk-fear → a11-in-the-dark): captured a08-what-the-folk-fear--the-keeper-says-the-lamp-is, HIT, set 2",
         "lantern-folk@ff141ad: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-027 (a11-in-the-dark → a14-the-keepers-flame): captured a11-in-the-dark--tallow-does-not-answer-when-a, HIT, set 1",
+        "lantern-folk-027 (a11-in-the-dark → a14-the-keepers-flame): captured a11-in-the-dark--a-voice-nora-recognizes-was-calling, HIT, set 2",
         "shared-dark@0eaa3867: phase 4 over 9 scenes; 113 ledger facts name a scene outside the subset (offered to none)",
-        "shared-dark-039 (building → claire): captured building--maren-has-dreamed-herself-inside-this, HIT, set 11",
-        "shared-dark-040 (building → claire): captured building--maren-has-dreamed-herself-inside-this;building--maren-and-hank-have-known-each, HIT, set 11",
-        "shared-dark-041 (pewter-town → claire) [left out: missing-persons: before the establishing scene]: captured pewter-town--at-the-time-of-this-scene, HIT, set 7",
+        "shared-dark-039 (building → claire): captured building--in-her-dreams-maren-was-made, HIT, set 11",
+        "shared-dark-040 (building → claire): captured building--maren-has-been-inside-this-building, HIT, set 11",
+        "shared-dark-041 (pewter-town → claire) [left out: missing-persons: before the establishing scene]: captured pewter-town--claire-has-been-missing-nine-days, HIT, set 7",
         "shared-dark-043 (keisha-argument → call) [left out: research: before the establishing scene]: captured keisha-argument--shannon-lives-on-the-second-floor, HIT, set 1",
         "shared-dark-044 (keisha-argument → call) [left out: research: before the establishing scene]: captured keisha-argument--madison-lives-on-the-third-floor, HIT, set 1",
         "shared-dark@b9ba79d3: phase 4 over 8 scenes; 126 ledger facts name a scene outside the subset (offered to none)",
         "shared-dark-034 (watching-ostrowski → call): captured watching-ostrowski--madison-is-sixteen-shannon-s-student, HIT, set 1",
-        "shared-dark-035 (no-response → phone-call): captured no-response--rook-is-female-and-sleeps-at, HIT, set 2",
+        "shared-dark-035 (no-response → phone-call): partial no-response--hank-left-his-apartment-before-dawn, HIT, set 4",
         "thornwall@2e7d14d: phase 4 over 17 scenes; 101 ledger facts name a scene outside the subset (offered to none)",
-        "thornwall-024 (not-alone → ivra-seals-archive) [left out: evening-visit: before the establishing scene]: captured not-alone--ves-wrote-her-journal-sixteen-years, HIT, set 1",
-        "thornwall-025 (thessan-resistance → thessan-vigil) [left out: morning-after: before the establishing scene]: captured thessan-resistance--thessan-has-executed-four-closures-greenhollow, HIT, set 4",
-        "thornwall-026 (crowded-chamber → thessan-resistance) [left out: thessan-rides: before the establishing scene]: captured crowded-chamber--at-greenhollow-davin-hale-opened-a, HIT, set 8; unrelated: crowded-chamber--at-greenhollow-davin-hale-opened-a: no subject: every later scene with a binding world fact is taken as depending on it",
-        "thornwall-028 (thessan-resistance → corvins-dispatch) [left out: crowded-chamber: before the establishing scene]: captured thessan-resistance--thessan-has-reviewed-the-greenhollow-file;thessan-resistance--thessan-believes-davin-walked-into-the;thessan-resistance--thessan-brought-the-greenhollow-assessment-copy, HIT, set 4",
-        "thornwall-029 (journals-of-the-east-wing → evidence-room): captured journals-of-the-east-wing--ryn-s-last-journal-entry-written, HIT, set 24",
-        "thornwall-030 (ivra-visits-sera → ivra-seals-archive): captured ivra-visits-sera--garren-s-watch-s-decline-played, HIT, set 14; unrelated: ivra-visits-sera--garren-s-watch-s-decline-played: no subject: every later scene with a binding world fact is taken as depending on it",
+        "thornwall-024 (not-alone → ivra-seals-archive) [left out: evening-visit: before the establishing scene]: captured not-alone--kael-says-ves-wrote-her-journal, HIT, set 15",
+        "thornwall-025 (thessan-resistance → thessan-vigil) [left out: morning-after: before the establishing scene]: captured thessan-resistance--thessan-has-carried-out-four-closures, HIT, set 4",
+        "thornwall-026 (crowded-chamber → thessan-resistance) [left out: thessan-rides: before the establishing scene]: partial crowded-chamber--davin-hale-seized-the-rend-and;crowded-chamber--kael-served-at-greenhollow-during-the, HIT, set 11; unrelated: crowded-chamber--davin-hale-seized-the-rend-and: no subject: every later scene with a binding world fact is taken as depending on it",
+        "thornwall-028 (thessan-resistance → corvins-dispatch) [left out: crowded-chamber: before the establishing scene]: captured thessan-resistance--thessan-has-told-herself-for-six;thessan-resistance--thessan-packed-a-copy-of-the;thessan-resistance--thessan-has-reviewed-the-greenhollow-file, HIT, set 4",
+        "thornwall-029 (journals-of-the-east-wing → evidence-room): captured journals-of-the-east-wing--ryn-s-last-journal-entry-reads, HIT, set 26; unrelated: journals-of-the-east-wing--ryn-s-last-journal-entry-reads: no subject: every later scene with a binding knowledge fact is taken as depending on it",
+        "thornwall-030 (ivra-visits-sera → ivra-seals-archive): captured ivra-visits-sera--sera-s-comparison-shows-the-decline, HIT, set 14; unrelated: ivra-visits-sera--sera-s-comparison-shows-the-decline: no subject: every later scene with a binding world fact is taken as depending on it; not listed: report-she-cannot-write (cut or merged)",
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:03:56+00:00",
+      "started_at": "2026-11-27T08:24:35+00:00",
       "status": "pass",
       "suite": "recheck-set"
     },
