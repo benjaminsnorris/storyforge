@@ -22,7 +22,8 @@ recording) were other real errors the replay made (2026-11-01).
 / `gate_advisory` sum what the gate's last run found over the gated replays
 (`e8.gate_counts`): `gate_inherited` is what was already in the book
 before the pass, reported but not blocking; `gate_advisory` (#642) the
-broken promises of beats the brief doesn't mark `must:`, reported but not
+broken promises of beats the brief doesn't mark `must:` and (since
+2026-11-27) the typed knowledge check's findings, reported but not
 blocking (before #642 they were in `gate_new` and blocked). A prose replay with no counts
 (the naturalness-upstream family gates through revise itself; a gate that
 couldn't finish) is noted and counted in `gate_counts_missing`.

@@ -38,7 +38,10 @@ Before doing anything else, orient yourself:
      (the brief field or registry id), `quote` (the promised item),
      `finding`, `command`, and `stale` (empty, or why the row may no
      longer hold: the scene or its brief changed since; suggest
-     `storyforge check <scene>`). A brief item the prose doesn't deliver.
+     `storyforge check <scene>`). A brief item the prose doesn't deliver,
+     or (a `finding` with `(typed state, knowledge)`) a fact the scene uses
+     before the scene that shows it learned: offer to fix the prose or the
+     brief's `knowledge_in`/`knowledge_out` when it's real.
      An advisory file that can't be read is a `gate` blocker, not a record. Not blockers: the prose stands. Mention them, and
      offer to amend the brief, or to mark the beat `must:` (in
      `key_actions` or `key_dialogue`) if the author wants the gate to
@@ -309,7 +312,7 @@ Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke
 Provide `storyforge audit`: the per-act digest of new ledger facts (`reference/commitments.csv`) not yet reviewed, fixed facts first, then relationship and knowledge, then physical state. Scope it with `--act N`, `--character ID`, `--scenes A..B` or `--thread ID`. The author marks what they've read with `storyforge audit --mark seen all` (or named ids), and a wrong fact with `--mark rejected ID`: the scene whose prose states it is listed to revise (drafting won't pass it until `storyforge check` passes it), and once it does, the later scenes that depend on it are re-checked; a fact with no prose to revise has its dependents re-checked with `storyforge check --pending`. Every ledger change is also recorded in `working/audit-log.csv`, readable at any pace. Don't mark facts on the author's behalf: the marking is the audit.
 
 **"The gate stopped on an error" / "Accept this error" / "This contradiction is fine":**
-A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken `must` beat (or a registry fact the scene sets up and doesn't establish), an unverified quote or a halt still has to be fixed. Other broken promises don't stop a scene: they're advisory.
+A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken `must` beat (or a registry fact the scene sets up and doesn't establish), an unverified quote or a halt still has to be fixed. Other broken promises don't stop a scene: they're advisory. Nor does the typed knowledge check (a character using a fact before the scene that shows them learning it): it is reported as `ADVISORY` and listed with the broken promises.
 
 In a faithful adaptation the gate also checks a scene against its source. A fact the source contradicts is still recorded (the ledger records what the book says), and the scene is listed in `working/gate-source-fix.csv` until it is fixed toward the source or the source check, which sees every fact of a listed scene again, no longer finds the departure. When the source tells a stopping finding the same way (Homer's own slip), the finding still stops the scene and is fixed, and the source's passage is added to `working/gate-source-notes.csv` for the author: whether to keep the source's oddity, with its license on the page, is theirs. Known slips of the translation against the original go in the file `source.errata` names in `storyforge.yaml`, so the check rules by the original. When a scene contradicts an earlier one and the source backs the later scene, the later scene passes (`SOURCE BACKS THIS SCENE`). The earlier scene's wrong fact stops binding, so later scenes follow the source, and that scene is listed in `working/gate-source-fix.csv`. Tell the author each one is theirs to fix toward the source, then run `storyforge check --pending`. The row stays until that scene's prose changes; a passing re-check never clears it, and it doesn't stop drafting.
 
@@ -417,7 +420,7 @@ the source of truth for position and next step:
 - **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → synopsis → act-shape → voice → spine → … → briefs → draft → evaluate (the voice from the verdict's `voice` record, not a rung; after the briefs when its `when` is `later`).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
 - **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
-- **Advisory:** list `advisory` (broken promises the gate didn't stop on, then the records whose `source` is `craft framework`) apart from the blockers: for a promise the author amends the brief, marks the beat `must:`, or leaves it; a craft-framework line is a diagnostic the author can use or ignore.
+- **Advisory:** list `advisory` (broken promises and typed-knowledge findings the gate didn't stop on, then the records whose `source` is `craft framework`) apart from the blockers: for a promise the author amends the brief, marks the beat `must:`, or leaves it; a craft-framework line is a diagnostic the author can use or ignore.
 
 Then add the context the verdict doesn't carry:
 
