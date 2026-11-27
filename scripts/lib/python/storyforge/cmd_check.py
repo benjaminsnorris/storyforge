@@ -11,7 +11,8 @@ Usage:
     storyforge check --blocking                # only each scene's blocking, reported (#626)
     storyforge check --stage-sheet act1-sc03   # blocking by the stage sheet, not the read (#647)
     storyforge check --blocking --stage-sheet  # ... the stage sheet alone, reported
-    storyforge check --questions act1-sc03     # yes/no questions, not the open checker (#649)
+    storyforge check --questions act1-sc03     # yes/no questions alone, no open checker (#649)
+    storyforge check --open act1-sc03          # the open checker alone, no questions (#738)
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -114,8 +115,15 @@ gets its quote filled. Model: STORYFORGE_QUESTIONS_MODEL (default the
 extraction tier). It doesn't read the book, so contradictions with earlier
 prose no ledger fact records, or with the bibles, aren't looked for (each
 scene's report says so); the cost forecast prices the question layer
-(`gate.recheck_cost_per_scene()`); the open checker stays the default until
-the questions and the typed checks match its recall on E4 and E8.
+(`gate.recheck_cost_per_scene()`).
+
+Tandem (#738), the default: each scene's gate run is checked by both the
+open checker and the questions, their findings the union, each tagged in
+the report with the checker that made it, and every place they rule a
+dispute or an ending differently noted (`NOTE (tandem: ...)`). `check`
+never fixes, so each run it makes is a first run. `--open` forces the open
+checker alone, `--questions` the questions alone, for the run; the
+messages pointing to `check --pending` carry the flag.
 
 A broken promise (a brief item the prose doesn't deliver) doesn't stop a
 scene (#642): the brief is a plan and the prose stands. It is reported
@@ -183,15 +191,16 @@ def parse_args(argv):
                              'working/stage-sheets/. With --blocking, the stage sheet alone. '
                              'Model: STORYFORGE_STAGE_SHEET_MODEL (default the extraction '
                              'tier).')
-    parser.add_argument('--questions', action='store_true',
-                        help='Check each scene against the book with yes/no questions from '
-                             'the ledger (facts no typed check compares, about who or where '
-                             'is in the scene; each asked twice, a third time when the two '
-                             'split, a finding on two yeses with the quote in the scene) and the brief\'s promises '
-                             '(does the scene deliver each?) instead of the open checker. '
-                             'Contradictions with prose no ledger fact records are not looked '
-                             'for. Model: STORYFORGE_QUESTIONS_MODEL (default the extraction '
-                             'tier).')
+    from storyforge.cli import add_check_method_args
+    add_check_method_args(
+        parser, 'Check each scene against the book with yes/no questions from '
+                'the ledger (facts no typed check compares, about who or where '
+                'is in the scene; each asked twice, a third time when the two '
+                'split, a finding on two yeses with the quote in the scene) and the brief\'s '
+                'promises (does the scene deliver each?) alone, without the open checker. '
+                'Contradictions with prose no ledger fact records are not looked '
+                'for. Model: STORYFORGE_QUESTIONS_MODEL (default the extraction '
+                'tier).')
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -215,39 +224,44 @@ def main(argv=None):
     from storyforge.git import commit_and_push, create_branch
     ledger.exit_if_not_migrated(project_dir)
     ledger.exit_if_unordered(project_dir)
+    from storyforge.cli import check_method
+    method = check_method(args)
+    flag = gate.CHECK_FLAGS[method] if method else ''
     if args.accept:
         if (args.positional or args.scenes or args.act or args.from_seq or args.pending
                 or args.keep_going or args.stop_at_first or args.stage_sheet
-                or args.questions):
+                or method):
             log('ERROR: --accept takes its own scene list; name no others with it '
-                '(and no --stage-sheet or --questions: accepting reads nothing).')
+                '(and no --stage-sheet, --tandem, --open or --questions: accepting reads '
+                'nothing).')
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
         return
     from storyforge.costs import exit_if_bad_threshold
     exit_if_bad_threshold()   # the re-checks and --pending's forecast check it
     if args.blocking:
-        if args.questions:
-            log('ERROR: --blocking reads only each scene\'s blocking; --questions checks a scene '
-                'against the book. Use one.')
+        if method:
+            log(f'ERROR: --blocking reads only each scene\'s blocking; {flag} checks a scene '
+                f'against the book. Use one.')
             sys.exit(1)
         if args.pending or args.keep_going or args.stop_at_first:
             log('ERROR: --blocking reads the scenes you name (or every scene); it takes no '
                 '--pending, --keep-going or --stop-at-first.')
             sys.exit(1)
         sys.exit(_blocking_report(args, project_dir))
-    if not (args.stage_sheet or args.questions):
+    if not (args.stage_sheet or method):
         return _check_named(args, project_dir)
     # this run only: an in-process caller after it keeps its own methods
-    saved = gate.GATE_BLOCKING_METHOD, gate.GATE_CHECK_METHOD
+    saved = gate.GATE_BLOCKING_METHOD
     if args.stage_sheet:
         gate.GATE_BLOCKING_METHOD = 'stage-sheet'
-    if args.questions:
-        gate.GATE_CHECK_METHOD = 'questions'
     try:
-        return _check_named(args, project_dir)
+        if not method:
+            return _check_named(args, project_dir)
+        with gate.forced_check_method(method):
+            return _check_named(args, project_dir)
     finally:
-        gate.GATE_BLOCKING_METHOD, gate.GATE_CHECK_METHOD = saved
+        gate.GATE_BLOCKING_METHOD = saved
 
 
 def _check_named(args, project_dir: str):
@@ -396,7 +410,7 @@ def _check_named(args, project_dir: str):
     if run.recheck_trouble:
         log(f'ERROR: {run.passed} of {len(scene_ids)} scene(s) passed, but the '
             f'{run.recheck_trouble}; it is listed in {gate.PENDING_PATH} '
-            f'(`storyforge check --pending`).')
+            f'(`{gate.pending_command()}`).')
         sys.exit(1)
 
 
@@ -700,7 +714,7 @@ def _keep_going_summary(project_dir: str, run: _Run) -> list[str]:
         lines.append(f'To accept their contradictions as written (no model call; a scene with '
                      f'other problems still stops on those): '
                      f'`storyforge check --accept {",".join(acceptable)}`, then '
-                     f'`storyforge check --pending`.')
+                     f'`{gate.pending_command()}`.')
     if to_fix:
         lines.append(f'Nothing to accept for {", ".join(to_fix)} (no verified contradiction '
                      f'stopped it in this run: a broken must beat, an unverified quote, an '
