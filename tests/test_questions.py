@@ -1418,8 +1418,8 @@ class TestGate:
         assert [r['quote'] for r in gate.advisories(project_dir)[SCENE]] == [
             'Tessa apologizes to Dorren']
 
-    def test_the_open_checker_is_the_default(self, project_dir, tmp_path, monkeypatch):
-        assert gate.GATE_CHECK_METHOD == 'open'
+    def test_the_open_method_asks_no_questions(self, project_dir, tmp_path, monkeypatch):
+        # the default is `tandem` (#738; test_gate_tandem.py)
         result, calls = self._gate(project_dir, tmp_path, monkeypatch,
                                    lambda n: pytest.fail('no questions'), method='open')
         assert calls == ['open'] and result.passed and result.question_notes == []

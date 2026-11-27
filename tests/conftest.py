@@ -67,6 +67,19 @@ def _gate_continuity_off(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _gate_check_open(request, monkeypatch):
+    """The gate's default check method, `tandem` (#738), adds the question
+    layer's calls to every gate run (and needs the continuity checks), which
+    the gate tests' API fakes don't answer. They run with the open checker
+    alone except in tests marked `check_method_default`, which see the
+    module's own default."""
+    if request.node.get_closest_marker('check_method_default'):
+        return
+    import storyforge.gate as gate
+    monkeypatch.setattr(gate, 'GATE_CHECK_METHOD', 'open')
+
+
+@pytest.fixture(autouse=True)
 def _stub_model_catalog(monkeypatch):
     import storyforge.common as common
     monkeypatch.setattr(common, '_catalog', [dict(m) for m in STUB_MODEL_CATALOG])
