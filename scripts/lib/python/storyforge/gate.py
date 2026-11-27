@@ -81,7 +81,8 @@ from functools import cached_property
 from typing import NamedTuple, Protocol
 
 from storyforge import audit, ledger, persistence
-from storyforge.blocking import BLOCKING_CODE, BlockingError, check_blocking
+from storyforge.blocking import BLOCKING_CODE, BLOCKING_READINGS, BlockingError, check_blocking
+from storyforge.blocking import COST_PER_READING as BLOCKING_COST_PER_READING
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
                                check_scene)
 from storyforge.extract import (CLAIM_DEPARTS, CLAIM_KEPT, ENDS_HERE, ENDS_MOVED, ID_PREFIX,
@@ -92,7 +93,7 @@ from storyforge.extract import (CLAIM_DEPARTS, CLAIM_KEPT, ENDS_HERE, ENDS_MOVED
 GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMITMENTS_PASS)
 
 #: Whether the gate reads each scene's blocking too (`blocking.check_blocking`,
-#: #626): one more call per scene, on the checker's model
+#: #626): `blocking.BLOCKING_READINGS` more calls per scene, on the checker's model
 GATE_BLOCKING = True
 #: How the gate checks blocking (#647): `read`, the whole-scene blocking read
 #: (`blocking.check_blocking`), the default until the stage sheet matches its
@@ -6117,13 +6118,15 @@ def held_facts(project_dir: str, scene_ids: list[str] | None = None) -> dict[str
 #: persistence call (Sonnet) and `GATE_READINGS` checks (Opus, the story so
 #: far cached). E4's one-reading gate ran about $0.35-0.45 a scene on
 #: shared-dark, and a second reading about $0.35 more against a cold cache
-#: (E8, 2026-11-01); rounded up. The blocking reading (#626) is one more
-#: call per reading on the scene alone (`blocking.BLOCKING_READINGS`), about
-#: $0.04 each on gawain (#626); rounded up. The continuity checks' typed
+#: (E8, 2026-11-01); rounded up. The blocking read (#626) is
+#: `blocking.BLOCKING_READINGS` more calls on the scene alone (three since
+#: #774), at `blocking.COST_PER_READING` each (about $0.035-0.04, rounded
+#: up). The continuity checks' typed
 #: state extraction (#648, `GATE_CONTINUITY`) is one more small-model call
 #: on the scene (none when its saved file is current), about $0.01 a scene
 #: at the extraction tier: covered by the rounding.
-RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKING else 0)
+_BLOCKING_COST = BLOCKING_READINGS * BLOCKING_COST_PER_READING if GATE_BLOCKING else 0
+RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + _BLOCKING_COST
 
 #: Under `GATE_CHECK_METHOD` `questions` (#649) the open checker's readings
 #: drop out of a gate run: extraction and persistence on sonnet ($0.13-0.19
@@ -6132,7 +6135,7 @@ RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKI
 #: facts, a third of any they split on, two of the brief's promises: about
 #: $0.001-0.01 a scene; rounded up) and the blocking check as above. A
 #: forecast, not measured on a gated book
-QUESTIONS_GATE_COST_PER_SCENE = 0.3 + 0.02 + (0.05 if GATE_BLOCKING else 0)
+QUESTIONS_GATE_COST_PER_SCENE = 0.3 + 0.02 + _BLOCKING_COST
 
 #: Under `tandem` (#738) a first run is the open checker's run and the
 #: question layer's calls (as above, $0.02 rounded up). Every gate run a

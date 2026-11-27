@@ -425,7 +425,7 @@ class TestSuite:
         suite = _suite()
         assert suite.frozen
         result = _record(suite, str(tmp_path / 'public-cassettes'))
-        assert len(calls) == 4                          # two scenes, two readings each
+        assert len(calls) == 6                          # two scenes, three readings each
         assert result['metrics']['caught'] == 1 and result['metrics']['left_flagged'] == 1
         assert os.path.isdir(os.path.join(private_set, 'cassettes', 'blocking-set'))
         assert not (tmp_path / 'public-cassettes').exists()
@@ -436,7 +436,7 @@ class TestSuite:
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         replayed = harness.run_suite(suite, 'replay', str(tmp_path / 'public-cassettes'))
         assert replayed['metrics'] == result['metrics']
-        assert replayed['cost']['usd_spent'] == 0 and replayed['cost']['replayed_calls'] == 4
+        assert replayed['cost']['usd_spent'] == 0 and replayed['cost']['replayed_calls'] == 6
 
     def test_the_report_carries_no_prose(self, private_set, tmp_path, monkeypatch):
         """Metrics and notes reach evals/baseline.json, which is public: no
