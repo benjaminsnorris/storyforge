@@ -76,13 +76,22 @@ def render_human(verdict: dict) -> str:
         lines.append(f'NOTE: {note}')
     every = verdict.get('advisory') or []
     craft = [a for a in every if a['source'] == CRAFT_ADVISORY_SOURCE]
-    advisory = [a for a in every if a['source'] != CRAFT_ADVISORY_SOURCE]
+    from storyforge.gate import advisory_line, is_knowledge_row
+    gated = [a for a in every if a['source'] != CRAFT_ADVISORY_SOURCE]
+    advisory = [a for a in gated if not is_knowledge_row(a)]
+    knowing = [a for a in gated if is_knowledge_row(a)]
     if advisory:
         lines.append(f'ADVISORY: {len(advisory)} broken promise(s) the gate reported but did '
                      f'not stop on (working/gate-advisory.csv); the prose stands. Amend the '
                      f'brief, or mark the beat `must:` to require it:')
-        from storyforge.gate import advisory_line
         for row in advisory:
+            lines.append(f'  {advisory_line(row)}')
+    if knowing:
+        lines.append(f'ADVISORY: {len(knowing)} use(s) of a fact before the scene that shows '
+                     f'it learned, by the typed knowledge check, which the gate reported but '
+                     f'did not stop on (working/gate-advisory.csv). Fix the prose, or the '
+                     f'brief\'s knowledge_in or knowledge_out, where one is wrong:')
+        for row in knowing:
             lines.append(f'  {advisory_line(row)}')
     if craft:
         # #643: diagnostics the author can use, never a stop

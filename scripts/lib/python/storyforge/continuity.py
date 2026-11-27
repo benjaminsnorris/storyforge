@@ -1119,7 +1119,10 @@ def check_knowledge(book: Book) -> tuple[list[Finding], list[str]]:
         if known is not None and (known.at is None or known.at[0] == sid
                                   or not book.before((sid, r.index), known.at)):
             continue   # known by now
-        if shown is None:
+        if shown is None or (not known.shown and known.at[0] != shown.at[0]):
+            # #781's review CR-1: an earlier scene that says only "known by
+            # then" leaves the learning anywhere before it, so a later scene
+            # showing it learned doesn't date it
             why = (f'{known.words}: known by then, not when learned'
                    if known and known.words.startswith(KNOWN_BY_START) else
                    f'the ledger places it in {known.source}' if known else

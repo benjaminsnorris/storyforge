@@ -992,6 +992,16 @@ class TestKnowledge:
                               's3': {'knowledge_in': 'mill-flooded'}})
         assert continuity.check_knowledge(b)[0] == []
 
+    def test_an_earlier_known_by_then_leaves_a_later_learning_undated(self):
+        # #781's review CR-1: s2's brief has it known entering s2, so s3's
+        # learning doesn't show s1's use came before it was learned
+        b = make_book('s1', {'s1': [R('knows', 'Mara', 'mill-flooded', 'uses')], 's2': [],
+                             's3': [R('knows', 'Mara', 'mill-flooded', 'learns')]},
+                      rows=[fact('mill-flooded', 's3', 'mara')],
+                      briefs={'s2': {'knowledge_in': 'mill-flooded'}})
+        f, notes = continuity.check_knowledge(b)
+        assert f == [] and any("knowledge_in of s2's brief" in n for n in notes)
+
     def test_knowledge_findings_are_advisory(self):
         b = make_book('s2', {'s1': [], 's2': [R('knows', 'Mara', 'mill-flooded', 'uses')],
                              's3': []},
@@ -1752,6 +1762,52 @@ class TestGate:
         summary = gate.advisory_summary(project_dir)
         assert 'typed knowledge check' in summary[0] and 'broken promise' not in summary[0]
 
+    def test_promises_and_knowledge_are_listed_apart(self, project_dir):
+        # #781's review SF-1, T-2: a knowledge row is not a broken promise
+        from storyforge import cmd_status
+        from storyforge.checker import Finding
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds the map', 'key_actions',
+                          'not delivered')
+        gate.record_advisory(project_dir, SCENE, 'draft', [promise, _kno()], prose=PROSE_2)
+        summary = gate.advisory_summary(project_dir)
+        assert summary[0].startswith('WARNING: 1 broken promise(s)') and 'PRM' in summary[1]
+        assert 'typed knowledge check' in summary[2] and 'KNO' in summary[3]
+        rows, _ = __import__('storyforge.status', fromlist=['x']).gate_advisory(project_dir)
+        out = cmd_status.render_human({
+            'phase': 'drafting', 'phase_declared': '', 'phase_matches_yaml': True,
+            'ladder': [], 'voice': None, 'next': {'action': 'x', 'command': '', 'reason': ''},
+            'then': None, 'blockers': [], 'advisory': rows})
+        assert 'ADVISORY: 1 broken promise(s)' in out
+        assert 'ADVISORY: 1 use(s) of a fact before the scene that shows it learned' in out
+
+    def test_an_advisory_finding_is_never_inherited(self, project_dir):
+        # #781's review T-3: reported before, it would have been inherited
+        from storyforge.checker import CheckResult
+        result = gate.GateResult(SCENE)
+        result.check = CheckResult(SCENE, findings=[_kno()])
+        reported = [{'source': 'act1-sc03', 'quote': 'Pell met him there'}]
+        gate._classify(result, project_dir, None, reported, prose=PROSE_2, rows=[])
+        assert result.inherited == [] and len(result.advisory) == 1
+
+    @pytest.mark.parametrize('tandem', ['', gate.READ])
+    def test_an_advisory_finding_never_stands_in_for_a_blocking_one(
+            self, project_dir, tmp_path, monkeypatch, tandem):
+        # #781's review T-1: a question finding on the same words and code
+        # as an advisory typed one is not a repeat of it
+        from storyforge import questions
+        from storyforge.checker import CheckResult, Finding
+        asked = Finding('contradiction', 'KNO', 'Pell met him there', 'act1-sc01', 'x',
+                        'map-stolen', 'Pell knew too soon')
+        monkeypatch.setattr(questions, 'check_questions', lambda *a, **k: (
+            questions.QuestionResult(SCENE, findings=[asked])))
+        result = gate.GateResult(SCENE)
+        result.check = CheckResult(SCENE, findings=[_kno()])
+        gate._ask_questions(project_dir, SCENE, PROSE_2, [], [], [], str(tmp_path), result,
+                            tandem=tandem)
+        assert asked in result.check.findings
+        gate._classify(result, project_dir, None, [], prose=PROSE_2, rows=[])
+        assert result.findings == [asked] and not result.passed
+
     def test_notes_are_reported_and_never_block(self, project_dir, tmp_path):
         result = self._gate(project_dir, tmp_path,
                             [rec('named', 'Pell', value='Pellinor', quote='Pell met him')])
@@ -1761,6 +1817,12 @@ class TestGate:
 
     def test_off_by_default_in_tests_on_by_default_in_the_gate(self):
         assert gate.GATE_CONTINUITY is True
+
+
+def _kno():
+    return continuity._finding('knowledge', 'Pell met him there', 'act1-sc03',
+                               "knowledge_out of act1-sc03's brief",
+                               'Pell acts on map-stolen before learning it', fact_id='map-stolen')
 
 
 def test_the_conftest_turns_the_checks_off():
