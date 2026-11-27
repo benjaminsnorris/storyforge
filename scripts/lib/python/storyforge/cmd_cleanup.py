@@ -1369,9 +1369,9 @@ DEATHS_TITLE: Final = 'Checking death_scene against the source...'
 def plan_death_scenes(project_dir: str) -> StepPlan:
     """Plan the blank characters.csv `death_scene` cells a faithful
     adaptation's source fills (`source_deaths.plan_deaths`): one change per
-    character. What it couldn't fill is the report's (`_check_source_deaths`)
-    or, when nothing was read, this step's summary. An author's value is
-    never overwritten."""
+    character. What it didn't fill or couldn't check is the report's
+    (`_check_source_deaths`), counted in this step's summary. An author's
+    value (a scene, or `lives`) is never overwritten."""
     from storyforge import source_deaths
     plan = source_deaths.plan_deaths(project_dir)
     changes = tuple(_change('fill', f.describe()) for f in plan.fills)
@@ -1387,7 +1387,11 @@ def plan_death_scenes(project_dir: str) -> StepPlan:
             _warn_vanished(f'{len(plan.fills) - len(done)} blank death_scene cell(s)')
         return tuple(c for c, f in zip(changes, plan.fills) if f.who in done)
 
-    summary = _note('; '.join(plan.notes)) if plan.notes else None
+    warned = len(plan.of(source_deaths.WARNING))
+    summary = (_note(f'{len(plan.findings)} thing(s) about the source\'s deaths not filled or '
+                     f'not checked ({warned} to act on): see the report '
+                     f'(working/cleanup-report.csv, type source_death)')
+               if plan.findings else None)
     return StepPlan(DEATHS_TITLE, changes, apply if changes else _no_op, summary=summary)
 
 
@@ -2807,18 +2811,20 @@ def _check_world_table(project_dir: str) -> list[dict]:
 
 def _check_source_deaths(project_dir: str) -> list[dict]:
     """Report the deaths a faithful adaptation's source records that
-    cleanup couldn't fill into characters.csv's `death_scene` (#745): a death
-    in a source scene the map cuts or leaves out, deaths in two sources, an
-    author's `death_scene` the source places elsewhere, a source death_scene
-    naming no source scene. The author decides; never repaired."""
+    cleanup didn't fill into characters.csv's `death_scene`, or couldn't
+    check (#745; `source_deaths` says which, and how severe). A warning
+    stops once the author sets the cell: a scene, or `lives`. Never
+    repaired."""
     from storyforge import source_deaths
     return [{
         'type': 'source_death', 'file': 'reference/characters.csv', 'category': 'integrity',
-        'detail': csv_safe(p),
-        'action': 'Set death_scene in reference/characters.csv to the scene after which '
-                  'the character is dead (blank if they live), or fix the source map',
-        'severity': 'warning',
-    } for p in source_deaths.plan_deaths(project_dir).problems]
+        'detail': csv_safe(f.detail),
+        'action': ('Set death_scene in reference/characters.csv to the scene after which '
+                   'the character is dead, or `lives` if they live in this version (or fix '
+                   'the source map or source)' if f.severity == source_deaths.WARNING
+                   else 'Nothing to do unless it is wrong'),
+        'severity': f.severity,
+    } for f in source_deaths.plan_deaths(project_dir).findings]
 
 
 def _check_crlf(project_dir: str) -> list[dict]:
