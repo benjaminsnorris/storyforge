@@ -634,15 +634,18 @@ class TestFloorGates:
     def _metrics(self, suite):
         return {name: 0.5 for name in suite.run.__globals__['FLOORS']}
 
-    #: The recorded floors (2026-11-09). Lowering one accepts a loss, so it
-    #: takes an edit here too: recall may only rise, the rest only fall
+    #: The recorded floors (2026-11-09; 2026-11-27 on the set with report
+    #: A's 38 findings added, a larger set whose pooled values moved).
+    #: Lowering one accepts a loss, so it takes an edit here too: recall may
+    #: only rise, the rest only fall
     RECORDED_FLOORS = {
-        'recall': 0.6154, 'recall_hands': 0.7353, 'recall_posture': 0.9091,
-        'recall_sightline': 0.3333, 'recall_worn': 0.4545, 'recall_position': 0.6129,
-        'recall_light': 0.3333, 'recall_other': 0.5833, 'recall_book_gawain': 0.4318,
-        'recall_book_wrath': 0.726, 'recall_found_by_readers': 0.3235,
-        'recall_found_by_tool': 0.7349, 'false_alarms_per_10k': 1.27, 'left_flagged': 1,
-        'flags': 99,
+        'recall': 0.6027, 'recall_hands': 0.7442, 'recall_posture': 0.8,
+        'recall_sightline': 0.375, 'recall_worn': 0.4615, 'recall_position': 0.5789,
+        'recall_light': 0.3333, 'recall_other': 0.5333, 'recall_book_gawain': 0.4318,
+        'recall_book_wrath': 0.726, 'recall_book_wrath-gate': 0.48,
+        'recall_book_wrath-gate-fix': 1.0, 'recall_found_by_readers': 0.3235,
+        'recall_found_by_tool': 0.6875, 'false_alarms_per_10k': 1.27, 'left_flagged': 1,
+        'flags': 122,
     }
 
     def test_floors_never_move_the_wrong_way_from_the_recorded_values(self):

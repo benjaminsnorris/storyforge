@@ -15,60 +15,60 @@
     {
       "by_code": {},
       "cost": {
-        "calls": 185,
-        "input_tokens": 767386,
-        "output_tokens": 185222,
-        "replayed_calls": 185,
+        "calls": 241,
+        "input_tokens": 1017432,
+        "output_tokens": 246236,
+        "replayed_calls": 241,
         "unpriced_calls": 0,
-        "usd_if_live": 6.774,
+        "usd_if_live": 8.9944,
         "usd_spent": 0.0
       },
       "description": "Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; private set",
-      "duration_s": 0.44,
+      "duration_s": 0.47,
       "error": null,
       "frozen": true,
       "gates": [
         {
-          "actual": 0.6154,
+          "actual": 0.6027,
           "name": "recall",
           "op": "==",
           "passed": true,
-          "threshold": 0.6154
+          "threshold": 0.6027
         },
         {
-          "actual": 0.7353,
+          "actual": 0.7442,
           "name": "recall_hands",
           "op": "==",
           "passed": true,
-          "threshold": 0.7353
+          "threshold": 0.7442
         },
         {
-          "actual": 0.9091,
+          "actual": 0.8,
           "name": "recall_posture",
           "op": "==",
           "passed": true,
-          "threshold": 0.9091
+          "threshold": 0.8
         },
         {
-          "actual": 0.3333,
+          "actual": 0.375,
           "name": "recall_sightline",
           "op": "==",
           "passed": true,
-          "threshold": 0.3333
+          "threshold": 0.375
         },
         {
-          "actual": 0.4545,
+          "actual": 0.4615,
           "name": "recall_worn",
           "op": "==",
           "passed": true,
-          "threshold": 0.4545
+          "threshold": 0.4615
         },
         {
-          "actual": 0.6129,
+          "actual": 0.5789,
           "name": "recall_position",
           "op": "==",
           "passed": true,
-          "threshold": 0.6129
+          "threshold": 0.5789
         },
         {
           "actual": 0.3333,
@@ -78,11 +78,11 @@
           "threshold": 0.3333
         },
         {
-          "actual": 0.5833,
+          "actual": 0.5333,
           "name": "recall_other",
           "op": "==",
           "passed": true,
-          "threshold": 0.5833
+          "threshold": 0.5333
         },
         {
           "actual": 0.4318,
@@ -99,6 +99,20 @@
           "threshold": 0.726
         },
         {
+          "actual": 0.48,
+          "name": "recall_book_wrath-gate",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.48
+        },
+        {
+          "actual": 1.0,
+          "name": "recall_book_wrath-gate-fix",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
           "actual": 0.3235,
           "name": "recall_found_by_readers",
           "op": "==",
@@ -106,11 +120,11 @@
           "threshold": 0.3235
         },
         {
-          "actual": 0.7349,
+          "actual": 0.6875,
           "name": "recall_found_by_tool",
           "op": "==",
           "passed": true,
-          "threshold": 0.7349
+          "threshold": 0.6875
         },
         {
           "actual": 1.27,
@@ -127,125 +141,130 @@
           "threshold": 1
         },
         {
-          "actual": 99,
+          "actual": 122,
           "name": "flags",
           "op": "==",
           "passed": true,
-          "threshold": 99
+          "threshold": 122
         },
         {
-          "actual": 117,
+          "actual": 146,
           "name": "cases",
           "op": ">=",
           "passed": true,
-          "threshold": 100
+          "threshold": 130
         }
       ],
       "metrics": {
         "book_scope_cases": 1,
         "book_scope_caught": 0,
-        "case_scene_words": 134893,
-        "cases": 117,
-        "cases_hands": 34,
+        "case_scene_words": 183030,
+        "cases": 146,
+        "cases_hands": 43,
         "cases_light": 6,
-        "cases_other": 12,
-        "cases_position": 31,
-        "cases_posture": 11,
-        "cases_sightline": 12,
-        "cases_worn": 11,
-        "caught": 72,
+        "cases_other": 15,
+        "cases_position": 38,
+        "cases_posture": 15,
+        "cases_sightline": 16,
+        "cases_worn": 13,
+        "caught": 88,
         "clean_flags": 3,
         "clean_scenes": 14,
         "clean_words": 23640,
+        "debatable_cases": 9,
+        "debatable_flagged": 3,
         "false_alarms_per_10k": 1.27,
-        "flags": 99,
+        "flags": 122,
         "left_cases": 13,
         "left_flagged": 1,
-        "recall": 0.6154,
+        "recall": 0.6027,
         "recall_book_gawain": 0.4318,
         "recall_book_wrath": 0.726,
+        "recall_book_wrath-gate": 0.48,
+        "recall_book_wrath-gate-fix": 1.0,
         "recall_found_by_readers": 0.3235,
-        "recall_found_by_tool": 0.7349,
-        "recall_hands": 0.7353,
+        "recall_found_by_tool": 0.6875,
+        "recall_hands": 0.7442,
         "recall_light": 0.3333,
-        "recall_other": 0.5833,
-        "recall_position": 0.6129,
-        "recall_posture": 0.9091,
-        "recall_sightline": 0.3333,
-        "recall_worn": 0.4545,
-        "unlabelled_flags": 22,
-        "unlabelled_per_10k": 1.63,
+        "recall_other": 0.5333,
+        "recall_position": 0.5789,
+        "recall_posture": 0.8,
+        "recall_sightline": 0.375,
+        "recall_worn": 0.4615,
+        "unlabelled_flags": 26,
+        "unlabelled_per_10k": 1.42,
         "unverified_flags": 0
       },
       "mode": "replay",
       "notes": [
-        "missed (45): gawain-001, gawain-002, gawain-004, gawain-005, gawain-006, gawain-009, gawain-010, gawain-011, gawain-014, gawain-015, gawain-017, gawain-018, gawain-021, gawain-022, gawain-023, gawain-025, gawain-026, gawain-027, gawain-028, gawain-029, gawain-031, gawain-033, gawain-034, gawain-036, gawain-043, wrath-005, wrath-006, wrath-016, wrath-017, wrath-023, wrath-025, wrath-030, wrath-035, wrath-038, wrath-039, wrath-043, wrath-049, wrath-053, wrath-054, wrath-059, wrath-062, wrath-065, wrath-068, wrath-069, wrath-070",
+        "missed (58): gawain-001, gawain-002, gawain-004, gawain-005, gawain-006, gawain-009, gawain-010, gawain-011, gawain-014, gawain-015, gawain-017, gawain-018, gawain-021, gawain-022, gawain-023, gawain-025, gawain-026, gawain-027, gawain-028, gawain-029, gawain-031, gawain-033, gawain-034, gawain-036, gawain-043, wrath-005, wrath-006, wrath-016, wrath-017, wrath-023, wrath-025, wrath-030, wrath-035, wrath-038, wrath-039, wrath-043, wrath-049, wrath-053, wrath-054, wrath-059, wrath-062, wrath-065, wrath-068, wrath-069, wrath-070, wrath-gate-005, wrath-gate-009, wrath-gate-013, wrath-gate-014, wrath-gate-018, wrath-gate-019, wrath-gate-020, wrath-gate-021, wrath-gate-024, wrath-gate-029, wrath-gate-031, wrath-gate-033, wrath-gate-034",
         "flagged a reading left as plausible: gawain-057",
+        "debatable cases (not in recall, no false alarm): 3 of 9 flagged",
         "book-scope cases (need other scenes; not in recall): 0 of 1 caught",
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:02:15+00:00",
+      "started_at": "2026-11-27T08:43:58+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
     {
       "by_code": {},
       "cost": {
-        "calls": 273,
-        "input_tokens": 1430569,
-        "output_tokens": 1417785,
-        "replayed_calls": 273,
+        "calls": 360,
+        "input_tokens": 1922366,
+        "output_tokens": 1973918,
+        "replayed_calls": 360,
         "unpriced_calls": 0,
-        "usd_if_live": 0.8519,
+        "usd_if_live": 1.1792,
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 2.29,
+      "duration_s": 2.93,
       "error": null,
       "frozen": true,
       "gates": [
         {
-          "actual": 0.2222,
+          "actual": 0.2192,
           "name": "recall",
           "op": "==",
           "passed": true,
-          "threshold": 0.2222
+          "threshold": 0.2192
         },
         {
-          "actual": 0.4412,
+          "actual": 0.3953,
           "name": "recall_hands",
           "op": "==",
           "passed": true,
-          "threshold": 0.4412
+          "threshold": 0.3953
         },
         {
-          "actual": 0.2727,
+          "actual": 0.2667,
           "name": "recall_posture",
           "op": "==",
           "passed": true,
-          "threshold": 0.2727
+          "threshold": 0.2667
         },
         {
-          "actual": 0.0,
+          "actual": 0.0625,
           "name": "recall_sightline",
           "op": "==",
           "passed": true,
-          "threshold": 0.0
+          "threshold": 0.0625
         },
         {
-          "actual": 0.2727,
+          "actual": 0.1538,
           "name": "recall_worn",
           "op": "==",
           "passed": true,
-          "threshold": 0.2727
+          "threshold": 0.1538
         },
         {
-          "actual": 0.129,
+          "actual": 0.1579,
           "name": "recall_position",
           "op": "==",
           "passed": true,
-          "threshold": 0.129
+          "threshold": 0.1579
         },
         {
           "actual": 0.0,
@@ -255,122 +274,141 @@
           "threshold": 0.0
         },
         {
-          "actual": 0.0833,
+          "actual": 0.1333,
           "name": "recall_other",
           "op": "==",
           "passed": true,
-          "threshold": 0.0833
+          "threshold": 0.1333
         },
         {
-          "actual": 0.2273,
+          "actual": 0.2045,
           "name": "recall_book_gawain",
           "op": "==",
           "passed": true,
-          "threshold": 0.2273
+          "threshold": 0.2045
         },
         {
-          "actual": 0.2192,
+          "actual": 0.274,
           "name": "recall_book_wrath",
           "op": "==",
           "passed": true,
-          "threshold": 0.2192
+          "threshold": 0.274
         },
         {
-          "actual": 0.2353,
+          "actual": 0.08,
+          "name": "recall_book_wrath-gate",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.08
+        },
+        {
+          "actual": 0.25,
+          "name": "recall_book_wrath-gate-fix",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.25
+        },
+        {
+          "actual": 0.1471,
           "name": "recall_found_by_readers",
           "op": "==",
           "passed": true,
-          "threshold": 0.2353
+          "threshold": 0.1471
         },
         {
-          "actual": 0.2169,
+          "actual": 0.2411,
           "name": "recall_found_by_tool",
           "op": "==",
           "passed": true,
-          "threshold": 0.2169
+          "threshold": 0.2411
         },
         {
-          "actual": 15.65,
+          "actual": 13.54,
           "name": "false_alarms_per_10k",
           "op": "==",
           "passed": true,
-          "threshold": 15.65
+          "threshold": 13.54
         },
         {
-          "actual": 2,
+          "actual": 1,
           "name": "left_flagged",
           "op": "==",
           "passed": true,
-          "threshold": 2
+          "threshold": 1
         },
         {
-          "actual": 288,
+          "actual": 344,
           "name": "flags",
           "op": "==",
           "passed": true,
-          "threshold": 288
+          "threshold": 344
         },
         {
-          "actual": 117,
+          "actual": 146,
           "name": "cases",
           "op": ">=",
           "passed": true,
-          "threshold": 100
+          "threshold": 130
         }
       ],
       "metrics": {
         "book_scope_cases": 1,
         "book_scope_caught": 0,
-        "case_scene_words": 134893,
-        "cases": 117,
-        "cases_hands": 34,
+        "case_scene_words": 183030,
+        "cases": 146,
+        "cases_hands": 43,
         "cases_light": 6,
-        "cases_other": 12,
-        "cases_position": 31,
-        "cases_posture": 11,
-        "cases_sightline": 12,
-        "cases_worn": 11,
-        "caught": 26,
-        "clean_flags": 37,
+        "cases_other": 15,
+        "cases_position": 38,
+        "cases_posture": 15,
+        "cases_sightline": 16,
+        "cases_worn": 13,
+        "caught": 32,
+        "clean_flags": 32,
         "clean_scenes": 14,
         "clean_words": 23640,
-        "events": 3475,
-        "false_alarms_per_10k": 15.65,
-        "flags": 288,
+        "debatable_cases": 9,
+        "debatable_flagged": 2,
+        "events": 4846,
+        "false_alarms_per_10k": 13.54,
+        "flags": 344,
         "left_cases": 13,
-        "left_flagged": 2,
-        "questions_asked": 904,
-        "recall": 0.2222,
-        "recall_book_gawain": 0.2273,
-        "recall_book_wrath": 0.2192,
-        "recall_found_by_readers": 0.2353,
-        "recall_found_by_tool": 0.2169,
-        "recall_hands": 0.4412,
+        "left_flagged": 1,
+        "questions_asked": 1256,
+        "recall": 0.2192,
+        "recall_book_gawain": 0.2045,
+        "recall_book_wrath": 0.274,
+        "recall_book_wrath-gate": 0.08,
+        "recall_book_wrath-gate-fix": 0.25,
+        "recall_found_by_readers": 0.1471,
+        "recall_found_by_tool": 0.2411,
+        "recall_hands": 0.3953,
         "recall_light": 0.0,
-        "recall_other": 0.0833,
-        "recall_position": 0.129,
-        "recall_posture": 0.2727,
-        "recall_sightline": 0.0,
-        "recall_worn": 0.2727,
-        "scenes_with_unchecked": 70,
-        "unlabelled_flags": 218,
-        "unlabelled_per_10k": 16.16,
+        "recall_other": 0.1333,
+        "recall_position": 0.1579,
+        "recall_posture": 0.2667,
+        "recall_sightline": 0.0625,
+        "recall_worn": 0.1538,
+        "scenes_with_unchecked": 91,
+        "unlabelled_flags": 266,
+        "unlabelled_per_10k": 14.53,
         "unverified_flags": 0
       },
       "mode": "replay",
       "notes": [
-        "missed (91): gawain-001, gawain-002, gawain-004, gawain-005, gawain-006, gawain-007, gawain-009, gawain-011, gawain-012, gawain-015, gawain-016, gawain-017, gawain-018, gawain-019, gawain-020, gawain-021, gawain-022, gawain-025, gawain-026, gawain-028, gawain-029, gawain-030, gawain-031, gawain-032, gawain-033, gawain-034, gawain-035, gawain-036, gawain-037, gawain-038, gawain-039, gawain-040, gawain-041, gawain-042, wrath-002, wrath-003, wrath-004, wrath-005, wrath-006, wrath-009, wrath-012, wrath-013, wrath-014, wrath-015, wrath-017, wrath-018, wrath-019, wrath-020, wrath-021, wrath-023, wrath-025, wrath-026, wrath-027, wrath-028, wrath-029, wrath-030, wrath-031, wrath-032, wrath-034, wrath-035, wrath-037, wrath-039, wrath-041, wrath-042, wrath-043, wrath-044, wrath-045, wrath-046, wrath-047, wrath-048, wrath-049, wrath-050, wrath-053, wrath-055, wrath-056, wrath-057, wrath-058, wrath-059, wrath-060, wrath-061, wrath-062, wrath-063, wrath-064, wrath-065, wrath-066, wrath-068, wrath-069, wrath-070, wrath-071, wrath-072, wrath-073",
-        "flagged a reading left as plausible: gawain-050, gawain-054",
+        "missed (114): gawain-001, gawain-002, gawain-003, gawain-004, gawain-005, gawain-006, gawain-007, gawain-008, gawain-009, gawain-010, gawain-011, gawain-012, gawain-014, gawain-015, gawain-016, gawain-017, gawain-018, gawain-019, gawain-020, gawain-021, gawain-022, gawain-025, gawain-026, gawain-028, gawain-030, gawain-031, gawain-032, gawain-033, gawain-034, gawain-035, gawain-036, gawain-038, gawain-039, gawain-040, gawain-041, wrath-002, wrath-003, wrath-004, wrath-006, wrath-007, wrath-009, wrath-012, wrath-015, wrath-016, wrath-017, wrath-018, wrath-019, wrath-020, wrath-023, wrath-025, wrath-026, wrath-027, wrath-028, wrath-030, wrath-031, wrath-032, wrath-034, wrath-035, wrath-037, wrath-039, wrath-041, wrath-042, wrath-043, wrath-044, wrath-045, wrath-046, wrath-047, wrath-049, wrath-050, wrath-053, wrath-055, wrath-056, wrath-057, wrath-058, wrath-059, wrath-060, wrath-061, wrath-062, wrath-064, wrath-065, wrath-066, wrath-067, wrath-068, wrath-069, wrath-070, wrath-071, wrath-072, wrath-073, wrath-gate-001, wrath-gate-002, wrath-gate-005, wrath-gate-009, wrath-gate-010, wrath-gate-011, wrath-gate-013, wrath-gate-014, wrath-gate-015, wrath-gate-fix-001, wrath-gate-017, wrath-gate-018, wrath-gate-019, wrath-gate-020, wrath-gate-021, wrath-gate-024, wrath-gate-fix-002, wrath-gate-025, wrath-gate-026, wrath-gate-029, wrath-gate-030, wrath-gate-031, wrath-gate-fix-003, wrath-gate-032, wrath-gate-033, wrath-gate-034",
+        "flagged a reading left as plausible: gawain-050",
+        "debatable cases (not in recall, no false alarm): 2 of 9 flagged",
         "book-scope cases (need other scenes; not in recall): 0 of 1 caught",
-        "side by side with the read (its last run): caught by both 18, only here 8, only by the read 54, of 117",
-        "only the read caught: gawain-007, gawain-012, gawain-016, gawain-019, gawain-020, gawain-030, gawain-032, gawain-035, gawain-037, gawain-038, gawain-039, gawain-040, gawain-041, gawain-042, wrath-002, wrath-003, wrath-004, wrath-009, wrath-012, wrath-013, wrath-014, wrath-015, wrath-018, wrath-019, wrath-020, wrath-021, wrath-026, wrath-027, wrath-028, wrath-029, wrath-031, wrath-032, wrath-034, wrath-037, wrath-041, wrath-042, wrath-044, wrath-045, wrath-046, wrath-047, wrath-048, wrath-050, wrath-055, wrath-056, wrath-057, wrath-058, wrath-060, wrath-061, wrath-063, wrath-064, wrath-066, wrath-071, wrath-072, wrath-073",
-        "only this caught: gawain-010, gawain-014, gawain-023, gawain-027, gawain-043, wrath-016, wrath-038, wrath-054",
-        "left readings flagged: here 2, by the read 1",
-        "70 scene(s) had something the sheet could not check (counts per scene, private: not_checked in results/latest-stage-sheet.json)",
+        "side by side with the read (its last run): caught by both 25, only here 7, only by the read 63, of 146",
+        "only the read caught: gawain-003, gawain-007, gawain-008, gawain-012, gawain-016, gawain-019, gawain-020, gawain-030, gawain-032, gawain-035, gawain-038, gawain-039, gawain-040, gawain-041, wrath-002, wrath-003, wrath-004, wrath-007, wrath-009, wrath-012, wrath-015, wrath-018, wrath-019, wrath-020, wrath-026, wrath-027, wrath-028, wrath-031, wrath-032, wrath-034, wrath-037, wrath-041, wrath-042, wrath-044, wrath-045, wrath-046, wrath-047, wrath-050, wrath-055, wrath-056, wrath-057, wrath-058, wrath-060, wrath-061, wrath-064, wrath-066, wrath-067, wrath-071, wrath-072, wrath-073, wrath-gate-001, wrath-gate-002, wrath-gate-010, wrath-gate-011, wrath-gate-015, wrath-gate-fix-001, wrath-gate-017, wrath-gate-fix-002, wrath-gate-025, wrath-gate-026, wrath-gate-030, wrath-gate-fix-003, wrath-gate-032",
+        "only this caught: gawain-023, gawain-027, gawain-029, gawain-043, wrath-005, wrath-038, wrath-054",
+        "left readings flagged: here 1, by the read 1",
+        "91 scene(s) had something the sheet could not check (counts per scene, private: not_checked in results/latest-stage-sheet.json)",
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:02:16+00:00",
+      "started_at": "2026-11-27T08:43:59+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
@@ -1177,7 +1215,7 @@
         "checker voicemail: a Friday 1 day(s) after waking-maren's Tuesday",
         "gate: 23 scene(s) gated, 12 fixed, 1 still failing after the fixes (write would stop at the first; E4 drafts on): drive",
         "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or character-bible.md): TIM contradicts character-bible.md: \"Said there was a woman who'd been held for eleven days and they wer",
-        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or prep): PHY contradicts prep: \"He called 911 from his phone on the dash.\" \u2014 Here Hank calls on his own phone and gives his nam",
+        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or prep): PHY contradicts prep: \"He called 911 from his phone on the dash.\" — Here Hank calls on his own phone and gives his nam",
         "  drive: NOTE (facts in force left out of what extraction was offered, over the cap (extract.MAX_KNOWN_COMMITMENTS); the scene's people and place kept first): drive (187)",
         "  drive: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
         "  drive: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep 36h; physical_state_in: operational fatigue; physical_state_in: somatic contamination residue; physical_state",
@@ -1457,7 +1495,7 @@
         "governor-020 (junction-fourteen): consistent",
         "governor-022 (article-twelve): consistent",
         "governor-023 (acceptable-losses): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
-        "governor-024 (acceptable-losses): reintroduced (the gate did not pass it: listed pending) [gate: 9 new, 1 already in the book] \u2014 \"A woman named Erdel, seventy-one, first floor.\"",
+        "governor-024 (acceptable-losses): reintroduced (the gate did not pass it: listed pending) [gate: 9 new, 1 already in the book] — \"A woman named Erdel, seventy-one, first floor.\"",
         "governor-025 (haddons-reckoning): not_present (the gate did not pass it: listed pending) [gate: 1 new]",
         "governor-026 (the-governors-vigil): not_present (the gate did not pass it: listed pending) [gate: 2 new, 2 already in the book]",
         "governor-027 (elias-agrees-to-the-terms): not_present",
@@ -1474,7 +1512,7 @@
         "shared-dark-037 (theory): consistent",
         "shared-dark-038 (decision): consistent [gate: 1 already in the book]",
         "shared-dark-040 (claire): consistent [gate counts not collected]",
-        "shared-dark-041 (missing-persons): halted, nothing written \u2014 upstream brief fix rewrote nothing for missing-persons: named Getting",
+        "shared-dark-041 (missing-persons): halted, nothing written — upstream brief fix rewrote nothing for missing-persons: named Getting",
         "thornwall-020 (confession-on-the-wall): consistent",
         "thornwall-022 (undefended-flame): not_present",
         "thornwall-023 (journals-of-the-east-wing): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
@@ -1483,7 +1521,7 @@
         "thornwall-027 (thessan-at-verath): not_present [gate: 1 already in the book]",
         "thornwall-029 (evidence-room): not_present",
         "thornwall-033 (shell-breaks-open): consistent",
-        "thornwall-035 (riders-approach): halted, nothing written \u2014 upstream brief fix rewrote nothing for riders-approach: named Meanwhile",
+        "thornwall-035 (riders-approach): halted, nothing written — upstream brief fix rewrote nothing for riders-approach: named Meanwhile",
         "thornwall-037 (evening-visit): consistent"
       ],
       "started_at": "2026-11-08T08:17:07+00:00",
@@ -1855,52 +1893,52 @@
         "excluded 3: no prose established span",
         "excluded 35: tree predates reference/scenes.csv",
         "governor@0ac31c3: phase 4 over 4 scenes; 156 ledger facts name a scene outside the subset (offered to none)",
-        "governor-019 (finest-cartographer \u2192 commission-testimony): captured finest-cartographer--doreen-issues-a-survey-order-assigning, HIT, set 36",
+        "governor-019 (finest-cartographer → commission-testimony): captured finest-cartographer--doreen-issues-a-survey-order-assigning, HIT, set 36",
         "governor@77c6bce: phase 4 over 17 scenes; 136 ledger facts name a scene outside the subset (offered to none)",
-        "governor-020 (ashward-breach \u2192 junction-fourteen, footnote): captured ashward-breach--elias-suffered-a-blistered-left-forearm, HIT, set 23",
-        "governor-022 (terrace-row \u2192 article-twelve): captured terrace-row--voss-orders-southern-trunk-maintenance-crews;block-fifteen-foundation-work, HIT, set 16; unrelated: block-fifteen-foundation-work: no subject: every later scene with a binding knowledge fact is taken as depending on it",
-        "governor-025 (the-governors-vigil \u2192 haddons-reckoning): captured the-governors-vigil--sera-holdt-is-read-out-by, HIT, set 2",
-        "governor-027 (confrontation-at-stairwell-nine \u2192 elias-agrees-to-the-terms): captured confrontation-at-stairwell-nine--last-night-in-the-eastern-gallery, HIT, set 19",
+        "governor-020 (ashward-breach → junction-fourteen, footnote): captured ashward-breach--elias-suffered-a-blistered-left-forearm, HIT, set 23",
+        "governor-022 (terrace-row → article-twelve): captured terrace-row--voss-orders-southern-trunk-maintenance-crews;block-fifteen-foundation-work, HIT, set 16; unrelated: block-fifteen-foundation-work: no subject: every later scene with a binding knowledge fact is taken as depending on it",
+        "governor-025 (the-governors-vigil → haddons-reckoning): captured the-governors-vigil--sera-holdt-is-read-out-by, HIT, set 2",
+        "governor-027 (confrontation-at-stairwell-nine → elias-agrees-to-the-terms): captured confrontation-at-stairwell-nine--last-night-in-the-eastern-gallery, HIT, set 19",
         "lantern-folk@17f3311: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-018 (a01-moving-night \u2192 a02-into-the-trees): partial a01-moving-night--nora-goes-out-the-back-door, HIT, set 1",
+        "lantern-folk-018 (a01-moving-night → a02-into-the-trees): partial a01-moving-night--nora-goes-out-the-back-door, HIT, set 1",
         "lantern-folk@1d3f552: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-028 (a11-in-the-dark \u2192 a14-the-keepers-flame): captured a11-in-the-dark--wick-lies-in-his-own-house, HIT, set 3",
+        "lantern-folk-028 (a11-in-the-dark → a14-the-keepers-flame): captured a11-in-the-dark--wick-lies-in-his-own-house, HIT, set 3",
         "lantern-folk@37bc78e: phase 4 over 8 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-012 (a04-the-great-lamp \u2192 a13-through-the-woods): captured a04-the-great-lamp--the-great-lamp-sits-in-a;a04-the-great-lamp--the-great-lamp-is-the-size, HIT, set 6",
-        "lantern-folk-013 (a12-the-remembering \u2192 a14-the-keepers-flame): partial a12-the-remembering--the-great-lamp-is-out-at;a12-the-remembering--just-before-the-lamp-died-leo, HIT, set 2",
-        "lantern-folk-014 (a03-the-little-voices \u2192 a09-the-worst-night): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
-        "lantern-folk-015 (a03-the-little-voices \u2192 a09-the-worst-night): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
+        "lantern-folk-012 (a04-the-great-lamp → a13-through-the-woods): captured a04-the-great-lamp--the-great-lamp-sits-in-a;a04-the-great-lamp--the-great-lamp-is-the-size, HIT, set 6",
+        "lantern-folk-013 (a12-the-remembering → a14-the-keepers-flame): partial a12-the-remembering--the-great-lamp-is-out-at;a12-the-remembering--just-before-the-lamp-died-leo, HIT, set 2",
+        "lantern-folk-014 (a03-the-little-voices → a09-the-worst-night): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
+        "lantern-folk-015 (a03-the-little-voices → a09-the-worst-night): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
         "lantern-folk@3b054ee: phase 4 over 7 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-001 (a07-the-cold-sleep \u2192 a11-in-the-dark): captured a07-the-cold-sleep--wick-s-dark-lantern-lay-on;a07-the-cold-sleep--wick-was-snuffed-by-the-murkwolf;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 4",
-        "lantern-folk-002 (a03-the-little-voices \u2192 a09-the-worst-night, a11-in-the-dark): partial a03-the-little-voices--wick-s-lantern-is-a-real, HIT, set 5",
+        "lantern-folk-001 (a07-the-cold-sleep → a11-in-the-dark): captured a07-the-cold-sleep--wick-s-dark-lantern-lay-on;a07-the-cold-sleep--wick-was-snuffed-by-the-murkwolf;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 4",
+        "lantern-folk-002 (a03-the-little-voices → a09-the-worst-night, a11-in-the-dark): partial a03-the-little-voices--wick-s-lantern-is-a-real, HIT, set 5",
         "lantern-folk@6c7fa1a: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-011 (a07-the-cold-sleep \u2192 a10-the-lamp-goes-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 3",
+        "lantern-folk-011 (a07-the-cold-sleep → a10-the-lamp-goes-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 3",
         "lantern-folk@73076e8: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-025 (a13-through-the-woods \u2192 a14-the-keepers-flame): captured a13-through-the-woods--leo-s-match-ember-relit-the, HIT, set 1",
+        "lantern-folk-025 (a13-through-the-woods → a14-the-keepers-flame): captured a13-through-the-woods--leo-s-match-ember-relit-the, HIT, set 1",
         "lantern-folk@771df26: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-005 (a11-in-the-dark \u2192 a12-the-remembering): partial a11-in-the-dark--only-five-folk-lanterns-are-still, HIT, set 1",
+        "lantern-folk-005 (a11-in-the-dark → a12-the-remembering): partial a11-in-the-dark--only-five-folk-lanterns-are-still, HIT, set 1",
         "lantern-folk@c131e3d: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-008 (a03-the-little-voices \u2192 a12-the-remembering): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 3",
+        "lantern-folk-008 (a03-the-little-voices → a12-the-remembering): captured a03-the-little-voices--children-s-ears-become-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 3",
         "lantern-folk@c9cd9b3: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-006 (a08-what-the-folk-fear \u2192 a11-in-the-dark): captured a08-what-the-folk-fear--the-keeper-has-watched-the-lamp;a08-what-the-folk-fear--the-keeper-says-that-the-lamp, HIT, set 3",
+        "lantern-folk-006 (a08-what-the-folk-fear → a11-in-the-dark): captured a08-what-the-folk-fear--the-keeper-has-watched-the-lamp;a08-what-the-folk-fear--the-keeper-says-that-the-lamp, HIT, set 3",
         "lantern-folk@ff141ad: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-027 (a11-in-the-dark \u2192 a14-the-keepers-flame): captured a11-in-the-dark--tallow-does-not-answer-when-a, HIT, set 1",
+        "lantern-folk-027 (a11-in-the-dark → a14-the-keepers-flame): captured a11-in-the-dark--tallow-does-not-answer-when-a, HIT, set 1",
         "shared-dark@0eaa3867: phase 4 over 9 scenes; 113 ledger facts name a scene outside the subset (offered to none)",
-        "shared-dark-039 (building \u2192 claire): captured building--maren-has-dreamed-herself-inside-this, HIT, set 11",
-        "shared-dark-040 (building \u2192 claire): captured building--maren-has-dreamed-herself-inside-this;building--maren-and-hank-have-known-each, HIT, set 11",
-        "shared-dark-041 (pewter-town \u2192 claire) [left out: missing-persons: before the establishing scene]: captured pewter-town--at-the-time-of-this-scene, HIT, set 7",
-        "shared-dark-043 (keisha-argument \u2192 call) [left out: research: before the establishing scene]: captured keisha-argument--shannon-lives-on-the-second-floor, HIT, set 1",
-        "shared-dark-044 (keisha-argument \u2192 call) [left out: research: before the establishing scene]: captured keisha-argument--madison-lives-on-the-third-floor, HIT, set 1",
+        "shared-dark-039 (building → claire): captured building--maren-has-dreamed-herself-inside-this, HIT, set 11",
+        "shared-dark-040 (building → claire): captured building--maren-has-dreamed-herself-inside-this;building--maren-and-hank-have-known-each, HIT, set 11",
+        "shared-dark-041 (pewter-town → claire) [left out: missing-persons: before the establishing scene]: captured pewter-town--at-the-time-of-this-scene, HIT, set 7",
+        "shared-dark-043 (keisha-argument → call) [left out: research: before the establishing scene]: captured keisha-argument--shannon-lives-on-the-second-floor, HIT, set 1",
+        "shared-dark-044 (keisha-argument → call) [left out: research: before the establishing scene]: captured keisha-argument--madison-lives-on-the-third-floor, HIT, set 1",
         "shared-dark@b9ba79d3: phase 4 over 8 scenes; 126 ledger facts name a scene outside the subset (offered to none)",
-        "shared-dark-034 (watching-ostrowski \u2192 call): captured watching-ostrowski--madison-is-sixteen-shannon-s-student, HIT, set 1",
-        "shared-dark-035 (no-response \u2192 phone-call): captured no-response--rook-is-female-and-sleeps-at, HIT, set 2",
+        "shared-dark-034 (watching-ostrowski → call): captured watching-ostrowski--madison-is-sixteen-shannon-s-student, HIT, set 1",
+        "shared-dark-035 (no-response → phone-call): captured no-response--rook-is-female-and-sleeps-at, HIT, set 2",
         "thornwall@2e7d14d: phase 4 over 17 scenes; 101 ledger facts name a scene outside the subset (offered to none)",
-        "thornwall-024 (not-alone \u2192 ivra-seals-archive) [left out: evening-visit: before the establishing scene]: captured not-alone--ves-wrote-her-journal-sixteen-years, HIT, set 1",
-        "thornwall-025 (thessan-resistance \u2192 thessan-vigil) [left out: morning-after: before the establishing scene]: captured thessan-resistance--thessan-has-executed-four-closures-greenhollow, HIT, set 4",
-        "thornwall-026 (crowded-chamber \u2192 thessan-resistance) [left out: thessan-rides: before the establishing scene]: captured crowded-chamber--at-greenhollow-davin-hale-opened-a, HIT, set 8; unrelated: crowded-chamber--at-greenhollow-davin-hale-opened-a: no subject: every later scene with a binding world fact is taken as depending on it",
-        "thornwall-028 (thessan-resistance \u2192 corvins-dispatch) [left out: crowded-chamber: before the establishing scene]: captured thessan-resistance--thessan-has-reviewed-the-greenhollow-file;thessan-resistance--thessan-believes-davin-walked-into-the;thessan-resistance--thessan-brought-the-greenhollow-assessment-copy, HIT, set 4",
-        "thornwall-029 (journals-of-the-east-wing \u2192 evidence-room): captured journals-of-the-east-wing--ryn-s-last-journal-entry-written, HIT, set 24",
-        "thornwall-030 (ivra-visits-sera \u2192 ivra-seals-archive): captured ivra-visits-sera--garren-s-watch-s-decline-played, HIT, set 14; unrelated: ivra-visits-sera--garren-s-watch-s-decline-played: no subject: every later scene with a binding world fact is taken as depending on it",
+        "thornwall-024 (not-alone → ivra-seals-archive) [left out: evening-visit: before the establishing scene]: captured not-alone--ves-wrote-her-journal-sixteen-years, HIT, set 1",
+        "thornwall-025 (thessan-resistance → thessan-vigil) [left out: morning-after: before the establishing scene]: captured thessan-resistance--thessan-has-executed-four-closures-greenhollow, HIT, set 4",
+        "thornwall-026 (crowded-chamber → thessan-resistance) [left out: thessan-rides: before the establishing scene]: captured crowded-chamber--at-greenhollow-davin-hale-opened-a, HIT, set 8; unrelated: crowded-chamber--at-greenhollow-davin-hale-opened-a: no subject: every later scene with a binding world fact is taken as depending on it",
+        "thornwall-028 (thessan-resistance → corvins-dispatch) [left out: crowded-chamber: before the establishing scene]: captured thessan-resistance--thessan-has-reviewed-the-greenhollow-file;thessan-resistance--thessan-believes-davin-walked-into-the;thessan-resistance--thessan-brought-the-greenhollow-assessment-copy, HIT, set 4",
+        "thornwall-029 (journals-of-the-east-wing → evidence-room): captured journals-of-the-east-wing--ryn-s-last-journal-entry-written, HIT, set 24",
+        "thornwall-030 (ivra-visits-sera → ivra-seals-archive): captured ivra-visits-sera--garren-s-watch-s-decline-played, HIT, set 14; unrelated: ivra-visits-sera--garren-s-watch-s-decline-played: no subject: every later scene with a binding world fact is taken as depending on it",
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
       "stale": null,

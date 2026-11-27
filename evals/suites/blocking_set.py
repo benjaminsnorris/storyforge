@@ -21,10 +21,10 @@ from blocking_set import runner
 from harness import Suite
 
 NAME = 'blocking-set'
-#: The set must keep its size: it has 117 in-scene fixed cases (the plan's
-#: "gawain's 35 and Wrath's 70", as built); 100 guards against a build
-#: that drops a source
-MIN_CASES = 100
+#: The set must keep its size: it has 146 in-scene fixed cases (gawain's
+#: 44, Wrath's Nov 8 73, and 29 from Wrath's overnight gate run, 2026-11-27);
+#: 130 guards against a build that drops a source
+MIN_CASES = 130
 
 #: The gates: the recorded baseline's values, each to be held exactly
 #: (#488). For recall a rise is a gain, for false alarms, left_flagged and
@@ -39,16 +39,29 @@ FLOORS: dict[str, float | None] = {
     # / 0.6496, readers' 0.3235 / 0.3824 / 0.4118, false alarms per 10k
     # 1.27 / 1.27 / 0.85, flags 99 / 101 / 96; the small categories move
     # most (sightline 0.33 / 0.67 / 0.75 on 12 cases, light 0.33 / 0.50 /
-    # 0.17 on 6, posture 0.91 / 0.55 / 0.82 on 11)
-    'recall': 0.6154,
-    'recall_hands': 0.7353, 'recall_posture': 0.9091, 'recall_sightline': 0.3333,
-    'recall_worn': 0.4545, 'recall_position': 0.6129, 'recall_light': 0.3333,
-    'recall_other': 0.5833,
+    # 0.17 on 6, posture 0.91 / 0.55 / 0.82 on 11).
+    # 2026-11-27: report A's 38 blocking-read findings on Wrath's overnight
+    # gate run joined the set (29 real, 9 debatable; books `wrath-gate`, the
+    # first-gated prose, and `wrath-gate-fix`, fix-round prose; PILOT.md
+    # step 3). Their 28 scenes were recorded as three runs ($6.65); the
+    # other scenes' recordings replay unchanged, so gawain's, Wrath's Nov 8,
+    # the readers', the false alarms and left_flagged keep their values.
+    # The pooled and category values below are run 1's on the larger set:
+    # recall 0.6027 / 0.6438 / 0.6301, wrath-gate 12 / 15 / 15 of 25,
+    # wrath-gate-fix 4 / 3 / 1 of 4, flags 122 / 128 / 118, debatable
+    # flagged 3 / 6 / 3 of 9. The added cases were found by the same read
+    # (`tool`), so recall_found_by_tool fell (0.7349 to 0.6875): a bigger
+    # set, not a weaker read
+    'recall': 0.6027,
+    'recall_hands': 0.7442, 'recall_posture': 0.8, 'recall_sightline': 0.375,
+    'recall_worn': 0.4615, 'recall_position': 0.5789, 'recall_light': 0.3333,
+    'recall_other': 0.5333,
     'recall_book_gawain': 0.4318, 'recall_book_wrath': 0.726,
-    'recall_found_by_readers': 0.3235, 'recall_found_by_tool': 0.7349,
+    'recall_book_wrath-gate': 0.48, 'recall_book_wrath-gate-fix': 1.0,
+    'recall_found_by_readers': 0.3235, 'recall_found_by_tool': 0.6875,
     'false_alarms_per_10k': 1.27,
     'left_flagged': 1,
-    'flags': 99,
+    'flags': 122,
 }
 
 
@@ -56,8 +69,8 @@ FLOORS: dict[str, float | None] = {
 #: different set errors, and a replay with fewer recordings (run 1's) is
 #: unavailable, naming the checkout, not read as a changed request.
 #: Re-recording sets both again (`blocking_set.fingerprint`, `.recordings`)
-RECORDED = {'set': '3244134c57b027323561416afdfc3d70119e9f8330ed5fe91ffab1b7997053fb',
-            'recordings': 185}
+RECORDED = {'set': '14a0145c377ee8b71751f48ff7177ef53ba30effde652755d6a714bd5c44baf7',
+            'recordings': 241}
 
 
 def run(ctx):
