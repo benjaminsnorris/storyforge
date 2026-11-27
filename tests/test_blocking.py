@@ -156,29 +156,48 @@ class TestCheckBlocking:
             assert check_blocking(project_dir, SCENE, prose=KNOT, model='m',
                                   readings=1).findings == []
 
-    def test_two_readings_by_default_their_union(self, project_dir, tmp_path):
+    def test_three_readings_by_default_their_union(self, project_dir, tmp_path):
         """One reading misses what another finds (#626: the author's own
-        example was missed by one full read and found by the next)."""
+        example was missed by one full read and found by the next). Three
+        readings since #774: a slip only the third reading finds is kept."""
         other = _knot_finding(kind='unclear', scene_quote='The guide had finished and was waiting',
                               other_quote='')
-        replies = iter([_text({'findings': [_knot_finding()]}),
-                        _text({'findings': [_knot_finding(scene_quote='left hip now'), other]})])
+        third = _knot_finding(kind='impossible', scene_quote='the gauntlet closed loosely on the silk',
+                              other_quote='')
+        by_reading = {1: [_knot_finding()],
+                      2: [_knot_finding(scene_quote='left hip now'), other],
+                      3: [_knot_finding(), third]}
         sent = []
 
         def fake(path, body, **k):
-            sent.append(body['messages'][0]['content'])
-            return next(replies)
+            prompt = body['messages'][0]['content']
+            sent.append(prompt)
+            n = next((n for n in (2, 3) if f'independent reading {n}' in prompt), 1)
+            return _text({'findings': by_reading[n]})
 
         with patch('storyforge.api._api_request', side_effect=fake):
             result = check_blocking(project_dir, SCENE, prose=KNOT, model='m',
                                     log_file=str(tmp_path / 'b.json'))
-        assert blocking.BLOCKING_READINGS == 2
-        assert len(sent) == 2
-        assert 'independent reading 2' in sent[1] and 'independent reading' not in sent[0]
-        # the second reading's quote of the same slip is one finding, kept once
+        assert blocking.BLOCKING_READINGS == 3
+        assert len(sent) == 3
+        assert sum('independent reading' not in s for s in sent) == 1
+        assert sum('independent reading 2' in s for s in sent) == 1
+        assert sum('independent reading 3' in s for s in sent) == 1
+        # each later reading's quote of the same slip is one finding, kept once;
+        # the union is in reading order
         assert [f.scene_quote for f in result.findings] == [
-            OVER_LEFT_HIP, 'The guide had finished and was waiting']
+            OVER_LEFT_HIP, 'The guide had finished and was waiting',
+            'the gauntlet closed loosely on the silk']
         assert os.path.isfile(tmp_path / 'b.r2.json')
+        assert os.path.isfile(tmp_path / 'b.r3.json')
+
+    def test_check_blockings_forecast_prices_every_reading(self):
+        """#774: `check --blocking`'s forecast is the readings times a
+        reading's cost, so a change in the count moves it."""
+        from storyforge import cmd_check
+        assert cmd_check.BLOCKING_COST_PER_SCENE == pytest.approx(
+            blocking.BLOCKING_READINGS * blocking.COST_PER_READING)
+        assert cmd_check.BLOCKING_COST_PER_SCENE == pytest.approx(0.15)
 
     def test_readings_below_one_raise(self, project_dir):
         with pytest.raises(ValueError):
@@ -218,7 +237,7 @@ class TestGateReadsBlocking:
 
     def test_the_authors_slip_stops_the_gate(self, project_dir, tmp_path):
         result, asked = self._run(project_dir, tmp_path, [_knot_finding()])
-        assert len(asked) == 2   # BLOCKING_READINGS
+        assert len(asked) == 3   # BLOCKING_READINGS (#774)
         assert not result.passed
         assert not result.committed
         assert [f.code for f in result.findings] == ['BLK']
@@ -228,7 +247,7 @@ class TestGateReadsBlocking:
 
     def test_clean_blocking_passes(self, project_dir, tmp_path):
         result, asked = self._run(project_dir, tmp_path, [])
-        assert len(asked) == 2
+        assert len(asked) == 3   # BLOCKING_READINGS (#774)
         assert result.passed
 
     def test_unverified_blocking_finding_blocks(self, project_dir, tmp_path):

@@ -3504,9 +3504,13 @@ class TestTwoReadings:
         assert result.passed and [f.reading for f in result.inherited] == [2]
 
     def test_the_recheck_forecast_prices_every_reading(self):
-        """#483 review SF-6: a re-check is GATE_READINGS checks."""
-        from storyforge import gate
-        assert gate.RECHECK_COST_PER_SCENE == pytest.approx(1.0)   # + the blocking read (#626)
+        """#483 review SF-6: a re-check is GATE_READINGS checks, and #774:
+        the blocking read's BLOCKING_READINGS readings."""
+        from storyforge import blocking, gate
+        assert gate.RECHECK_COST_PER_SCENE == pytest.approx(
+            0.6 + 0.35 * (gate.GATE_READINGS - 1)
+            + blocking.BLOCKING_READINGS * blocking.COST_PER_READING)
+        assert gate.RECHECK_COST_PER_SCENE == pytest.approx(1.1)   # + the blocking read (#626, #774)
 
 
 def gate_blocking(result):

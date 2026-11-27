@@ -219,7 +219,7 @@ class TestAcceptedBlockingSticks:
             f.write('\nShe rolled the maps away.\n')
         book.blocking, book.blocking_calls = [], []
         result = book.unchanged(project_dir, tmp_path, SCENE, 'recheck')
-        assert len(book.blocking_calls) == 2   # BLOCKING_READINGS
+        assert len(book.blocking_calls) == 3   # BLOCKING_READINGS (#774)
         assert result.blocking_note == 'blocking read run: its prose changed since its last gate'
 
     def test_a_scene_gated_before_the_blocking_read_gets_one(self, project_dir, tmp_path):
@@ -232,7 +232,7 @@ class TestAcceptedBlockingSticks:
         assert gate.blocking_read_before(project_dir, SCENE, _read(project_dir, SCENE)) == (
             False, 'its last gate had no blocking read (gated before it existed)')
         first = book.unchanged(project_dir, tmp_path, SCENE, 'recheck')
-        assert len(book.blocking_calls) == 2 and first.committed
+        assert len(book.blocking_calls) == 3 and first.committed
         assert 'gated before it existed' in first.blocking_note
         book.blocking_calls.clear()
         second = book.unchanged(project_dir, tmp_path, SCENE, 'recheck')
@@ -243,7 +243,7 @@ class TestAcceptedBlockingSticks:
         self._accepted_and_passed(project_dir, tmp_path, book)
         book.blocking, book.blocking_calls = [], []
         result = book.unchanged(project_dir, tmp_path, SCENE, 'advisor')
-        assert len(book.blocking_calls) == 2 and not result.blocking_skipped
+        assert len(book.blocking_calls) == 3 and not result.blocking_skipped
         assert result.blocking_note == ''
 
     def test_an_accept_does_not_cover_a_reading_in_another_paragraph(

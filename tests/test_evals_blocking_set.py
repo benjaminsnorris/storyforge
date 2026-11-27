@@ -425,7 +425,7 @@ class TestSuite:
         suite = _suite()
         assert suite.frozen
         result = _record(suite, str(tmp_path / 'public-cassettes'))
-        assert len(calls) == 4                          # two scenes, two readings each
+        assert len(calls) == 6                          # two scenes, three readings each
         assert result['metrics']['caught'] == 1 and result['metrics']['left_flagged'] == 1
         assert os.path.isdir(os.path.join(private_set, 'cassettes', 'blocking-set'))
         assert not (tmp_path / 'public-cassettes').exists()
@@ -436,7 +436,7 @@ class TestSuite:
         monkeypatch.setattr(api, '_live_request', lambda *a: pytest.fail('went live'))
         replayed = harness.run_suite(suite, 'replay', str(tmp_path / 'public-cassettes'))
         assert replayed['metrics'] == result['metrics']
-        assert replayed['cost']['usd_spent'] == 0 and replayed['cost']['replayed_calls'] == 4
+        assert replayed['cost']['usd_spent'] == 0 and replayed['cost']['replayed_calls'] == 6
 
     def test_the_report_carries_no_prose(self, private_set, tmp_path, monkeypatch):
         """Metrics and notes reach evals/baseline.json, which is public: no
@@ -641,17 +641,19 @@ class TestFloorGates:
         return {name: 0.5 for name in suite.run.__globals__['FLOORS']}
 
     #: The recorded floors (2026-11-09; 2026-11-27 on the set with report
-    #: A's 38 findings added, a larger set whose pooled values moved).
+    #: A's 38 findings added, a larger set whose pooled values moved; then
+    #: at three readings, #774, where the third reading's extra flags and
+    #: false alarms, 1.27 to 2.12 per 10k, are Ben's accepted cost).
     #: Lowering one accepts a loss, so it takes an edit here too: recall may
     #: only rise, the rest only fall
     RECORDED_FLOORS = {
-        'recall': 0.6027, 'recall_hands': 0.7442, 'recall_posture': 0.8,
-        'recall_sightline': 0.375, 'recall_worn': 0.4615, 'recall_position': 0.5789,
-        'recall_light': 0.3333, 'recall_other': 0.5333, 'recall_book_gawain': 0.4318,
-        'recall_book_wrath': 0.726, 'recall_book_wrath-gate': 0.48,
-        'recall_book_wrath-gate-fix': 1.0, 'recall_found_by_readers': 0.3235,
-        'recall_found_by_tool': 0.6875, 'false_alarms_per_10k': 1.27, 'left_flagged': 1,
-        'flags': 122,
+        'recall': 0.6712, 'recall_hands': 0.7442, 'recall_posture': 0.8667,
+        'recall_sightline': 0.5625, 'recall_worn': 0.5385, 'recall_position': 0.6316,
+        'recall_light': 0.5, 'recall_other': 0.6667, 'recall_book_gawain': 0.5,
+        'recall_book_wrath': 0.7808, 'recall_book_wrath-gate': 0.6,
+        'recall_book_wrath-gate-fix': 1.0, 'recall_found_by_readers': 0.3824,
+        'recall_found_by_tool': 0.7589, 'false_alarms_per_10k': 2.12, 'left_flagged': 1,
+        'flags': 150,
     }
 
     def test_floors_never_move_the_wrong_way_from_the_recorded_values(self):

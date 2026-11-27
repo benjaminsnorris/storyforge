@@ -82,7 +82,9 @@ verified contradictions a gate run recorded can be accepted: broken
 that couldn't run still have to be fixed.
 
 Blocking (#626, #647): the gate reads each scene's blocking alone (hands,
-posture, what is worn, light) with the whole-scene blocking read by default.
+posture, what is worn, light) with the whole-scene blocking read by default:
+`blocking.BLOCKING_READINGS` independent readings (three since #774), their
+union.
 `--stage-sheet` checks it with the stage sheet instead (`storyforge.stage_sheet`:
 a small model records each physical action as a transition, code checks the
 transitions, and a yes/no question asked twice covers the rest), saving each
@@ -141,13 +143,14 @@ import os
 import sys
 from dataclasses import dataclass, field
 
-from storyforge.blocking import BLOCKING_READINGS
+from storyforge.blocking import BLOCKING_READINGS, COST_PER_READING
 from storyforge.common import detect_project_root, install_signal_handlers, log, set_log_file
 
 REPORT_PATH = 'working/check-report.md'
 BLOCKING_REPORT_PATH = 'working/blocking-report.md'
-#: `--blocking`'s forecast per scene: one call on the scene alone
-BLOCKING_COST_PER_SCENE = 0.1   # BLOCKING_READINGS readings, about $0.04 each
+#: `--blocking`'s forecast per scene: `BLOCKING_READINGS` calls on the
+#: scene alone, at `blocking.COST_PER_READING` each ($0.15 at three, #774)
+BLOCKING_COST_PER_SCENE = BLOCKING_READINGS * COST_PER_READING
 #: `--blocking --stage-sheet`'s forecast per scene: one extraction and two
 #: askings on the small model (cents; a larger STORYFORGE_STAGE_SHEET_MODEL
 #: costs more)

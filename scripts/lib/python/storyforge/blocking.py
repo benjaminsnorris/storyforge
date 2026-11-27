@@ -43,8 +43,17 @@ BLOCKING_CODE = 'BLK'
 #: Independent readings per check, their findings' union (`check_blocking`).
 #: One reading misses most slips another finds: on gawain at a04c452 (#626)
 #: one full read flagged 12 of the 35 slips the author's readers fixed and
-#: missed his own example, which a second read of that scene found
-BLOCKING_READINGS = 2
+#: missed his own example, which a second read of that scene found. Three
+#: since #774 (2026-11-27): on `blocking-set`'s 29 real slips from Wrath's
+#: overnight gate run, recall was 0.47 at one reading and 0.575 at two,
+#: projected 0.63-0.70 at three; the readings repeat each other no more than
+#: independent ones would, so a third buys recall, and a fourth only 3-5
+#: points more. About a fifth of real slips stay near-invisible to the read
+BLOCKING_READINGS = 3
+
+#: What one reading costs, for forecasts: an Opus call on the scene alone,
+#: about $0.035 on Wrath (#774) and $0.04 on gawain (#626); rounded up
+COST_PER_READING = 0.05
 
 KINDS = ('contradiction', 'impossible', 'unclear')
 

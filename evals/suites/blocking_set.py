@@ -1,6 +1,6 @@
 """The blocking set (#646): today's blocking read (`storyforge.blocking`,
-two readings per scene) against known blocking slips from *A Year and a
-Day* (gawain) and *Wrath Like Smoke* (iliad-adult), and clean scenes for
+`BLOCKING_READINGS` readings per scene, three since #774) against known
+blocking slips from *A Year and a Day* (gawain) and *Wrath Like Smoke* (iliad-adult), and clean scenes for
 false alarms. See ``evals/blocking_set``.
 
 The set and its recordings are private (the author's unpublished prose) and
@@ -51,17 +51,24 @@ FLOORS: dict[str, float | None] = {
     # wrath-gate-fix 4 / 3 / 1 of 4, flags 122 / 128 / 118, debatable
     # flagged 3 / 6 / 3 of 9. The added cases were found by the same read
     # (`tool`), so recall_found_by_tool fell (0.7349 to 0.6875): a bigger
-    # set, not a weaker read
-    'recall': 0.6027,
-    'recall_hands': 0.7442, 'recall_posture': 0.8, 'recall_sightline': 0.375,
-    'recall_worn': 0.4615, 'recall_position': 0.5789, 'recall_light': 0.3333,
-    'recall_other': 0.5333,
-    'recall_book_gawain': 0.4318, 'recall_book_wrath': 0.726,
-    'recall_book_wrath-gate': 0.48, 'recall_book_wrath-gate-fix': 1.0,
-    'recall_found_by_readers': 0.3235, 'recall_found_by_tool': 0.6875,
-    'false_alarms_per_10k': 1.27,
+    # set, not a weaker read.
+    # 2026-11-27, #774: three readings a scene. Reading 3 is a new request,
+    # so all 120 case scenes were topped up as three runs ($13.36; readings
+    # 1 and 2 replay). Run 1 / 2 / 3: recall 0.6712 / 0.6781 / 0.6781 (was
+    # 0.6027 / 0.6438 / 0.6301 at two), the overnight run's real slips 19 /
+    # 19 / 18 of 29 (was 16 / 18 / 16), readers' 0.3824 / 0.4412 / 0.4118,
+    # false alarms per 10k 2.12 / 1.69 / 2.12 (was 1.27: the third reading
+    # adds some), flags 150 / 142 / 141. The values below are run 1's
+    'recall': 0.6712,
+    'recall_hands': 0.7442, 'recall_posture': 0.8667, 'recall_sightline': 0.5625,
+    'recall_worn': 0.5385, 'recall_position': 0.6316, 'recall_light': 0.5,
+    'recall_other': 0.6667,
+    'recall_book_gawain': 0.5, 'recall_book_wrath': 0.7808,
+    'recall_book_wrath-gate': 0.6, 'recall_book_wrath-gate-fix': 1.0,
+    'recall_found_by_readers': 0.3824, 'recall_found_by_tool': 0.7589,
+    'false_alarms_per_10k': 2.12,
     'left_flagged': 1,
-    'flags': 122,
+    'flags': 150,
 }
 
 
@@ -70,7 +77,7 @@ FLOORS: dict[str, float | None] = {
 #: unavailable, naming the checkout, not read as a changed request.
 #: Re-recording sets both again (`blocking_set.fingerprint`, `.recordings`)
 RECORDED = {'set': '14a0145c377ee8b71751f48ff7177ef53ba30effde652755d6a714bd5c44baf7',
-            'recordings': 241}
+            'recordings': 361}
 
 
 def run(ctx):
