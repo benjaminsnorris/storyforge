@@ -181,6 +181,11 @@ class SourceReview:
     #: #736: the earlier scenes whose source was left out for the budget
     #: (`MAX_SOURCE_CHARS`): a call with fewer contradictions might show it
     unshown: set = field(default_factory=set, repr=False, compare=False)
+    #: #736's review (CR-2, SF-4): the people whose source facts were sent
+    #: (`_source_facts`; None: none were read), and whether that list was cut
+    #: at `MAX_SOURCE_FACTS`
+    people: frozenset | None = field(default=None, repr=False, compare=False)
+    facts_cut: bool = field(default=False, repr=False, compare=False)
 
     def note(self, text: str, about=None) -> None:
         self.notes.append(text)
@@ -188,21 +193,29 @@ class SourceReview:
             self.about[len(self.notes) - 1] = about
 
 
-def _from_earlier(key: tuple) -> 'SourceReview | None':
+def _from_earlier(key: tuple, people: frozenset | None = frozenset()) -> 'SourceReview | None':
     """#736: a ruling made earlier in this process (`_MEMO`) that covers the
     call `key` would make: the same scene and facts (the same order), and
     every contradiction and finding of `key` among those it ruled on, none
     of them against an earlier scene whose source was left out for the
-    budget there. The fix loop's re-check carries its facts (`gate._extract`),
-    and its findings are the run before's or fewer, so a call would only ask
-    again what was answered. Its rulings and notes, cut to `key`'s items
-    and indexed by them; None when none covers it."""
+    budget there. With contradictions or findings to rule on, the source
+    facts it was shown must cover theirs (#736's review CR-2, SF-4): not cut
+    at `MAX_SOURCE_FACTS`, and `people` (whose facts this call would send;
+    None: they can't be read) among the people it was sent. The fix loop's
+    re-check carries its facts (`gate._extract`), and its findings are the
+    run before's or fewer, so a call would only ask again what was answered.
+    Its rulings and notes, cut to `key`'s items and indexed by them; None
+    when none covers it."""
     scene, facts, contradictions, findings = key
     for (s, f, cs, fs), earlier in _MEMO.items():
         if s != scene or f != facts or not (set(contradictions) <= set(cs)
                                             and set(findings) <= set(fs)):
             continue
         if any(c[1] in earlier.unshown for c in contradictions):
+            continue
+        if (contradictions or findings) and (
+                earlier.facts_cut or people is None or earlier.people is None
+                or not people <= earlier.people):
             continue
         out = SourceReview(departs=list(earlier.departs), ruled=set(earlier.ruled))
         c_at = {c: cs.index(c) for c in contradictions}
@@ -438,22 +451,50 @@ def _one_line(text: str) -> str:
     return ' '.join((text or '').split())
 
 
+def _named_people(project_dir: str, scene_id: str, refs: list[tuple[str, str]],
+                  contradictions: list, findings: list) -> list:
+    """The people the contradictions and findings name, or, naming none the
+    source knows, the scene's cast (`source.named_in`, `scene_cast`).
+
+    Raises:
+        source.SourceError, OSError, UnicodeDecodeError: they can't be read.
+    """
+    from storyforge import source
+    text = '\n'.join(part for f in [*contradictions, *findings]
+                     for part in (f.scene_quote, f.established_quote, f.explanation))
+    return (source.named_in(project_dir, [s for s, _ in refs], text)
+            or source.scene_cast(project_dir, scene_id, refs))
+
+
+def _people(project_dir: str, scene_id: str, refs: list[tuple[str, str]],
+            contradictions: list, findings: list) -> frozenset | None:
+    """#736's review (CR-2): whose source facts a call would send
+    (`_named_people`); empty with nothing to rule on, None when they can't
+    be read."""
+    from storyforge import source
+    if not contradictions and not findings:
+        return frozenset()
+    try:
+        return frozenset(_named_people(project_dir, scene_id, refs, contradictions, findings))
+    except (source.SourceError, OSError, UnicodeDecodeError):
+        return None
+
+
 def _source_facts(project_dir: str, scene_id: str, refs: list[tuple[str, str]],
-                  contradictions: list, findings: list, notes: list[str]) -> list[str]:
+                  contradictions: list, findings: list, notes: list[str],
+                  out: 'SourceReview | None' = None) -> list[str]:
     """The source's facts (`source.entering_state`, through this scene's own
     source scenes) on the people the contradictions and findings name, or,
     naming none the source knows, the scene's cast: retrieval for the
     ruling (#747). [] with nothing to rule on. What can't be read is a
-    note, and the ruling goes on without them."""
+    note, and the ruling goes on without them. `out` records whose facts
+    were sent and whether they were cut (#736's review CR-2)."""
     from storyforge import source
     from storyforge.prompts_source import entering_lines
     if not contradictions and not findings:
         return []
-    text = '\n'.join(part for f in [*contradictions, *findings]
-                     for part in (f.scene_quote, f.established_quote, f.explanation))
     try:
-        people = (source.named_in(project_dir, [s for s, _ in refs], text)
-                  or source.scene_cast(project_dir, scene_id, refs))
+        people = _named_people(project_dir, scene_id, refs, contradictions, findings)
         state = source.entering_state(project_dir, refs, people, through=True,
                                       limit=MAX_SOURCE_FACTS)
     except (source.SourceError, OSError, UnicodeDecodeError) as e:
@@ -461,6 +502,8 @@ def _source_facts(project_dir: str, scene_id: str, refs: list[tuple[str, str]],
                      f'({e}): ruled without them')
         return []
     notes.extend(state.notes)
+    if out is not None:
+        out.people, out.facts_cut = frozenset(people), bool(state.left_out)
     lines = entering_lines(state.facts, quotes=True)
     if state.left_out and lines:
         # #747's review (CR-2, SF-2): a cut list says it is partial
@@ -492,7 +535,8 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
            c_keys, f_keys)
     if key in _MEMO:
         return _MEMO[key]
-    earlier_ruling = _from_earlier(key)
+    earlier_ruling = _from_earlier(key, _people(project_dir, scene_id, ctx.refs[scene_id],
+                                                contradictions, findings))
     if earlier_ruling is not None:
         return earlier_ruling
     refs = list(ctx.refs[scene_id])
@@ -535,7 +579,7 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
     # the facts are this scene's: only its own source scenes' slips clear one
     slips = [e for slug, sid in ctx.refs[scene_id] for e in ctx.errata.get((slug, sid), [])]
     source_facts = _source_facts(project_dir, scene_id, ctx.refs[scene_id],
-                                 contradictions, findings, out.notes)
+                                 contradictions, findings, out.notes, out=out)
     row = ctx.map_rows.get(scene_id, {})
     prompt = build_prompt(scene_id, prose, facts,
                           [(c.scene_quote, c.established_scene, c.established_quote,

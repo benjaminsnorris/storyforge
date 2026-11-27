@@ -885,3 +885,77 @@ def test_a_fix_away_from_every_quote_makes_no_source_call(project_dir, tmp_path,
     assert out.fixed and out.result.passed, gate.report_lines(out.result)
     assert calls == ['extract', 'persistence', 'check', 'source', 'fix', 'check']
     assert out.result.source_ruled
+
+
+class TestRulingReuseLimits:
+    """#736's review (T-1, T-2, T-3, CR-2/SF-4): what a reused ruling may
+    cover, and how it is cut."""
+
+    def _c(self, quote, scene=EARLIER):
+        from storyforge.checker import Finding
+        return Finding('contradiction', 'TIM', quote, scene, 'Dorren Hayle pressed', '', 'why')
+
+    def _review(self, project_dir, tmp_path, ctx, contradictions, reply=None, findings=()):
+        sent = []
+
+        def fake(path, body, **k):
+            sent.append(body)
+            return _text(reply or {'facts': [], 'contradictions': [], 'findings': []})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            out = gate_source.review(project_dir, SCENE, 'prose', [_commitment()],
+                                     contradictions, model='m',
+                                     log_file=str(tmp_path / 'src.json'), ctx=ctx,
+                                     findings=list(findings))
+        return out, sent
+
+    def test_a_contradiction_the_ruling_did_not_cover_is_a_call(self, project_dir, tmp_path,
+                                                                adaptation):
+        a, b = self._c('She tapped the map'), self._c('The sword broke')
+        self._review(project_dir, tmp_path, adaptation, [a])
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert len(sent) == 1
+
+    def test_contradictions_are_cut_and_indexed_with_their_notes(self, project_dir, tmp_path,
+                                                                 adaptation):
+        unmapped = self._c('The well ran dry', scene='act9-sc09')
+        backed, unquoted = self._c('She tapped the map'), self._c('The sword broke')
+        reply = {'facts': [], 'findings': [], 'contradictions': [
+            {'n': 2, 'backs': 'this', 'source_quote': 'four hundred and twelve souls',
+             'why': 'b'},
+            {'n': 3, 'backs': 'this', 'source_quote': 'words the source has not', 'why': 'c'}]}
+        first, _ = self._review(project_dir, tmp_path, adaptation, [unmapped, backed, unquoted],
+                                reply=reply)
+        assert [i for i, _ in first.backs_scene] == [1]
+        assert any('act9-sc09 is not mapped' in n for n in first.notes)
+        assert any('words the source has not' in n for n in first.notes)
+        again, sent = self._review(project_dir, tmp_path, adaptation, [backed])
+        assert sent == [] and [i for i, _ in again.backs_scene] == [0]
+        assert not any('act9-sc09' in n or 'words the source has not' in n
+                       for n in again.notes)
+
+    def test_a_source_left_out_for_the_budget_is_never_reused(self, project_dir, tmp_path,
+                                                              adaptation, monkeypatch):
+        """T-2: a smaller call might show the source the earlier one left out."""
+        this = gate_source._source_text(project_dir, adaptation.refs[SCENE])
+        monkeypatch.setattr(gate_source, 'MAX_SOURCE_CHARS', len(this) + 10)
+        a, b = self._c('She tapped the map'), self._c('The sword broke')
+        first, _ = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert EARLIER in first.unshown
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a])
+        assert len(sent) == 1
+
+    def test_source_facts_cut_or_other_people_are_never_reused(self, project_dir, tmp_path,
+                                                                adaptation, monkeypatch):
+        """CR-2/SF-4: the ruling must have been shown the source facts this
+        call would send."""
+        a, b = self._c('She tapped the map'), self._c('The sword broke')
+        first, _ = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert first.people is not None and not first.facts_cut
+        first.facts_cut = True
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a])
+        assert len(sent) == 1
+        gate_source._MEMO.clear()
+        self._review(project_dir, tmp_path, adaptation, [a, b])
+        monkeypatch.setattr(gate_source, '_people', lambda *a: frozenset({'someone-else'}))
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a])
+        assert len(sent) == 1
