@@ -1554,3 +1554,210 @@ class TestCheckCommand:
         from storyforge import cmd_check
         assert cmd_check.parse_args(['--questions', 'x']).questions is True
         assert '--questions' in cmd_check.__doc__
+
+
+# ============================================================================
+# The source's entering state (#769)
+# ============================================================================
+
+SOURCE_YAML = """
+source:
+  projects:
+    - slug: atlas
+      path: ../atlas
+  mode: {mode}
+"""
+
+#: an imported source whose ledger wounds Dorren before the passage
+#: act1-sc02 adapts (s-study), and heals Kael
+SOURCE_FILES = {
+    'scenes.csv': 'id|seq|title\ns-office|1|Office\ns-study|2|Study\n',
+    'characters.csv': ('id|name|aliases\ndorren-hayle|Dorren Hayle|Dorren\n'
+                       'kael-maren|Kael Maren|\n'),
+    'scene-intent.csv': 'id|function|on_stage\ns-office|x|dorren-hayle\ns-study|x|dorren-hayle\n',
+    'commitments.csv': (
+        'id|scene_id|type|subject|statement|quote|status|category|resolves\n'
+        'cut|s-office|physical|dorren-hayle|A deep cut across the palm of her left hand.|'
+        'the blade opened her palm|binding|injury|\n'),
+}
+CUT = 'A deep cut across the palm of her left hand.'
+UNHURT = 'Dorren flexed both hands, whole and unhurt, and opened the map.'
+
+
+def _with_source(project_dir, mode='faithful', mapped=True, commitments=None):
+    from storyforge.elaborate import _read_csv, _write_csv
+    with open(os.path.join(project_dir, 'storyforge.yaml'), 'a', encoding='utf-8') as f:
+        f.write(SOURCE_YAML.format(mode=mode))
+    ref = os.path.join(project_dir, 'reference')
+    with open(os.path.join(ref, 'source-map.csv'), 'w', encoding='utf-8') as f:
+        f.write('scene_id|source_scenes|treatment|note\n'
+                + (f'{SCENE}|s-study|dramatize|\n' if mapped else ''))
+    src = os.path.join(ref, 'source', 'atlas')
+    os.makedirs(src, exist_ok=True)
+    files = dict(SOURCE_FILES)
+    if commitments is not None:
+        files['commitments.csv'] = commitments
+    for name, text in files.items():
+        with open(os.path.join(src, name), 'w', encoding='utf-8') as f:
+            f.write(text)
+    # the scene's cast by id, as an imported book's is
+    for name in ('scenes.csv', 'scene-intent.csv'):
+        path = os.path.join(ref, name)
+        rows = _read_csv(path)
+        for r in rows:
+            if r['id'] == SCENE:
+                for col in ('pov', 'on_stage'):
+                    if col in r:
+                        r[col] = 'dorren-hayle'
+        _write_csv(path, rows, list(rows[0].keys()))
+
+
+class TestSourceEntering:
+    def _check(self, project_dir, rows=None, prose=UNHURT, answers=None):
+        asked = []
+        answers = answers or (lambda a, n: [ans(i, 'no') for i in range(1, n + 1)])
+        rows = rows if rows is not None else _add_rows(project_dir)
+        with patch('storyforge.api._api_request', side_effect=_answering(answers, asked)):
+            r = questions.check_questions(project_dir, SCENE, prose=prose, rows=rows,
+                                          records=[Record('at', 'Dorren', '')], model='m',
+                                          promises=False)
+        return r, asked
+
+    def test_a_contradicted_source_entering_fact_is_a_finding_naming_the_source_scene(
+            self, project_dir):
+        _with_source(project_dir)
+
+        def answers(asking, n):
+            return [ans(1, 'yes', 'whole and unhurt', 'Her hand was cut.')] \
+                + [ans(i, 'no') for i in range(2, n + 1)]
+        r, asked = self._check(project_dir, answers=answers)
+        one = first_asking(asked)
+        assert 'Established in source atlas:s-office: "' + CUT + '"' in one
+        assert 'the blade opened her palm' in one
+        assert 'source this novel adapts has this holding as the scene opens' in one
+        assert r.asked_fact_ids[0] == 'source:atlas:cut'
+        [f] = r.findings
+        assert (f.fact_id, f.code, f.established_scene) == \
+            ('source:atlas:cut', 'PHY', 'source atlas:s-office')
+        assert f.scene_quote == 'whole and unhurt'
+        assert f.explanation.startswith('(question, asked 2 times) The source has: "' + CUT)
+        assert 'contradicts source atlas:s-office' in f.message()
+
+    def test_a_ledger_fact_finding_still_says_the_book(self, project_dir):
+        rows = _add_rows(project_dir, TESSA_KIND)
+        r, _ = self._check(project_dir, rows, prose=TESSA_PROSE,
+                           answers=lambda a, n: [ans(1, 'yes', 'Tessa mocked Dorren')]
+                           + [ans(i, 'no') for i in range(2, n + 1)])
+        assert r.findings[0].explanation.startswith('(question, asked 2 times) The book has:')
+
+    def test_the_source_state_comes_after_the_brief_and_before_the_facts(self, project_dir):
+        from storyforge.elaborate import _read_csv, _write_csv
+        _with_source(project_dir)
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        briefs = _read_csv(path)
+        for b in briefs:
+            if b['id'] == SCENE:
+                b['physical_state_in'] = 'Dorren wears a borrowed coat'
+        _write_csv(path, briefs, list(briefs[0].keys()))
+        rows = _add_rows(project_dir, {**TESSA_KIND, 'subject': 'dorren-hayle',
+                                       'statement': 'Dorren never lies'})
+        r, asked = self._check(project_dir, rows)
+        one = first_asking(asked)
+        assert one.index('Dorren wears a borrowed coat') < one.index(CUT) \
+            < one.index('Dorren never lies')
+        assert r.asked_fact_ids == ['physical_state_in', 'source:atlas:cut', 'tessa-kind']
+
+    def test_a_fact_the_brief_already_states_is_asked_once(self, project_dir):
+        from storyforge.elaborate import _read_csv, _write_csv
+        _with_source(project_dir)
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        briefs = _read_csv(path)
+        for b in briefs:
+            if b['id'] == SCENE:
+                b['physical_state_in'] = 'a deep cut across the palm of her  left hand'
+        _write_csv(path, briefs, list(briefs[0].keys()))
+        r, asked = self._check(project_dir)
+        assert r.asked_fact_ids == ['physical_state_in']
+        assert any(n == '1 source entering fact(s) the brief or the ledger already states, '
+                        'asked once: source:atlas:cut' for n in r.notes)
+
+    def test_a_fact_the_ledger_already_states_is_asked_once(self, project_dir):
+        _with_source(project_dir)
+        rows = _add_rows(project_dir, {**TESSA_KIND, 'id': 'dorren-cut', 'type': 'physical',
+                                       'subject': 'dorren-hayle', 'statement': CUT})
+        r, _ = self._check(project_dir, rows)
+        assert r.asked_fact_ids == ['dorren-cut']
+
+    def test_they_count_toward_the_cap(self, project_dir, monkeypatch):
+        monkeypatch.setattr(questions, 'MAX_QUESTIONS', 1)
+        _with_source(project_dir)
+        rows = _add_rows(project_dir, {**TESSA_KIND, 'subject': 'dorren-hayle'})
+        r, _ = self._check(project_dir, rows)
+        assert r.asked_fact_ids == ['source:atlas:cut']
+
+    def test_only_the_latest_are_asked_and_the_rest_are_said(self, project_dir, monkeypatch):
+        monkeypatch.setattr(questions, 'SOURCE_ENTERING_MAX', 1)
+        _with_source(project_dir, commitments=SOURCE_FILES['commitments.csv']
+                     + 'bruise|s-office|physical|dorren-hayle|A bruise on her right knee.||'
+                       'binding|injury|\n')
+        r, _ = self._check(project_dir)
+        assert r.asked_fact_ids == ['source:atlas:bruise']
+        assert any(n.startswith("the source's entering state: 1 older fact(s)")
+                   for n in r.notes)
+
+    def test_a_state_that_ends_in_the_adapted_passage_says_so(self, project_dir):
+        _with_source(project_dir, commitments=SOURCE_FILES['commitments.csv'].replace(
+            '|injury|\n', '|injury|s-study\n'))
+        _, asked = self._check(project_dir)
+        assert 'The source ends this state in s-study' in first_asking(asked)
+
+    def test_a_book_with_no_source_is_unchanged(self, project_dir):
+        rows = _add_rows(project_dir, TESSA_KIND)
+        r, asked = self._check(project_dir, rows, prose=TESSA_PROSE)
+        assert r.asked_fact_ids == ['tessa-kind']
+        assert not any('source' in n for n in r.notes)
+        assert 'source this novel adapts' not in asked[0]
+
+    def test_a_free_adaptation_asks_nothing_from_the_source_and_says_so(self, project_dir):
+        _with_source(project_dir, mode='free')
+        r, asked = self._check(project_dir)
+        assert r.asked == 0 and asked == []
+        assert "the source's entering state was not asked: source.mode is free: fidelity " \
+               "isn't checked" in r.notes
+
+    def test_an_unmapped_scene_says_so(self, project_dir):
+        _with_source(project_dir, mapped=False)
+        r, _ = self._check(project_dir)
+        assert r.asked == 0
+        assert any(n.startswith("the source's entering state was not asked:") for n in r.notes)
+
+    def test_a_scene_the_map_doesnt_adapt_says_so(self, project_dir):
+        from storyforge.elaborate import _read_csv, _write_csv
+        _with_source(project_dir)
+        path = os.path.join(project_dir, 'reference', 'source-map.csv')
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('act1-sc01|s-office|dramatize|\n')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace(f'{SCENE}|s-study|dramatize|', f'{SCENE}||invent|'))
+        r, _ = self._check(project_dir)
+        assert r.asked == 0
+        assert ("the source's entering state was not asked: the scene is invented or not "
+                "mapped in reference/source-map.csv") in r.notes
+
+    def test_an_unreadable_source_table_says_so(self, project_dir):
+        _with_source(project_dir)
+        with patch('storyforge.source.entering_state',
+                   side_effect=__import__('storyforge.source').source.SourceError('bad row')):
+            r, _ = self._check(project_dir)
+        assert r.asked == 0
+        assert ("the source's entering state was not asked: it can't be read (bad row)"
+                in r.notes)
+
+    def test_a_source_with_no_ledger_says_so(self, project_dir):
+        _with_source(project_dir)
+        os.remove(os.path.join(project_dir, 'reference', 'source', 'atlas', 'commitments.csv'))
+        r, _ = self._check(project_dir)
+        assert any(n.startswith("the source's entering state: source atlas has no fact ledger")
+                   for n in r.notes)

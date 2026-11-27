@@ -191,9 +191,12 @@ class Finding:
     scene_quote: str          # the scene's words that break it
     established_scene: str    # where the broken fact is set up: a scene id, a
                               # bible's file name, 'scenes.csv' (the calendar),
-                              # or '' for a ledger fact with no scene or a brief promise
+                              # `source <slug>:<scene>` for a source fact
+                              # (#769, the question layer), or '' for a
+                              # ledger fact with no scene or a brief promise
     established_quote: str
-    fact_id: str              # ledger id, or the brief field of a promise
+    fact_id: str              # ledger id, the brief field of a promise, or
+                              # `source:<slug>:<id>` (#769)
     explanation: str
     problem: str = ''         # why it is unverified ('' when verified)
     #: which of the check's readings made it (`check_scene(readings=)`);

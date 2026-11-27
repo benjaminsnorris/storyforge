@@ -22,8 +22,12 @@ by asking about each one narrowly:
   and injury checks read the prose's records, not ledger rows, so every
   `physical` row is asked). A `state` trait (a mood, attire, a posture)
   set on an earlier `timeline_day` may be stale: it is asked last (#739).
-- **Likeliest slips first** (#739): disputes, the brief's entering items,
-  then the facts: the on-stage cast's physical states, then the last
+- **Likeliest slips first** (#739): disputes, the brief's entering items
+  and, in a faithful adaptation, the source's entering state (#769:
+  `source_entering_questions`, the latest `SOURCE_ENTERING_MAX` of its
+  people's deaths, wounds, healings and arms before the passage the scene
+  adapts, less any the brief or a ledger fact already states), then the
+  facts: the on-stage cast's physical states, then the last
   `RECENT_SCENES` scenes' facts, then the rest, each by `TYPE_SALIENCE`
   and the nearest scene. At most `MAX_QUESTIONS` (30), asked `BATCH` (30)
   to a call; the cap cuts from the end.
@@ -119,6 +123,16 @@ MAX_QUESTIONS = 30
 BATCH = 30
 #: The most brief promises asked per scene (one call)
 MAX_PROMISES = 30
+#: #769: the most of a faithful adaptation's source entering state (its
+#: people's deaths, wounds and healings, armour and weapons before the
+#: passage the scene adapts, `source.entering_state`) asked in one scene:
+#: the latest are kept, so they never crowd the book's own facts out of
+#: `MAX_QUESTIONS` (they count toward it, asked with the brief's entering
+#: items)
+SOURCE_ENTERING_MAX = 10
+#: The `fact_id` of a question about a source fact (#769):
+#: `source:<slug>:<source fact id>`, never a book ledger id
+SOURCE_FACT_PREFIX = 'source:'
 #: The number of the asking that breaks a split (an asking's number names
 #: its log, `.a3`, and its prompt, "independent asking 3"): only the split
 #: questions, one more call. "Two yeses of three" holds only for two
@@ -604,6 +618,59 @@ def entering_question(col: str, item: str) -> Question:
                          'or say something this rules out?')
 
 
+def source_fact_question(fact) -> Question:
+    """The question for one fact of the source's entering state (#769; a
+    `source.SourceFact`): it holds as the scene opens, as the brief's
+    entering items do. Its finding names the source scene it is told in
+    (`established_scene` `source <slug>:<scene>`, which is no scene of the
+    book) and its fact (`fact_id` `source:<slug>:<id>`)."""
+    statement = ' '.join(fact.statement.split())
+    ends = (f' The source ends this state in {fact.ends}, so the scene may show it ending.'
+            if fact.ends else '')
+    return Question(fact_id=f'{SOURCE_FACT_PREFIX}{fact.slug}:{fact.fact_id}', type='physical',
+                    subject='', statement=statement,
+                    established_scene=f'source {fact.slug}:{fact.scene_id}',
+                    established_quote=' '.join(fact.quote.split()) or statement,
+                    text='The source this novel adapts has this holding as the scene opens.'
+                         + ends + ' Does the scene show or say something this rules out?')
+
+
+def source_entering_questions(project_dir: str, scene_id: str
+                              ) -> tuple[list[Question], list[str]]:
+    """The questions for `scene_id`'s entering state from the source's
+    fact ledger (#769, `source.entering_state` over the scene's cast,
+    `source.scene_cast`, before the source scenes it adapts), the latest
+    `SOURCE_ENTERING_MAX`; and notes. A book with no `source:` block has
+    neither. When it can't be read (a free adaptation, no map, a scene the
+    map doesn't adapt, an unreadable source table), no questions and a note
+    saying why: never silent."""
+    from storyforge import gate_source, source
+    ctx = gate_source.setup(project_dir)
+    if ctx is None:
+        return [], []
+    why = ctx.skip or ('' if ctx.refs.get(scene_id) else
+                       'the scene is invented or not mapped in reference/source-map.csv')
+    if why:
+        return [], [f'the source\'s entering state was not asked: {why}']
+    refs = ctx.refs[scene_id]
+    try:
+        cast = source.scene_cast(project_dir, scene_id, refs)
+        state = source.entering_state(project_dir, refs, cast, limit=SOURCE_ENTERING_MAX)
+    except (source.SourceError, OSError, ValueError) as e:
+        return [], [f'the source\'s entering state was not asked: it can\'t be read ({e})']
+    notes = [f'the source\'s entering state: {n}' for n in state.notes]
+    if state.left_out:
+        notes.append(f'the source\'s entering state: {state.left_out} older fact(s) about the '
+                     f'scene\'s people not asked (the latest {len(state.facts)} are)')
+    return [source_fact_question(f) for f in state.facts], notes
+
+
+def _said(text: str) -> str:
+    """A statement as compared for a duplicate: case, spacing and closing
+    punctuation aside."""
+    return ' '.join(text.split()).casefold().rstrip('.!;: ')
+
+
 def dispute_question(d: Dispute, row: dict, name: str = '') -> Question:
     """The question for a dispute: extraction read the scene as changing
     the registry fact `row`; does it contradict it? The doubt goes to `yes`
@@ -676,10 +743,11 @@ def max_tokens(count: int) -> int:
 def _finding(q: Question, quote: str, why: str, tie_break: bool = False) -> Finding:
     asked = (f'asked {TIE_ASKING} times, split, then yes' if tie_break
              else f'asked {ASKINGS} times')
+    who = 'The source has' if q.fact_id.startswith(SOURCE_FACT_PREFIX) else 'The book has'
     return Finding(kind='contradiction', code=q.code, scene_quote=quote,
                    established_scene=q.established_scene,
                    established_quote=q.established_quote, fact_id=q.fact_id,
-                   explanation=f'(question, {asked}) The book has: "{q.statement}". {why}')
+                   explanation=f'(question, {asked}) {who}: "{q.statement}". {why}')
 
 
 def _verified(said: list[dict[str, str]], prose: str) -> tuple[str, str]:
@@ -1060,7 +1128,8 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     gate reads it, without the scene's own commitments) that hold for it
     and whose subject is present by `records` (the scene's typed state),
     its places or its prose's names, or can't be placed; about the brief's
-    entering items in words; about `disputes`; whether the scene shows each
+    entering items in words; about the source's entering state in a
+    faithful adaptation (#769, `source_entering_questions`); about `disputes`; whether the scene shows each
     of `endings` ending (#734, `ending_question`); and, with `promises`, whether
     it delivers each of its brief's promises (`ask_promises`, its own call
     logged beside `log_file` as `-promises`). The notes say how many were
@@ -1132,9 +1201,25 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
     questions += [entering_question(col, item) for col, items_ in brief.entering.items()
                   for item in items_]
     # a disputed fact is asked once, as its dispute (one slip is not two)
-    questions += [question_for(r, names.get(_lookup(r['subject'], chars, places),
-                                            r['subject'].strip()), order)
-                  for r in picked.facts if r['id'] not in ruled]
+    facts = [question_for(r, names.get(_lookup(r['subject'], chars, places),
+                                       r['subject'].strip()), order)
+             for r in picked.facts if r['id'] not in ruled]
+    # #769: the source's entering state, with the brief's entering items;
+    # one the brief, a dispute or a ledger fact already states isn't asked twice
+    from_source, source_notes = source_entering_questions(project_dir, scene_id)
+    result.notes += source_notes
+    said = {_said(q.statement) for q in questions + facts}
+    twice = []
+    for q in from_source:
+        if _said(q.statement) in said:
+            twice.append(q.fact_id)
+            continue
+        said.add(_said(q.statement))
+        questions.append(q)
+    if twice:
+        result.notes.append(f'{len(twice)} source entering fact(s) the brief or the ledger '
+                            f'already states, asked once: ' + ', '.join(twice))
+    questions += facts
     if not present:
         result.notes.append('no one present by the typed state, no place, and no registry '
                             'name in the prose: only facts that can\'t be placed were asked')
