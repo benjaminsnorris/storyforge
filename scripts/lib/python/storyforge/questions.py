@@ -29,8 +29,13 @@ by asking about each one narrowly:
   adapts, less any the brief or a ledger fact already states), then the
   facts: the on-stage cast's physical states, then the last
   `RECENT_SCENES` scenes' facts, then the rest, each by `TYPE_SALIENCE`
-  and the nearest scene. At most `MAX_QUESTIONS` (30), asked `BATCH` (30)
-  to a call; the cap cuts from the end.
+  and the nearest scene. A `timeline` `state` fact is the time at its own
+  scene ("the scene takes place at night", "awake forty hours"), which
+  has moved on by any other: it is never asked of another scene, and the
+  notes count it (E4, 2026-11-27: `name-surfaces`' night in Hank's
+  kitchen, asked of `driving-west` at dawn, stopped it). At most
+  `MAX_QUESTIONS` (30), asked `BATCH` (30) to a call; the cap cuts from
+  the end.
 - **Only about who is there** (`present_subjects`): a fact is asked when
   its subject (an id, name or alias, through the registries) is present by
   the scene's extracted cast (its typed state's `at` records), its places
@@ -256,6 +261,9 @@ class Selection:
     #: posture, but also a vow or a grudge) set on an earlier
     #: `timeline_day` than the scene's: maybe stale, so asked last (#739)
     stale: list[str] = field(default_factory=list)
+    #: in-force `timeline` `state` facts of other scenes: the time at their
+    #: own scene, moved on by this one, so not asked (`scene_bound`)
+    scene_bound: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -475,7 +483,9 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
     compares it (`continuity.covered_fact_ids`) and it is not the scene's
     own: a fixed one (or one with no `mutable`) from any other scene or
     none, unless a binding fact supersedes it; a `state` one while in force
-    entering the scene. A holding fact is asked when its subject
+    entering the scene, unless it is a `timeline` state (`scene_bound`: the
+    time at its own scene; counted in `Selection.scene_bound`, not asked).
+    A holding fact is asked when its subject
     (through `chars` and `places`, the registries' alias maps) is
     `present`, or is in no `registry` (normalized registry ids: a group or
     concept can't be placed, so it's asked everywhere); with no subject, or
@@ -507,8 +517,11 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
                    else r['id'] not in superseded)]
     days = days or {}
     out = Selection()
+    out.scene_bound = [r['id'] for r in holding if scene_bound(r)]
     asked = []
     for r in holding:
+        if r['id'] in out.scene_bound:
+            continue
         subject = (r.get('subject') or '').strip()
         key = _lookup(subject, chars or {}, places or {})
         if not subject:
@@ -541,6 +554,24 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
     out.facts = sorted(asked, key=key)
     out.stale = [r['id'] for r in out.facts if r['id'] in stale]
     return out
+
+
+#: How many scene-bound timeline states a note names (#782's review CR-2:
+#: nothing ends them, so the list grows with the book)
+SCENE_BOUND_NAMED = 10
+
+
+def scene_bound(r: dict) -> bool:
+    """Whether a ledger fact holds only in its own scene: a `timeline`
+    `state` fact is the time at that scene (the hour, how long someone has
+    been awake, how many nights), which has moved on by the next. Asked of
+    a later scene it compares that scene's moment with the earlier one's
+    (E4, 2026-11-27: `name-surfaces`' "The scene takes place at night in
+    Hank's kitchen", in force by the ledger because nothing ended it, was
+    asked of `driving-west` at dawn and stopped it). A fixed timeline fact
+    (a dated event) holds everywhere and is asked."""
+    return ((r.get('type') or '').strip() == 'timeline'
+            and (r.get('mutable') or '').strip() == 'state')
 
 
 def scene_days(scenes: dict[str, dict]) -> dict[str, int]:
@@ -1243,6 +1274,12 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
         result.notes.append(f'{len(picked.absent)} fact(s) about people or places not in the '
                             f'scene (by its typed state, its location, or a name in its '
                             f'prose): not asked: ' + ', '.join(picked.absent))
+    if picked.scene_bound:
+        shown = picked.scene_bound[:SCENE_BOUND_NAMED]
+        result.notes.append(f'{len(picked.scene_bound)} timeline state(s) of other scenes, the '
+                            f'time at their own scene, not asked: ' + ', '.join(shown)
+                            + (f' and {len(picked.scene_bound) - len(shown)} more'
+                               if len(picked.scene_bound) > len(shown) else ''))
     if picked.stale:
         cut = [q.fact_id for q in questions[MAX_QUESTIONS:] if q.fact_id in picked.stale]
         result.notes.append(f'{len(picked.stale)} state trait(s) set on an earlier day than '
