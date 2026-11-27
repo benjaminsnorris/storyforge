@@ -5320,6 +5320,45 @@ class TestExtractionCutOff:
         assert len(budgets) == 2
 
 
+class TestExtractionThinking:
+    """#743: the extraction call and its retry send `gate.EXTRACT_THINK`.
+    On by default (Ben, 2026-11-26): no thinking setting, the request main
+    sent before #743, so recordings replay. Off asks the model not to think.
+    The persistence check and the checker are unchanged either way."""
+
+    def _run(self, project_dir, tmp_path, monkeypatch):
+        from storyforge import common
+        monkeypatch.setattr(common, '_catalog', [{'id': 'm', 'capabilities': {'thinking': {
+            'types': {'disabled': {'supported': True}}}}}])
+        sent, others, stops = [], [], iter(['max_tokens', 'end_turn'])
+
+        def fake(path, body, **k):
+            if _is_persistence(body) or 'tools' in body:
+                others.append('thinking' in body)
+                if 'tools' in body:
+                    return _text({'findings': [], 'kept': []})
+                return _persistence_reply(body, ())
+            sent.append(body.get('thinking', 'not sent'))
+            return _text({'commitments': [_commitment()]}, stop=next(stops))
+        with patch('storyforge.api._api_request', side_effect=fake):
+            result = gate_scene(project_dir, SCENE, command='draft',
+                                log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                check_model='m')
+        assert result.passed
+        assert others and not any(others)
+        return sent
+
+    def test_by_default_the_model_thinks_and_no_setting_is_sent(self, project_dir, tmp_path,
+                                                                monkeypatch):
+        assert gate.EXTRACT_THINK is True
+        assert self._run(project_dir, tmp_path, monkeypatch) == ['not sent'] * 2
+
+    def test_off_the_extraction_and_its_retry_ask_the_model_not_to_think(
+            self, project_dir, tmp_path, monkeypatch):
+        monkeypatch.setattr(gate, 'EXTRACT_THINK', False)
+        assert self._run(project_dir, tmp_path, monkeypatch) == [{'type': 'disabled'}] * 2
+
+
 class TestCarryFactsAcrossFixRounds:
     """#736: every fix round re-ran extraction and persistence, a re-roll of
     about a quarter of the facts though a fix changes about 18 words. The

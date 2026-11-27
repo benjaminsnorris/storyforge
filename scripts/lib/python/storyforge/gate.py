@@ -459,16 +459,28 @@ def _subjects(project_dir: str) -> dict[str, str]:
     return {**maps.get('locations', {}), **maps.get('characters', {})}
 
 
+#: #743: whether the gate's extraction call (and E3's, which measures it)
+#: lets the model think. On (Ben, 2026-11-26), which sends no thinking
+#: setting, the request main sent before #743. Off (`api.thinking_off`) was
+#: measured: median 16 s against about 42 s, 37% fewer output tokens, E3
+#: 42/7/0 captured/partial/missing against 43/5/1, but 13.5% fewer rows,
+#: and the rows lost were mostly a scene's final state changes, which the
+#: continuity checks rely on (docs/history.md, #743). Revisit after a real
+#: book run. False re-keys every recording of the call (re-record E3 and
+#: the gate sets)
+EXTRACT_THINK = True
 #: The answer budget of the gate's extraction call (`api.THINKING_ALLOWANCE`
-#: is added for thinking). It is part of the recorded request, so a change
-#: re-keys every recording of the call: the largest answer logged on
-#: iliad-adult (2026-11-16/17, 117 calls) was 5,796 tokens, with 17,314
-#: output in all of the 24,000 sent
+#: is added for thinking; with it off, headroom for the answer). It is part of the
+#: recorded request, so a change re-keys every recording of the call: the
+#: largest answer logged on iliad-adult (2026-11-16/17, 117 calls, thinking
+#: on) was 5,796 tokens, with 17,314 output in all of the 24,000 sent
 EXTRACT_ANSWER_TOKENS = 8000
 #: #734: the budget of the one retry after a reply cut off at
 #: `EXTRACT_ANSWER_TOKENS` (the model's own limit caps it): a cut-off raised
 #: `GateError` and stopped the session, on the densest scenes. Only a
-#: cut-off sends it, so recordings of whole replies replay as they were
+#: cut-off sends it, so recordings of whole replies replay as they were.
+#: With `EXTRACT_THINK` off (#743) the first request's whole budget is
+#: answer, so a cut-off is rarer, and this one still adds 16,000 tokens
 EXTRACT_RETRY_TOKENS = 24000
 
 
@@ -670,7 +682,8 @@ def _read_commitments(scene_id: str, prose: str, prompt: str, model: str,
     log_file = os.path.join(log_dir, f'gate-extract-{scene_id}.json')
     try:
         response = invoke_to_file(prompt, model, log_file, EXTRACT_ANSWER_TOKENS,
-                                  output_schema=COMMITMENTS_SCHEMA, label=f'extract {scene_id}')
+                                  output_schema=COMMITMENTS_SCHEMA, label=f'extract {scene_id}',
+                                  think=EXTRACT_THINK)
         if is_truncated(response):
             from storyforge.common import log
             log(f'  {scene_id}: the extraction reply was cut off at its token limit; asking '
@@ -678,7 +691,7 @@ def _read_commitments(scene_id: str, prose: str, prompt: str, model: str,
             response = invoke_to_file(prompt, model,
                                       os.path.join(log_dir, f'gate-extract-{scene_id}.retry.json'),
                                       EXTRACT_RETRY_TOKENS, output_schema=COMMITMENTS_SCHEMA,
-                                      label=f'extract {scene_id} (retry)')
+                                      label=f'extract {scene_id} (retry)', think=EXTRACT_THINK)
         if is_truncated(response):
             raise ValueError('the reply hit its token limit, twice')
         found = parse_commitments_response(extract_text(response), scene_id)

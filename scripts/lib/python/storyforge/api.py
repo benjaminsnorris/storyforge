@@ -64,6 +64,37 @@ def max_input_tokens(model: str) -> int:
     return 200_000
 
 
+#: #743: the models already warned that they can't turn thinking off
+_thinking_stays_on: set[str] = set()
+_thinking_lock = threading.Lock()
+
+
+def thinking_off(model: str, label: str = '') -> dict | None:
+    """#743: the request's ``thinking`` to turn thinking off on ``model``,
+    as the Models API catalog says the model takes it: ``disabled`` where it
+    is accepted, else ``between_tools`` (Sonnet 5.5: no thinking, and a
+    request with no tools has nothing between tools); None when the model
+    has neither (Opus 5.5 always thinks) or the catalog doesn't list it,
+    logged once per model as a WARNING naming ``label``: the reply is still
+    the model's, at thinking's cost and latency."""
+    from storyforge.common import model_catalog
+    entry = next((m for m in model_catalog() if m.get('id') == model), None)
+    types = (((entry or {}).get('capabilities') or {}).get('thinking') or {}).get('types') or {}
+    for kind in ('disabled', 'between_tools'):
+        if (types.get(kind) or {}).get('supported'):
+            return {'type': kind}
+    with _thinking_lock:
+        if model in _thinking_stays_on:
+            return None
+        _thinking_stays_on.add(model)
+    from storyforge.common import log
+    why = ('the Models API does not list it' if entry is None
+           else 'the Models API lists no way to turn it off')
+    log(f'WARNING: {label or "a request"} asked {model} not to think, but {why}; it runs '
+        f'with thinking (slower and dearer; the reply is still {model}\'s)')
+    return None
+
+
 def request_max_tokens(model: str, answer_tokens: int) -> int:
     """The max_tokens to send: the answer budget plus THINKING_ALLOWANCE,
     capped at the model's limit."""
@@ -361,7 +392,7 @@ def _meter(response, model: str) -> None:
 
 def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
           system: list[dict] | None, output_schema: dict | None = None,
-          fallback: bool = False) -> dict:
+          fallback: bool = False, think: bool = True) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -377,6 +408,10 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         fallback: Opt into the server-side refusal fallback (FALLBACK_BETA).
             A reply written by a fallback model is logged as a WARNING
             naming ``label`` and that model.
+        think: False asks the model not to think (``thinking_off``; #743).
+            True (the default) sends no thinking setting, so current models
+            think as much as they choose. THINKING_ALLOWANCE is added to
+            ``max_tokens`` either way: unused, it is headroom for the answer.
 
     Returns:
         Full API response dict.
@@ -386,6 +421,10 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         'max_tokens': request_max_tokens(model, max_tokens),
         'messages': [{'role': 'user', 'content': prompt}],
     }
+    if not think:
+        thinking = thinking_off(model, label)
+        if thinking:
+            body['thinking'] = thinking
     if system:
         body['system'] = system
     if output_schema:
@@ -456,7 +495,8 @@ def chat(messages: list[dict], model: str, max_tokens: int = 4096, label: str = 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
            timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-           output_schema: dict | None = None, fallback: bool = False) -> dict:
+           output_schema: dict | None = None, fallback: bool = False,
+           think: bool = True) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -469,6 +509,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         system: Optional list of system content blocks (supports cache_control).
         output_schema: Optional JSON schema for a structured reply (see _send).
         fallback: Opt into the server-side refusal fallback (see _send).
+        think: False asks the model not to think (see _send).
 
     Returns:
         Full API response dict.
@@ -479,14 +520,15 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
             requested model has none).
     """
     response = _send(prompt, model, max_tokens, label, timeout, system, output_schema,
-                     fallback)
+                     fallback, think)
     _check_refusal(response)
     return response
 
 
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
                    timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-                   output_schema: dict | None = None, fallback: bool = False) -> dict:
+                   output_schema: dict | None = None, fallback: bool = False,
+                   think: bool = True) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -499,6 +541,7 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         system: Optional list of system content blocks (supports cache_control).
         output_schema: Optional JSON schema for a structured reply (see _send).
         fallback: Opt into the server-side refusal fallback (see _send).
+        think: False asks the model not to think (see _send).
 
     Returns:
         Full API response dict.
@@ -508,7 +551,7 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     """
     try:
         response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
-                          output_schema=output_schema, fallback=fallback)
+                          output_schema=output_schema, fallback=fallback, think=think)
     except RefusalError as e:
         _write_log(log_file, e.response)
         raise
