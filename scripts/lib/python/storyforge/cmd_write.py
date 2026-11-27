@@ -789,7 +789,8 @@ class GateBlockers:
         self.rows = rows
         self.facts: dict[str, list[dict[str, str]]] = {}
         for r in rows:
-            if ledger.is_commitment(r) and r.get('status') != 'planned':
+            # #749: a claim in speech is no fact a later scene depends on
+            if ledger.is_commitment(r) and r.get('status') not in ('planned', ledger.CLAIM):
                 self.facts.setdefault((r.get('scene_id') or '').strip(), []).append(r)
         self.registry = {r['id']: r for r in rows
                          if r.get('id') and not ledger.is_commitment(r)}

@@ -445,6 +445,9 @@ def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
         names = load_alias_map(os.path.join(project_dir, 'reference', 'characters.csv'))
 
         def knows(r):
+            from storyforge import ledger
+            if r.get('status') == ledger.CLAIM:
+                return False   # #749: its known_by is who said it, not who knows it
             return c in [names.get(k.strip().lower(), k.strip())
                          for k in (r.get('known_by') or '').split(';')]
         pool = [r for r in pool if (r.get('subject') or '').strip() == c or knows(r)]
