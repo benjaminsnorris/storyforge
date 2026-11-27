@@ -1078,3 +1078,21 @@ On *Wrath Like Smoke*'s Nov 8 draft, 4 of the open checker's 5 false findings an
   - *Stops.* 1 false stop.
   - *The momentary combat states* ("brandishes two spears") made no finding.
   - #775 proposes filtering by kind (conditional orders and constraints), not by age; not implemented.
+
+## The consolidated re-record, without the blocking calls (2026-11-27)
+
+PILOT.md step 2, reduced. The suites with recording misses that make no blocking-read call were re-recorded (`--mode auto`, $17.39 of Ben's pre-approved re-record). The four that do were left for after #774: `gate-set`, `gate-set-questions`, `e4-generation`, `e8-revision-safety`. Whether a suite makes the call was checked in the code (`blocking.check_blocking` is reached only through `gate.gate_scene`, `check --blocking`, the blocking set and `voice_sample`; an eval reaches it only through the gate or the blocking set) and in the recordings: the blocking prompt is in `e4-generation`, `e8-revision-safety`, the two gate sets and `blocking-set`, and in no other cassette. Floors are each re-recorded suite's single run.
+
+- **`question-set`** ($0.05; the question layer's 2026-11-26 changes, #734 to #749 and #769): recall 0.7647 to 0.8824. qs-009 and qs-035 are now found, and there are still no false alarms. Splits went from 3 to 4, and those found on the third asking from 1 to 2. The superseded recordings were removed.
+- **`e2-carol-checker`** ($5.23; the open checker's #741 request and #749's speech claims): recall 0.8378 to 0.8108, and precision 0.8387 to 0.8667.
+  - KNO 1.0 to 0.8: e2-carol-027 is missed.
+  - TRT 0.6667 to 0.8333: e2-carol-016 is caught.
+  - Flags 31 to 30.
+  - One case each way on one run, within the checker's spread. Lowering the KNO and flags floors is a decision, so the pins in `test_evals_e2.py` moved with them.
+- **`e5-roundtrip`** ($4.55): mismatches per scene 1.7 to 1.1, with PHY 15 to 8. The ledger-only redraft went 3.8 to 3.9 a scene, exactly at its gate (`LEDGER_ONLY_PER_SCENE`), so one more mismatch on the next re-record fails it. No floor moved.
+- **`recheck-set`** ($7.56; phase 4's prompt, #749): recall stays 1.0. Other numbers moved:
+  - captured 28 to 27, and end-to-end recall 0.875 to 0.8438;
+  - control inclusion 0.7059 to 0.76;
+  - mean re-check set 7.96 to 8.78 scenes.
+  - Its gates are fixed thresholds, and both still hold.
+- **`baseline.json`.** `--baseline` refuses while `gate-set` and `gate-set-questions` are stale with no measurement to carry. So only the four re-recorded suites' entries were replaced, from a full replay in which every other suite passed and only the four deferred ones were stale.
