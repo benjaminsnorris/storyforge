@@ -53,24 +53,26 @@ CASES_FILE = os.path.join(EVALS_DIR, 'fixtures', 'question-set', 'cases.json')
 #: the same commit; a loss is a decision). The plan's targets are notes:
 #: recall at least the open checker's on the frozen E4/E8, no false alarms
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-16 (haiku 5.5, about $0.05 for the set): the prompt
-    # counts dialogue and memory as the book's word and checks every
-    # clause, and a split is asked a third time (two yeses of three). A
-    # second recording gave the same: 0.7647, no false alarms. Was 0.4706
+    # re-recorded 2026-11-27 (haiku 5.5, $0.05) after the question layer's
+    # changes of 2026-11-26 (#734-#749, #769): recall 0.8824, qs-009 and
+    # qs-035 now found, still no false alarms; 4 splits, 2 found on the
+    # third asking. Was 0.7647
+    # (2026-11-16: the prompt counts dialogue and memory as the book's word
+    # and checks every clause, and a split is asked a third time), 0.4706
     # (2026-11-09). fixtures/tier-comparison/ holds the 2026-11-09 prompt's
     # sonnet run: stale until re-recorded
-    'recall': 0.7647,
-    'recall_any': 0.7647,
+    'recall': 0.8824,
+    'recall_any': 0.8824,
     'false_alarms': 0,
-    'split': 3,
-    # of the 3 splits, the third asking made one finding (qs-016's salary);
-    # qs-033 and qs-035 split, then no (#714's review SF-3)
-    'tie_found': 1,
+    'split': 4,
+    # of the 4 splits, the third asking made 2 findings (#714's review SF-3
+    # counted 1 of 3 on 2026-11-16)
+    'tie_found': 2,
     # #673's review (T6, CR-2/SF-3): a prompt that breaks quoting shows here,
     # not only as a recall drop; and what the gate's selection costs recall
     'misquoted': 0,
     'selection_lost': 1,
-    'recall_selected': 0.7647,
+    'recall_selected': 0.8824,
 }
 
 
