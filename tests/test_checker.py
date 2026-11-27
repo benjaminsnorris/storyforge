@@ -36,6 +36,12 @@ def _finding(**over):
     return f
 
 
+def _prompt(body):
+    """The first user message of a request, as the model reads it."""
+    content = body['messages'][0]['content']
+    return content if isinstance(content, str) else ''.join(b['text'] for b in content)
+
+
 def _run(project_dir, replies, **kw):
     bodies = []
 
@@ -128,9 +134,9 @@ class TestTools:
 class TestPromises:
     def test_the_brief_is_in_the_prompt_only_with_promises(self, project_dir):
         _, bodies = _run(project_dir, [_answer()], promises=False)
-        assert "brief's promises" not in bodies[0]['messages'][0]['content']
+        assert "brief's promises" not in _prompt(bodies[0])
         _, bodies = _run(project_dir, [_answer()])
-        assert "brief's promises" in bodies[0]['messages'][0]['content']
+        assert "brief's promises" in _prompt(bodies[0])
 
     def test_kept_needs_a_promised_id_and_a_real_quote(self, project_dir):
         from storyforge.elaborate import get_scene
@@ -275,11 +281,9 @@ class TestReview450:
         result, _ = _run(project_dir, [_answer([f])])
         assert len(result.findings) == 1
 
-    def test_without_disputes_the_schema_is_unchanged(self, project_dir):
+    def test_without_disputes_the_prompt_has_no_dispute_section(self, project_dir):
         _, bodies = _run(project_dir, [_answer()])
-        schema = bodies[0]['output_config']['format']['schema']
-        assert 'cleared' not in schema['properties']
-        assert 'may change' not in bodies[0]['messages'][0]['content']
+        assert 'may change' not in _prompt(bodies[0])
 
 
 def test_a_word_or_two_of_a_named_field_does_not_verify(project_dir):
@@ -300,7 +304,7 @@ class TestReference:
         system = bodies[0]['system'][0]['text']
         assert '<reference file="character-bible.md">' in system
         assert self.BIBLE_QUOTE in system
-        assert 'character-bible.md) also establishes facts' in bodies[0]['messages'][0]['content']
+        assert 'character-bible.md) also establishes facts' in _prompt(bodies[0])
 
     def test_a_finding_against_a_bible_verifies_by_its_text(self, project_dir):
         result, _ = _run(project_dir, [_answer([_finding(
@@ -322,7 +326,7 @@ class TestReference:
                     os.path.join(project_dir, 'reference', 'character-bible.md'))
         _, bodies = _run(project_dir, [_answer()])
         assert '<reference' not in ''.join(b['text'] for b in bodies[0]['system'])
-        assert 'no reference material' in bodies[0]['messages'][0]['content']
+        assert 'no reference material' in _prompt(bodies[0])
         result, _ = _run(project_dir, [_answer([_finding(
             established_scene='character-bible.md', established_quote='Role')])])
         assert result.findings == [] and 'not given to the checker' in result.unverified[0].problem
@@ -432,7 +436,7 @@ class TestStorySoFar:
         with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
             check_scene(project_dir, scene, model='claude-opus-5-5')
         body = api.call_args[0][1]
-        return body.get('system', []), body['messages'][0]['content']
+        return body.get('system', []), _prompt(body)
 
     def test_earlier_scenes_follow_the_bibles_in_reading_order_cached(self, project_dir):
         system, prompt = self._system(project_dir)
@@ -488,9 +492,9 @@ class TestStorySoFar:
                         model='claude-opus-5-5')
         body = api.call_args[0][1]
         system = ''.join(b['text'] for b in body['system'])
-        assert 'Fresh draft words.' in body['messages'][0]['content']
+        assert 'Fresh draft words.' in _prompt(body)
         assert 'Fresh draft words.' not in system and on_disk not in system
-        assert on_disk not in body['messages'][0]['content']
+        assert on_disk not in _prompt(body)
 
     def test_a_finding_quoting_the_story_so_far_verifies(self, project_dir):
         result, bodies = _run(project_dir, [_answer([_finding()])])
@@ -535,7 +539,7 @@ class TestCalendar:
         with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
             check_scene(project_dir, scene, model='claude-opus-5-5')
         body = api.call_args[0][1]
-        return ''.join(b['text'] for b in body.get('system', [])), body['messages'][0]['content']
+        return ''.join(b['text'] for b in body.get('system', [])), _prompt(body)
 
     def test_the_scene_list_header_and_story_so_far_carry_the_day(self, project_dir):
         system, prompt = self._sent(project_dir)
@@ -606,7 +610,7 @@ def test_the_prompt_asks_for_one_search_per_name_in_later_scenes(project_dir):
     """E8's thornwall-026: a later scene contradicted the redraft, and the
     re-check searched another Warden's name."""
     _, bodies = _run(project_dir, [_answer()])
-    prompt = bodies[0]['messages'][0]['content']
+    prompt = _prompt(bodies[0])
     assert '**Later scenes too.**' in prompt
     assert 'one search per name' in prompt
 
@@ -623,7 +627,7 @@ class TestCalendarReview478:
         with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
             check_scene(project_dir, SCENE, model='claude-opus-5-5')
         body = api.call_args[0][1]
-        return ''.join(b['text'] for b in body.get('system', [])), body['messages'][0]['content']
+        return ''.join(b['text'] for b in body.get('system', [])), _prompt(body)
 
     @pytest.mark.parametrize('quote', ['"act1-sc01: day 1, morning"', "'act1-sc01: day 1, morning.'",
                                        '`act1-sc01: Day 1, Morning`'])
@@ -692,10 +696,9 @@ class TestReadings:
                               readings=2)
         assert [f.scene_quote for f in result.findings] == [HERE, HERE2]
         assert result.readings == 2
-        first, second = (b['messages'][0]['content'] for b in bodies)
-        second_text = ''.join(b['text'] for b in second)
-        assert 'Reading 2' not in first and 'Reading 2: an independent check' in second_text
-        assert first != second_text   # recordings are keyed by the request
+        first, second = (_prompt(b) for b in bodies)
+        assert 'Reading 2' not in first and 'Reading 2: an independent check' in second
+        assert first != second   # recordings are keyed by the request
 
     def test_reading_two_reads_reading_one_from_cache_and_writes_only_its_note(
             self, project_dir):
@@ -704,14 +707,14 @@ class TestReadings:
         cache; joined, it is the text it always was."""
         _, bodies = _run(project_dir, [_answer(), _answer()], readings=2)
         first, second = (b['messages'][0]['content'] for b in bodies)
-        assert isinstance(first, str)
-        head, note = second
-        assert head == {'type': 'text', 'text': first, 'cache_control': {'type': 'ephemeral'}}
+        stable, rest, note = second
+        assert [stable['text'], rest['text']] == [b['text'] for b in first]
+        assert 'cache_control' not in stable
+        assert rest['cache_control'] == {'type': 'ephemeral'}
         assert note == {'type': 'text', 'text': checker._reading_note(2)}
         book = checker.Book.load(project_dir, SCENE, None, None)
         brief = checker._brief(book, project_dir, SCENE)
-        assert head['text'] + note['text'] == checker.build_prompt(
-            book, SCENE, brief.text, None, 2)
+        assert _prompt(bodies[1]) == checker.build_prompt(book, SCENE, brief.text, None, 2)
         # the API's limit of four, all used: the bibles, the story so far,
         # before the note, and the automatic one; a longer TTL never after a shorter
         assert sum('cache_control' in b for b in bodies[1]['system']) == 2
@@ -722,7 +725,7 @@ class TestReadings:
 
     def test_one_reading_sends_what_it_always_sent(self, project_dir):
         _, bodies = _run(project_dir, [_answer()])
-        assert 'Reading' not in bodies[0]['messages'][0]['content']
+        assert 'Reading' not in _prompt(bodies[0])
 
     def test_a_finding_both_readings_make_is_kept_once(self, project_dir):
         shorter = 'four hundred and twelve at last census'
@@ -1006,15 +1009,11 @@ class TestEndings:
 
     D = checker.Dispute('wound', 'Ares is wounded', 'Paeon heals Ares')
 
-    def test_no_endings_send_what_was_always_sent(self):
-        assert checker.schema_for([], None) is checker.SCHEMA
-        assert checker.schema_for([self.D], None) is checker.DISPUTE_SCHEMA
+    def test_no_endings_add_no_section(self):
         assert checker._endings_text([]) == ''
 
-    def test_endings_add_their_own_answer_and_section(self):
-        schema = checker.schema_for([], [self.D])
-        assert 'ended' in schema['properties'] and 'ended' in schema['required']
-        assert 'cleared' not in schema['properties']
+    def test_endings_add_their_own_section_and_the_schema_has_their_answer(self):
+        assert 'ended' in checker.SCHEMA['required']
         text = checker._endings_text([self.D])
         assert '## States this scene may end' in text and '- wound:' in text
 
@@ -1024,3 +1023,60 @@ class TestEndings:
         assert checker.merge_readings([one, none], [], [self.D]).ended == []
         assert checker.merge_readings([one, checker.CheckResult('s', ended=[self.D])], [],
                                       [self.D]).ended == [self.D]
+
+
+class TestOneCachePrefix:
+    """#741: the open checker's request keeps what a fix of the prose leaves
+    unchanged ahead of what it changes, and asks every scene for the same
+    schema, so neither a re-check nor a scene with disputes misses the
+    whole cache."""
+
+    D = checker.Dispute('village-vanished', 'The village vanished', 'the village stands')
+    E = checker.Dispute('wound', 'Ares is wounded', 'Paeon heals Ares')
+
+    def test_every_scene_is_asked_for_the_same_schema(self, project_dir):
+        schemas = []
+        for kw in ({}, {'disputes': [self.D]}, {'endings': [self.E]},
+                   {'disputes': [self.D], 'endings': [self.E]}):
+            _, bodies = _run(project_dir, [_answer()], **kw)
+            schemas.append(bodies[0]['output_config'])
+        assert all(s == schemas[0] for s in schemas)
+        assert {'cleared', 'ended'} <= set(schemas[0]['format']['schema']['required'])
+
+    def test_a_dispute_cleared_or_not_is_ruled_as_before(self, project_dir):
+        reply = _answer()
+        reply['content'][0]['text'] = json.dumps(
+            {'findings': [], 'kept': [], 'cleared': ['village-vanished'], 'ended': []})
+        result, _ = _run(project_dir, [reply], disputes=[self.D])
+        assert result.cleared == [self.D] and result.unruled == []
+        result, _ = _run(project_dir, [_answer()], disputes=[self.D])
+        assert result.cleared == [] and result.unruled == [self.D]
+
+    def test_an_answer_for_a_fact_not_asked_about_is_not_read(self, project_dir):
+        reply = _answer()
+        reply['content'][0]['text'] = json.dumps(
+            {'findings': [], 'kept': [], 'cleared': ['village-vanished'], 'ended': ['wound']})
+        result, _ = _run(project_dir, [reply])
+        assert result.cleared == [] and result.unruled == [] and result.ended == []
+
+    def test_reading_one_breaks_after_what_a_fix_leaves_unchanged(self, project_dir):
+        _, bodies = _run(project_dir, [_answer()])
+        stable, rest = bodies[0]['messages'][0]['content']
+        assert stable['cache_control'] == {'type': 'ephemeral'}
+        assert 'cache_control' not in rest
+        assert '## Every scene, in reading order' in stable['text']
+        assert HERE in rest['text'] and HERE not in stable['text']
+        assert rest['text'].index(HERE) < rest['text'].index('## What to report')
+        # the API's limit of four: the bibles, the story so far, this one
+        # and the automatic one
+        assert json.dumps(bodies[0]).count('"cache_control"') == 4
+
+    def test_new_prose_and_disputes_leave_the_cached_part_as_it_was(self, project_dir):
+        book = checker.Book.load(project_dir, SCENE, None, None)
+        brief = checker._brief(book, project_dir, SCENE).text
+        before = checker.prompt_content(book, SCENE, brief)
+        fixed = checker.Book.load(project_dir, SCENE, 'Entirely new words.', None)
+        after = checker.prompt_content(fixed, SCENE, brief, [self.D], 1, [self.E])
+        assert after[0] == before[0]
+        assert 'Entirely new words.' in after[1]['text']
+        assert '- village-vanished:' in after[1]['text'] and '- wound:' in after[1]['text']
