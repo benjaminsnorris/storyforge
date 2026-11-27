@@ -1109,6 +1109,9 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
                  'says why)')
     elif out.discarded:
         tried += f' (fix round {out.discarded} was discarded; the log says why)'
+    if out.unseen:   # #737's review SF-4: said where the author looks
+        tried += (f' [the discarded fix\'s check also found {out.unseen} problem(s) in words '
+                  f'it left alone, not in this verdict; the log names them]')
     if regate:
         tried += f' [{regate}]'
     if out.blocked_stale:   # SF-1 (#504's review): said where the author looks

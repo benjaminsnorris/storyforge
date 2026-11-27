@@ -456,12 +456,22 @@ def _quote_untouched(quote: str, diff: '_Diff', before: tuple | None = None,
     SF-3), the characters around each place, its punctuation included,
     must also be in the prose before: "dead." made "dead?" is a change the
     word diff can't see."""
-    places = _quote_spans(quote, diff.after)
-    if not places or any(_touches(p, diff.after_spans, near=True) for p in places):
+    return _untouched(_quote_spans(quote, diff.after), diff.after_spans, after, before)
+
+
+def _untouched(places: list['Span'], changed: list['Span'], own: tuple | None = None,
+               other: tuple | None = None) -> bool:
+    """The one test of "away from the fix" (#736's carry and #737's
+    never-worse rule): there are `places`, none comes near a `changed`
+    span (`_touches(near=True)`), and with `own` and `other` (`_word_offsets`
+    of the prose the places are in, and of the prose on the diff's other
+    side) the characters around each place, its punctuation included
+    (`_window`), are in the other prose too."""
+    if not places or any(_touches(p, changed, near=True) for p in places):
         return False
-    if before is None or after is None:
+    if own is None or other is None:
         return True
-    return all(_window(after[0], after[1], p) in before[0] for p in places)
+    return all(_window(own[0], own[1], p) in other[0] for p in places)
 
 
 def _quoted_list(what: str, quotes: list[str]) -> str:
@@ -3544,6 +3554,10 @@ class GatedScene:
     #: the fix round whose fix was discarded (0: none); `rounds` holds the
     #: ones kept, so 1 with no rounds means the scene is as given
     discarded: int = 0
+    #: how many new findings the discarded fix's check made in words it
+    #: left alone: in the prose kept too, not in the verdict kept (#737's
+    #: review SF-4: the pending reason says so)
+    unseen: int = 0
     #: why `BLOCKED_PATH` couldn't be put back to the kept run's
     #: contradictions after a discard ('' when it was): the caller says so
     blocked_stale: str = ''
@@ -3652,6 +3666,10 @@ class _Diff:
     after: list[str]
     before_spans: list[Span]
     after_spans: list[Span]
+    #: `_word_offsets` of each prose, for `_untouched`'s punctuation test
+    #: (#737's review CR-2); None in a diff built by hand
+    before_flat: tuple | None = None
+    after_flat: tuple | None = None
 
 
 def _diff(before: str, after: str) -> _Diff:
@@ -3660,7 +3678,8 @@ def _diff(before: str, after: str) -> _Diff:
     ops = [op for op in SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
            if op[0] != 'equal']
     return _Diff(old, new, [Span(i1, i2) for _, i1, i2, _, _ in ops],
-                 [Span(j1, j2) for _, _, _, j1, j2 in ops])
+                 [Span(j1, j2) for _, _, _, j1, j2 in ops],
+                 _word_offsets(before), _word_offsets(after))
 
 
 def _quote_spans(quote: str, words: list[str]) -> list[Span]:
@@ -3710,36 +3729,37 @@ def _touches(span: Span, changed: list[Span], near: bool = False) -> bool:
     return any((a < e and s < b) if a < b else (s < a < e) for a, b in changed)
 
 
-def _in_edited_text(f: Finding, changed: list[Span], words: list[str]) -> bool:
-    """Whether `f`'s scene quote lies in text the fix changed: found in
-    `words`, and every place it is found touches a changed span (an empty
-    one, words taken out, when the quote spans it). A quote not found: no."""
-    places = _quote_spans(f.scene_quote, words)
-    return bool(places) and all(_touches(p, changed) for p in places)
+def _in_untouched_text(f: Finding, diff: '_Diff', before: bool = False) -> bool:
+    """Whether `f`'s scene quote lies only in text the fix left alone, in
+    the prose after the fix (or with `before`, the prose before it): found
+    there, and `_untouched` (no place near a change, its punctuation
+    unchanged). A quote not found: no (it may be about the change)."""
+    return _place(*_side(f.scene_quote, diff, before)) == ALONE
 
 
-def _in_untouched_text(f: Finding, changed: list[Span], words: list[str]) -> bool:
-    """Whether `f`'s scene quote lies only in text the fix left alone: found
-    in `words`, and no place it is found comes near a changed span
-    (`_touches(near=True)`: words put in right after a quote may be its
-    fix). A quote not found: no (it may be about the change)."""
-    places = _quote_spans(f.scene_quote, words)
-    return bool(places) and not any(_touches(p, changed, near=True) for p in places)
+def _side(quote: str, diff: '_Diff', before: bool = False) -> tuple:
+    """`_place`'s arguments for `quote` on one side of `diff`."""
+    if before:
+        return (_quote_spans(quote, diff.before), diff.before_spans, diff.before_flat,
+                diff.after_flat)
+    return (_quote_spans(quote, diff.after), diff.after_spans, diff.after_flat,
+            diff.before_flat)
 
 
 #: Where a re-check's finding lies relative to a fix (`_placement`)
 EDITED, NEAR, ALONE, UNPLACED = 'edited', 'near', 'alone', 'unplaced'
 
 
-def _place(places: list[Span], changed: list[Span]) -> str:
-    """`EDITED` when every place touches a changed span, `ALONE` when none
-    comes near one (`_touches(near=True)`), else `NEAR`; `UNPLACED` with
-    no place."""
+def _place(places: list[Span], changed: list[Span], own: tuple | None = None,
+           other: tuple | None = None) -> str:
+    """`EDITED` when every place touches a changed span, `ALONE` when they
+    are away from the fix (`_untouched`: none near a change, punctuation
+    beside each unchanged), else `NEAR`; `UNPLACED` with no place."""
     if not places:
         return UNPLACED
     if all(_touches(p, changed) for p in places):
         return EDITED
-    if not any(_touches(p, changed, near=True) for p in places):
+    if _untouched(places, changed, own, other):
         return ALONE
     return NEAR
 
@@ -3773,7 +3793,8 @@ def _took_out_its_words(f: Finding, diff: '_Diff') -> bool:
                for run in runs for p in _quote_spans(' '.join(run), diff.before))
 
 
-def _placement(f: Finding, before_run: GateResult | None, diff: '_Diff') -> str:
+def _placement(f: Finding, before_run: GateResult | None, diff: '_Diff',
+               by_kept: bool = True) -> str:
     """Where the re-check's finding `f` lies relative to the fix `diff`
     (#737):
 
@@ -3782,21 +3803,30 @@ def _placement(f: Finding, before_run: GateResult | None, diff: '_Diff') -> str:
       `_NEAR_WORDS` of a change), or `NEAR`;
     - a broken promise with no quote there (the question layer gives
       none; a fix that takes out the words keeping a promise leaves none
-      to give) is placed by where the run before found the promise kept
-      (`_kept_places`), measured on the prose before the fix: those words
-      unchanged are `ALONE` (the same words, read again), changed or next
-      to a change `EDITED` or `NEAR`. With no kept quote, it is `EDITED`
-      when the words the fix took out are the promise's own
-      (`_took_out_its_words`);
+      to give) is `EDITED` when the fix changed its own words (four in a
+      row of them, `_took_out_its_words`), whatever a kept quote says:
+      words taken out are evidence about this prose, a kept quote is the
+      run before's reading of one place (#737's review CR-3). Otherwise,
+      with `by_kept`, it is placed by where the run before found the
+      promise kept (`_kept_places`), measured on the prose before the fix:
+      those words unchanged are `ALONE` (the same words, read again),
+      changed or next to a change `EDITED` or `NEAR`;
     - anything else `UNPLACED`: nothing ties it to the edits or clears it
-      of them."""
-    where = _place(_quote_spans(f.scene_quote, diff.after), diff.after_spans)
+      of them.
+
+    `by_kept` is False for a finding the run before already had (#737's
+    review SF-1): it was counted there by its scene quote alone, and must
+    be counted the same way after, or a promise both kept and broken by
+    two readings drops out of one side of the count only."""
+    where = _place(*_side(f.scene_quote, diff))
     if where != UNPLACED or f.kind != 'broken-promise':
         return where
-    where = _place(_kept_places(f, before_run, diff.before), diff.before_spans)
-    if where == UNPLACED and _took_out_its_words(f, diff):
+    if _took_out_its_words(f, diff):
         return EDITED
-    return where
+    if not by_kept:
+        return UNPLACED
+    return _place(_kept_places(f, before_run, diff.before), diff.before_spans,
+                  diff.before_flat, diff.after_flat)
 
 
 def _new_findings(before_run: GateResult, after_run: GateResult) -> list[Finding]:
@@ -3880,15 +3910,19 @@ def _worse(n: int, before_run: GateResult, after_run: GateResult, diff: _Diff) -
 
     The count leaves out, on each side, the findings in words the fix left
     alone (`_in_untouched_text`; after the fix, `_placement` `ALONE`, which
-    places a broken promise with no quote by the words the run before
+    places a new broken promise with no quote by the words the run before
     found it kept): those words are in both proses, and two readings of
     them differ. E4's missing-persons (2026-11-03): a fix cleared both
     first findings, the re-check found four new ones, every one in words
     it hadn't touched, and a plain count would have thrown the fix away. A
     finding that can't be placed counts."""
-    then_alone = sum(_in_untouched_text(f, diff.before_spans, diff.before)
+    then_alone = sum(_in_untouched_text(f, diff, before=True)
                      for f in before_run.findings + before_run.unverified)
-    now_alone = sum(_placement(f, before_run, diff) == ALONE
+    # a finding the run before had is placed as it was counted there, by
+    # its scene quote (#737's review SF-1); a new one may be placed by a
+    # kept quote
+    new = {id(f) for f in _new_findings(before_run, after_run)}
+    now_alone = sum(_placement(f, before_run, diff, by_kept=id(f) in new) == ALONE
                     for f in after_run.findings + after_run.unverified)
     then = _blocking_count(before_run) - then_alone
     now = _blocking_count(after_run) - now_alone
@@ -3915,20 +3949,26 @@ def _bad_edits(edits: list[dict], new: list[Finding], diff: '_Diff',
     findings), or None when one can't be tied to an edit: a finding whose
     scene quote lies in or next to an edit's replacement, a broken promise
     whose kept words (`_kept_places`, in the prose before the fix) lie in
-    or next to an edit's `find`, or one whose promised words the edit took
-    out (its `find` shares four words in a row with them)."""
+    an edit's `find` (or, when none holds them, next to one), or one whose
+    promised words the edit took out (its `find` shares four words in a
+    row with them)."""
     after_words = diff.after
     bad: set[int] = set()
     for f in new:
         hit = set()
         places = _quote_spans(f.scene_quote, after_words) if f.scene_quote else []
         kept = [] if places else _kept_places(f, before_run, diff.before)
+        finds = [_edit_span(diff.before, e.get('find') or '') for e in edits]
+        # the edits whose `find` held the kept words, else those next to
+        # them, as `_placement` reads them (#737's review CR-1)
+        in_kept = {i for i, sp in enumerate(finds) if any(_touches(p, sp) for p in kept)}
+        by_kept = in_kept or {i for i, sp in enumerate(finds)
+                              if any(_touches(p, sp, near=True) for p in kept)}
         for i, e in enumerate(edits):
             spans = _edit_span(after_words, e.get('replace') or '')
             if places and any(_touches(p, spans, near=True) for p in places):
                 hit.add(i)
-            elif kept and any(_touches(p, _edit_span(diff.before, e.get('find') or ''))
-                              for p in kept):
+            elif i in by_kept:
                 hit.add(i)
             elif (f.kind == 'broken-promise' and f.established_quote
                   and _shares_run(_words(e.get('find') or ''), _words(f.established_quote))):
@@ -3949,11 +3989,13 @@ def _shares_run(a: str, b: str, n: int = 4) -> bool:
 def _partial_fix(project_dir: str, scene_id: str, command: str, current: str,
                  before_run: GateResult, after_run: GateResult, diff: '_Diff',
                  edits: list[dict], *, log_dir: str, extract_model, check_model,
-                 before) -> tuple[list[dict], str, GateResult, str] | None:
+                 before) -> tuple[list[dict], str, GateResult, str, list[str]] | None:
     """B-030 (#556): a fix round with several edits, discarded because it
     brought in problems, is retried with only the edits that didn't
     (`_bad_edits`), one more gate run. Returns (the edits kept, their
-    prose, its gate run, the dropped edits as text), or None when every
+    prose, its gate run, the dropped edits as text, notes naming its run's
+    new findings that couldn't be placed or lie in words the edits left
+    alone, `_round_notes`; #737's review SF-3), or None when every
     edit (or none) is to blame, a new problem can't be tied to one, the
     rest can't be applied, the run fails, or it is worse than `before_run`
     (`_worse`)."""
@@ -3973,10 +4015,33 @@ def _partial_fix(project_dir: str, scene_id: str, command: str, current: str,
                          check_model=check_model, before=before, carry=before_run)
     except GateError:
         return None
-    if not run.passed and _worse(0, before_run, run, _diff(current, prose)):
-        return None
+    notes: list[str] = []
+    if not run.passed:
+        d = _diff(current, prose)
+        if _worse(0, before_run, run, d):
+            return None
+        loose, alone = _round_notes('the edits kept', before_run, run, d)
+        notes = [n for n in (loose, alone and f'{alone}: not the fix\'s, so they stand for the '
+                             f'next round or the author') if n]
     dropped = '; '.join(f'"{_one_line(edits[i].get("find", ""))[:60]}"' for i in bad)
-    return good, prose, run, dropped
+    return good, prose, run, dropped, notes
+
+
+def _round_notes(what: str, before_run: GateResult, after_run: GateResult,
+                 diff: '_Diff') -> tuple[str, str]:
+    """What the notes say of `after_run`'s new findings (`what`: the fix
+    round it checked): those that couldn't be placed relative to the fix,
+    judged by the count (SF-3, #504's review), and the start of the line
+    naming those in words it left alone (#737), each '' when there are
+    none."""
+    unplaced = _unplaced(before_run, after_run, diff)
+    loose = (f'{what}: {len(unplaced)} new finding(s) of the check after it could not be '
+             f'placed in the fixed prose (' + _finding_names(unplaced)
+             + '): judged by the problem count only') if unplaced else ''
+    alone = _alone(before_run, after_run, diff)
+    found = (f'{what}: {len(alone)} new finding(s) of the check after it in words the fix '
+             f'left alone (' + _finding_names(alone) + ')') if alone else ''
+    return loose, found
 
 
 def run_log_dir(log_dir: str, scene_id: str, *, now=None, pid: int | None = None) -> str:
@@ -4107,7 +4172,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                            extract_model=extract_model, check_model=check_model,
                            before=before)
         current, result, rounds, notes, run_dir = prose, first, [], [], logs
-        discarded, blocked_stale = 0, ''
+        discarded, blocked_stale, unseen = 0, '', 0
         regate, reextraction = _OneRegate(), None
         for n in range(1, FIX_ROUNDS + 1):
             if result.passed:
@@ -4184,25 +4249,15 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             # re-check's broken promise, in the words it changed, was kept).
             # A pass is kept: it committed. A re-roll with no edit is the
             # same prose, so its verdict stands
-            worse, loose, alone = '', '', []
+            worse, loose, found = '', '', ''
             if fixed != current and not again.passed:
                 diff = _diff(current, fixed)
                 worse = _worse(n, result, again, diff)
                 # SF-3 (#504's review): a new problem that can't be placed is
-                # neither tied to the fix nor cleared of it: say so
-                unplaced = _unplaced(result, again, diff)
-                if unplaced:
-                    loose = (f'fix round {n}: {len(unplaced)} new finding(s) of the check '
-                             f'after it could not be placed in the fixed prose ('
-                             + _finding_names(unplaced) + '): judged by the problem count only')
-                # #737: a new problem in words the fix left alone is the
-                # prose's, not the fix's (`_worse` leaves it out); said below
-                alone = _alone(result, again, diff)
-            found = (f'fix round {n}: {len(alone)} new finding(s) of the check after it in '
-                     f'words the fix left alone (' + _finding_names(alone) + ')') if alone else ''
-            # a discarded fix's: in the prose kept too, but not in its verdict
-            gone = (f'{found}: in the prose kept too, but not in the verdict kept; a re-check '
-                    f'of the scene reads them again')
+                # neither tied to the fix nor cleared of it; #737: one in
+                # words the fix left alone is the prose's, not the fix's
+                # (`_worse` leaves it out). Both said below
+                loose, found = _round_notes(f'fix round {n}', result, again, diff)
             if worse:
                 # B-030 (#556): keep the edits that didn't do it
                 part = _partial_fix(project_dir, scene_id, command, current, result, again,
@@ -4210,11 +4265,17 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                                     extract_model=extract_model, check_model=check_model,
                                     before=before)
                 if part is not None:
-                    good, part_prose, part_run, dropped_edits = part
+                    good, part_prose, part_run, dropped_edits, part_notes = part
                     notes.append(f'{worse}; kept its {len(good)} edit(s) that did not, '
                                  f'dropped {dropped_edits}, and re-checked')
+                    # #737's review SF-2, CR-4: this run is set aside, and
+                    # the re-check of the edits kept read its words again
+                    if loose:
+                        notes.append(loose)
                     if found:
-                        notes.append(gone)
+                        notes.append(f'{found}: not the fix\'s; the re-check of the edits kept '
+                                     f'read those words again')
+                    notes += part_notes
                     rounds.append(FixRound(to_fix, good))
                     current, result, run_dir = part_prose, part_run, os.path.join(
                         logs, f'partial-{n}')
@@ -4226,7 +4287,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if loose:
                     notes.append(loose)
                 if found:
-                    notes.append(gone)
+                    # in the prose kept too, but not in the verdict kept
+                    notes.append(f'{found}: in the prose kept too, but not in the verdict '
+                                 f'kept; a re-check of the scene reads them again')
+                    unseen = len(_alone(result, again, diff))
                 # the blocked list is the kept run's, for `check --accept`
                 blocked_stale = _note_blocked(project_dir, scene_id, command, result)
                 # and so is the advisory list (#642)
@@ -4256,7 +4320,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
         e.first, e.log_dir = first, logs
         raise
     return GatedScene(current, result, first, fixed=current != prose, rounds=rounds,
-                      notes=notes, log_dir=logs, discarded=discarded,
+                      notes=notes, log_dir=logs, discarded=discarded, unseen=unseen,
                       blocked_stale=blocked_stale, reextraction=reextraction)
 
 
