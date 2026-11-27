@@ -29,10 +29,11 @@ PY=python3.12   # storyforge needs Python 3.10-3.13; a bare python3 may be 3.9
 sf() { "$PY" ~/Developer/sf-pilot/storyforge "$@"; }   # a function, so it works in zsh and bash
 OUT=~/Developer/iliad-adult-pilot-results; mkdir -p "$OUT"
 
-# throwaway clone, next to the book so ../homer resolves; no remote, so nothing is pushed
+# throwaway clone, next to the book so ../evals and ../homer resolve; no remote, so nothing is pushed
 git clone -q ~/Developer/iliad-adult ~/Developer/iliad-adult-pilot
 cd ~/Developer/iliad-adult-pilot && git remote remove origin
-sf cleanup --dry-run      # if it lists death_scene fills (#745), the book hasn't had them yet:
+sf source import          # picks up the source registry's death_scene (#761); commits locally
+sf cleanup --dry-run      # lists the death_scene fills (#745, #761: about 229, against 44 from the ledger alone):
 sf cleanup                # apply them here (the redraft will have them); commits locally
 git tag pilot-base
 export STORYFORGE_COST_THRESHOLD=1.25   # one scene's run fits; the re-checks after it mostly don't
@@ -40,7 +41,7 @@ export STORYFORGE_COST_THRESHOLD=1.25   # one scene's run fits; the re-checks af
 
 There is no dry-run or no-commit option for `check`. A passing scene commits its facts and the report, `commit_and_push` warns when the push fails, and the commit stays in the clone. A scene that passes and changes facts can list later scenes for a re-check. The low threshold leaves those re-checks unrun. If one does run, note its cost apart and leave it out of the comparison.
 
-**Base state (proposal):** the clone is the book at its current main. The scenes before each pilot scene are post-fix, and the ledger also holds later scenes' facts. The review's replay used the commit before each scene's commit instead. If findings against later scenes dominate, re-run that scene on `git checkout <scene's commit>^` (run `cleanup` there too).
+**Base state (proposal):** the clone is the book at its current main. The scenes before each pilot scene are post-fix, and the ledger also holds later scenes' facts. The review's replay used the commit before each scene's commit instead. If findings against later scenes dominate, re-run that scene on `git checkout <scene's commit>^` (run `source import` and `cleanup` there too).
 
 ## Rebuild each scene's pre-fix prose
 
@@ -200,7 +201,7 @@ States checked 2026-11-26.
 | Issue | State | What's left |
 |---|---|---|
 | #746 | open | Second half: fill `aliases` with patronymics and standing epithets at `source import` (`source.py`), from a series-repo table whose format isn't defined yet. The namesake guard itself merged (PR #754) |
-| #761 | open | #745's follow-up: fill `death_scene` in the source project's own registry, and send a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
+| #761 | open | (a) is done: the source registry (`evals/projects/iliad/reference/characters.csv`) gives `death_scene` for 233 Iliad deaths, and `source import` then `cleanup` fills 229 in the book (Hector and Patroclus stay warnings; Dolops and Melanippus warn because the book's `ajax-holds-the-ships` puts the wrong namesakes on stage). Left: (b), sending a death the draft leaves out to the source author list (that needs the gate's source check, a model call) |
 | #769 | open (filed with this page) | Wire `source.entering_state(project_dir, refs, source.scene_cast(project_dir, scene_id, refs))` into the question layer's brief entering items, with refs from `gate_source.setup(project_dir).refs[scene_id]` (#747 and #754 are merged) |
 | #749 | PR #768 open | A claim in speech is not narration. Its recording misses are in step 2 |
 
