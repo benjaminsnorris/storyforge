@@ -33,8 +33,9 @@ by asking about each one narrowly:
   scene ("the scene takes place at night", "awake forty hours"), which
   has moved on by any other: it is never asked of another scene, and the
   notes count it (E4, 2026-11-27: `name-surfaces`' night in Hank's
-  kitchen, asked of `driving-west` at dawn, stopped it). At most `MAX_QUESTIONS` (30), asked `BATCH` (30)
-  to a call; the cap cuts from the end.
+  kitchen, asked of `driving-west` at dawn, stopped it). At most
+  `MAX_QUESTIONS` (30), asked `BATCH` (30) to a call; the cap cuts from
+  the end.
 - **Only about who is there** (`present_subjects`): a fact is asked when
   its subject (an id, name or alias, through the registries) is present by
   the scene's extracted cast (its typed state's `at` records), its places
@@ -553,6 +554,11 @@ def facts_to_ask(rows: list[dict], scene_id: str, order: dict[str, int],
     out.facts = sorted(asked, key=key)
     out.stale = [r['id'] for r in out.facts if r['id'] in stale]
     return out
+
+
+#: How many scene-bound timeline states a note names (#782's review CR-2:
+#: nothing ends them, so the list grows with the book)
+SCENE_BOUND_NAMED = 10
 
 
 def scene_bound(r: dict) -> bool:
@@ -1269,9 +1275,11 @@ def check_questions(project_dir: str, scene_id: str, *, prose: str, rows: list[d
                             f'scene (by its typed state, its location, or a name in its '
                             f'prose): not asked: ' + ', '.join(picked.absent))
     if picked.scene_bound:
+        shown = picked.scene_bound[:SCENE_BOUND_NAMED]
         result.notes.append(f'{len(picked.scene_bound)} timeline state(s) of other scenes, the '
-                            f'time at their own scene, not asked: '
-                            + ', '.join(picked.scene_bound))
+                            f'time at their own scene, not asked: ' + ', '.join(shown)
+                            + (f' and {len(picked.scene_bound) - len(shown)} more'
+                               if len(picked.scene_bound) > len(shown) else ''))
     if picked.stale:
         cut = [q.fact_id for q in questions[MAX_QUESTIONS:] if q.fact_id in picked.stale]
         result.notes.append(f'{len(picked.stale)} state trait(s) set on an earlier day than '
