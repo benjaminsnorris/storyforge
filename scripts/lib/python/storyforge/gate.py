@@ -118,9 +118,12 @@ GATE_CONTINUITY = True
 #: question layer takes the scene's cast from its typed state, so it needs
 #: `GATE_CONTINUITY`. What it doesn't do (brief promises, filling the quotes
 #: of registry facts the prose establishes) is said in
-#: `GateResult.question_notes`. Or `tandem` (#738), the default: both
-#: checkers on a scene's first gate run, the question layer alone after it
-#: (see `OPEN` below); `storyforge check --open` / `--questions` and
+#: `GateResult.question_notes`. Or `tandem` (#738), the default (Ben,
+#: 2026-11-26): both checkers on a scene's first gate run, the question
+#: layer alone after it (see `OPEN` below). A pilot comparing both modes'
+#: catches and false stops on about six scenes may switch it back to
+#: `open` (the question layer stopped about 0.48 of gate-set-questions'
+#: controls, and a false stop sends a scene into the fix loop, #740); `storyforge check --open` / `--questions` and
 #: `write --open` / `--questions` force one for a run
 #: (`forced_check_method`)
 CHECK_METHODS = ('open', 'questions', 'tandem')
