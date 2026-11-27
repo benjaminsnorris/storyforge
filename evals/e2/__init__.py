@@ -70,10 +70,16 @@ FLOORS = {
                  'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0, 'flags': 1},
     # recall_PHY 0.6667 -> 0.8333, recall_TRT 0.5 -> 0.6667, precision
     # 0.7742 -> 0.8387 (#513, v1.156.0): re-recorded for the calendar note's
-    # wording; one run, so a gain within the checker's run-to-run spread
-    'e2-carol-checker': {'recall_PHY': 0.8333, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
-                         'recall_REL': 0.8, 'recall_TRT': 0.6667, 'precision': 0.8387,
-                         'flags': 31},
+    # wording; one run, so a gain within the checker's run-to-run spread.
+    # recall_KNO 1.0 -> 0.8, recall_TRT 0.6667 -> 0.8333, precision 0.8387
+    # -> 0.8667, flags 31 -> 30 (2026-11-27, a decision): re-recorded after
+    # the open checker's 2026-11-26 changes (#741's one cache prefix and
+    # schema, #749's speech claims; consolidated re-record, PILOT.md step 2).
+    # e2-carol-016 (TRT) is now caught and e2-carol-027 (KNO) missed: one
+    # case each way on one run, within the checker's spread
+    'e2-carol-checker': {'recall_PHY': 0.8333, 'recall_TIM': 0.8, 'recall_KNO': 0.8,
+                         'recall_REL': 0.8, 'recall_TRT': 0.8333, 'precision': 0.8667,
+                         'flags': 30},
     # neither corpus suite has a REL case (E1 is thin on REL)
     # precision 0.4 -> 0.3333, flags 5 -> 6 (#542, v1.146.4, a decision):
     # continues_not_same_day flags lantern-folk-019's tree, where a02 (day 2)
