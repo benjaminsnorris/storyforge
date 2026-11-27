@@ -133,7 +133,7 @@ On item 7's risk: the open checker drops to a window of recent scenes once the s
 
 ## Issues
 
-Each build item has an issue. **[ISSUES.md](ISSUES.md) has the order, what can run in parallel (up to six at once), and the smallest set to merge before a redraft.**
+Each build item has an issue. **[ISSUES.md](ISSUES.md) has the order, what can run in parallel (up to six at once), and the smallest set to merge before a redraft.** **[PILOT.md](PILOT.md)** is the runbook for the pilot before the redraft, and what's left after it.
 
 | Item | Issue |
 |---|---|
