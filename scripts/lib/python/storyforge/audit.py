@@ -325,6 +325,13 @@ class Digest:
     remaining: dict[str, int] = field(default_factory=dict)
 
 
+def is_disputed(row: dict[str, str]) -> bool:
+    """A commitment a provisional commit recorded as disputed (#735,
+    `gate.is_held`): status `pending`, `reviewed` `held:...`."""
+    return (row.get('status') == 'pending'
+            and (row.get('reviewed') or '').startswith('held:'))
+
+
 def is_unreviewed(row: dict[str, str]) -> bool:
     return (row.get('status') == 'binding'
             and not (row.get('reviewed') or '').strip())
@@ -572,6 +579,13 @@ def mark(rows: list[dict[str, str]], ids: list[str], verdict: str, *,
                 f'superseded, so no longer binding: {", ".join(superseded)}. '
                 f'Rejecting it would lose that a later fact replaced it; reject '
                 f'the fact that superseded it, or mark this one seen')
+    # #735's review CR-3: a disputed fact's `reviewed` links it to the
+    # finding it states; a mark would cut it from `check --accept`
+    disputed = [i for i in ids if is_disputed(by_id[i])]
+    if disputed:
+        raise ValueError(f'recorded as disputed (a provisional commit held them for a '
+                         f'finding), so not marked: {", ".join(disputed)}. Accept the finding '
+                         f'(`storyforge check --accept SCENE`) or check the scene again')
     stamp = f'{verdict}:{date or datetime.now().strftime("%Y-%m-%d")}'
     changed = []
     for i in dict.fromkeys(ids):

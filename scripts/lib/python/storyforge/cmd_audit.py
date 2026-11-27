@@ -245,7 +245,11 @@ def _run(args, emit):
     if 'all' in args.ids:
         if args.ids != ['all']:
             _fail('`all` marks every fact the listing shows; give it alone')
-        ids = [r['id'] for r in digest.facts]
+        ids = [r['id'] for r in digest.facts if not audit.is_disputed(r)]
+        skipped = len(digest.facts) - len(ids)
+        if skipped:   # #735's review CR-3: never cut a disputed fact's link
+            digest.notes.append(f'{skipped} fact(s) recorded as disputed left unmarked: '
+                                f'`storyforge check --accept SCENE` brings one into force')
     else:
         ids = args.ids
     if not ids:
