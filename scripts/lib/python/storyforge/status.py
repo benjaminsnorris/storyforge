@@ -434,7 +434,8 @@ def gate_waiting(project_dir: str) -> list[dict[str, str]]:
 
 
 def gate_advisory(project_dir: str) -> tuple[list[dict[str, str]], list[str]]:
-    """#642: the broken promises the gate reported but didn't stop on
+    """#642: the advisory findings the gate reported but didn't stop on:
+    broken promises and the typed knowledge check's (`gate.is_knowledge_row`)
     (`gate.read_advisory`, working/gate-advisory.csv), one record each
     (`{scene_id, command, source, quote, finding, stale}`), and what
     couldn't be read, one line each (a `gate` blocker, never a promise).

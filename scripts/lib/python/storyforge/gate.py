@@ -30,7 +30,9 @@ For one scene's prose, `gate_scene` runs:
    (`storyforge.must`, `_is_must`) still blocks, as does one of a registry
    fact the ledger sets up in this scene (`_set_up_here`), and a `must`
    beat's quoted words are checked word for word by code
-   (`_verbatim_findings`).
+   (`_verbatim_findings`). The typed knowledge check's findings
+   (`continuity.is_advisory`) are advisory the same way: reported and
+   recorded, never fixed or blocking.
    With `GATE_CHECK_METHOD` `questions` (#649, `storyforge check
    --questions`), the question layer (`questions.check_questions`) checks
    the scene in the open checker's place: narrow yes/no questions from the
@@ -42,7 +44,7 @@ For one scene's prose, `gate_scene` runs:
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
-   not, other than advisory broken promises and contradictions already in
+   not, other than advisory findings and contradictions already in
    the book before the pass
    (`gate_scene(before=)`: `inherited`, reported as `ALREADY IN THE SCENE`
    and kept in working/gate-reported.csv; the commitments stating them are
@@ -359,10 +361,13 @@ class GateResult:
     #: (plan conflict, whether its speaker was checked and why not), for
     #: the report (`_plan_conflict`)
     speaker_notes: list[tuple[Finding, str]] = field(default_factory=list)
-    #: broken promises that don't stop the scene (#642): every broken
-    #: promise, verified or not, except one of a beat the brief marks
-    #: `must:` (`_is_must`) or of a registry fact the ledger sets up in this
-    #: scene (`_set_up_here`). A brief is a plan, and the prose wins.
+    #: findings that don't stop the scene: every broken promise (#642),
+    #: verified or not, except one of a beat the brief marks `must:`
+    #: (`_is_must`) or of a registry fact the ledger sets up in this scene
+    #: (`_set_up_here`), since a brief is a plan and the prose wins; and
+    #: every finding of an advisory continuity check
+    #: (`continuity.is_advisory`: the typed knowledge check, whose
+    #: learning points are read from briefs and a model's records).
     #: Reported (`ADVISORY`), kept in `ADVISORY_PATH`, never sent to the
     #: fix. Set by `_classify`; disjoint from `findings` and `unverified`
     advisory: list[Finding] = field(default_factory=list)
@@ -1690,7 +1695,10 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
     verified or not, is `advisory` (#642) unless it is of a beat the brief
     marks `must:` (`_is_must`) or of a registry fact the ledger sets up in
     this scene (`_set_up_here`); those block, and `promise_why` says why.
+    An advisory continuity check's finding (`continuity.is_advisory`) is
+    `advisory` too, and neither inherited nor a plan conflict.
     `rows`: the ledger (read when None)."""
+    from storyforge.continuity import is_advisory
     result.inherited, result.plan_conflicts, result.speaker_notes = [], [], []
     result.advisory, result.bare_must, result.promise_why = [], [], []
     result.misplaced_must = []
@@ -1710,11 +1718,13 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
             result.promise_why.append((f, MUST_BEAT))
         else:
             result.advisory.append(f)
+    result.advisory += [f for f in result.check.findings + result.check.unverified
+                        if is_advisory(f)]
     old = before.scenes.get(result.scene_id) if before else None
     known = {(r['source'], _words(r['quote'])) for r in reported}
     phrases = None
     for f in result.check.findings:
-        if f.kind != 'contradiction' or not f.scene_quote.strip():
+        if f.kind != 'contradiction' or not f.scene_quote.strip() or is_advisory(f):
             continue
         if ((f.established_scene or '', _words(f.scene_quote)) in known
                 or (old is not None and _quoted_in(f.scene_quote, old)
@@ -5018,11 +5028,13 @@ def _join_tandem(result: 'GateResult', got, disputes: list[Dispute],
     - Brief reports: `kept` by fact, the rest without repeats.
     - Rulings (`_join_rulings`), with the facts the questions found
       contradicted read before any is left out as a repeat."""
-    from storyforge.continuity import overlaps
+    from storyforge.continuity import is_advisory, overlaps
     check = result.check
     q_found = {f.fact_id for f in list(got.findings) + list(got.unverified) if f.fact_id}
     opened = [f for f in check.findings + check.unverified if _from_open(f)]
-    shared = [f for f in check.findings + check.unverified if not f.checker]
+    # an advisory continuity finding never stands in for a blocking one
+    shared = [f for f in check.findings + check.unverified
+              if not f.checker and not is_advisory(f)]
     for found, into in ((got.findings, check.findings), (got.unverified, check.unverified)):
         for f in found:
             same = next((g for g in opened if _same_check(g, f)), None)
@@ -5149,7 +5161,7 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
     re-check doesn't read (`TANDEM_RECHECK_GAP`) in place of
     `QUESTION_LAYER_GAPS`, which a first run's open reading covers."""
     from storyforge.common import log
-    from storyforge.continuity import overlaps
+    from storyforge.continuity import is_advisory, overlaps
     from storyforge.questions import QuestionError, check_questions
     try:
         got = check_questions(project_dir, scene_id, prose=prose, rows=rows, records=records,
@@ -5165,7 +5177,8 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
                                   if i not in result.asked_fact_ids]
         log(f'  {scene_id}: questions: ' + '; '.join(got.notes))
         return
-    have = result.check.findings + result.check.unverified
+    # an advisory continuity finding never stands in for a blocking one
+    have = [f for f in result.check.findings + result.check.unverified if not is_advisory(f)]
     for f in got.findings:
         if f.kind != 'contradiction' or not any(
                 g.code == f.code and overlaps(g.scene_quote, f.scene_quote) for g in have):
@@ -5324,11 +5337,24 @@ def reread_lines(result: GateResult) -> list[str]:
 #: What an `ADVISORY` line says (#642)
 ADVISORY_LABEL = ('a broken promise; not blocking: the brief is a plan and the prose stands. '
                   'Amend the brief, or mark the beat `must:` to require it')
+#: The `ADVISORY` label of an advisory continuity finding
+#: (`continuity.is_advisory`: the typed knowledge check)
+ADVISORY_KNOWLEDGE_LABEL = ('the typed knowledge check; not blocking: when a character learns '
+                            'a fact is read from the briefs and the scenes\' typed state, which '
+                            'often misplace it. Fix the prose, or the brief\'s knowledge_in '
+                            'or knowledge_out, if it is wrong')
+
+
+def _advisory_label(f: Finding) -> str:
+    return ADVISORY_LABEL if f.kind == 'broken-promise' else ADVISORY_KNOWLEDGE_LABEL
 
 
 def _advisory_message(f: Finding) -> str:
-    """An advisory broken promise in words: the promised item first (a
-    broken promise's scene quote is often empty)."""
+    """An advisory finding in words: a broken promise's promised item first
+    (its scene quote is often empty); any other finding as reported
+    (`Finding.message`)."""
+    if f.kind != 'broken-promise':
+        return f.message() + (f' (unverified: {f.problem})' if f.problem else '')
     what = f'the brief\'s {f.fact_id}' if f.fact_id else 'the brief'
     promised = f' "{f.established_quote}"' if f.established_quote else ''
     near = f'; nearest words: "{f.scene_quote}"' if f.scene_quote else ''
@@ -5338,7 +5364,7 @@ def _advisory_message(f: Finding) -> str:
 
 def advisory_report_lines(result: GateResult) -> list[str]:
     """The `ADVISORY` lines for `result.advisory`, as `report_lines` words them."""
-    return [f'ADVISORY ({ADVISORY_LABEL}; listed in {ADVISORY_PATH}){_from_reading(f)}: '
+    return [f'ADVISORY ({_advisory_label(f)}; listed in {ADVISORY_PATH}){_from_reading(f)}: '
             f'{_one_line(_advisory_message(f))}' for f in result.advisory]
 
 
@@ -5773,9 +5799,11 @@ def record_blocked(project_dir: str, scene_id: str, command: str,
 # Broken promises that don't block: working/gate-advisory.csv (#642)
 # ============================================================================
 
-#: The advisory broken promises of each scene's last gate run (#642):
-#: `REPORTED_PATH`'s columns, `source` the brief field (or registry id),
-#: `quote` the promised item, and `paragraphs` what the run read
+#: The advisory findings of each scene's last gate run (#642): broken
+#: promises and advisory continuity findings (`continuity.is_advisory`).
+#: `REPORTED_PATH`'s columns, `source` the brief field (or registry id; a
+#: continuity finding's fact id), `quote` the promised item (the
+#: established words), `finding` the report's words, and `paragraphs` what the run read
 #: (`_advisory_stamp`: `prose=<key>;brief=<key>`), so a row the scene or its
 #: brief has since moved past can be told (`read_advisory`). Replaced by
 #: each gate run of the scene that gets to the check, pass or not, and put
@@ -5839,7 +5867,7 @@ def _note_advisory(project_dir: str, scene_id: str, command: str,
     except (GateError, OSError) as e:
         from storyforge.common import log
         why = f'{ADVISORY_PATH} could not be updated: {e}'
-        log(f'WARNING: {scene_id}: {why}. Its advisory broken promises are only in this log.')
+        log(f'WARNING: {scene_id}: {why}. Its advisory findings are only in this log.')
         return why
     return ''
 
@@ -5918,21 +5946,37 @@ def advisory_lines(project_dir: str, scene_ids=None) -> list[str]:
     return [advisory_line(r) for r in read_advisory(project_dir, scene_ids).rows]
 
 
+def is_knowledge_row(row: dict[str, str]) -> bool:
+    """Whether an `ADVISORY_PATH` row is the typed knowledge check's (its
+    finding as `_advisory_message` words it), not a broken promise."""
+    return '(typed state, knowledge)' in (row.get('finding') or '')
+
+
 def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
-    """The advisory broken promises of `scene_ids` (every scene when None)
-    in `ADVISORY_PATH` as a WARNING line and one line each, after a WARNING
-    for each thing that couldn't be read; none of either: []. They don't
-    stop a scene (the brief is a plan and the prose stands); `check`,
-    `write` and `revise` list them at the end of a run so the author can
-    amend a brief or mark a beat `must:`."""
+    """The advisory findings of `scene_ids` (every scene when None) in
+    `ADVISORY_PATH`, broken promises then the typed knowledge check's
+    (`is_knowledge_row`), each kind as a WARNING line and one line each,
+    after a WARNING for each thing that couldn't be read; none of either:
+    []. They don't stop a scene; `check`, `write` and `revise` list them at
+    the end of a run so the author can amend a brief, mark a beat `must:`,
+    or fix a knowledge slip that is real."""
     found = read_advisory(project_dir, scene_ids)
     lines = [f'WARNING: {p}' for p in found.problems]
-    if found.rows:
-        lines += ([f'WARNING: {len(found.rows)} broken promise(s) the gate reported but did '
+    promises = [r for r in found.rows if not is_knowledge_row(r)]
+    knowing = [r for r in found.rows if is_knowledge_row(r)]
+    if promises:
+        lines += ([f'WARNING: {len(promises)} broken promise(s) the gate reported but did '
                    f'not stop on (advisory, {ADVISORY_PATH}, as of each scene\'s last gate '
                    f'run): the prose stands. Amend the brief, or mark the beat `must:` in '
                    f'key_actions or key_dialogue to require it:']
-                  + [f'  {advisory_line(r)}' for r in found.rows])
+                  + [f'  {advisory_line(r)}' for r in promises])
+    if knowing:
+        lines += ([f'WARNING: {len(knowing)} use(s) of a fact before the scene that shows it '
+                   f'learned, by the typed knowledge check, which the gate reported but did '
+                   f'not stop on (advisory, {ADVISORY_PATH}, as of each scene\'s last gate '
+                   f'run): often the brief misplaces the learning. Fix the prose, or the '
+                   f'brief\'s knowledge_in or knowledge_out, where one is wrong:']
+                  + [f'  {advisory_line(r)}' for r in knowing])
     return lines
 
 
