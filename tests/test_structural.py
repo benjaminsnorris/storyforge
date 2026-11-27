@@ -3,6 +3,8 @@
 import os
 import shutil
 
+import pytest
+
 
 class TestScoreCompleteness:
     def test_returns_score_and_findings(self, fixture_dir):
@@ -478,8 +480,10 @@ class TestDeadCharacterOnStageRatio:
             f"Dead character should not be flagged for on-stage ratio, but got: {ratio_findings}"
         )
 
-    def test_alive_character_still_flagged(self, tmp_path):
-        """Characters without death_scene should still be flagged normally."""
+    @pytest.mark.parametrize('death_scene', ['', 'lives'])
+    def test_alive_character_still_flagged(self, tmp_path, death_scene):
+        """Characters without death_scene, or with `lives` (#745), should
+        still be flagged normally."""
         from storyforge.structural import score_character_presence
         from storyforge.elaborate import _read_csv_as_map
 
@@ -502,7 +506,7 @@ class TestDeadCharacterOnStageRatio:
         with open(os.path.join(ref, 'characters.csv'), 'w') as f:
             f.write('id|name|aliases|role|death_scene\n')
             f.write('zara|Zara||protagonist|\n')
-            f.write('ghost-char|Ghost Char||supporting|\n')
+            f.write(f'ghost-char|Ghost Char||supporting|{death_scene}\n')
 
         scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
         intent = _read_csv_as_map(os.path.join(ref, 'scene-intent.csv'))
