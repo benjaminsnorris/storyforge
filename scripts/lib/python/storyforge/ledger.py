@@ -44,6 +44,8 @@ from storyforge.common import csv_safe
 
 LEDGER_FILE = 'commitments.csv'
 
+#: `known_by`: who knows the fact; on a `CLAIM` row, who said it (read it
+#: through `speaker`, never as knowledge)
 COLUMNS = [
     'id', 'scene_id', 'type', 'subject', 'statement', 'quote', 'origin',
     'status', 'mutable', 'known_by', 'supersedes', 'depends_on', 'reviewed',
@@ -59,9 +61,9 @@ ORIGINS = ('plan', 'prose', 'author', 'migrated')
 #: established, so the checker never holds prose to it; the gate makes it
 #: binding when the prose establishes it (`fill_quote`)
 #: `claim` (#749): what a character says in speech about the past, not shown
-#: on the page (`extract.CLAIM`; `known_by` is the speaker): recorded as their
-#: account, never binding, so no check holds a scene to it and nothing
-#: supersedes or ends through it
+#: on the page (`extract.SPEECH_CLAIM`; `speaker` is who said it): recorded
+#: as their account, never binding, so no check holds a scene to it and
+#: nothing supersedes or ends through it
 CLAIM = 'claim'
 STATUSES = ('binding', 'pending', 'rejected', 'superseded', 'planned', CLAIM)
 MUTABLE = ('state', 'fixed')
@@ -476,6 +478,12 @@ COMMITMENTS_PASS = 'commitments'
 COMMITMENT_WRITERS = (COMMITMENTS_PASS, 'draft', 'redraft', 'revise', 'advisor', 'recheck')
 
 
+def speaker(row: dict) -> str:
+    """Who said a `CLAIM` row (#749: its `known_by`); '' for any other row,
+    whose `known_by` is who knows it."""
+    return (row.get('known_by') or '').strip() if row.get('status') == CLAIM else ''
+
+
 def is_commitment(row: dict) -> bool:
     """Whether `row` is a commitment (what the prose said), not a registry
     fact (what a brief can name)."""
@@ -723,6 +731,19 @@ def validate_ledger(rows: list[dict[str, str]], *,
                 and row.get('subject', '').strip() not in character_ids):
             problems.append(f'{where}: subject {row.get("subject", "")!r} is not '
                             f'a character id')
+        if row.get('status', '').strip() == CLAIM:
+            # #749's review TD-3: a claim is the prose's, said by one
+            # character, and links to nothing
+            if not is_commitment(row):
+                problems.append(f'{where}: a claim, but not a commitment (introduced_by '
+                                f'{row.get("introduced_by", "")!r})')
+            if len(_split(row.get('known_by', ''))) != 1:
+                problems.append(f'{where}: a claim names {len(_split(row.get("known_by", "")))} '
+                                f'speakers in known_by, not one')
+            for column in ('supersedes', 'resolves'):
+                if row.get(column, '').strip():
+                    problems.append(f'{where}: a claim with {column} '
+                                    f'{row.get(column, "").strip()!r}; a claim changes no fact')
     for n, row in enumerate(rows, start=2):
         for column in ('supersedes', 'depends_on'):
             for ref in _split(row.get(column, '')):

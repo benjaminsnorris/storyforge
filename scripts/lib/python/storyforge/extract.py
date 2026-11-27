@@ -847,7 +847,7 @@ If all three are yes, record it as one declarative sentence with its quote. Ther
 
 Always capture: names and their spellings; pronouns and gender; ages and dates; who is related to whom and how; who knows what, and who told them; injuries, illness, and possessions; where a person or object is when it carries past the scene (who holds the key, where the body lies, where someone is held or has gone); the time of day and day the scene occurs; elapsed time stated relative to another event ("three weeks ago," "eight days ago"); counts and quantities (how many survivors, how many records, how many guards); distances and travel times; stated rules of the world; anything a character promises or threatens; anything the narrator states as fact about the past; information conveyed in dialogue.
 
-A character's account in speech is that character's claim, not a fact about the world, when it is the only support for a commitment and tells of something that happened before this scene and isn't shown in it: an old story, backstory, who did what in the past. Record it, with claimed_by naming the speaker: characters tell the past their own way, and two of them may tell it differently. These are never claims: narration, a character's thoughts and memories, the story's present, a promise, threat or plan, a name, a kinship, an age, a date or an elapsed time.
+A character's account in speech is that character's claim, not a fact about the world, when it is the only support for a commitment and tells of something that happened before this scene and isn't shown in it: an old story, backstory, who did what in the past. Record it, with claimed_by naming the speaker: characters tell the past their own way, and two of them may tell it differently. These are never claims: narration, a character's thoughts and memories, the story's present and how things are now, a stated rule of the world, who learns or knows what in this scene, a promise, threat or plan, a name, a kinship, an age, a date or an elapsed time.
 
 Never capture:
 - staging: who stands, sits, crosses the room or turns to the door, where people are as the scene ends, unless it carries past the scene (someone locked in, left behind, hiding, gone to another place);
@@ -1082,13 +1082,111 @@ UNOFFERED = 'unoffered'
 ENDS_HERE = 'ends here'
 #: An `Ending`'s kind for an offered state ended here
 OFFERED_END = 'ends'
-#: A commitment whose only support is a character's spoken account of
-#: something before the scene and not shown in it (`claimed_by`; #749,
-#: Wrath Like Smoke: Poseidon tells who built Laomedon's wall two ways, and
-#: the gate raised it). Recorded as that character's claim (`ledger.CLAIM`
-#: status, `known_by` the speaker), never a binding fact: it supersedes and
-#: ends nothing, and no check holds a scene to it. Reported, never silent
-CLAIM = 'claim'
+#: `commitment_rows`' problem kind for a claim in speech: a commitment
+#: whose only support is a character's spoken account of something before
+#: the scene and not shown in it (`claimed_by`; #749, Wrath Like Smoke:
+#: Poseidon tells who built Laomedon's wall two ways, and the gate raised
+#: it). Its row has the ledger status `ledger.CLAIM` (`ledger.speaker` is
+#: who said it), never binding: no check holds a scene to it, and it ends
+#: nothing. Reported, never silent
+SPEECH_CLAIM = 'speech claim'
+#: A commitment extraction marked `claimed_by` that code keeps binding
+#: (`claim_refusal`: a time, a state, a name or age, knowledge, a quote
+#: outside quotation marks, a speaker who isn't one character): reported
+CLAIM_KEPT = 'claim kept binding'
+#: A claim in speech whose `supersedes` names a fact in force that is a
+#: commitment (a registry fact is a dispute, `disagrees`, as narration's
+#: is): the claim is recorded as said, the fact stands, and the checkers
+#: read the scene against it. Reported, naming the fact
+CLAIM_DEPARTS = 'claim departs'
+#: Types a claim can't have (`claim_refusal`): when and in what order,
+#: kinship, who knows what (a learning event, which the knowledge check
+#: needs), and promises
+CLAIM_REFUSED_TYPES = ('timeline', 'relationship', 'knowledge', 'promise')
+#: Words that make a statement an elapsed time, an age or a name, never a
+#: claim (`claim_refusal`)
+_CLAIM_REFUSED_WORDS = re.compile(
+    r"\b(?:ago|years? old|aged|named|called|name is|spelled|born)\b", re.I)
+
+
+@dataclass
+class Speakers:
+    """Who can make a claim: characters.csv's characters, bound as the
+    continuity checks bind a person (#733, `continuity.Book.person`): an
+    id, or a name or alias only one character has. Never a place."""
+    names: dict = field(default_factory=dict)     # lower name/alias/id -> id
+    ids: dict = field(default_factory=dict)       # lower id -> id
+    shared: dict = field(default_factory=dict)    # lower name -> the ids sharing it
+
+    @classmethod
+    def from_rows(cls, rows: list[dict]) -> 'Speakers':
+        from .continuity import namesakes, registry_ids
+        names = {}
+        for row in rows:
+            cid = (row.get('id') or row.get('name') or '').strip()
+            if not cid or not (row.get('name') or '').strip():
+                continue
+            for n in [cid, row.get('name') or ''] + (row.get('aliases') or '').split(';'):
+                n = ' '.join(n.split()).lower()
+                if n:
+                    names.setdefault(n, cid)
+        return cls(names, registry_ids(rows), namesakes(rows))
+
+    @classmethod
+    def load(cls, project_dir: str) -> 'Speakers':
+        """From reference/characters.csv (none: no one can make a claim)."""
+        from .elaborate import _read_csv
+        path = os.path.join(project_dir, 'reference', 'characters.csv')
+        return cls.from_rows(_read_csv(path) if os.path.isfile(path) else [])
+
+    def of(self, name: str) -> tuple[str | None, str]:
+        """The character `name` binds, or None and why not."""
+        if ';' in name or ',' in name:
+            return None, 'it names more than one speaker'
+        n = ' '.join(name.split()).lower()
+        if not n:
+            return None, 'it names no speaker'
+        if n in self.shared:
+            return None, (f'its speaker is a name several characters share '
+                          f'({", ".join(self.shared[n])})')
+        found = self.ids.get(n) or self.names.get(n)
+        if not found:
+            return None, 'its speaker is not a character in characters.csv'
+        return found, ''
+
+
+def in_speech(scene_text: str, quote: str) -> bool:
+    """Whether every part of `quote` lies inside double quotation marks in
+    `scene_text` (after `quotes.normalize`): a character's words aloud.
+    Single quotation marks can't be told from apostrophes, so a book that
+    writes speech in them has no claims (each is kept binding, reported)."""
+    from .quotes import normalize, part_pattern, quote_parts
+    hay = normalize(scene_text)
+    spans = [m.span() for m in re.finditer(r'"[^"]*"', hay)]
+    parts = quote_parts(quote)
+    if not parts or not spans:
+        return False
+    for part in parts:
+        if not any(any(a <= m.start() and m.end() <= b for a, b in spans)
+                   for m in part_pattern(part).finditer(hay)):
+            return False
+    return True
+
+
+def claim_refusal(item: dict, scene_text: str) -> str:
+    """Why a commitment extraction marked `claimed_by` can't be a claim
+    ('' when it can): code holds the rubric's line (#749's review SF-2,
+    CR-3: the E3 recordings marked elapsed times, the present and states
+    as claims, and a claim escapes every check)."""
+    if item.get('type') in CLAIM_REFUSED_TYPES:
+        return f'it is a {item["type"]} fact'
+    if (item.get('mutable') or 'state') == 'state':
+        return 'it is a state, which can change'
+    if _CLAIM_REFUSED_WORDS.search(item.get('statement') or ''):
+        return 'it states an elapsed time, an age or a name'
+    if not in_speech(scene_text, item.get('quote') or ''):
+        return 'its quote is not inside quotation marks'
+    return ''
 
 
 @dataclass
@@ -1104,7 +1202,8 @@ class Ending:
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
 COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
                        'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced',
-                       ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE, CLAIM)
+                       ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE, SPEECH_CLAIM,
+                       CLAIM_KEPT, CLAIM_DEPARTS)
 
 #: How alike (`difflib` ratio) the words of an id that isn't in the ledger
 #: must be to those of one fact of the same scene for `_nearest_id` to
@@ -1156,7 +1255,8 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                     registry_is_plan: bool = False, *,
                     reserved: Set[str],
                     order: dict[str, int] | None = None,
-                    ends_out: list[Ending] | None = None) -> list[dict[str, str]]:
+                    ends_out: list[Ending] | None = None,
+                    speakers: 'Speakers | None' = None) -> list[dict[str, str]]:
     """Ledger rows for one scene's parsed commitments (`parse_commitments_response`).
 
     Each is binding, `origin=prose`, `introduced_by`, with an id that no row
@@ -1214,12 +1314,17 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     which edits only its own rows) it is `ends registry`.
 
     A claim (`claimed_by` set; #749) is a row of status `ledger.CLAIM`, its
-    `known_by` the speaker (resolved through `subjects`, as a subject is):
+    `known_by` the speaker (`speakers.of`: one characters.csv character):
     a character's account of the past in speech, recorded as what they
-    said and never as a fact about the world. Its `supersedes` and `ends`
-    are not applied (a claim changes no fact), and every claim is listed in
-    `CLAIM` with the links it named, so none is set aside silently. Its
-    quote is checked like any other.
+    said and never as a fact about the world. One `claim_refusal` turns
+    down, or whose speaker binds no one character (or with no `speakers`),
+    is a binding row like any other, listed in `CLAIM_KEPT`. A claim's
+    `ends` are not applied. Its `supersedes`, when it names a registry fact
+    in the gate (or one recorded for this scene), is `disagrees`, a dispute
+    the checker rules on as for narration; one naming an offered
+    commitment is `CLAIM_DEPARTS`, naming it; neither is applied. Every
+    claim is listed in `SPEECH_CLAIM` with the links not applied, so none
+    is set aside silently. Its quote is checked like any other.
     """
     from .common import csv_safe
     from . import ledger
@@ -1295,14 +1400,37 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
             else:
                 problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
         row['subject'] = subject
-        speaker = ' '.join(item.get('claimed_by', '').replace('|', ',').split())
+        said_by = ' '.join(item.get('claimed_by', '').replace('|', ',').split())
+        speaker = None
+        if said_by:
+            why = claim_refusal(item, scene_text)
+            if not why:
+                speaker, why = (speakers.of(said_by) if speakers is not None
+                                else (None, 'no characters registry was read'))
+            if speaker is None:
+                problems[CLAIM_KEPT].append(
+                    f'{scene_id}: {row["id"]}: "{csv_safe(item["statement"])}" (claimed by '
+                    f'{csv_safe(said_by)}, but {why}; kept binding)')
         if speaker:
             # #749: what a character says happened, not what happened
-            row.update(status=ledger.CLAIM, known_by=subjects.get(speaker.lower(), speaker))
-            links = ([f'supersedes {item["supersedes"]}'] if item['supersedes'] else []) \
-                + [f'ends {gone}' for gone in item['ends']]
-            problems[CLAIM].append(
-                f'{scene_id}: {row["known_by"]}: "{csv_safe(item["statement"])}"'
+            row.update(status=ledger.CLAIM, known_by=speaker)
+            links = [f'ends {gone}' for gone in item['ends']]
+            if item['supersedes']:
+                ref, could = _link(item['supersedes'])
+                target = offered.get(ref)
+                if not could and ((target is not None and registry_is_plan
+                                   and not ledger.is_commitment(target)) or ref in here):
+                    problems['disagrees'].append(f'{scene_id}: {ref} (prose: {row["id"]})')
+                    links.append(f'supersedes {ref}: a dispute for the check')
+                elif not could and target is not None:
+                    problems[CLAIM_DEPARTS].append(
+                        f'{scene_id}: {row["id"]} tells otherwise than {ref} '
+                        f'("{csv_safe(target.get("statement") or "")}")')
+                    links.append(f'supersedes {ref}')
+                else:
+                    links.append(f'supersedes {item["supersedes"]}')
+            problems[SPEECH_CLAIM].append(
+                f'{scene_id}: {speaker}: "{csv_safe(item["statement"])}"'
                 + (f' ({", ".join(csv_safe(x) for x in links)}: not applied)' if links else ''))
         elif item['supersedes']:
             ref, could = _link(item['supersedes'])
