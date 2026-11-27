@@ -791,3 +791,171 @@ def test_no_errata_key_reads_nothing(tmp_path):
     from storyforge import source
     project = _yaml(tmp_path)
     assert source.read_errata(project, source.read_config(project)) == {}
+
+
+class TestRulingReusedForFewerItems:
+    """#736: the fix loop's re-check carries its facts, and its findings are
+    the run before's or fewer; the memo was keyed on all three, so a
+    re-check that passed (no findings) asked the source again about the
+    same facts. A ruling made earlier in the process that covers every item
+    is reused, cut to them; anything new is a call, sent as before."""
+
+    def _finding(self, quote, why='w'):
+        from storyforge.checker import Finding
+        return Finding('contradiction', 'PHY', quote, '', '', '', why)
+
+    def _review(self, project_dir, tmp_path, ctx, findings, facts=None, reply=None):
+        sent = []
+
+        def fake(path, body, **k):
+            sent.append(body)
+            return _text(reply or {'facts': [{'n': 1, 'verdict': 'contradicts',
+                                              'why': 'the source says 300'}],
+                                   'contradictions': [],
+                                   'findings': [
+                                       {'n': 1, 'verdict': 'source-has-it',
+                                        'source_quote': 'words the source has not', 'why': 'a'},
+                                       {'n': 2, 'verdict': 'source-has-it',
+                                        'source_quote': 'the sword broke in his hand',
+                                        'why': 'b'}]})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            out = gate_source.review(project_dir, SCENE, 'prose', facts or [_commitment()], [],
+                                     model='m', log_file=str(tmp_path / 'src.json'), ctx=ctx,
+                                     findings=findings)
+        return out, sent
+
+    def test_fewer_findings_reuse_the_ruling_cut_to_them(self, project_dir, tmp_path,
+                                                         adaptation):
+        a, b = self._finding('She tapped the map'), self._finding('The sword broke')
+        first, sent = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert len(sent) == 1 and [i for i, _, _ in first.has_it] == [1]
+        assert any('words the source has not' in n for n in first.notes)
+        again, sent = self._review(project_dir, tmp_path, adaptation, [b])
+        assert sent == []
+        assert again.departs == first.departs and again.ruled == first.ruled
+        assert again.has_it == [(0, 'the sword broke in his hand', 'b')]
+        assert not any('words the source has not' in n for n in again.notes)
+        passed, sent = self._review(project_dir, tmp_path, adaptation, [])
+        assert sent == [] and passed.has_it == [] and passed.departs == first.departs
+
+    def test_a_new_finding_or_other_facts_are_a_call(self, project_dir, tmp_path, adaptation):
+        a, b = self._finding('She tapped the map'), self._finding('The sword broke')
+        self._review(project_dir, tmp_path, adaptation, [a, b])
+        _, sent = self._review(project_dir, tmp_path, adaptation,
+                               [b, self._finding('The well ran dry')])
+        assert len(sent) == 1
+        _, sent = self._review(project_dir, tmp_path, adaptation, [b],
+                               facts=[_commitment(statement='Other', quote='other words')])
+        assert len(sent) == 1
+
+
+def test_a_fix_away_from_every_quote_makes_no_source_call(project_dir, tmp_path, adaptation):
+    """#736's acceptance, in a faithful adaptation: the re-check after a fix
+    that left every quote alone makes no extraction, persistence or source
+    call, and passes on the first run's facts and source ruling."""
+    import os
+    end, moved = 'She returned to the new map. Nothing.', 'She went back to the new map. Nothing.'
+    calls = []
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        prompt = prompt if isinstance(prompt, str) else ''.join(b.get('text', '') for b in prompt)
+        if _is_persistence(body):
+            calls.append('persistence')
+            return _persistence_reply(body)
+        if _is_source(body):
+            calls.append('source')
+            return _text({'facts': [{'n': 1, 'verdict': 'agrees', 'why': 'w'},
+                                    {'n': 2, 'verdict': 'agrees', 'why': 'w'}],
+                          'contradictions': [], 'findings': []})
+        if 'tools' in body:
+            calls.append('check')
+            finding = {**_contradiction(), 'scene_quote': end}
+            return _text({'findings': [finding] if end in prompt else [], 'kept': []})
+        if 'edits' in json.dumps(body.get('output_config', {})):
+            calls.append('fix')
+            return _text({'edits': [{'problem': 1, 'find': end, 'replace': moved}]})
+        calls.append('extract')
+        return _text({'commitments': _two()})
+    prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+    with patch('storyforge.api._api_request', side_effect=fake):
+        out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=prose,
+                                log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                check_model='m')
+    assert out.fixed and out.result.passed, gate.report_lines(out.result)
+    assert calls == ['extract', 'persistence', 'check', 'source', 'fix', 'check']
+    assert out.result.source_ruled
+
+
+class TestRulingReuseLimits:
+    """#736's review (T-1, T-2, T-3, CR-2/SF-4): what a reused ruling may
+    cover, and how it is cut."""
+
+    def _c(self, quote, scene=EARLIER):
+        from storyforge.checker import Finding
+        return Finding('contradiction', 'TIM', quote, scene, 'Dorren Hayle pressed', '', 'why')
+
+    def _review(self, project_dir, tmp_path, ctx, contradictions, reply=None, findings=()):
+        sent = []
+
+        def fake(path, body, **k):
+            sent.append(body)
+            return _text(reply or {'facts': [], 'contradictions': [], 'findings': []})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            out = gate_source.review(project_dir, SCENE, 'prose', [_commitment()],
+                                     contradictions, model='m',
+                                     log_file=str(tmp_path / 'src.json'), ctx=ctx,
+                                     findings=list(findings))
+        return out, sent
+
+    def test_a_contradiction_the_ruling_did_not_cover_is_a_call(self, project_dir, tmp_path,
+                                                                adaptation):
+        a, b = self._c('She tapped the map'), self._c('The sword broke')
+        self._review(project_dir, tmp_path, adaptation, [a])
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert len(sent) == 1
+
+    def test_contradictions_are_cut_and_indexed_with_their_notes(self, project_dir, tmp_path,
+                                                                 adaptation):
+        unmapped = self._c('The well ran dry', scene='act9-sc09')
+        backed, unquoted = self._c('She tapped the map'), self._c('The sword broke')
+        reply = {'facts': [], 'findings': [], 'contradictions': [
+            {'n': 2, 'backs': 'this', 'source_quote': 'four hundred and twelve souls',
+             'why': 'b'},
+            {'n': 3, 'backs': 'this', 'source_quote': 'words the source has not', 'why': 'c'}]}
+        first, _ = self._review(project_dir, tmp_path, adaptation, [unmapped, backed, unquoted],
+                                reply=reply)
+        assert [i for i, _ in first.backs_scene] == [1]
+        assert any('act9-sc09 is not mapped' in n for n in first.notes)
+        assert any('words the source has not' in n for n in first.notes)
+        again, sent = self._review(project_dir, tmp_path, adaptation, [backed])
+        assert sent == [] and [i for i, _ in again.backs_scene] == [0]
+        assert not any('act9-sc09' in n or 'words the source has not' in n
+                       for n in again.notes)
+
+    def test_a_source_left_out_for_the_budget_is_never_reused(self, project_dir, tmp_path,
+                                                              adaptation, monkeypatch):
+        """T-2: a smaller call might show the source the earlier one left out."""
+        this = gate_source._source_text(project_dir, adaptation.refs[SCENE])
+        monkeypatch.setattr(gate_source, 'MAX_SOURCE_CHARS', len(this) + 10)
+        a, b = self._c('She tapped the map'), self._c('The sword broke')
+        first, _ = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert EARLIER in first.unshown
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a])
+        assert len(sent) == 1
+
+    def test_source_facts_cut_or_other_people_are_never_reused(self, project_dir, tmp_path,
+                                                                adaptation, monkeypatch):
+        """CR-2/SF-4: the ruling must have been shown the source facts this
+        call would send."""
+        a, b = self._c('She tapped the map'), self._c('The sword broke')
+        first, _ = self._review(project_dir, tmp_path, adaptation, [a, b])
+        assert first.people is not None and not first.facts_cut
+        first.facts_cut = True
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a])
+        assert len(sent) == 1
+        gate_source._MEMO.clear()
+        self._review(project_dir, tmp_path, adaptation, [a, b])
+        monkeypatch.setattr(gate_source, '_people', lambda *a: frozenset({'someone-else'}))
+        _, sent = self._review(project_dir, tmp_path, adaptation, [a])
+        assert len(sent) == 1

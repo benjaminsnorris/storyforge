@@ -334,6 +334,13 @@ class GateResult:
     #: #677: the ledger fact ids the question layer asked about
     #: (`QuestionResult.asked_fact_ids`), in order, each once
     asked_fact_ids: list[str] = field(default_factory=list)
+    #: #736: on the re-check after a fix, whether extraction was carried from
+    #: the run before it or read again, and why (`_extract`'s note), for the
+    #: log; '' on a run that isn't a fix's re-check
+    extract_note: str = ''
+    #: #736: what this run's extraction read (or carried), for the re-check
+    #: after a fix (`_carry_of`); None when the run didn't reach extraction
+    _extracted: 'object' = field(default=None, repr=False, compare=False)
     #: what `_commit` needs from the run (`_CommitContext`); None until the
     #: run reaches the check
     _ctx: 'object' = field(default=None, repr=False, compare=False)
@@ -400,23 +407,136 @@ EXTRACT_ANSWER_TOKENS = 8000
 EXTRACT_RETRY_TOKENS = 24000
 
 
+@dataclass
+class _Extracted:
+    """#736: what a gate run's extraction read, kept on its `GateResult` so
+    the re-check after a fix can reuse it (`_carry_reason`): the model's
+    replies, never the rows made from them, which are made again by code
+    from the fixed prose."""
+    #: the prose the model read (a carried run keeps its source's)
+    prose: str
+    #: the extraction prompt with the scene left out (`build_commitments_prompt`
+    #: with no prose): everything else the model was shown
+    context: str
+    model: str
+    #: the parsed extraction reply (`parse_commitments_response`)
+    found: list[dict]
+    #: the persistence check's verdict on `found`
+    kept: list[dict]
+    dropped: list[tuple[dict, str]]
+    #: #736's review CR-1: set by `_carry_of`: the continuity checks' state
+    #: codes among the findings sent to the fix
+    state_codes: frozenset = frozenset()
+
+
+def _word_offsets(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """`text` normalized and lowercased as `_word_list` reads it, and each of
+    its words' character span there."""
+    from storyforge.checker import normalize
+    flat = normalize(text).lower()
+    return flat, [m.span() for m in re.finditer(r'\w+', flat)]
+
+
+def _window(flat: str, offsets: list[tuple[int, int]], span: 'Span') -> str:
+    """The characters of `flat` from the end of the word `_NEAR_WORDS` before
+    `span` to the start of the word `_NEAR_WORDS` after it: the quote, its
+    punctuation and the words beside it."""
+    start = offsets[span.start - _NEAR_WORDS][1] if span.start >= _NEAR_WORDS else 0
+    after = span.end + _NEAR_WORDS - 1
+    end = offsets[after][0] if after < len(offsets) else len(flat)
+    return flat[start:end]
+
+
+def _quote_untouched(quote: str, diff: '_Diff', before: tuple | None = None,
+                     after: tuple | None = None) -> bool:
+    """#736: whether `quote` is in the fixed prose (`diff.after`) and no
+    place it is found comes near a change (`_touches(near=True)`): words
+    put in or taken out beside a quote can change what it says. With
+    `before` and `after` (`_word_offsets` of each prose; #736's review
+    SF-3), the characters around each place, its punctuation included,
+    must also be in the prose before: "dead." made "dead?" is a change the
+    word diff can't see."""
+    places = _quote_spans(quote, diff.after)
+    if not places or any(_touches(p, diff.after_spans, near=True) for p in places):
+        return False
+    if before is None or after is None:
+        return True
+    return all(_window(after[0], after[1], p) in before[0] for p in places)
+
+
+def _quoted_list(what: str, quotes: list[str]) -> str:
+    first = _one_line(quotes[0])
+    return (f'{what} of {len(quotes)} fact(s) ("{first[:60]}{"…" if len(first) > 60 else ""}"'
+            + (f' and {len(quotes) - 1} more' if len(quotes) > 1 else '') + ')')
+
+
+def _carry_reason(carry: _Extracted, prose: str, context: str, model: str) -> str:
+    """#736: why `carry` (the extraction of the prose before a fix) can't
+    stand for an extraction of `prose`; '' when it can: the same model,
+    shown the same facts in force, registries and scene details; every
+    fact it read (those persistence dropped too) quoted from words of
+    `prose` the fix left alone, away from every change, its punctuation
+    and the characters beside it unchanged (`_quote_untouched`); and, when
+    the fix put words in anywhere, no fact it read a state (#736's review
+    CR-1: words far from a state's quote can end or replace it, "Mara
+    handed Tom the key" leaving "Mara holds the key" in force) and no
+    finding sent to the fix one of the continuity checks' state codes
+    (`carry.state_codes`: a fix for a state writes a change of state). Then
+    the rows are made again from its replies by code, against `prose`."""
+    if carry.model != model:
+        return 'the extraction model differs'
+    if carry.context != context:
+        return ('the facts in force, the registries or the scene\'s details changed since it '
+                'was read')
+    quotes = [e.get('quote') or '' for e in carry.found]
+    if any(not q.strip() for q in quotes):
+        return f'{sum(not q.strip() for q in quotes)} fact(s) read have no quote to check'
+    diff = _diff(carry.prose, prose)
+    never = [q for q in quotes if not _quote_spans(q, diff.before)]
+    if never:
+        return _quoted_list('the prose read never had the quote', never)
+    before, after = _word_offsets(carry.prose), _word_offsets(prose)
+    touched = [q for q in quotes if not _quote_untouched(q, diff, before, after)]
+    if touched:
+        return _quoted_list('the fix changed words or punctuation in or beside the quote',
+                            touched)
+    if any(b > a for a, b in diff.after_spans):
+        states = [q for e, q in zip(carry.found, quotes) if e.get('mutable') == 'state']
+        if states:
+            return _quoted_list('the fix put words in, which can end or change a state: '
+                                'the state', states)
+        if carry.state_codes:
+            return (f'the fix put words in for a state finding '
+                    f'({", ".join(sorted(carry.state_codes))}), which can change a state')
+    return ''
+
+
 def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
              problems: dict[str, list[str]],
              dropped: list[tuple[str, str]], *,
-             reserved: Set[str], ends: list | None = None) -> list[dict[str, str]]:
+             reserved: Set[str], ends: list | None = None,
+             carry: _Extracted | None = None, refused: str = '',
+             read_out: list | None = None) -> list[dict[str, str]]:
     """The scene's commitments read from `prose` against `rows`, each with an
     id no row of `rows` and none of `reserved` has (#599; required, #599's
     review TD-2: `_reserved_ids`). The ends read go to `ends`
     (`extract.Ending`), none applied to `rows`; an `ENDS_HERE` claim on a
     state a later scene leans on is `ends registry` instead
-    (`_route_leaned_on`)."""
-    from storyforge.api import extract_text, invoke_to_file, is_truncated
+    (`_route_leaned_on`).
+
+    #736: with `carry` (the extraction of the prose before a fix), its
+    replies stand for this prose when `_carry_reason` finds nothing against
+    them: no extraction or persistence call; the rows, problems and ends are
+    made from them again by code, against `prose`. Otherwise the scene is
+    extracted as without it (the same requests). `refused` is why the run
+    before had nothing to carry (`_carry_of`). `read_out` gets
+    `(_Extracted, note)`: what this run read or carried, and the log line
+    saying which and why ('' when nothing was offered or refused)."""
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
-    from storyforge.extract import (COMMITMENTS_SCHEMA, build_commitments_prompt,
-                                    commitment_rows, known_for_scene,
-                                    parse_commitments_response, unplaced_rows)
+    from storyforge.extract import (build_commitments_prompt, commitment_rows,
+                                    known_for_scene, unplaced_rows)
     ref_dir = os.path.join(project_dir, 'reference')
     scene = get_scene(scene_id, ref_dir) or {}
     subjects = _subjects(project_dir)
@@ -429,10 +549,49 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
         problems['cap'].append(f'{scene_id} ({left_out})')
         OFFER_LEFT_OUT[scene_id] = left_out
     problems['unplaced'].extend(unplaced_rows(rows, order))
-    prompt = build_commitments_prompt(
-        scene_id, prose, {k: scene.get(k, '') for k in ('title', 'pov', 'location')},
-        registries_text=format_registries_for_prompt(project_dir, exclude=('knowledge',)),
-        known=known, recorded=recorded)
+    details = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
+    registries_text = format_registries_for_prompt(project_dir, exclude=('knowledge',))
+    context = build_commitments_prompt(scene_id, '', details, registries_text=registries_text,
+                                       known=known, recorded=recorded)
+    why_not = _carry_reason(carry, prose, context, model) if carry is not None else ''
+    if carry is not None and not why_not:
+        found = copy.deepcopy(carry.found)
+        verdict = persistence.Verdict(kept=copy.deepcopy(carry.kept),
+                                      dropped=copy.deepcopy(carry.dropped))
+        note = (f'extraction carried from the prose before the fix: no fact\'s quote was '
+                f'changed ({len(found)} fact(s) read); words the fix put in are not read for '
+                f'new facts')
+        source = carry.prose
+    else:
+        found, verdict = _read_commitments(
+            scene_id, prose, build_commitments_prompt(scene_id, prose, details,
+                                                      registries_text=registries_text,
+                                                      known=known, recorded=recorded),
+            model, log_dir)
+        why_not = why_not or refused
+        note = f'extracted again: {why_not}' if why_not else ''
+        source = prose
+    if read_out is not None:
+        read_out.append((_Extracted(source, context, model, copy.deepcopy(found),
+                                    copy.deepcopy(verdict.kept),
+                                    copy.deepcopy(verdict.dropped)), note))
+    dropped.extend((e['statement'], why) for e, why in verdict.dropped)
+    ends = [] if ends is None else ends
+    out = commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
+                          introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
+                          registry_is_plan=True, reserved=reserved, order=order,
+                          ends_out=ends)
+    _route_leaned_on(project_dir, scene_id, rows, order, ends, problems)
+    return out
+
+
+def _read_commitments(scene_id: str, prose: str, prompt: str, model: str,
+                      log_dir: str) -> tuple[list[dict], 'persistence.Verdict']:
+    """The extraction call on `prompt` (asked again once, with a larger
+    budget, when its reply is cut off; #734) and the persistence check on
+    what it read."""
+    from storyforge.api import extract_text, invoke_to_file, is_truncated
+    from storyforge.extract import COMMITMENTS_SCHEMA, parse_commitments_response
     log_file = os.path.join(log_dir, f'gate-extract-{scene_id}.json')
     try:
         response = invoke_to_file(prompt, model, log_file, EXTRACT_ANSWER_TOKENS,
@@ -456,14 +615,7 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                                                           f'gate-persistence-{scene_id}.json'))
     except persistence.PersistenceError as e:
         raise GateError(str(e)) from e
-    dropped.extend((e['statement'], why) for e, why in verdict.dropped)
-    ends = [] if ends is None else ends
-    out = commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
-                          introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
-                          registry_is_plan=True, reserved=reserved, order=order,
-                          ends_out=ends)
-    _route_leaned_on(project_dir, scene_id, rows, order, ends, problems)
-    return out
+    return found, verdict
 
 
 def _route_leaned_on(project_dir: str, scene_id: str, rows: list[dict[str, str]],
@@ -1586,7 +1738,9 @@ def _apply_source(result: GateResult, project_dir: str, scene_id: str, prose: st
     sent, and with none of those, no contradiction and no other blocking
     finding to rule on there is no call (a re-check of an unchanged scene);
     a fix round whose facts and findings are what an earlier run of this
-    process sent reuses its ruling (`gate_source.review`'s memo)."""
+    process sent reuses its ruling (`gate_source.review`'s memo), and so
+    does one with the same facts and fewer findings (#736: a fix's re-check
+    carries its facts, `gate_source._from_earlier`)."""
     from storyforge import gate_source
     ctx = gate_source.setup(project_dir)
     if ctx is None:
@@ -1656,7 +1810,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                check_model: str | None = None,
                introduced_by: str | None = None,
                before: Snapshot | None = None,
-               standing: 'GateResult | None' = None) -> GateResult:
+               standing: 'GateResult | None' = None,
+               carry: 'GateResult | None' = None) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -1666,7 +1821,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
             return _gate_scene(project_dir, scene_id, command=command, prose=prose,
                                log_dir=log_dir, extract_model=extract_model,
                                check_model=check_model, introduced_by=introduced_by,
-                               before=before, standing=standing)
+                               before=before, standing=standing, carry=carry)
         finally:
             _log_spend(meter, project_dir, 'gate', scene_id)
 
@@ -1686,7 +1841,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 check_model: str | None = None,
                 introduced_by: str | None = None,
                 before: Snapshot | None = None,
-                standing: 'GateResult | None' = None) -> GateResult:
+                standing: 'GateResult | None' = None,
+                carry: 'GateResult | None' = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -1706,6 +1862,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     findings still stand: each one this run's check didn't make again
     (`_persists`) is added to its own, so a re-extraction beside findings
     re-reads the facts without a re-roll of the check passing the prose.
+
+    `carry` (#736) is the run of the prose before a fix: its extraction's
+    replies stand for this prose's when no fact's quote was changed
+    (`_carry_of`, `_extract`), so there is no extraction or persistence
+    call; the rows are made again from them by code, and the check, the
+    blocking read and the typed state read this prose as ever.
 
     `before` is the book before the pass that wrote `prose` (`snapshot`;
     None: a new scene or advisor mode; a re-check through `gate_unchanged`
@@ -1816,11 +1978,15 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     # steps ran one after the other, so a finding is kept or left out as
     # it was. The question layer (or the open checker) needs extraction's
     # disputes and the typed state's cast, so it comes after
+    read: list = []
+    carried, refused = _carry_of(carry)
+
     def extract():
         return _extract(project_dir, scene_id, prose, rows, order, introduced_by or command,
                         extract_model or select_model('evaluation'), log_dir,
                         result.problems, result.dropped,
-                        reserved=_reserved_ids(old, loaded, briefs_name), ends=result.ends)
+                        reserved=_reserved_ids(old, loaded, briefs_name), ends=result.ends,
+                        carry=carried, refused=refused, read_out=read)
     calls = [extract]
     if read_blocking:
         calls.append(lambda: _read_blocking(project_dir, scene_id, prose, check_model, log_dir,
@@ -1833,6 +1999,10 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     from storyforge.runner import together
     got = together(*calls)
     result.proposed = got.pop(0)
+    result._extracted, result.extract_note = read[0]
+    if result.extract_note:
+        from storyforge.common import log
+        log(f'  {scene_id}: {result.extract_note}')
     blocked = got.pop(0) if read_blocking else None
     state = got.pop(0) if GATE_CONTINUITY else None
     # A fact the author rejected may not come back as binding
@@ -1901,6 +2071,34 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         return result
     _commit(project_dir, result)
     return result
+
+
+#: #736's review CR-1: the continuity checks whose findings are about a
+#: state (`continuity.CODES`: PHY, KNO): a fix for one writes a change of state
+_STATE_CHECKS = ('life', 'possession', 'injury', 'knowledge')
+
+
+def _carry_of(run: 'GateResult | None') -> tuple['_Extracted | None', str]:
+    """#736: what `run` (the run of the prose before a fix) read, for the
+    re-check to carry, with the state codes among the findings sent to the
+    fix (`_Extracted.state_codes`), and ''; or None and why not (#736's
+    review SF-1: said in the log): it didn't reach extraction, or
+    extraction problems stopped it (`unresolved`: a misquote, a link to
+    nothing, a rejected fact), which its re-check reads again, as before
+    (#734: the fix's re-check re-reads a slip's facts). (None, '') with no
+    `run`."""
+    from dataclasses import replace
+
+    from storyforge.continuity import CODES
+    if run is None:
+        return None, ''
+    if run._extracted is None:
+        return None, 'the run before the fix has no extraction to carry'
+    if run.unresolved:
+        return None, (f'the run before the fix had extraction problems '
+                      f'({_one_line("; ".join(run.unresolved))[:120]})')
+    states = {CODES[k] for k in _STATE_CHECKS} & {f.code for f in run.fixable + run.unverified}
+    return replace(run._extracted, state_codes=frozenset(states)), ''
 
 
 def _reserved_ids(old: Set[str], loaded: list[dict[str, str]],
@@ -3671,7 +3869,7 @@ def _partial_fix(project_dir: str, scene_id: str, command: str, current: str,
         prose = apply_edits(current, good)
         run = gate_scene(project_dir, scene_id, command=command, prose=prose,
                          log_dir=log_dir, extract_model=extract_model,
-                         check_model=check_model, before=before)
+                         check_model=check_model, before=before, carry=before_run)
     except GateError:
         return None
     if not run.passed and _worse(0, before_run, run, _diff(current, prose)):
@@ -3859,9 +4057,13 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             # logs, logs/recheck, logs/recheck-2
             next_dir = os.path.join(logs, 'recheck' if n == 1 else f'recheck-{n}')
             try:
+                # #736: a fix's re-check carries the facts of the run before
+                # it (`_carry_of`); a re-gate of the same prose (nothing to
+                # fix) is there to read them again
                 again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                                    log_dir=next_dir, extract_model=extract_model,
-                                   check_model=check_model, before=before)
+                                   check_model=check_model, before=before,
+                                   carry=result if to_fix else None)
             except GateError as e:
                 if n == 1:
                     raise
