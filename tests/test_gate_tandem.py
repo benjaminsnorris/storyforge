@@ -149,7 +149,9 @@ class TestFirstRun:
         assert [f.code for f in result.open_findings] == ['PHY']
 
     def test_a_finding_both_make_is_one_tagged_both(self, tandem, tmp_path):
-        book = _Book(open_findings=[{**_lamp('Tessa mocked Dorren'), 'code': 'TRT'}])
+        # the same fact (#738's review CR-3: the same words alone are not enough)
+        book = _Book(open_findings=[{**_lamp('Tessa mocked Dorren'), 'code': 'TRT',
+                                     'fact_id': 'tessa-kind'}])
         with patch('storyforge.api._api_request', side_effect=book):
             result = gate.gate_scene(tandem, SCENE, command='advisor',
                                      log_dir=str(tmp_path / 'logs'), extract_model='m',
@@ -242,11 +244,16 @@ class TestJoin:
     """`gate._ask_questions(tandem=)` on its own."""
 
     def _join(self, monkeypatch, tmp_path, existing, got, disputes=(), endings=(),
-              tandem=gate.READ, cleared=(), unruled=(), ended=()):
+              tandem=gate.READ, cleared=(), unruled=(), ended=(), view=None):
         monkeypatch.setattr(questions, 'check_questions', lambda *a, **k: got)
         result = gate.GateResult('s1')
         result.check = CheckResult('s1', findings=list(existing), cleared=list(cleared),
                                    unruled=list(unruled), ended=list(ended))
+        if view is not None:
+            result.open_rulings = view
+        elif tandem == gate.READ:
+            result.open_rulings = gate.OpenRulings.of(result.check, list(disputes),
+                                                      list(endings))
         gate._ask_questions(str(tmp_path), 's1', 'p', [], [], list(disputes), str(tmp_path),
                             result, endings=list(endings), tandem=tandem)
         return result
@@ -315,8 +322,12 @@ class TestJoin:
         result = self._join(monkeypatch, tmp_path, [carried], got, disputes=[d, e],
                             endings=[end], tandem=gate.CARRIED)
         assert result.check.cleared == [e] and result.check.ended == [end]
-        assert 'the open checker found it contradicted, the questions cleared it' in (
-            result.check_notes[0])
+        assert result.check_notes == ['dispute on a: the open checker on the first run found '
+                                      'it contradicted, the questions cleared it; the finding '
+                                      'stands',
+                                      'ending of x: recorded on the questions\' answer alone; '
+                                      'the open checker\'s view was not read again on this '
+                                      're-check']
         assert result.question_notes[-1] == gate.TANDEM_RECHECK_GAP
 
 
@@ -508,3 +519,261 @@ class TestFlags:
         assert seen == [('open', 'storyforge check --pending --open'),
                         ('tandem', 'storyforge check --pending')]
         assert gate.GATE_CHECK_METHOD == 'tandem'
+
+
+# ============================================================================
+# #738's review (PR #767)
+# ============================================================================
+
+class TestSameCheck:
+    """T-1 / CR-3: `_same_check` keeps two problems two."""
+
+    def test_the_same_fact_on_the_same_words_is_one(self):
+        a = _f(code='TRT', quote='Tessa mocked Dorren', fact='tessa-kind', checker=gate.OPEN)
+        b = _f(code='TRT', quote='mocked Dorren', fact='tessa-kind')
+        assert gate._same_check(a, b)
+
+    @pytest.mark.parametrize('b', [
+        _f(code='REL', quote='mocked Dorren', fact='tessa-kind'),        # another code
+        _f(code='TRT', quote='until he left', fact='tessa-kind'),        # other words
+        _f(code='TRT', quote='mocked Dorren', fact='kael-shy',           # another fact
+           source='act1-sc03'),
+        _f('broken-promise', 'TRT', 'Tessa mocked Dorren', 'outcome', ''),  # a promise
+    ])
+    def test_two_stay_two(self, b):
+        a = _f(code='TRT', quote='Tessa mocked Dorren', fact='tessa-kind', checker=gate.OPEN)
+        assert not gate._same_check(a, b)
+
+    def test_two_facts_in_one_sentence_stay_two(self):
+        # the same source scene, other established words, no shared fact id
+        a = _f(code='PHY', quote='Tessa mocked Dorren', fact='', checker=gate.OPEN)
+        b = _f(code='PHY', quote='mocked Dorren', fact='tessa-kind')
+        b.established_quote = 'Tessa is never cruel to Dorren'
+        assert not gate._same_check(a, b)
+
+    def test_two_different_promises_stay_two(self):
+        a = _f('broken-promise', 'PRM', '', 'outcome', '', gate.OPEN)
+        a.established_quote = 'Tessa apologizes'
+        b = _f('broken-promise', 'PRM', '', 'outcome', '')
+        b.established_quote = 'Dorren forgives her'
+        assert not gate._same_check(a, b)
+
+
+class TestReviewJoin(TestJoin):
+    def test_a_question_contradiction_left_out_as_a_repeat_still_rules(
+            self, monkeypatch, tmp_path):
+        # SF-1: the questions found the dispute contradicted on a shared
+        # layer's words; the open checker cleared it: a contradiction, not
+        # cleared, and said
+        d = Dispute('tessa-kind', 's', 'c')
+        blk = _f(code='TRT', quote='Tessa mocked Dorren', fact='')
+        mine = _f(code='TRT', quote='mocked Dorren', fact='tessa-kind', source='')
+        got = questions.QuestionResult('s1', findings=[mine])
+        result = self._join(monkeypatch, tmp_path, [blk], got, disputes=[d], cleared=[d])
+        assert result.check.findings == [blk] and result.check.cleared == []
+        assert result.check.unruled == []
+        assert result.check_notes == ['dispute on tessa-kind: the questions found it '
+                                      'contradicted, the open checker cleared it; the '
+                                      'finding stands']
+
+    def test_cleared_by_the_questions_alone_is_said(self, monkeypatch, tmp_path):
+        # T-3: the whole list, both directions
+        d = Dispute('a', 's', 'c')
+        got = questions.QuestionResult('s1', cleared=[d])
+        result = self._join(monkeypatch, tmp_path, [], got, disputes=[d], unruled=[d])
+        assert result.check.cleared == [d]
+        assert result.check_notes == ['dispute on a: the questions cleared it, the open '
+                                      'checker gave no ruling; cleared']
+
+    def test_a_recheck_keeps_the_first_runs_clearing_and_ending(self, monkeypatch, tmp_path):
+        # CR-1/CR-2: carried rulings; the questions split now
+        d, end, new = Dispute('a', 's', 'c'), Dispute('x', 's', 'c'), Dispute('y', 's', 'c')
+        view = gate.OpenRulings({'a': 'c'}, {'a'}, {'x': 'c'}, set())
+        got = questions.QuestionResult('s1', unruled=[d], ended=[end, new])
+        result = self._join(monkeypatch, tmp_path, [], got, disputes=[d],
+                            endings=[end, new], tandem=gate.CARRIED, view=view)
+        assert result.check.cleared == [d] and result.check.unruled == []
+        # x: the open checker said not ending, on words the fix left alone
+        assert result.check.ended == [new]
+        assert result.check_notes == [
+            'dispute on a: the open checker on the first run cleared it, the questions gave '
+            'no ruling; cleared',
+            'ending of x: the questions found the scene shows it ending, the open checker '
+            'on the first run did not; not recorded',
+            'ending of y: recorded on the questions\' answer alone; the open checker\'s view '
+            'was not read again on this re-check']
+
+    def test_the_brief_reports_join_without_repeats(self, monkeypatch, tmp_path):
+        # T-7
+        got = questions.QuestionResult(
+            's1', kept=[('k1', 'q'), ('k2', 'q2')], kept_unverified=[('k1', 'q', 'short'),
+                                                                   ('k3', 'q', 'short')],
+            plan_departures=[_f('broken-promise', 'PRM', '', 'p1', ''),
+                             _f('broken-promise', 'PRM', '', 'p2', '')],
+            unknown_brief_items=['a', 'b'], asked_fact_ids=['f1', 'f2', 'f1'])
+        monkeypatch.setattr(questions, 'check_questions', lambda *a, **k: got)
+        result = gate.GateResult('s1', asked_fact_ids=['f2'])
+        result.check = CheckResult('s1', kept=[('k1', 'open')],
+                                   kept_unverified=[('k2', 'q2', 'short')],
+                                   plan_departures=[_f('broken-promise', 'PRM', '', 'p1', '')],
+                                   unknown_brief_items=['a'])
+        result.open_rulings = gate.OpenRulings()
+        gate._ask_questions(str(tmp_path), 's1', 'p', [], [], [], str(tmp_path), result,
+                            tandem=gate.READ)
+        assert result.check.kept == [('k1', 'open'), ('k2', 'q2')]
+        assert result.check.kept_unverified == [('k3', 'q', 'short')]
+        assert [f.fact_id for f in result.check.plan_departures] == ['p1', 'p2']
+        assert result.check.unknown_brief_items == ['a', 'b']
+        assert result.asked_fact_ids == ['f2', 'f1']
+
+
+class TestReviewCarry(TestCarryOpen):
+    def test_a_verified_quote_clears_the_old_problem(self, monkeypatch, tmp_path):
+        # SF-4
+        f = _f(quote='not there', checker=gate.OPEN, problem='the quote is not in the scene')
+        result, _ = self._carry(
+            monkeypatch, tmp_path, [f], PROSE, PROSE.replace('mocked', 'thanked'),
+            answer=lambda again: questions.Resolved(standing=[(again[0], 'Tessa thanked')]))
+        [g] = result.check.findings
+        assert (g.scene_quote, g.problem) == ('Tessa thanked', '')
+
+    def test_words_changed_where_they_stood_are_asked_though_found_elsewhere(
+            self, monkeypatch, tmp_path):
+        # T-8: the quote twice before the fix; the fix changes the first
+        twice = f'{LAMP} at dusk. Tessa mocked Dorren once more. Later {LAMP} at dawn.'
+        after = twice.replace(f'{LAMP} at dusk', 'a candle guttered at dusk', 1)
+        f = _f(checker=gate.OPEN)
+        _, asked = self._carry(monkeypatch, tmp_path, [f], twice, after)
+        assert asked == [f]
+
+    def test_rulings_carry_only_on_untouched_words(self, monkeypatch, tmp_path):
+        # CR-1/CR-2: the claim's words decide
+        before = ('Tessa mocked Dorren until he left the study and walked far into the '
+                  'night. Kael healed by morning.')
+        after = before.replace('mocked', 'thanked')
+        run_view = gate.OpenRulings({'a': 'Tessa mocked Dorren', 'b': 'healed by morning'},
+                                    {'a', 'b'}, {'e': 'Kael healed by morning'}, {'e'})
+        run = gate.GateResult('s1')
+        run.open_findings, run.open_prose, run.open_rulings = [], before, run_view
+        result = gate.GateResult('s1')
+        result.check = CheckResult('s1')
+        ds = [Dispute('a', 's', 'Tessa mocked Dorren'), Dispute('b', 's', 'healed by morning')]
+        gate._carry_open('s1', after, run, ds, str(tmp_path), result,
+                         endings=[Dispute('e', 's', 'Kael healed by morning')])
+        assert result.open_rulings == gate.OpenRulings(
+            {'b': 'healed by morning'}, {'b'}, {'e': 'Kael healed by morning'}, {'e'})
+        assert result.check_notes[-1] == (
+            'the open checker\'s first-run ruling on 1 item(s) not carried, the fix changed '
+            'the words it ruled on (the questions alone rule them): dispute on a')
+
+
+class TestReviewWiring:
+    """T-2: the runs that make no open reading are handed the one before."""
+
+    def _capture(self, monkeypatch):
+        seen = []
+
+        def fake(*a, **k):
+            seen.append(k)
+            r = gate.GateResult('s1')
+            r.check = CheckResult('s1')
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', fake)
+        return seen
+
+    def test_reextract_hands_on_the_run(self, monkeypatch, tmp_path):
+        seen = self._capture(monkeypatch)
+        run = gate.GateResult('s1')
+        run.check = CheckResult('s1')
+        gate._reextract(str(tmp_path), 's1', 'draft', 'p', run, str(tmp_path),
+                        extract_model='m', check_model='m', before=None,
+                        fallback_dir=str(tmp_path))
+        assert seen[0]['open_from'] is run
+
+    def test_partial_fix_hands_on_the_run_before(self, monkeypatch, tmp_path):
+        seen = self._capture(monkeypatch)
+        before = gate.GateResult('s1')
+        monkeypatch.setattr(gate, '_introduced', lambda *a: [_f()])
+        monkeypatch.setattr(gate, '_bad_edits', lambda *a: [0])
+        monkeypatch.setattr(gate, 'apply_edits', lambda prose, edits: 'kept')
+        gate._partial_fix(str(tmp_path), 's1', 'draft', 'p', before, gate.GateResult('s1'),
+                          None, [{'find': 'a'}, {'find': 'b'}], log_dir=str(tmp_path),
+                          extract_model='m', check_model='m', before=None)
+        assert seen[0]['open_from'] is before and seen[0]['carry'] is before
+
+
+@pytest.mark.continuity
+class TestTandemEndToEnd:
+    """T-4: tandem runs through the callers."""
+
+    def test_a_recheck_of_unchanged_prose_is_a_first_run(self, tandem, tmp_path):
+        book = _Book()
+        with patch('storyforge.api._api_request', side_effect=book):
+            result, _ = gate.gate_unchanged(tandem, SCENE, command='recheck',
+                                            log_dir=str(tmp_path / 'logs'),
+                                            extract_model='m', check_model='m')
+        assert book.calls.count('open') == gate.GATE_READINGS
+        assert 'questions' in book.calls and result.check_notes[0].startswith('first run')
+
+    def test_a_carried_finding_and_a_continuity_slip_on_its_words_are_one(
+            self, tandem, tmp_path, monkeypatch):
+        # CR-4: the carry comes before the shared layers' findings
+        slip = _f(code='PHY', quote=LAMP)
+        real = gate._read_continuity
+
+        def read(*a, **k):
+            got = real(*a, **k)
+            got.findings.append(slip)
+            return got
+        monkeypatch.setattr(gate, '_read_continuity', read)
+        book = _Book()
+        with patch('storyforge.api._api_request', side_effect=book):
+            out = gate.gate_and_fix(tandem, SCENE, command='draft', prose=PROSE,
+                                    log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                    check_model='m',
+                                    fixer=_fixer(PROSE.replace('mocked', 'thanked')))
+        assert [(f.code, f.carried) for f in out.result.findings] == [('PHY', gate.UNTOUCHED)]
+
+    def test_a_reextraction_after_the_fix_makes_no_open_reading(self, tandem, tmp_path,
+                                                                monkeypatch):
+        book = _Book()
+        slips = iter([['m1: "x" is not in the scene']])
+        monkeypatch.setattr(gate, '_slips_beside_findings', lambda r: next(slips, []))
+        with patch('storyforge.api._api_request', side_effect=book):
+            out = gate.gate_and_fix(tandem, SCENE, command='draft', prose=PROSE,
+                                    log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                    check_model='m',
+                                    fixer=_fixer(PROSE.replace('mocked', 'thanked')))
+        assert out.reextraction is not None
+        assert book.calls.count('open') == gate.GATE_READINGS
+        assert [f.carried for f in out.result.findings] == [gate.UNTOUCHED]
+
+
+class TestReviewCommands:
+    def test_write_refuses_the_default_without_continuity(self, project_dir, monkeypatch,
+                                                         capsys):
+        # T-5: the default tandem needs the typed state; --open doesn't
+        from storyforge import cmd_write
+        monkeypatch.setattr(gate, 'GATE_CHECK_METHOD', 'tandem')
+        monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
+        with pytest.raises(SystemExit) as e:
+            cmd_write.main(['--coaching', 'full', '--scenes', SCENE])
+        assert e.value.code == 1
+        assert ('the gate (its default check, both checkers) needs the gate\'s continuity'
+                in capsys.readouterr().out)
+        # --open runs without the typed state: a dry run goes through
+        cmd_write.main(['--open', '--dry-run', '--coaching', 'full', '--scenes', SCENE])
+        assert 'continuity checks' not in capsys.readouterr().out
+
+    def test_recheck_over_the_threshold_names_the_runs_flag(self, project_dir, tmp_path,
+                                                            monkeypatch, capsys):
+        # T-6
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '0.1')
+        gate.mark_pending(project_dir, 'act2-sc01', 'recheck', 're-check: x')
+        with gate.forced_check_method('open'), \
+                patch('storyforge.api._api_request', side_effect=AssertionError('spent')):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path))
+        assert run.over_budget
+        assert '`storyforge check --pending --open`' in capsys.readouterr().out

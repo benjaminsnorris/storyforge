@@ -399,6 +399,10 @@ class GateResult:
     #: (`_carry_open`); None when no open reading is behind this run
     open_findings: 'list[Finding] | None' = field(default=None, repr=False, compare=False)
     open_prose: str = field(default='', repr=False, compare=False)
+    #: #738: under `tandem`, the open checker's rulings on disputes and
+    #: endings standing in this run (`OpenRulings`: its own reading's, or
+    #: those carried), for a re-check to carry (`_carry_rulings`)
+    open_rulings: 'OpenRulings | None' = field(default=None, repr=False, compare=False)
     #: #736: on the re-check after a fix, whether extraction was carried from
     #: the run before it or read again, and why (`_extract`'s note), for the
     #: log; '' on a run that isn't a fix's re-check
@@ -2119,8 +2123,13 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     disputes = _disputes(result, rows)
     endings = _endings(result, rows)
     if not read_open:
-        # filled after the typed state is read (`_carry_open`, `_ask_questions`)
+        # filled after the typed state is read (`_ask_questions`)
         result.check = CheckResult(scene_id)
+        if carry_open:
+            # where the open reading would have put its findings: before
+            # the shared layers', so one slip is not two (#738's review CR-4)
+            _carry_open(scene_id, prose, open_from, disputes, log_dir, result,
+                        endings=endings)
     else:
         try:
             result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
@@ -2137,6 +2146,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 f.checker = OPEN
             result.open_findings = result.check.findings + result.check.unverified
             result.open_prose = prose
+            result.open_rulings = OpenRulings.of(result.check, disputes, endings)
             result.check_notes.append(
                 f'first run: the open checker ({GATE_READINGS} reading(s)) and the questions '
                 f'both read it')
@@ -2163,8 +2173,6 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         log(f'  {scene_id}: {result.blocking_note}')
     if GATE_CONTINUITY:
         records = _merge_continuity(scene_id, state, result)
-        if carry_open:
-            _carry_open(scene_id, prose, open_from, disputes, log_dir, result)
         if ask:
             _ask_questions(project_dir, scene_id, prose, rows, records, disputes, log_dir,
                            result, endings=endings,
@@ -4733,20 +4741,85 @@ def _from_open(f: Finding) -> bool:
     return f.checker in (OPEN, BOTH)
 
 
+@dataclass
+class OpenRulings:
+    """#738: the open checker's rulings in a tandem run, by fact id, for a
+    re-check to carry: the disputes and endings it was asked (each with
+    the claim extraction read, `Dispute.claim`, whose words place it in the
+    prose), which disputes it cleared and which endings it found the scene
+    shows. A dispute it ruled a contradiction is a finding
+    (`GateResult.open_findings`), carried as findings are."""
+    disputes: dict[str, str] = field(default_factory=dict)
+    cleared: set[str] = field(default_factory=set)
+    endings: dict[str, str] = field(default_factory=dict)
+    ended: set[str] = field(default_factory=set)
+
+    @classmethod
+    def of(cls, check: CheckResult, disputes: list[Dispute],
+           endings: list[Dispute]) -> 'OpenRulings':
+        """The open checker's own reading's rulings (`check`, before the
+        question layer joins it)."""
+        return cls({d.fact_id: d.claim for d in disputes}, {d.fact_id for d in check.cleared},
+                   {d.fact_id: d.claim for d in endings}, {d.fact_id for d in check.ended})
+
+
+def _words_untouched(text: str, diff: '_Diff | None') -> bool:
+    """#738: whether `text` lies in words the fix left alone, in the prose
+    before it (`_place` `ALONE`); always on the same prose (`diff` None).
+    Words not found there can't be shown untouched: no."""
+    if diff is None:
+        return True
+    return bool(text.strip()) and _place(*_side(text, diff, before=True)) == ALONE
+
+
+def _carry_rulings(run: 'GateResult', disputes: list[Dispute], endings: list[Dispute],
+                   diff: '_Diff | None', result: 'GateResult') -> None:
+    """#738: the open checker's first-run rulings (`run.open_rulings`) a
+    re-check keeps: each on a dispute or ending this run asks again with
+    the same claim, whose words the fix left alone (`_words_untouched`).
+    One asked again whose words the fix changed (or whose claim changed)
+    is not carried, and the notes say so; the questions alone rule it.
+    The kept ones are this run's `open_rulings`, for the next."""
+    view = run.open_rulings or OpenRulings()
+    out = OpenRulings()
+    lost = []
+    for kind, asked, ruled, now in (('dispute', view.disputes, view.cleared, disputes),
+                                    ('ending', view.endings, view.ended, endings)):
+        for d in now:
+            if d.fact_id not in asked:
+                continue
+            claim = asked[d.fact_id]
+            if claim == d.claim and _words_untouched(claim, diff):
+                (out.disputes if kind == 'dispute' else out.endings)[d.fact_id] = claim
+                if d.fact_id in ruled:
+                    (out.cleared if kind == 'dispute' else out.ended).add(d.fact_id)
+            else:
+                lost.append(f'{kind} on {d.fact_id}')
+    result.open_rulings = out
+    if lost:
+        result.check_notes.append(
+            f'the open checker\'s first-run ruling on {len(lost)} item(s) not carried, the '
+            f'fix changed the words it ruled on (the questions alone rule them): '
+            + ', '.join(lost))
+
+
 def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dispute],
-                log_dir: str, result: 'GateResult') -> None:
+                log_dir: str, result: 'GateResult', endings: list[Dispute] = ()) -> None:
     """#738: a tandem run that makes no open reading carries `run`'s open
-    findings (`open_findings`, on `open_prose`) into its check. One whose
-    scene quote lies in words the fix left alone (`_in_untouched_text`, on
-    the prose before it; all of them, on the same prose) stands as it was
+    findings (`open_findings`, on `open_prose`) into its check, where the
+    open reading would have put them (before the shared layers' findings,
+    so a continuity finding on the same words is one slip, not two). One
+    whose scene quote lies in words the fix left alone (`_in_untouched_text`,
+    on the prose before it; all of them, on the same prose) stands as it was
     (`UNTOUCHED`). The rest (words changed or next to a change, a quote not
     in the prose, a broken promise with no words) are asked again in this
     prose (`questions.ask_resolved`): resolved, it is dropped and named in
     `check_notes`; otherwise it stands (`STILL_THERE`), on the words the
-    asking gave, or with none: unverified (`CARRIED_UNPLACED`) for a
-    contradiction, a broken promise as it was. A ruling on a dispute this
-    run's extraction no longer raises doesn't stand (#734's review CR-4,
-    as `_carry_standing`). What stands is this run's `open_findings`, for
+    asking gave (verified), or with none: unverified (`CARRIED_UNPLACED`)
+    for a contradiction, a broken promise as it was. A ruling on a dispute
+    this run's extraction no longer raises doesn't stand (#734's review
+    CR-4, as `_carry_standing`). Its rulings on disputes and endings carry
+    too (`_carry_rulings`). What stands is this run's `open_findings`, for
     the next. A failed asking is a `GateError`."""
     from dataclasses import replace
 
@@ -4763,6 +4836,7 @@ def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dis
         else:
             again.append(f)
     still, resolved = [], []
+    notes = []
     if again:
         try:
             got = ask_resolved(scene_id, prose, again, model=resolve_model(),
@@ -4771,43 +4845,51 @@ def _carry_open(scene_id: str, prose: str, run: 'GateResult', disputes: list[Dis
             raise GateError(str(e)) from e
         resolved = got.resolved
         for f, quote in got.standing:
-            if quote or f.kind == 'broken-promise':
-                still.append(replace(f, scene_quote=quote, checker=OPEN, carried=STILL_THERE))
+            if quote:
+                # words of this prose that verify: the old quote's problem is gone
+                still.append(replace(f, scene_quote=quote, checker=OPEN, carried=STILL_THERE,
+                                     problem=''))
+            elif f.kind == 'broken-promise':
+                still.append(replace(f, scene_quote='', checker=OPEN, carried=STILL_THERE))
             else:
                 still.append(replace(f, checker=OPEN, carried=STILL_THERE,
                                      problem=f.problem or CARRIED_UNPLACED))
-        result.check_notes += [f'asking whether they are still there: {n}' for n in got.notes]
+        notes = [f'asking whether they are still there: {n}' for n in got.notes]
     for f in kept + still:
         (result.check.unverified if f.problem else result.check.findings).append(f)
     result.open_findings, result.open_prose = kept + still, prose
     if not earlier:
-        result.check_notes.insert(0, 're-check: no open reading; the open checker found '
-                                     'nothing on the prose before')
-        return
-    said = (f're-check: no open reading; of the open checker\'s {len(earlier)} finding(s) on '
-            f'the prose before, {len(kept)} stand (their words untouched)')
-    if again:
-        said += (f', {len(again)} asked again in this prose: {len(still)} still there, '
-                 f'{len(resolved)} resolved' + (f' ({_finding_names(resolved)})'
-                                                if resolved else ''))
-    if stale:
-        said += (f', {len(stale)} dropped: rulings on disputes this run\'s extraction no '
-                 f'longer raises ({_finding_names(stale)})')
-    result.check_notes.insert(0, said)
+        said = 're-check: no open reading; the open checker found nothing on the prose before'
+    else:
+        said = (f're-check: no open reading; of the open checker\'s {len(earlier)} finding(s) '
+                f'on the prose before, {len(kept)} stand (their words untouched)')
+        if again:
+            said += (f', {len(again)} asked again in this prose: {len(still)} still there, '
+                     f'{len(resolved)} resolved' + (f' ({_finding_names(resolved)})'
+                                                    if resolved else ''))
+        if stale:
+            said += (f', {len(stale)} dropped: rulings on disputes this run\'s extraction no '
+                     f'longer raises ({_finding_names(stale)})')
+    result.check_notes += [said] + notes
+    _carry_rulings(run, disputes, list(endings), diff, result)
 
 
 def _same_check(a: Finding, b: Finding) -> bool:
     """#738: whether the open checker's finding `a` and the question
     layer's `b` are one problem: a contradiction with the same code on
-    overlapping words (as the question layer's are left out beside the
-    other layers'), or the same broken promise (`checker.same_target`)."""
+    overlapping words about the same thing (the same fact id, or
+    `checker.same_target` with a fact needed: the same source and
+    established words), so two facts broken in one sentence stay two; or
+    the same broken promise (`same_target`). When in doubt, two."""
     from storyforge.checker import same_target
     from storyforge.continuity import overlaps
     if a.kind != b.kind:
         return False
     if a.kind == 'broken-promise':
-        return same_target(a, b)
-    return a.code == b.code and overlaps(a.scene_quote, b.scene_quote)
+        return same_target(a, b, need_fact=True)
+    if a.code != b.code or not overlaps(a.scene_quote, b.scene_quote):
+        return False
+    return bool(a.fact_id and a.fact_id == b.fact_id) or same_target(a, b, need_fact=True)
 
 
 def _join_tandem(result: 'GateResult', got, disputes: list[Dispute],
@@ -4821,9 +4903,11 @@ def _join_tandem(result: 'GateResult', got, disputes: list[Dispute],
       and code is left out, as in `questions` mode; the rest are tagged
       `QUESTIONS`.
     - Brief reports: `kept` by fact, the rest without repeats.
-    - Rulings (`_join_rulings`)."""
+    - Rulings (`_join_rulings`), with the facts the questions found
+      contradicted read before any is left out as a repeat."""
     from storyforge.continuity import overlaps
     check = result.check
+    q_found = {f.fact_id for f in list(got.findings) + list(got.unverified) if f.fact_id}
     opened = [f for f in check.findings + check.unverified if _from_open(f)]
     shared = [f for f in check.findings + check.unverified if not f.checker]
     for found, into in ((got.findings, check.findings), (got.unverified, check.unverified)):
@@ -4851,12 +4935,18 @@ def _join_tandem(result: 'GateResult', got, disputes: list[Dispute],
                                                    + list(got.unknown_brief_items)))
     check.stale_brief_items = list(dict.fromkeys(check.stale_brief_items
                                                  + list(got.stale_brief_items)))
-    _join_rulings(result, got, disputes, endings, open_read)
+    view = result.open_rulings or OpenRulings()
+    _join_rulings(result, got, disputes, endings, view, q_found, open_read)
 
 
 def _join_rulings(result: 'GateResult', got, disputes: list[Dispute],
-                  endings: list[Dispute], open_read: bool) -> None:
+                  endings: list[Dispute], view: OpenRulings, q_found: set[str],
+                  open_read: bool) -> None:
     """#738: how a tandem run's two checkers rule on one dispute or ending.
+    `view` is the open checker's rulings: its own reading's on a first run
+    (`open_read`), on a re-check those carried from the first run where
+    the fix left their words alone (`_carry_rulings`). `q_found` is every
+    fact the questions found contradicted, those left out as repeats too.
 
     - A dispute either checker reported as a contradiction (a finding
       naming its fact, carried ones included) is a contradiction: a
@@ -4868,52 +4958,60 @@ def _join_rulings(result: 'GateResult', got, disputes: list[Dispute],
     - An ending is recorded only when both say the scene shows it ending
       (#734: every reading of the open checker must, and two askings of the
       questions); either alone records nothing, and the end is held as a
-      no is.
+      no is. On a re-check, one the open checker's view of didn't carry
+      (asked now for the first time, or the fix changed its words) is the
+      questions' alone, and a recorded one says so.
 
-    Every disagreement is a `check_notes` line, so a ruling one checker
-    alone made is never silent. On a re-check (not `open_read`) the open
-    checker gave no rulings: the questions rule, beside the contradictions
-    carried."""
+    Every disagreement, and every ruling one checker alone made on a
+    re-check, is a `check_notes` line, so it is never silent."""
     check = result.check
     checked = [f for f in check.findings + check.unverified if f.checker]
-    found = {f.fact_id for f in checked if f.fact_id}
+    found = {f.fact_id for f in checked if f.fact_id} | q_found
     by_open = {f.fact_id for f in checked if _from_open(f) and f.fact_id}
-    by_questions = {f.fact_id for f in checked if f.checker in (QUESTIONS, BOTH) and f.fact_id}
-    open_cleared = {d.fact_id for d in check.cleared} if open_read else set()
     q_cleared = {d.fact_id for d in got.cleared}
+    first = 'the open checker' if open_read else 'the open checker on the first run'
     cleared, unruled, notes = [], [], []
     for d in disputes:
         rid = d.fact_id
+        seen = rid in view.disputes
         if rid in found:
-            if rid in by_open and rid not in by_questions and rid in q_cleared:
-                notes.append(f'dispute on {rid}: the open checker found it contradicted, the '
+            if rid in by_open and rid not in q_found and rid in q_cleared:
+                notes.append(f'dispute on {rid}: {first} found it contradicted, the '
                              f'questions cleared it; the finding stands')
-            elif rid in by_questions and rid not in by_open and rid in open_cleared:
-                notes.append(f'dispute on {rid}: the questions found it contradicted, the open '
-                             f'checker cleared it; the finding stands')
+            elif rid in q_found and rid not in by_open and rid in view.cleared:
+                notes.append(f'dispute on {rid}: the questions found it contradicted, {first} '
+                             f'cleared it; the finding stands')
             continue
-        if rid in open_cleared or rid in q_cleared:
+        if rid in view.cleared or rid in q_cleared:
             cleared.append(d)
-            if open_read and (rid in open_cleared) != (rid in q_cleared):
-                who, other = (('the open checker', 'the questions') if rid in open_cleared
-                              else ('the questions', 'the open checker'))
-                notes.append(f'dispute on {rid}: {who} cleared it, {other} gave no ruling; '
-                             f'cleared')
+            if rid not in q_cleared:
+                notes.append(f'dispute on {rid}: {first} cleared it, the questions gave no '
+                             f'ruling; cleared')
+            elif seen and rid not in view.cleared:
+                notes.append(f'dispute on {rid}: the questions cleared it, {first} gave no '
+                             f'ruling; cleared')
         else:
             unruled.append(d)
     check.cleared, check.unruled = cleared, unruled
     q_ended = {d.fact_id for d in got.ended}
-    if open_read:
-        open_ended = {d.fact_id for d in check.ended}
-        for d in endings:
-            if (d.fact_id in open_ended) != (d.fact_id in q_ended):
-                who, other = (('the open checker', 'the questions') if d.fact_id in open_ended
-                              else ('the questions', 'the open checker'))
-                notes.append(f'ending of {d.fact_id}: {who} found the scene shows it ending, '
-                             f'{other} did not; not recorded')
-        check.ended = [d for d in endings if d.fact_id in open_ended and d.fact_id in q_ended]
-    else:
-        check.ended = list(got.ended)
+    ended = []
+    for d in endings:
+        rid = d.fact_id
+        if rid not in view.endings:
+            # a re-check: the open checker's view didn't carry
+            if rid in q_ended:
+                ended.append(d)
+                notes.append(f'ending of {rid}: recorded on the questions\' answer alone; the '
+                             f'open checker\'s view was not read again on this re-check')
+            continue
+        if (rid in view.ended) != (rid in q_ended):
+            who, other = ((first, 'the questions') if rid in view.ended
+                          else ('the questions', first))
+            notes.append(f'ending of {rid}: {who} found the scene shows it ending, '
+                         f'{other} did not; not recorded')
+        elif rid in q_ended:
+            ended.append(d)
+    check.ended = ended
     result.check_notes += notes
 
 
