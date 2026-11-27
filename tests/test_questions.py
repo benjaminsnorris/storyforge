@@ -354,6 +354,19 @@ class TestFactsToAsk:
                 row('not-yet', mutable='state', scene='s4')]
         assert self.ask(rows)[0] == ['ends-here', 'now']   # one scene: by id
 
+    def test_a_timeline_state_of_another_scene_is_not_asked(self):
+        # E4, 2026-11-27: name-surfaces' "The scene takes place at night in
+        # Hank's kitchen" (timeline, state, never ended) stopped driving-west
+        night = row('name-surfaces--the-scene-takes-place-at-night', 'timeline',
+                    scene='s1', mutable='state',
+                    statement="The scene takes place at night in Hank's kitchen.")
+        rows = [night, row('hearing-thursday', 'timeline', scene='s1'),
+                row('wound', 'physical', scene='s1', mutable='state')]
+        got = self.pick(rows)
+        assert sorted(r['id'] for r in got.facts) == ['hearing-thursday', 'wound']
+        assert got.scene_bound == [night['id']]
+        assert questions.scene_bound(night) and not questions.scene_bound(rows[1])
+
     def test_not_binding_or_superseded(self):
         rows = [row('planned', status='planned'), row('pending', status='pending'),
                 row('old'), row('new', supersedes='old'),
@@ -1195,6 +1208,15 @@ class TestCheckQuestions:
         assert r.asked_fact_ids[-1] == 'tessa-sulks'
         assert any(n.startswith('1 state trait(s)') and n.endswith('other fact: tessa-sulks')
                    for n in r.notes)
+
+    def test_a_timeline_state_of_another_scene_is_said(self, project_dir):
+        rows = _add_rows(project_dir, {**TESSA_KIND, 'id': 'tessa-awake-two-days',
+                                       'type': 'timeline', 'mutable': 'state',
+                                       'statement': 'Tessa has been awake two days'})
+        r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
+        assert 'tessa-awake-two-days' not in r.asked_fact_ids
+        assert any(n.startswith('1 timeline state(s) of other scenes')
+                   and n.endswith('not asked: tessa-awake-two-days') for n in r.notes)
 
     def test_a_stale_state_trait_past_the_cap_is_named(self, project_dir, monkeypatch):
         from storyforge.elaborate import _read_csv, _write_csv
