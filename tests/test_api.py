@@ -160,6 +160,10 @@ class TestThinkingOff:
         assert self._sent(monkeypatch, entry, tmp_path, think=False)['thinking'] == {
             'type': 'disabled'}
 
+    def test_disabled_is_preferred_when_both_are_listed(self, monkeypatch):
+        entry = _takes('adaptive', 'disabled', 'between_tools')
+        assert self._sent(monkeypatch, entry, think=False)['thinking'] == {'type': 'disabled'}
+
     def test_between_tools_where_disabled_is_refused(self, monkeypatch):
         body = self._sent(monkeypatch, _takes('adaptive', 'between_tools'), think=False)
         assert body['thinking'] == {'type': 'between_tools'}
