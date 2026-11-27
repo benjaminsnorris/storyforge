@@ -4849,23 +4849,26 @@ class TestCarryFactsAcrossFixRounds:
     """#736: every fix round re-ran extraction and persistence, a re-roll of
     about a quarter of the facts though a fix changes about 18 words. The
     re-check after a fix carries the run before's replies when the fix left
-    every fact's quote (and the words beside it) alone; a fact whose quote
-    the fix changed is read again, with the whole scene."""
+    every fact's quote (and the words beside it) alone, and, when it put
+    words in, the scene has no state fact (#736's review CR-1); otherwise
+    the whole scene is read again."""
 
     BLANK = 'Blank parchment. Not even a contour line.'
     END = 'She returned to the new map. Nothing.'
     MOVED = 'She went back to the new map. Nothing.'
+    CUT = 'She returned to the map. Nothing.'   # words taken out only
 
-    def _finding(self):
-        return {'kind': 'contradiction', 'code': 'TIM', 'scene_quote': self.END,
+    def _finding(self, code='TIM'):
+        return {'kind': 'contradiction', 'code': code, 'scene_quote': self.END,
                 'established_scene': 'act1-sc01', 'fact_id': '', 'explanation': 'why',
                 'established_quote': 'Dorren Hayle pressed the brass calipers against the '
                                      'vellum'}
 
-    def _run(self, project_dir, tmp_path, edit, extractions):
+    def _run(self, project_dir, tmp_path, edit, extractions, drop=(), code='TIM'):
         """Gate and fix act1-sc02: the first check finds `END`, the fix makes
         `edit` (find, replace); each extraction returns the next of
-        `extractions`. Returns (the GatedScene, the calls in order)."""
+        `extractions`; persistence drops the statements in `drop`. Returns
+        (the GatedScene, the calls in order)."""
         extractions = iter(extractions)
         calls = []
 
@@ -4873,10 +4876,10 @@ class TestCarryFactsAcrossFixRounds:
             prompt = _prompt_text(body['messages'][0]['content'])
             if _is_persistence(body):
                 calls.append('persistence')
-                return _persistence_reply(body)
+                return _persistence_reply(body, drop)
             if 'tools' in body:
                 calls.append('check')
-                return _text({'findings': [self._finding()] if self.END in prompt else [],
+                return _text({'findings': [self._finding(code)] if self.END in prompt else [],
                               'kept': []})
             if 'edits' in json.dumps(body.get('output_config', {})):
                 calls.append('fix')
@@ -4890,9 +4893,11 @@ class TestCarryFactsAcrossFixRounds:
                                     check_model='m')
         return out, calls
 
-    def _facts(self):
-        return [_commitment(), _commitment(statement='The map is blank where the village was',
-                                           quote=self.BLANK, mutable='state')]
+    BLANK_FACT = 'The map is blank where the village was'
+
+    def _facts(self, mutable='fixed'):
+        return [_commitment(), _commitment(statement=self.BLANK_FACT, quote=self.BLANK,
+                                           mutable=mutable)]
 
     def _committed(self, project_dir):
         return sorted(r['quote'] for r in ledger.load(project_dir)
@@ -4912,6 +4917,10 @@ class TestCarryFactsAcrossFixRounds:
         recheck = os.path.join(out.log_dir, 'recheck')
         assert not [n for n in os.listdir(recheck) if n.startswith(('gate-extract',
                                                                     'gate-persistence'))]
+        # T-7 (#736's review): a carried run keeps the prose the model read,
+        # so the next round is measured against it
+        prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+        assert out.result._extracted.prose == prose and out.first._extracted.prose == prose
 
     def test_a_fact_whose_quote_the_fix_removed_does_not_survive(self, project_dir, tmp_path):
         out, calls = self._run(project_dir, tmp_path,
@@ -4921,8 +4930,9 @@ class TestCarryFactsAcrossFixRounds:
         assert calls[:7] == ['extract', 'persistence', 'check', 'fix',
                              'extract', 'persistence', 'check']
         assert out.first.extract_note == ''
-        assert out.result.extract_note.startswith('extracted again: the fix changed words in '
-                                                  'or beside the quote of 1 fact(s) ("Blank')
+        assert out.result.extract_note.startswith(
+            'extracted again: the fix changed words or punctuation in or beside the quote of '
+            '1 fact(s) ("Blank')
         assert [r['quote'] for r in out.result.proposed] == [HERE]
 
     def test_words_put_in_beside_a_quote_read_the_scene_again(self, project_dir, tmp_path):
@@ -4933,16 +4943,53 @@ class TestCarryFactsAcrossFixRounds:
                                [self._facts(), self._facts()])
         assert calls.count('extract') == 2 and calls.count('persistence') == 2
 
+    def test_a_fact_persistence_dropped_counts(self, project_dir, tmp_path):
+        """T-6 (#736's review): a dropped fact's quote is checked too: the fix
+        may have made it last."""
+        out, calls = self._run(project_dir, tmp_path,
+                               (self.BLANK, 'Blank parchment. Not even a line.'),
+                               [self._facts(), self._facts()], drop=(self.BLANK_FACT,))
+        assert out.first.dropped and calls.count('extract') == 2
+        assert 'quote of 1 fact(s) ("Blank' in out.result.extract_note
+
+    def test_words_put_in_anywhere_read_a_scene_with_a_state_again(self, project_dir,
+                                                                    tmp_path):
+        """CR-1 (#736's review): words far from a state's quote can end it
+        ("Mara handed Tom the key"), so a fix that puts words in doesn't
+        carry a scene with a state fact."""
+        out, calls = self._run(project_dir, tmp_path, (self.END, self.MOVED),
+                               [self._facts('state'), self._facts('state')])
+        assert out.result.passed and calls.count('extract') == 2
+        assert out.result.extract_note.startswith(
+            'extracted again: the fix put words in, which can end or change a state: the '
+            'state of 1 fact(s) ("Blank')
+
+    def test_words_only_taken_out_carry_a_state(self, project_dir, tmp_path):
+        out, calls = self._run(project_dir, tmp_path, (self.END, self.CUT),
+                               [self._facts('state')])
+        assert out.result.passed and calls.count('extract') == 1
+
+    def test_a_fix_for_a_state_finding_that_puts_words_in_reads_again(self, project_dir,
+                                                                      tmp_path):
+        """CR-1: a fix for a possession, life, injury or knowledge finding
+        writes a change of state, though no fact read is a state."""
+        out, calls = self._run(project_dir, tmp_path, (self.END, self.MOVED),
+                               [self._facts(), self._facts()], code='PHY')
+        assert calls.count('extract') == 2
+        assert out.result.extract_note == ('extracted again: the fix put words in for a state '
+                                           'finding (PHY), which can change a state')
+
     def test_a_run_with_extraction_problems_is_not_carried(self, project_dir, tmp_path):
         """A misquote (the extractor's slip) is read again by the fix's
-        re-check, as before (#734)."""
+        re-check, as before (#734), and the log says why (SF-1)."""
         out, calls = self._run(project_dir, tmp_path, (self.END, self.MOVED),
                                [self._facts() + [_commitment(statement='x',
                                                              quote='words not in the scene')],
                                 self._facts()])
         assert out.result.passed, gate.report_lines(out.result)
         assert calls.count('extract') == 2
-        assert out.result.extract_note == ''   # nothing was offered to carry
+        assert out.result.extract_note.startswith(
+            'extracted again: the run before the fix had extraction problems (quote: ')
 
     def test_round_one_with_nothing_to_fix_reads_the_scene_again(self, monkeypatch, tmp_path):
         """A re-gate of the same prose (nothing for the fix) is there to
@@ -4960,32 +5007,78 @@ class TestCarryFactsAcrossFixRounds:
         gate.gate_and_fix('p', SCENE, command='draft', prose='x', log_dir=str(tmp_path))
         assert len(kwargs) >= 2 and kwargs[1]['carry'] is None
 
+    def test_a_partial_fix_carries_the_run_before(self, monkeypatch, tmp_path):
+        """T-5 (#736's review): the partial fix's run gets the run before the
+        fix to carry."""
+        from storyforge.checker import Finding
+        before_run = gate.GateResult(SCENE, check=checker.CheckResult(SCENE))
+        after_run = gate.GateResult(SCENE, check=checker.CheckResult(SCENE))
+        passed = gate.GateResult(SCENE, check=checker.CheckResult(SCENE))
+        kwargs = []
+        monkeypatch.setattr(gate, '_introduced', lambda *a: [
+            Finding('contradiction', 'TIM', 'b', 'act1-sc01', 'e', '', 'why')])
+        monkeypatch.setattr(gate, '_bad_edits', lambda *a: [1])
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: kwargs.append(k) or passed)
+        edits = [{'find': 'a', 'replace': 'A'}, {'find': 'b', 'replace': 'B'}]
+        part = gate._partial_fix('p', SCENE, 'draft', 'a b', before_run, after_run,
+                                 gate._diff('a b', 'A B'), edits, log_dir=str(tmp_path),
+                                 extract_model='m', check_model='m', before=None)
+        assert part is not None and kwargs[0]['carry'] is before_run
+
 
 class TestCarryReason:
     """#736: `_carry_reason`, by code."""
 
     PROSE = 'One two three four five six seven eight nine ten eleven twelve thirteen.'
 
-    def _carry(self, quote, context='c', model='m'):
-        return gate._Extracted(self.PROSE, context, model, [{'quote': quote}], [], [])
+    def _carry(self, quote, context='c', model='m', mutable='fixed', prose=None, codes=()):
+        return gate._Extracted(prose or self.PROSE, context, model,
+                               [{'quote': quote, 'mutable': mutable}], [], [],
+                               state_codes=frozenset(codes))
+
+    def _reason(self, quote, old, new, **kw):
+        return gate._carry_reason(self._carry(quote, **kw), self.PROSE.replace(old, new),
+                                  'c', 'm')
 
     def test_untouched_far_away_carries(self):
-        fixed = self.PROSE.replace('twelve', 'TWELVE-ish')
-        assert gate._carry_reason(self._carry('one two three'), fixed, 'c', 'm') == ''
+        assert self._reason('one two three', 'twelve', 'TWELVE-ish') == ''
 
-    def test_a_change_within_the_near_words_does_not(self):
-        fixed = self.PROSE.replace('six', 'sixty')
-        assert 'the quote of 1 fact(s)' in gate._carry_reason(self._carry('one two three'),
-                                                              fixed, 'c', 'm')
+    @pytest.mark.parametrize('quote,old,carries', [
+        # T-4 (#736's review): 3 unchanged words between a change and the
+        # quote touch it, 4 don't; after the quote and before it
+        ('one two three', 'seven', False), ('one two three', 'eight', True),
+        ('eight nine', 'four', False), ('eight nine', 'three', True)])
+    def test_the_near_window_is_four_words(self, quote, old, carries):
+        assert (self._reason(quote, old, old + 'x') == '') is carries
 
     def test_a_quote_no_longer_in_the_prose_does_not(self):
-        fixed = self.PROSE.replace('two', 'deux')
-        assert gate._carry_reason(self._carry('one two three'), fixed, 'c', 'm')
+        assert 'changed words or punctuation' in self._reason('one two three', 'two', 'deux')
 
-    def test_a_blank_quote_does_not(self):
-        assert gate._carry_reason(self._carry(''), self.PROSE, 'c', 'm')
+    def test_a_punctuation_change_at_a_quote_does_not(self):
+        """SF-3 (#736's review): "dead." made "dead?" passes a word diff."""
+        prose = 'He was dead. The rest of the words here go on and on.'
+        carry = self._carry('He was dead', prose=prose)
+        assert 'punctuation' in gate._carry_reason(carry, prose.replace('dead.', 'dead?'),
+                                                   'c', 'm')
+        assert gate._carry_reason(carry, prose.replace('on and on', 'on, on'), 'c', 'm') == ''
+
+    def test_a_blank_quote_has_its_own_reason(self):
+        """SF-2 (#736's review): not "the fix changed" a quote it never had."""
+        assert self._reason('', 'x', 'x') == '1 fact(s) read have no quote to check'
+
+    def test_a_quote_never_in_the_prose_read_has_its_own_reason(self):
+        assert self._reason('fourteen fifteen', 'x', 'x').startswith(
+            'the prose read never had the quote of 1 fact(s)')
 
     def test_another_context_or_model_does_not(self):
         carry = self._carry('one two three')
         assert 'changed since it was read' in gate._carry_reason(carry, self.PROSE, 'd', 'm')
         assert 'model differs' in gate._carry_reason(carry, self.PROSE, 'c', 'n')
+
+    def test_words_put_in_with_a_state_fact_do_not(self):
+        """CR-1 (#736's review)."""
+        assert 'can end or change a state' in self._reason(
+            'one two three', 'twelve', 'twelve and more', mutable='state')
+        assert self._reason('one two three', 'twelve ', '', mutable='state') == ''
+        assert 'state finding (PHY)' in self._reason('one two three', 'twelve',
+                                                     'twelve and more', codes=('PHY',))
