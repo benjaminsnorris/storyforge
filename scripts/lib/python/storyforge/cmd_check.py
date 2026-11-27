@@ -48,7 +48,10 @@ which used to ask for it with `--pending`, is still taken and changes
 nothing) and doesn't stop at one that fails: each failure is listed
 pending as above (a verified contradiction that stopped it is recorded in
 `working/gate-blocked.csv`, so `--accept` works on that scene), and the run
-goes on, re-check failures included. At the end a summary lists every
+goes on, re-check failures included. A scene committed provisionally
+(`write --keep-going`) that fails again is committed provisionally again
+from this run (#735), so the facts stating what stopped it are in the
+ledger as disputed: before #735 they were left out. At the end a summary lists every
 scene that didn't pass with its findings, the re-checks that failed or
 weren't run, and the exact `storyforge check --accept a,b,c` for the
 scenes this run recorded contradictions for (a scene that couldn't be
@@ -70,7 +73,9 @@ accepts the verified contradictions that stopped each scene's last gate run
 (`working/gate-blocked.csv`, `gate.accept_blocked`): they move to
 `working/gate-reported.csv` as accepted, so later gate runs report them
 instead of stopping, and a failed re-check is listed for a re-check again.
-No model call; it commits, and `--pending` then checks the scenes. Only
+A fact a provisional commit recorded as disputed for one of them comes into
+force (#735). No model call; it commits, and `--pending` then checks the
+scenes. Only
 verified contradictions a gate run recorded can be accepted: broken
 `must` beats, unverified quotes, extraction problems, halts and a check
 that couldn't run still have to be fixed.
@@ -474,6 +479,7 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
         # read again for each scene: earlier scenes' re-checks list more
         row = gate.pending(project_dir).get(scene_id, {})
         recheck = row.get('command') in (gate.RECHECK, gate.RECHECK_FAILED)
+        was_provisional = row.get('command') == gate.PROVISIONAL
         # a failed scene stays listed as it was listed: a re-check keeps its
         # prose's writer
         listed_as = gate.RECHECK_FAILED if recheck else 'advisor'
@@ -555,12 +561,13 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
                 # and the next check overwrites the report
                 count = sum(1 for x in lines if not x.startswith(('NOTE', 'COMMITTED')))
                 first = ' / '.join(gate._one_line(x)[:200] for x in problems[:3])
-                gate.mark_pending(project_dir, scene_id, listed_as,
-                                  f'{count} problem(s)'
-                                  + (f': {first}' + ('; ...' if len(problems) > 3 else '')
-                                     if first else '')
-                                  + f'; see {REPORT_PATH}'
-                                  + (f' ({said})' if said else ''))
+                reason = (f'{count} problem(s)'
+                          + (f': {first}' + ('; ...' if len(problems) > 3 else '')
+                             if first else '')
+                          + f'; see {REPORT_PATH}' + (f' ({said})' if said else ''))
+                gate.mark_pending(project_dir, scene_id, listed_as, reason)
+                if was_provisional:
+                    report += _recommit_provisional(project_dir, result, reason)
                 run.failures[scene_id] = problems or ['did not pass (see the report)']
                 if _contradictions(result):
                     run.recorded.add(scene_id)
@@ -577,6 +584,40 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
                            f'checked: {", ".join(rest)}.', '']
             break
     return run
+
+
+def _recommit_provisional(project_dir: str, result, reason: str) -> list[str]:
+    """#735's repair path: a scene committed provisionally that fails its
+    check again is committed provisionally again from this run
+    (`gate.commit_provisional`), so the facts stating what stopped it are
+    in the ledger as disputed. Before #735 they were left out, and a book
+    gated then is missing them (Pandarus's death). Its listing stays
+    `PROVISIONAL`; the scenes depending on what changed are listed for a
+    re-check (`check --pending` runs them). Returns the report lines."""
+    from storyforge import gate
+    from storyforge.cmd_write import report_changes
+    sid = result.scene_id
+    cannot = gate.can_commit_provisionally(result)
+    if not cannot:
+        try:
+            gate.commit_provisional(project_dir, result, f'provisional: {reason}')
+        except gate.GateError as e:
+            cannot = str(e)
+    if cannot:
+        line = (f'WARNING: {sid} keeps its earlier provisional commit; this run\'s facts '
+                f'were not committed provisionally ({cannot}), so a fact an earlier commit '
+                f'left out is still missing')
+        log(f'  {line}')
+        return [f'- {line}', '']
+    lines = [f'{sid}: committed provisionally again, from this check']
+    lines += [x for x in gate.report_lines(result)
+              if x.startswith(('COMMITTED', 'NOTE (recorded as disputed'))]
+    for x in lines:
+        log(f'  {x}')
+    report_changes(result)
+    lines += [f'{s} listed for a re-check: {sid} changed {why}'
+              for s, why in result.recheck_why.items()]
+    return [f'- {x}' for x in lines] + ['']
 
 
 def _waits_on(project_dir: str, scene_id: str, unsettled: list[str]) -> list[str]:
@@ -726,9 +767,14 @@ def _accept(project_dir: str, scene_ids: list[str]) -> None:
         log('ERROR: could not create or find a branch to work on; nothing accepted.')
         sys.exit(1)
     total = 0
+    from storyforge import audit, ledger
     for sid in scene_ids:
+        promoted: list[str] = []
+        listed: list[str] = []
+        notes: list[str] = []
         try:
-            rows = gate.accept_blocked(project_dir, sid)
+            rows = gate.accept_blocked(project_dir, sid, promoted=promoted, listed=listed,
+                                       notes=notes)
         except gate.GateError as e:
             log(f'ERROR: {sid}: {e}')
             sys.exit(1)
@@ -736,9 +782,27 @@ def _accept(project_dir: str, scene_ids: list[str]) -> None:
         log(f'{sid}: accepted {len(rows)} contradiction(s):')
         for r in rows:
             log(f'  {r["finding"]}')
+        # #735: the facts a provisional commit recorded as disputed for them
+        if promoted:
+            log(f'  in force now (recorded as disputed for these): {", ".join(promoted)}')
+        for n in notes:
+            log(f'  WARNING: {n}')
+        if listed:
+            log(f'  listed for a re-check (gated while those facts were held): '
+                f'{", ".join(listed)}')
+        try:
+            still = gate.held_facts(project_dir, [sid]).get(sid, [])
+        except gate.GateError as e:
+            log(f'WARNING: {sid}: which of its facts are still disputed is unknown ({e}).')
+            still = []
+        if still:
+            log(f'  still disputed, for findings not accepted here (`storyforge check '
+                f'--pending` gates it again): ' + '; '.join(gate._one_line(s) for s in still))
     if not commit_and_push(project_dir, f'Check: accept {total} contradiction(s) in '
                            f'{", ".join(scene_ids)}',
-                           [gate.REPORTED_PATH, gate.BLOCKED_PATH, gate.PENDING_PATH]):
+                           [gate.REPORTED_PATH, gate.BLOCKED_PATH, gate.PENDING_PATH,
+                            f'reference/{ledger.LEDGER_FILE}', audit.LOG_PATH,
+                            audit.SNAPSHOT_PATH]):
         log('ERROR: the commit failed: the files are written but not committed.')
         sys.exit(1)
     log(f'Accepted; they are reported from now on, not blocking. Check the scene(s) again: '
