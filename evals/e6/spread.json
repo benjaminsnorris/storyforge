@@ -60,7 +60,7 @@
       "claim": "what the gate stops on: CP10k in the gate's passed scenes 3.42 -> 2.09 (#480)",
       "claimed_delta": 1.33,
       "metric": "cp10k_passed",
-      "range": 1.694,
+      "range": 2.294,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -68,7 +68,7 @@
       "claim": "what the gate stops on: gate missed 5 -> 4 (#480)",
       "claimed_delta": 1,
       "metric": "gate_missed",
-      "range": 3,
+      "range": 1,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -76,7 +76,7 @@
       "claim": "a second fix round: still failing after the fixes 3 -> 4 (#482)",
       "claimed_delta": 1,
       "metric": "gate_failed",
-      "range": 8,
+      "range": 5,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -84,7 +84,7 @@
       "claim": "a second fix round: fixed 9 -> 10 (#482)",
       "claimed_delta": 1,
       "metric": "gate_fixed",
-      "range": 4,
+      "range": 2,
       "suite": "e4-generation",
       "within_noise": true
     },
@@ -92,7 +92,7 @@
       "claim": "a second fix round: CP10k in passed scenes 2.09 -> 2.17 (#482)",
       "claimed_delta": 0.08000000000000007,
       "metric": "cp10k_passed",
-      "range": 1.694,
+      "range": 2.294,
       "suite": "e4-generation",
       "within_noise": true
     }
@@ -115,9 +115,9 @@
       "run3": "3fb62cd707582d5c11fda49ac55599e25ca08749"
     },
     "e4-generation": {
-      "run1": "046ab0fd2449655c3947c901b683a76cd4c93b55",
-      "run2": "046ab0fd2449655c3947c901b683a76cd4c93b55",
-      "run3": "046ab0fd2449655c3947c901b683a76cd4c93b55"
+      "run1": "44f0f47d5275425c847f889b212f94975dd95792",
+      "run2": "44f0f47d5275425c847f889b212f94975dd95792",
+      "run3": "44f0f47d5275425c847f889b212f94975dd95792"
     },
     "e8-revision-safety": {
       "run1": "3fb62cd707582d5c11fda49ac55599e25ca08749",
@@ -1098,6 +1098,20 @@
       }
     },
     "e4-generation": {
+      "PHY.contradictions": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "missing_in": [
+          "run1",
+          "run3"
+        ],
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1
+        ]
+      },
       "PRM.broken_promises": {
         "max": 0,
         "mean": 0.0,
@@ -1138,12 +1152,12 @@
       },
       "bps_all": {
         "max": 0.174,
-        "mean": 0.144667,
-        "min": 0.13,
-        "range": 0.044,
-        "sd": 0.025403,
+        "mean": 0.130333,
+        "min": 0.087,
+        "range": 0.087,
+        "sd": 0.043501,
         "values": [
-          0.13,
+          0.087,
           0.13,
           0.174
         ]
@@ -1186,170 +1200,170 @@
       },
       "broken_promises_all": {
         "max": 4,
-        "mean": 3.333333,
-        "min": 3,
-        "range": 1,
-        "sd": 0.57735,
+        "mean": 3.0,
+        "min": 2,
+        "range": 2,
+        "sd": 1.0,
         "values": [
-          3,
+          2,
           3,
           4
         ]
       },
       "checker_flags": {
-        "max": 2,
-        "mean": 1.0,
-        "min": 0,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          2,
-          1,
-          0
-        ]
-      },
-      "contradictions": {
         "max": 1,
-        "mean": 0.333333,
+        "mean": 0.666667,
         "min": 0,
         "range": 1,
         "sd": 0.57735,
         "values": [
           0,
           1,
+          1
+        ]
+      },
+      "contradictions": {
+        "max": 2,
+        "mean": 0.666667,
+        "min": 0,
+        "range": 2,
+        "sd": 1.154701,
+        "values": [
+          0,
+          2,
           0
         ]
       },
       "contradictions_all": {
-        "max": 11,
-        "mean": 9.0,
-        "min": 8,
-        "range": 3,
-        "sd": 1.732051,
+        "max": 14,
+        "mean": 10.666667,
+        "min": 7,
+        "range": 7,
+        "sd": 3.511885,
         "values": [
-          8,
+          7,
           11,
-          8
+          14
         ]
       },
       "contradictions_in_failed": {
-        "max": 7,
-        "mean": 4.666667,
+        "max": 6,
+        "mean": 4.333333,
         "min": 2,
-        "range": 5,
-        "sd": 2.516611,
+        "range": 4,
+        "sd": 2.081666,
         "values": [
           2,
-          7,
+          6,
           5
         ]
       },
       "contradictions_passed": {
-        "max": 6,
-        "mean": 4.333333,
-        "min": 3,
-        "range": 3,
-        "sd": 1.527525,
+        "max": 9,
+        "mean": 6.333333,
+        "min": 5,
+        "range": 4,
+        "sd": 2.309401,
         "values": [
-          6,
-          4,
-          3
+          5,
+          5,
+          9
         ]
       },
       "cp10k": {
-        "max": 5.893,
-        "mean": 1.964333,
+        "max": 5.51,
+        "mean": 1.836667,
         "min": 0.0,
-        "range": 5.893,
-        "sd": 3.402325,
+        "range": 5.51,
+        "sd": 3.1812,
         "values": [
           0.0,
-          5.893,
+          5.51,
           0.0
         ]
       },
       "cp10k_all": {
-        "max": 4.844,
-        "mean": 3.922,
-        "min": 3.425,
-        "range": 1.419,
-        "sd": 0.799287,
+        "max": 6.012,
+        "mean": 4.597333,
+        "min": 3.014,
+        "range": 2.998,
+        "sd": 1.5061,
         "values": [
-          3.425,
-          4.844,
-          3.497
+          3.014,
+          4.766,
+          6.012
         ]
       },
       "cp10k_checker_all": {
-        "max": 0.856,
-        "mean": 0.432,
+        "max": 0.433,
+        "mean": 0.287333,
         "min": 0.0,
-        "range": 0.856,
-        "sd": 0.428056,
+        "range": 0.433,
+        "sd": 0.248846,
         "values": [
-          0.856,
-          0.44,
-          0.0
+          0.0,
+          0.433,
+          0.429
         ]
       },
       "cp10k_passed": {
-        "max": 3.799,
-        "mean": 3.006667,
-        "min": 2.105,
-        "range": 1.694,
-        "sd": 0.852276,
+        "max": 5.137,
+        "mean": 3.925,
+        "min": 2.843,
+        "range": 2.294,
+        "sd": 1.152512,
         "values": [
-          3.116,
-          3.799,
-          2.105
+          2.843,
+          3.795,
+          5.137
         ]
       },
       "gate_advisory": {
-        "max": 67,
-        "mean": 64.666667,
-        "min": 63,
-        "range": 4,
-        "sd": 2.081666,
+        "max": 71,
+        "mean": 69.0,
+        "min": 66,
+        "range": 5,
+        "sd": 2.645751,
         "values": [
-          63,
-          64,
-          67
+          70,
+          66,
+          71
         ]
       },
       "gate_catch_rate": {
-        "max": 0.667,
-        "mean": 0.49,
-        "min": 0.167,
-        "range": 0.5,
-        "sd": 0.280155,
+        "max": 0.556,
+        "mean": 0.377,
+        "min": 0.2,
+        "range": 0.356,
+        "sd": 0.178008,
         "values": [
-          0.167,
-          0.636,
-          0.667
+          0.2,
+          0.556,
+          0.375
         ]
       },
       "gate_caught": {
-        "max": 7,
-        "mean": 4.0,
+        "max": 5,
+        "mean": 3.0,
         "min": 1,
-        "range": 6,
-        "sd": 3.0,
+        "range": 4,
+        "sd": 2.0,
         "values": [
           1,
-          7,
-          4
+          5,
+          3
         ]
       },
       "gate_failed": {
-        "max": 12,
-        "mean": 8.0,
-        "min": 4,
-        "range": 8,
-        "sd": 4.0,
+        "max": 10,
+        "mean": 7.0,
+        "min": 5,
+        "range": 5,
+        "sd": 2.645751,
         "values": [
-          4,
-          12,
-          8
+          5,
+          10,
+          6
         ]
       },
       "gate_false_alarm": {
@@ -1359,45 +1373,45 @@
         "range": 2,
         "sd": 1.0,
         "values": [
-          3,
+          4,
           5,
-          4
+          3
         ]
       },
       "gate_fixed": {
-        "max": 19,
-        "mean": 17.666667,
-        "min": 15,
-        "range": 4,
-        "sd": 2.309401,
+        "max": 18,
+        "mean": 16.666667,
+        "min": 16,
+        "range": 2,
+        "sd": 1.154701,
         "values": [
-          15,
-          19,
-          19
+          16,
+          16,
+          18
         ]
       },
       "gate_missed": {
         "max": 5,
-        "mean": 3.666667,
-        "min": 2,
-        "range": 3,
-        "sd": 1.527525,
+        "mean": 4.333333,
+        "min": 4,
+        "range": 1,
+        "sd": 0.57735,
         "values": [
-          5,
           4,
-          2
+          4,
+          5
         ]
       },
       "length_drift": {
-        "max": 0.096,
-        "mean": 0.086,
-        "min": 0.08,
-        "range": 0.016,
-        "sd": 0.008718,
+        "max": 0.105,
+        "mean": 0.094333,
+        "min": 0.087,
+        "range": 0.018,
+        "sd": 0.009452,
         "values": [
-          0.096,
-          0.08,
-          0.082
+          0.091,
+          0.087,
+          0.105
         ]
       },
       "refused": {
@@ -1425,26 +1439,26 @@
         ]
       },
       "scenes_passed": {
-        "max": 19,
-        "mean": 15.0,
-        "min": 11,
-        "range": 8,
-        "sd": 4.0,
+        "max": 18,
+        "mean": 16.0,
+        "min": 13,
+        "range": 5,
+        "sd": 2.645751,
         "values": [
-          19,
-          11,
-          15
+          18,
+          13,
+          17
         ]
       },
       "scenes_to_first_gate_failure": {
-        "max": 3,
-        "mean": 2.333333,
+        "max": 4,
+        "mean": 3.0,
         "min": 2,
-        "range": 1,
-        "sd": 0.57735,
+        "range": 2,
+        "sd": 1.0,
         "values": [
           2,
-          2,
+          4,
           3
         ]
       },
@@ -1461,15 +1475,15 @@
         ]
       },
       "voi": {
-        "max": 4.859,
-        "mean": 4.808,
-        "min": 4.75,
-        "range": 0.109,
-        "sd": 0.054836,
+        "max": 4.761,
+        "mean": 4.753667,
+        "min": 4.739,
+        "range": 0.022,
+        "sd": 0.012702,
         "values": [
-          4.75,
-          4.815,
-          4.859
+          4.739,
+          4.761,
+          4.761
         ]
       },
       "voi_author": {
@@ -1485,27 +1499,27 @@
         ]
       },
       "words": {
-        "max": 2870,
-        "mean": 2111.0,
-        "min": 1697,
-        "range": 1173,
-        "sd": 658.218049,
+        "max": 3630,
+        "mean": 2752.333333,
+        "min": 1770,
+        "range": 1860,
+        "sd": 934.406942,
         "values": [
-          1766,
-          1697,
-          2870
+          1770,
+          3630,
+          2857
         ]
       },
       "words_all": {
-        "max": 23355,
-        "mean": 22980.0,
-        "min": 22709,
-        "range": 646,
-        "sd": 335.322233,
+        "max": 23288,
+        "mean": 23197.666667,
+        "min": 23080,
+        "range": 208,
+        "sd": 106.659896,
         "values": [
-          23355,
-          22709,
-          22876
+          23225,
+          23080,
+          23288
         ]
       }
     },
