@@ -734,6 +734,49 @@ class TestAccept:
         assert e.value.code == 1
 
 
+class TestUnfix:
+    """#788: `check --unfix` makes a fixed fact a state fact, names the
+    pending scene it stopped, and commits the ledger, the log and the
+    snapshot (no model call)."""
+
+    def _fixed(self, project_dir):
+        rows = ledger.load(project_dir)
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id='gold-armour', type='trait',
+                         scene_id='act1-sc01', statement='Tessa wears gold armour',
+                         origin='prose', status='binding', mutable='fixed'))
+        ledger.save(project_dir, rows, command='test')
+
+    def test_unfix_commits_and_names_the_held_scene(self, project, capsys):
+        from storyforge import audit
+        project_dir, commits = project
+        self._fixed(project_dir)
+        gate.mark_pending(project_dir, SCENE, 'draft',
+                          '1 problem(s): HALT (supersedes-fixed; the plan calls for this '
+                          'change, so gold-armour is likely mis-typed fixed')
+        with patch('storyforge.api._api_request', side_effect=AssertionError('no call')):
+            cmd_check.main(['--unfix', 'gold-armour'])
+        assert next(r for r in ledger.load(project_dir)
+                    if r['id'] == 'gold-armour')['mutable'] == 'state'
+        msg, paths = commits[-1]
+        assert msg == 'Check: unfix gold-armour'
+        assert set(paths) == {'reference/commitments.csv', audit.LOG_PATH,
+                              audit.SNAPSHOT_PATH}
+        out = capsys.readouterr().out
+        assert f'the scene(s) it stopped ({SCENE})' in out and 'check --pending' in out
+
+    def test_a_fact_that_is_not_fixed_is_an_error(self, project):
+        project_dir, commits = project
+        before = ledger.load(project_dir)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--unfix', 'no-such-fact'])
+        assert e.value.code == 1 and commits == [] and ledger.load(project_dir) == before
+
+    def test_it_takes_no_other_selection(self, project):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--unfix', 'gold-armour', '--pending'])
+        assert e.value.code == 1
+
+
 class TestCheckBudget:
     def test_a_check_by_name_is_forecast_too(self, project, monkeypatch, capsys):
         """It skipped the threshold silently."""

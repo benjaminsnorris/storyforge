@@ -41,8 +41,13 @@ a blank `reviewed`, in tiers (`TIERS`: `fixed` facts, then relationship and
 knowledge, then physical state, then other state facts), grouped by subject
 within each tier.
 
-**The immediate tier** (`halting_conditions`) is for Phase 3's gate; nothing
-but tests calls it yet.
+**The immediate tier** (`halting_conditions`) is the gate's halts; a halt
+the scene's plan calls for (#788) is marked by the gate (`Halt.planned`).
+
+**Unfixing** (`unfix`, #788): the author's `storyforge check --unfix` turns
+binding `fixed` facts into `state` ones, through `ledger.save`, so the log
+records it (`changed`, column `mutable`, command `UNFIX`) and the snapshot
+follows.
 """
 
 from __future__ import annotations
@@ -646,6 +651,13 @@ class Halt:
     kind: str      # one of HALT_KINDS
     fact_id: str   # the proposed fact
     detail: str
+    #: #788: for a `supersedes-fixed` or `changes-fixed` halt the scene's
+    #: plan calls for (`gate._planned_change`): the fixed fact it changes,
+    #: and why the plan calls for it. No prose edit repairs it (the change
+    #: is the scene), so it goes to the author, never the fix: the fixed
+    #: fact is likely mis-typed (`check --unfix`)
+    fixed_id: str = ''
+    planned: str = ''
 
     def __str__(self) -> str:
         return f'{self.fact_id}: {self.detail}'
@@ -677,7 +689,7 @@ def halting_conditions(proposed: list[dict[str, str]],
             if old in fixed:
                 halts.append(Halt('supersedes-fixed', pid,
                                   f'supersedes the fixed fact {old} '
-                                  f'({fixed[old].get("statement", "")!r})'))
+                                  f'({fixed[old].get("statement", "")!r})', fixed_id=old))
         prev = fixed.get(pid)
         if prev is not None:
             diffs = [c for c in ('statement', 'subject', 'type')
@@ -685,9 +697,56 @@ def halting_conditions(proposed: list[dict[str, str]],
             if diffs:
                 halts.append(Halt('changes-fixed', pid,
                                   f'changes the fixed fact\'s {", ".join(diffs)} '
-                                  f'(was {prev.get("statement", "")!r})'))
+                                  f'(was {prev.get("statement", "")!r})', fixed_id=pid))
         if (p.get('confidence') or '').strip().lower() == 'low':
             halts.append(Halt('low-confidence', pid,
                               f'extraction flagged it low-confidence: '
                               f'{p.get("statement", "")!r}'))
     return halts
+
+
+# ============================================================================
+# Unfixing a fact (#788)
+# ============================================================================
+
+#: The writer `unfix` names in the log
+UNFIX = 'unfix'
+
+
+class UnfixError(ValueError):
+    """`unfix` was asked for a fact it can't unfix; nothing was written."""
+
+
+def unfix(project_dir: str, fact_ids: list[str]) -> list[dict[str, str]]:
+    """Make each of `fact_ids` (`mutable` `fixed` in the ledger) a `state`
+    fact, for the author who says it was never meant to hold for the whole
+    book (#788: armour the extractor read as a trait, that a later scene
+    trades away). Written with `ledger.save`, so the log records each as
+    `changed` (column `mutable`, command `UNFIX`) and the snapshot follows.
+    No model call. Returns the changed rows.
+
+    Raises:
+        UnfixError: an id is blank, not in the ledger, or not a fixed fact;
+            every one is named and nothing is written.
+        ledger.LedgerError, ValueError: from `ledger.save` (nothing written).
+    """
+    from storyforge import ledger
+    ids = list(dict.fromkeys(i.strip() for i in fact_ids if i.strip()))
+    if not ids:
+        raise UnfixError('no fact ids given')
+    rows = ledger.load(project_dir)
+    by_id = {r.get('id', ''): r for r in rows}
+    bad = []
+    for fid in ids:
+        row = by_id.get(fid)
+        if row is None:
+            bad.append(f'{fid} is not in reference/{ledger.LEDGER_FILE}')
+        elif (row.get('mutable') or '').strip() != 'fixed':
+            bad.append(f'{fid} is not fixed (mutable is '
+                       f'{(row.get("mutable") or "").strip() or "blank"!r})')
+    if bad:
+        raise UnfixError('; '.join(bad))
+    for fid in ids:
+        by_id[fid]['mutable'] = 'state'
+    ledger.save(project_dir, rows, command=UNFIX)
+    return [by_id[fid] for fid in ids]

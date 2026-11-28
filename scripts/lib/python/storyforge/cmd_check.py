@@ -8,6 +8,7 @@ Usage:
     storyforge check --pending                 # every scene waiting on the gate, all of them
     storyforge check --pending --stop-at-first # ... stopping at the first that fails
     storyforge check --accept act1-sc03        # accept what stopped it, then --pending
+    storyforge check --unfix armour-fact       # a fixed fact that can change (#788)
     storyforge check --blocking                # only each scene's blocking, reported (#626)
     storyforge check --stage-sheet act1-sc03   # blocking by the stage sheet, not the read (#647)
     storyforge check --blocking --stage-sheet  # ... the stage sheet alone, reported
@@ -80,6 +81,13 @@ scenes. Only
 verified contradictions a gate run recorded can be accepted: broken
 `must` beats, unverified quotes, extraction problems, halts and a check
 that couldn't run still have to be fixed.
+
+A halt (a scene that changes a fixed fact) can't be accepted. When the
+scene's plan calls for the change (a plan fact it sets in this scene, or a
+`must:` beat; #788), the halt is reported as a likely mis-typing, never sent
+to the fix. `--unfix FACTS` makes those fixed facts `state` facts (the
+ledger, the audit log and its snapshot; no model call), lists the pending
+scenes whose reason names them, and commits; `--pending` then checks them.
 
 Blocking (#626, #647): the gate reads each scene's blocking alone (hands,
 posture, what is worn, light) with the whole-scene blocking read by default:
@@ -209,6 +217,10 @@ def parse_args(argv):
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
+    parser.add_argument('--unfix', metavar='FACTS',
+                        help='Comma-separated fact IDs: make these fixed facts state facts '
+                             '(they may change later in the book), for a scene halted for '
+                             'changing one (no model call)')
     return parser.parse_args(argv)
 
 
@@ -233,6 +245,15 @@ def main(argv=None):
     method = check_method(args)
     flag = gate.CHECK_FLAGS[method] if method else ''
     think = extract_think(args)
+    if args.unfix:
+        if (args.accept or args.positional or args.scenes or args.act or args.from_seq
+                or args.pending or args.keep_going or args.stop_at_first or args.stage_sheet
+                or args.blocking or method or think is not None):
+            log('ERROR: --unfix takes its own fact list; name nothing else with it '
+                '(unfixing reads no scene).')
+            sys.exit(1)
+        _unfix(project_dir, [f.strip() for f in args.unfix.split(',') if f.strip()])
+        return
     if args.accept:
         if (args.positional or args.scenes or args.act or args.from_seq or args.pending
                 or args.keep_going or args.stop_at_first or args.stage_sheet
@@ -831,6 +852,44 @@ def _accept(project_dir: str, scene_ids: list[str]) -> None:
         sys.exit(1)
     log(f'Accepted; they are reported from now on, not blocking. Check the scene(s) again: '
         f'`storyforge check --pending` (a scene that also had other problems stops on those).')
+
+
+def _unfix(project_dir: str, fact_ids: list[str]) -> None:
+    """`--unfix`: make `fact_ids` state facts (`audit.unfix`), name the
+    pending scenes whose reason names one, and commit. A fact that isn't a
+    fixed one is an error, and nothing is changed."""
+    import re
+    from storyforge import audit, gate, ledger
+    from storyforge.git import commit_and_push, create_branch
+    if not fact_ids:
+        log('ERROR: --unfix needs fact ids.')
+        sys.exit(1)
+    if not create_branch('check', project_dir):
+        log('ERROR: could not create or find a branch to work on; nothing unfixed.')
+        sys.exit(1)
+    try:
+        rows = audit.unfix(project_dir, fact_ids)
+    except (audit.UnfixError, ledger.LedgerError, ValueError) as e:
+        log(f'ERROR: {e}. Nothing unfixed.')
+        sys.exit(1)
+    for r in rows:
+        log(f'{r["id"]}: now a state fact (it may change later in the book): '
+            f'{r.get("statement", "")}')
+    try:
+        held = [sid for sid, p in gate.pending(project_dir).items()
+                if any(re.search(rf'(?<![\w-]){re.escape(r["id"])}(?![\w-])', p['reason'])
+                       for r in rows)]
+    except gate.GateError as e:
+        log(f'WARNING: which pending scenes it stopped is unknown ({e}).')
+        held = []
+    if not commit_and_push(project_dir, f'Check: unfix {", ".join(r["id"] for r in rows)}',
+                           [f'reference/{ledger.LEDGER_FILE}', audit.LOG_PATH,
+                            audit.SNAPSHOT_PATH]):
+        log('ERROR: the commit failed: the files are written but not committed.')
+        sys.exit(1)
+    which = (f'the scene(s) it stopped ({", ".join(held)})' if held
+             else 'the scene(s) it stopped (no pending reason names it)')
+    log(f'Unfixed. Check {which} again: `{gate.pending_command()}`.')
 
 
 def _named(args) -> list[str]:

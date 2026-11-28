@@ -1557,6 +1557,62 @@ def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
                    for item in items(scene.get(col) or '') if not item.must)
 
 
+#: #788: the halts a plan can call for: a scene that changes a fixed fact
+_PLANNABLE_HALTS = ('supersedes-fixed', 'changes-fixed')
+
+
+def _planned_change(project_dir: str, scene_id: str, fact: dict[str, str],
+                    fixed: dict[str, str], rows: list[dict[str, str]],
+                    scene: dict[str, str] | None = None) -> str:
+    """Why the scene's plan calls for `fact`, which changes the binding
+    `fixed` fact `fixed` ('' when it doesn't; #788): a plan fact (origin
+    `plan`, binding or planned) the brief sets in this scene (its row's
+    scene, or listed in the brief's `knowledge_out` or
+    `physical_state_out`) about the subject of either, or a `must:` beat
+    of the brief that `fact`'s quote or statement names
+    (`must.names_beat`). `scene`: the brief row (read when None)."""
+    from storyforge.must import MUST_FIELDS, names_beat
+    if scene is None:
+        scene = _brief_row(project_dir, scene_id)
+    subjects = {(r.get('subject') or '').strip().lower() for r in (fact, fixed)} - {''}
+    listed = {i.strip() for col in ('knowledge_out', 'physical_state_out')
+              for i in (scene.get(col) or '').split(';') if i.strip()}
+    for r in rows:
+        rid = (r.get('id') or '').strip()
+        if (r.get('origin') == 'plan' and r.get('status') in ('binding', 'planned')
+                and rid != (fixed.get('id') or '').strip()
+                and ((r.get('scene_id') or '').strip() == scene_id or rid in listed)
+                and (r.get('subject') or '').strip().lower() in subjects):
+            return f'the plan sets {rid} in this scene ("{r.get("statement", "")}")'
+    for col in MUST_FIELDS:
+        for beat in _must_beats(scene).get(col, []):
+            if any(names_beat(fact.get(k) or '', beat.text) for k in ('quote', 'statement')):
+                return f'the brief\'s must: beat in {col} ("{beat.text}")'
+    return ''
+
+
+def _mark_planned(project_dir: str, scene_id: str, halts: list[audit.Halt],
+                  proposed: list[dict[str, str]],
+                  rows: list[dict[str, str]]) -> list[audit.Halt]:
+    """`halts`, each one the scene's plan calls for (`_planned_change`)
+    marked with why (`Halt.planned`, #788): it still stops the scene, but
+    goes to the author (the fixed fact is likely mis-typed: `check
+    --unfix`), never to the fix."""
+    from dataclasses import replace
+    if not any(h.kind in _PLANNABLE_HALTS for h in halts):
+        return halts
+    by_id = {(r.get('id') or '').strip(): r for r in rows}
+    facts = {(r.get('id') or '').strip(): r for r in proposed}
+    scene = _brief_row(project_dir, scene_id)
+    out = []
+    for h in halts:
+        fact, fixed = facts.get(h.fact_id), by_id.get(h.fixed_id)
+        why = (_planned_change(project_dir, scene_id, fact, fixed, rows, scene)
+               if h.kind in _PLANNABLE_HALTS and fact and fixed else '')
+        out.append(replace(h, planned=why) if why else h)
+    return out
+
+
 def _set_up_here(project_dir: str, scene_id: str,
                  rows: list[dict[str, str]] | None = None) -> set[str]:
     """The binding registry facts (knowledge, physical) the ledger says
@@ -2240,7 +2296,9 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             result.problems['rejected'].append(
                 f'{scene_id}: "{r.get("quote") or r.get("statement")}" restates {rid}, '
                 f'which the author rejected')
-        result.halts = audit.halting_conditions(result.proposed, rows)
+    result.halts = _mark_planned(project_dir, scene_id,
+                                 audit.halting_conditions(result.proposed, rows),
+                                 result.proposed, rows)
     disputes = _disputes(result, rows)
     endings = _endings(result, rows)
     if not read_open:
@@ -2445,11 +2503,19 @@ def can_commit_provisionally(result: GateResult) -> str:
         return 'it was committed'
     if getattr(result, '_ctx', None) is None:
         return 'the gate run did not finish'
+    if any(h.planned for h in result.halts):
+        return ('it changes a fixed fact its plan calls for (unfix the fact: '
+                '`storyforge check --unfix ' + ','.join(_planned_fixed(result)) + '`)')
     if result.halts:
         return 'it changes a fixed fact (a halt)'
     if result.unresolved:
         return 'extraction left problems a commit would write'
     return ''
+
+
+def _planned_fixed(result: GateResult) -> list[str]:
+    """The fixed facts `result`'s plan-called halts change (#788), once each."""
+    return list(dict.fromkeys(h.fixed_id for h in result.halts if h.planned))
 
 
 def commit_provisional(project_dir: str, result: GateResult, reason: str) -> None:
@@ -3599,13 +3665,16 @@ def problems_to_fix(result: GateResult) -> list[str]:
     words that set the fact), contradictions and broken promises, and
     unverified findings, marked as such with why their quotes failed. An
     extraction problem isn't a prose problem, so it isn't here: the re-check
-    extracts again. Neither is a plan conflict (the brief's own words: an
+    extracts again. Neither is a halt the plan calls for (#788: the change
+    is the scene, so the fixed fact is likely mis-typed), a plan conflict (the brief's own words: an
     edit would break the promise), an inherited contradiction (the
     author's, from before the pass) or an advisory broken promise (#642:
     the prose wins over a beat the brief doesn't mark `must:`)."""
     proposed = {r['id']: r for r in result.proposed}
     lines = []
     for h in result.halts:
+        if h.planned:
+            continue    # #788: the change is the scene; the author's to unfix
         row = proposed.get(h.fact_id)
         said = (f' The scene says: "{row.get("quote") or row.get("statement")}".'
                 if row else '')
@@ -4451,7 +4520,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if result.passed:
                     break
             to_fix = problems_to_fix(result)
-            if not to_fix and (result.plan_conflicts or n > 1):
+            if not to_fix and (result.plan_conflicts or n > 1
+                               or any(h.planned for h in result.halts)):
                 break
             # round 1 with nothing for the fix: re-gate the same prose
             misquoted = None
@@ -5505,7 +5575,14 @@ def report_lines(result: GateResult) -> list[str]:
     either way, then what was committed."""
     lines = []
     for h in result.halts:
-        lines.append(f'HALT ({h.kind}): {_one_line(h)}')
+        if h.planned:
+            lines.append(f'HALT ({h.kind}; the plan calls for this change, so {h.fixed_id} is '
+                         f'likely mis-typed fixed: not sent to the fix. If it can change, '
+                         f'`storyforge check --unfix {h.fixed_id}`, then check the scene '
+                         f'again; if it can\'t, fix the brief): {_one_line(h)}; '
+                         f'{_one_line(h.planned)}')
+        else:
+            lines.append(f'HALT ({h.kind}): {_one_line(h)}')
     for item in result.unresolved:
         lines.append(f'EXTRACTION: {_one_line(item)}')
     lines += _held_slips_line(result)
