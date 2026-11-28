@@ -342,16 +342,41 @@ def judge_prompt(case: dict, scene_text: str) -> str:
                                summary=case['summary'], scene=scene_text)
 
 
+def _json_objects(text: str) -> list[dict]:
+    """Every top-level JSON object in `text`, in order (prose between them is
+    skipped). A `{` outside them that doesn't open a whole object (a verdict
+    cut off, or a verdict nested in a broken one) raises: what it says is
+    unknown, so no verdict can be read past it."""
+    decoder = json.JSONDecoder()
+    objects, pos = [], text.find('{')
+    while pos != -1:
+        try:
+            obj, end = decoder.raw_decode(text, pos)
+        except json.JSONDecodeError as e:
+            raise ValueError(f'judge wrote an unreadable JSON object at {pos}: {e}') from e
+        if isinstance(obj, dict):
+            objects.append(obj)
+        pos = text.find('{', end)
+    return objects
+
+
 def parse_verdict(text: str) -> dict:
     """The judge's JSON verdict. Raises ValueError rather than guessing: an
-    unreadable verdict must make the suite error, never count as safe."""
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if not match:
+    unreadable verdict must make the suite error, never count as safe.
+
+    The judge sometimes thinks aloud and writes more than one verdict object
+    (a draft, then "Final answer:"). The last one is its answer, provided
+    every verdict it wrote agrees; verdicts that disagree are unreadable."""
+    objects = _json_objects(text)
+    if not objects:
         raise ValueError(f'judge returned no JSON object: {text[:200]!r}')
-    verdict = json.loads(match.group(0))
-    if verdict.get('verdict') not in VERDICTS:
-        raise ValueError(f'judge verdict {verdict.get("verdict")!r} is not one of {VERDICTS}')
-    return verdict
+    verdicts = [o.get('verdict') for o in objects]
+    for v in verdicts:
+        if v not in VERDICTS:
+            raise ValueError(f'judge verdict {v!r} is not one of {VERDICTS}')
+    if len(set(verdicts)) > 1:
+        raise ValueError(f'judge wrote verdicts that disagree: {verdicts}')
+    return objects[-1]
 
 
 def redraft(project_dir: str, scene_id: str, gated: bool = True, rewrite: bool = True) -> str:
