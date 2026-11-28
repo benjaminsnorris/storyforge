@@ -111,6 +111,81 @@ def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=N
                           check_model='m', **kw)
 
 
+class TestASlipMadeAgainIsHeld:
+    """E4's re-record (#784): `waking-hank`, `waking-maren` and
+    `missing-persons` stopped on a quote extraction gave twice not as the
+    prose has it ("she had to look at" for "she'd had to look at", "had
+    not" for "hadn't", "knows" for "knew"). The re-extraction (#598) read
+    the same prose and made the same slip; the scene stopped on the gate's
+    own extraction. Now the second reading's slipped fact is held back:
+    not recorded, said in a NOTE, and the scene isn't stopped for it."""
+    # waking-maren, run 3: the prose has "she'd had to look at"
+    SLIP = 'a week of photographs she had to look at long enough to describe'
+
+    def _slipped(self):
+        return _commitment(statement='Maren worked the Arndt hearing', quote=self.SLIP)
+
+    def test_the_second_reading_holds_the_slipped_fact_back(self, project_dir, tmp_path):
+        before = {r['id'] for r in ledger.load(project_dir)}
+        result = _gate(project_dir, tmp_path, [_commitment(), self._slipped()],
+                       hold_slips=True)
+        assert result.passed and result.committed and result.unresolved == []
+        added = [r for r in ledger.load(project_dir) if r['id'] not in before]
+        assert [r['quote'] for r in added] == [HERE]
+        held_id = f'{SCENE}--maren-worked-the-arndt-hearing'
+        assert result.slips_held == [f'{held_id}: "{self.SLIP[:60].rstrip()}…" is not in '
+                                     f'the scene']
+        assert any(line.startswith('NOTE (not recorded: extraction misquoted these again')
+                   and held_id in line for line in gate.report_lines(result))
+        assert gate.blocking_lines(gate.report_lines(result)) == []
+
+    def test_the_first_reading_still_stops_on_it(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment(), self._slipped()])
+        assert result.unresolved and not result.passed and result.slips_held == []
+
+    def test_a_held_fact_still_halts(self, project_dir, tmp_path):
+        """Holding a slip back keeps every finding: a fixed fact the slipped
+        reading supersedes still halts."""
+        rows = ledger.load(project_dir)
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id='eyes', type='trait',
+                         statement='Her eyes are grey', origin='prose', status='binding',
+                         mutable='fixed', introduced_by='draft', scene_id='act1-sc01'))
+        ledger.save(project_dir, rows, command='test')
+        result = _gate(project_dir, tmp_path,
+                       [_commitment(quote=self.SLIP, supersedes='eyes')], hold_slips=True)
+        assert [h.kind for h in result.halts] == ['supersedes-fixed']
+        assert not result.passed and not result.committed and result.slips_held
+
+    def test_gate_and_fix_passes_a_scene_whose_extraction_slips_twice(
+            self, project_dir, tmp_path):
+        prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+        commitments = [_commitment(), self._slipped()]
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': commitments})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=prose,
+                                    log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                    check_model='m', fix_model='m')
+        assert out.result.passed and out.result.committed and not out.fixed
+        assert out.reextraction.outcome == gate.REGATE_PASSED
+        assert out.reextraction.held == out.result.slips_held != []
+        assert 'held back, not recorded' in out.reextraction.summary()
+
+    def test_a_fix_recheck_carrying_a_held_reading_holds_it_again(self, project_dir, tmp_path):
+        """#736: a fix's re-check carries the run before's replies and rebuilds
+        its rows by code, the slipped one too; the retry has been had, so it
+        stays held rather than stopping the re-check."""
+        held = _gate(project_dir, tmp_path, [_commitment(), self._slipped()],
+                     findings=[_contradiction()], hold_slips=True)
+        assert not held.passed and held.slips_held
+        again = _gate(project_dir, tmp_path, [_commitment(), self._slipped()], carry=held)
+        assert again.unresolved == [] and again.slips_held == held.slips_held
+        assert again.passed
+
+
 class TestCommit:
     def test_a_clean_scene_commits_its_commitments(self, project_dir, tmp_path):
         result = _gate(project_dir, tmp_path, [_commitment()])
@@ -2342,9 +2417,12 @@ def test_a_misquote_after_a_fix_no_longer_stops_write(project_dir, tmp_path, cap
 
 
 @pytest.mark.real_gate
-def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
-    """The stop rule stands (#598): a scene whose quote is still not the
-    prose's would commit a wrong quote, so it isn't committed provisionally."""
+def test_a_second_misquote_holds_the_fact_and_write_goes_on(project_dir, tmp_path):
+    """#598 stopped a scene whose quote was still not the prose's after the
+    re-extraction. E4's re-record (#784): the second reading makes the same
+    slip, and three scenes stopped on the gate's own extraction. The
+    misquoted fact is now held back (not recorded, said) and the scene
+    passes; no wrong quote is committed."""
     from storyforge import cmd_write
     scene_file = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
     wrong = 'Blank vellum. Not even a contour line.'
@@ -2365,19 +2443,16 @@ def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
                                      'replace': 'a village of some size'}]})
         return _text({'commitments': [_commitment(statement='The map is blank there',
                                                   quote=next(quotes))]})
+    before = len(ledger.load(project_dir))
     with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
         passed, why = cmd_write._gate_drafted_scene(project_dir, SCENE, scene_file, 'draft',
                                                     str(tmp_path / 'logs'), keep_going=True)
-    assert not passed and 'EXTRACTION: quote' in why
-    assert not why.startswith('provisional')
+    assert passed and why == ''
     # T-2 (#602's review): the re-extraction ran (a third extraction)
     assert calls == ['extract', 'check', 'fix', 'extract', 'check', 'extract', 'check']
-    # SF-1: the pending reason says the extractor misquoted, twice
-    row = gate.pending(project_dir)[SCENE]
-    assert row['command'] == 'draft'
-    assert ('so the same prose was gated again (extraction and the check): it misquoted the '
-            'prose again (' in row['reason'])
-    assert "no quote is replaced with the prose's words" in row['reason']
+    assert not any(r.get('quote') == wrong for r in ledger.load(project_dir))
+    assert len(ledger.load(project_dir)) == before
+    assert SCENE not in gate.pending(project_dir)
 
 
 @pytest.mark.real_gate
