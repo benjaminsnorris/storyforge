@@ -281,7 +281,7 @@ def _suite(name='gate-set'):
     return next(s for s in harness.discover(str(SUITES_DIR)) if s.name == name)
 
 
-def _gate_catching_wrong(item, work_dir):
+def _gate_catching_wrong(item, work_dir, **kw):
     return _result(blocking=['after a week at sea'] if item['prose'] == WRONG else [])
 
 
@@ -311,6 +311,7 @@ class TestSuite:
             seen.append((item['role'], gate.GATE_CHECK_METHOD))
             # the question layer's suite seeds each case's fact; the open
             # checker's gets none
+            assert kw.pop('pins')   # the run's cassette directory (#788)
             assert kw == ({'facts': [FACT]} if method == 'questions' else {})
             return _gate_catching_wrong(item, work_dir)
         monkeypatch.setattr(runner, 'gate_one', fake_gate)
@@ -344,7 +345,7 @@ class TestSuite:
 
     def test_the_gate_raising_errors_the_suite_naming_ids_not_prose(self, private_set, tmp_path,
                                                                    monkeypatch):
-        def boom(item, work_dir):
+        def boom(item, work_dir, **kw):
             raise RuntimeError(f'reply quoted {item["prose"]}')
         monkeypatch.setattr(runner, 'gate_one', boom)
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
@@ -355,7 +356,7 @@ class TestSuite:
     def test_an_unfinished_item_is_a_stop_named_in_the_notes(self, private_set, tmp_path,
                                                             monkeypatch):
         """SF-1: a GateError is counted and named, never silent."""
-        def gate(item, work_dir):
+        def gate(item, work_dir, **kw):
             if item['prose'] == WRONG_2:
                 return runner.Unfinished('the ledger could not be read')
             return _gate_catching_wrong(item, work_dir)
@@ -370,7 +371,7 @@ class TestSuite:
     def test_none_finished_errors_rather_than_reading_as_all_stopped(self, private_set, tmp_path,
                                                                      monkeypatch):
         """SF-1: a gate that can't run at all would score every scene stopped."""
-        monkeypatch.setattr(runner, 'gate_one', lambda *a: runner.Unfinished('misconfigured'))
+        monkeypatch.setattr(runner, 'gate_one', lambda *a, **kw: runner.Unfinished('misconfigured'))
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'error'
         assert 'could not finish any of the 3' in result['error']
@@ -379,7 +380,7 @@ class TestSuite:
                                                                monkeypatch):
         from storyforge import gate
         monkeypatch.setattr(gate, 'GATE_CONTINUITY', False)
-        monkeypatch.setattr(runner, 'gate_one', lambda *a: pytest.fail('gated'))
+        monkeypatch.setattr(runner, 'gate_one', lambda *a, **kw: pytest.fail('gated'))
         result = harness.run_suite(_suite('gate-set-questions'), 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'error' and 'GATE_CONTINUITY' in result['error']
 
@@ -387,7 +388,7 @@ class TestSuite:
                                                             monkeypatch):
         """SF-4: the gate turns a miss into a GateError; the run must stop
         before writing outcomes as if they were measured."""
-        def missing(item, work_dir):
+        def missing(item, work_dir, **kw):
             with open(os.environ['STORYFORGE_CASSETTE_LOG'], 'a') as f:
                 f.write(json.dumps({'error': 'CassetteMiss: a changed request'}) + '\n')
             return runner.Unfinished('cassette miss')
@@ -399,7 +400,7 @@ class TestSuite:
     def test_a_set_out_of_step_with_e1_errors_naming_the_rebuild(self, private_set, tmp_path,
                                                                  monkeypatch):
         monkeypatch.setattr('e1.load_cases', lambda *a: [OTHER])
-        monkeypatch.setattr(runner, 'gate_one', lambda *a: pytest.fail('gated'))
+        monkeypatch.setattr(runner, 'gate_one', lambda *a, **kw: pytest.fail('gated'))
         result = harness.run_suite(_suite(), 'replay', str(tmp_path / 'c'))
         assert result['status'] == 'error' and 'rebuild the set' in result['error']
 
@@ -409,7 +410,7 @@ class TestSuite:
         refuses --baseline as the harness's no-recordings error would."""
         _write_set(tmp_path, _items(), recorded=())
         monkeypatch.setenv(blocking_set.PRIVATE_ENV, str(tmp_path))
-        monkeypatch.setattr(runner, 'gate_one', lambda *a: pytest.fail('gated'))
+        monkeypatch.setattr(runner, 'gate_one', lambda *a, **kw: pytest.fail('gated'))
         suite = _suite()
         # as before the first recording: no floor set
         monkeypatch.setitem(suite.run.__globals__, 'FLOORS',
@@ -426,7 +427,7 @@ class TestSuite:
         monkeypatch.setattr('e1.load_cases', lambda *a: [CASE])
         seen = []
         monkeypatch.setattr(runner, 'gate_one',
-                            lambda item, wd: seen.append(item['id']) or _result())
+                            lambda item, wd, **kw: seen.append(item['id']) or _result())
         harness.run_suite(_suite(), 'record', str(tmp_path / 'c'), record_frozen=True)
         assert len(seen) == 3
 
@@ -442,7 +443,7 @@ class TestSuite:
                             {k: 0.5 for k in suite.run.__globals__['FLOORS']})
         from storyforge import cassette
 
-        def miss(item, work_dir):
+        def miss(item, work_dir, **kw):
             cassette._fail(cassette.CassetteMiss('nothing recorded'))
             return runner.Unfinished('miss')
         monkeypatch.setattr(runner, 'gate_one', miss)
@@ -533,7 +534,7 @@ class TestFacts:
         monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
         (private_set / gate_set.FACTS_FILE).write_text(json.dumps(
             {'cases': {'tale-001': {'rows': [], 'why_none': 'only in the gated scene'}}}))
-        monkeypatch.setattr(runner, 'gate_one', lambda item, wd, facts: (
+        monkeypatch.setattr(runner, 'gate_one', lambda item, wd, facts, **kw: (
             _gate_catching_wrong(item, wd) if facts == [] else pytest.fail(facts)))
         result = harness.run_suite(_suite('gate-set-questions'), 'replay', str(tmp_path / 'c'))
         assert any('gated without one' in n and n.endswith(': tale-001')
@@ -619,7 +620,7 @@ class TestFacts:
         monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
         wrong_id = gate_set.item_id('tale-001', WRONG)
 
-        def fake(item, wd, facts):
+        def fake(item, wd, facts, **kw):
             r = _gate_catching_wrong(item, wd)
             # asked about the fact for WRONG only
             r.asked_fact_ids = [FACT['id']] if item['id'] == wrong_id else []
@@ -689,7 +690,7 @@ class TestPreflight:
         from storyforge import gate
         monkeypatch.setattr(gate, 'GATE_CONTINUITY', True)
 
-        def fails(item, wd, facts):
+        def fails(item, wd, facts, **kw):
             raise gate_set.FactUnusable('gate-set-tale-001: scene harbour is not in the book')
         monkeypatch.setattr(runner, 'gate_one', fails)
         result = harness.run_suite(_suite('gate-set-questions'), 'replay', str(tmp_path / 'c'))
@@ -761,6 +762,54 @@ class TestGateOne:
         monkeypatch.setattr(gate, 'gate_scene', lambda *a, **kw: 1 / 0)
         with pytest.raises(ZeroDivisionError):
             runner.gate_one(_item(WRONG, 'reintroduced', 'a week'), str(tmp_path / 'w'))
+
+
+class TestPins:
+    """#788: each item's extraction is pinned beside the run's recordings,
+    so an extraction prompt change doesn't re-record the checker."""
+
+    @pytest.fixture
+    def book(self, tmp_path, monkeypatch):
+        import e8
+        project = tmp_path / 'book'
+        (project / 'scenes').mkdir(parents=True)
+        monkeypatch.setattr(e8, 'prepare', lambda case, wd: (str(project), 'island'))
+        monkeypatch.setattr(runner, 'e1_case', lambda cid: CASE)
+        monkeypatch.setattr(gate_set, 'seed_facts', lambda *a: None)
+        from storyforge import gate
+        monkeypatch.setattr(gate, 'snapshot', lambda p: None)
+        return project
+
+    PIN = {'found': [{'statement': 's', 'quote': 'q'}], 'kept': [{'statement': 's'}],
+           'dropped': [[{'statement': 'gone'}, 'momentary']]}
+
+    def test_no_pin_writes_one_then_the_next_run_uses_it(self, book, tmp_path, monkeypatch):
+        from storyforge import gate
+        seen = []
+        result = _result()
+        monkeypatch.setattr(gate, 'gate_scene',
+                            lambda *a, **kw: seen.append(kw['pinned']) or result)
+        monkeypatch.setattr(gate, 'pinned_extraction', lambda r: self.PIN)
+        pins = str(tmp_path / 'cassettes')
+        item = _item(WRONG, 'reintroduced', 'a week')
+        runner.gate_one(item, str(tmp_path / 'w'), pins=pins)
+        assert seen == [None] and runner.read_pin(pins, item['id']) == self.PIN
+        monkeypatch.setattr(gate, 'pinned_extraction', lambda r: pytest.fail('re-pinned'))
+        runner.gate_one(item, str(tmp_path / 'w2'), pins=pins)
+        assert seen[1] == self.PIN
+
+    def test_a_pin_is_not_a_recording_the_cassette_reads(self, tmp_path):
+        from storyforge import cassette
+        runner.write_pin(str(tmp_path), 'x', self.PIN)
+        assert list(cassette._recordings(str(tmp_path))) == []
+
+    def test_an_unreadable_pin_raises(self, tmp_path):
+        path = runner.pin_path(str(tmp_path), 'x')
+        os.makedirs(os.path.dirname(path))
+        with open(path, 'w') as f:
+            json.dump({'found': []}, f)
+        with pytest.raises(ValueError, match='not a pinned extraction'):
+            runner.read_pin(str(tmp_path), 'x')
 
 
 class TestFloorDirection:

@@ -5,6 +5,17 @@ default; `evals/suites/gate_set_questions.py`: the question layer, #649).
 Both score the same way (`gate_set.score`), gate on their own recorded
 values (`blocking_set.runner.floor_gates`, #488), and write per-item
 outcomes to the private set's `results/` (never to this repo).
+
+**Extraction is pinned** (#788): the suites measure the layers after
+extraction (the checker, the questions, the typed state and the blocking
+read), and extraction's output is part of the checker's request, so a
+change to extraction's prompt used to make every checker call a new
+request: a re-record at about $40-130 a run. Each item's extraction (its
+reply and the persistence check's verdict, `gate.pinned_extraction`) is
+kept in `PINS_DIR` beside the run's recordings and handed to the gate
+(`gate_scene(pinned=)`), which then makes no extraction call. An item with
+no pin is extracted as before and its pin written, so the first run after
+deleting a pin re-pins it. Extraction itself is measured by E3.
 """
 
 from __future__ import annotations
@@ -20,6 +31,38 @@ from harness import Gate, SuiteOutput, SuiteUnavailable, has_recordings, read_ca
 #: What each check method's per-item outcomes file is called in `results/`
 OUTCOMES = {'open': 'latest.json', 'questions': 'latest-questions.json'}
 
+#: The pinned extractions' folder in a run's cassette directory, one
+#: `<item id>.json` each (the cassette reads only its two-character shards)
+PINS_DIR = 'pins'
+
+
+def pin_path(cassette_dir: str, item_id: str) -> str:
+    return os.path.join(cassette_dir, PINS_DIR, f'{item_id}.json')
+
+
+def read_pin(cassette_dir: str, item_id: str) -> dict | None:
+    """The item's pinned extraction; None when it has none. A pin that
+    can't be read raises: measuring with a fresh extraction would silently
+    change what is measured."""
+    path = pin_path(cassette_dir, item_id)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        pin = json.load(f)
+    if not (isinstance(pin, dict) and all(isinstance(pin.get(k), list)
+                                          for k in ('found', 'kept', 'dropped'))):
+        raise ValueError(f'{PINS_DIR}/{item_id}.json is not a pinned extraction '
+                         f'(found, kept and dropped lists)')
+    return pin
+
+
+def write_pin(cassette_dir: str, item_id: str, pin: dict) -> None:
+    path = pin_path(cassette_dir, item_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(pin, f, indent=1, ensure_ascii=False, sort_keys=True)
+        f.write('\n')
+
 
 @dataclass
 class Unfinished:
@@ -30,13 +73,16 @@ class Unfinished:
     reason: str
 
 
-def gate_one(item: dict, work_dir: str, facts: list[dict] | None = None):
+def gate_one(item: dict, work_dir: str, facts: list[dict] | None = None,
+             pins: str | None = None):
     """Gate one item's prose in its pre-pass book, as revise gates a pass's
     prose: `before` is the book before the prose is written. `facts`: ledger
     rows added to the book first (`gate_set.seed_facts`), before
     `gate.snapshot`, so the prose is the only change the gate sees. Returns
     the `GateResult`, or `Unfinished` on a `GateError`. Anything else
-    raises (`gate_set.FactUnusable` among it)."""
+    raises (`gate_set.FactUnusable` among it). `pins`: the run's cassette
+    directory: the item's pinned extraction is used (`read_pin`), or, with
+    none, written from this run's (`write_pin`)."""
     from e8 import prepare
     from storyforge import gate
     case = e1_case(item['case'])
@@ -45,12 +91,18 @@ def gate_one(item: dict, work_dir: str, facts: list[dict] | None = None):
     before = gate.snapshot(project)
     with open(os.path.join(project, 'scenes', f'{scene_id}.md'), 'w', encoding='utf-8') as f:
         f.write(item['prose'])
+    pin = read_pin(pins, item['id']) if pins else None
     try:
-        return gate.gate_scene(project, scene_id, command=gate_set.COMMANDS[item['family']],
-                               prose=item['prose'], before=before,
-                               log_dir=os.path.join(project, 'working', 'logs', 'gate'))
+        result = gate.gate_scene(project, scene_id, command=gate_set.COMMANDS[item['family']],
+                                 prose=item['prose'], before=before, pinned=pin,
+                                 log_dir=os.path.join(project, 'working', 'logs', 'gate'))
     except gate.GateError as e:
         return Unfinished(str(e))
+    if pins and pin is None:
+        read = gate.pinned_extraction(result)
+        if read is not None:
+            write_pin(pins, item['id'], read)
+    return result
 
 
 def preflight(facts: dict[str, dict], cases: list[str], work_dir: str) -> list[str]:
@@ -142,8 +194,9 @@ def run(ctx, method: str, floors: dict, min_positives: int, *, seeded: bool = Fa
     def gate_item(iid: str):
         item = run_items[iid]
         if not seeded:
-            return gate_one(item, ctx.work_dir)
-        return gate_one(item, ctx.work_dir, facts=facts[item['case']].get('rows') or [])
+            return gate_one(item, ctx.work_dir, pins=ctx.cassette_dir)
+        return gate_one(item, ctx.work_dir, facts=facts[item['case']].get('rows') or [],
+                        pins=ctx.cassette_dir)
     saved = gate.GATE_CHECK_METHOD
     gate.GATE_CHECK_METHOD = method
     try:

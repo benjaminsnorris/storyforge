@@ -5861,3 +5861,25 @@ class TestCarryReason:
         assert self._reason('one two three', 'twelve ', '', mutable='state') == ''
         assert 'state finding (PHY)' in self._reason('one two three', 'twelve',
                                                      'twelve and more', codes=('PHY',))
+
+
+def test_a_pinned_extraction_makes_no_extraction_call(project_dir, tmp_path):
+    """#788: an eval's pinned extraction stands for the extraction and
+    persistence calls; the rows are made from it as from a reply."""
+    pin = {'found': [dict(_commitment(), ends=[])], 'kept': [dict(_commitment(), ends=[])],
+           'dropped': []}
+    asked = []
+
+    def fake(path, body, **k):
+        if 'tools' in body:
+            return _text({'findings': [], 'kept': []})
+        asked.append(body)
+        return _text({'commitments': []})
+    with patch('storyforge.api._api_request', side_effect=fake):
+        result = gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path / 'l'),
+                            extract_model='m', check_model='m', pinned=pin)
+    assert asked == [] and result.passed
+    assert [r['quote'] for r in result.proposed] == [HERE]
+    assert 'pinned by the eval' in result.extract_note
+    assert gate.pinned_extraction(result) == {'found': pin['found'], 'kept': pin['kept'],
+                                              'dropped': []}

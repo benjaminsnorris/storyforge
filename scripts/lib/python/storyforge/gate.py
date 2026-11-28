@@ -688,7 +688,8 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
              dropped: list[tuple[str, str]], *,
              reserved: Set[str], ends: list | None = None,
              carry: _Extracted | None = None, refused: str = '',
-             read_out: list | None = None) -> list[dict[str, str]]:
+             read_out: list | None = None,
+             pinned: dict | None = None) -> list[dict[str, str]]:
     """The scene's commitments read from `prose` against `rows`, each with an
     id no row of `rows` and none of `reserved` has (#599; required, #599's
     review TD-2: `_reserved_ids`). The ends read go to `ends`
@@ -703,7 +704,9 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     extracted as without it (the same requests). `refused` is why the run
     before had nothing to carry (`_carry_of`). `read_out` gets
     `(_Extracted, note)`: what this run read or carried, and the log line
-    saying which and why ('' when nothing was offered or refused)."""
+    saying which and why ('' when nothing was offered or refused).
+    `pinned` (#788, `gate_scene`): an eval's frozen replies, used as they
+    are, with no call."""
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
     from storyforge.extract import (build_commitments_prompt, commitment_rows,
@@ -725,7 +728,14 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     context = build_commitments_prompt(scene_id, '', details, registries_text=registries_text,
                                        known=known, recorded=recorded)
     why_not = _carry_reason(carry, prose, context, model) if carry is not None else ''
-    if carry is not None and not why_not:
+    if pinned is not None:
+        found = copy.deepcopy(pinned['found'])
+        verdict = persistence.Verdict(kept=copy.deepcopy(pinned['kept']),
+                                      dropped=[(copy.deepcopy(e), why)
+                                               for e, why in pinned['dropped']])
+        note = f'extraction pinned by the eval ({len(found)} fact(s) read): no extraction call'
+        source = prose
+    elif carry is not None and not why_not:
         found = copy.deepcopy(carry.found)
         verdict = persistence.Verdict(kept=copy.deepcopy(carry.kept),
                                       dropped=copy.deepcopy(carry.dropped))
@@ -756,6 +766,18 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                           ends_out=ends, speakers=Speakers.load(project_dir))
     _route_leaned_on(project_dir, scene_id, rows, order, ends, problems)
     return out
+
+
+def pinned_extraction(result: 'GateResult') -> dict | None:
+    """#788: what `result`'s extraction read, as JSON-ready data for an eval
+    to pin (`gate_scene(pinned=)`): the extraction reply (`found`) and the
+    persistence check's verdict (`kept`, `dropped` as [entry, why] pairs).
+    None when the run didn't reach extraction."""
+    read = result._extracted
+    if read is None:
+        return None
+    return {'found': copy.deepcopy(read.found), 'kept': copy.deepcopy(read.kept),
+            'dropped': [[copy.deepcopy(e), why] for e, why in read.dropped]}
 
 
 def _read_commitments(scene_id: str, prose: str, prompt: str, model: str,
@@ -2063,7 +2085,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                standing: 'GateResult | None' = None,
                carry: 'GateResult | None' = None,
                open_from: 'GateResult | None' = None,
-               hold_slips: bool = False) -> GateResult:
+               hold_slips: bool = False,
+               pinned: dict | None = None) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -2074,7 +2097,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                                log_dir=log_dir, extract_model=extract_model,
                                check_model=check_model, introduced_by=introduced_by,
                                before=before, standing=standing, carry=carry,
-                               open_from=open_from, hold_slips=hold_slips)
+                               open_from=open_from, hold_slips=hold_slips, pinned=pinned)
         finally:
             _log_spend(meter, project_dir, 'gate', scene_id)
 
@@ -2097,7 +2120,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 standing: 'GateResult | None' = None,
                 carry: 'GateResult | None' = None,
                 open_from: 'GateResult | None' = None,
-                hold_slips: bool = False) -> GateResult:
+                hold_slips: bool = False,
+                pinned: dict | None = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -2123,6 +2147,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     (`_carry_of`, `_extract`), so there is no extraction or persistence
     call; the rows are made again from them by code, and the check, the
     blocking read and the typed state read this prose as ever.
+
+    `pinned` (#788) is an eval's frozen extraction of this prose
+    (`pinned_extraction`'s dict): its replies stand for the extraction and
+    persistence calls, which aren't made, so an eval measuring the layers
+    after extraction doesn't re-record them when extraction's prompt
+    changes. Never passed outside the evals.
 
     `open_from` (#738) is an earlier run of this process whose open reading
     stands for this one under `tandem` (the run before a fix, a re-roll or
@@ -2266,7 +2296,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                         extract_model or select_model('evaluation'), log_dir,
                         result.problems, result.dropped,
                         reserved=_reserved_ids(old, loaded, briefs_name), ends=result.ends,
-                        carry=carried, refused=refused, read_out=read)
+                        carry=carried, refused=refused, read_out=read, pinned=pinned)
     calls = [extract]
     if read_blocking:
         calls.append(lambda: _read_blocking(project_dir, scene_id, prose, check_model, log_dir,
