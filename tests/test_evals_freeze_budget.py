@@ -537,6 +537,28 @@ def test_auto_tops_a_stale_frozen_suite_up_recording_only_what_changed(tmp_path,
     assert _result(tmp_path, 'e4')['status'] == 'pass' and live == []
 
 
+def test_a_one_run_top_up_records_run_1_and_says_runs_2_and_3_stay(tmp_path, live, capsys):
+    """#790's review T-3, SF-7: the default top-up is run 1's alone."""
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
+    _record_frozen(tmp_path)
+    run2 = sorted(p.name for p in (tmp_path / 'e6' / 'run2' / 'e4').rglob('*'))
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='a changed prompt')
+    live.clear()
+    capsys.readouterr()
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'test') == 0
+    assert len(live) == 1   # the changed request, run 1 only
+    assert _result(tmp_path, 'e4')['status'] == 'pass'
+    assert sorted(p.name for p in (tmp_path / 'e6' / 'run2' / 'e4').rglob('*')) == run2
+    assert 'topping up run 1 only; its run(s) 2, 3 stay' in capsys.readouterr().out
+
+
+def test_a_one_run_top_up_with_no_run_1_is_refused(tmp_path, live, capsys):
+    _suite(tmp_path, 'e4', frozen=True)
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'x') == 2
+    assert 'run 1 has no recordings' in capsys.readouterr().err
+    assert live == []
+
+
 def _stale_top_up(tmp_path, live):
     """A recorded frozen e4 whose second request has since changed."""
     _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')

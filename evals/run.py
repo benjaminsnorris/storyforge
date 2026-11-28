@@ -55,7 +55,6 @@ CONFIG_FILE = os.path.join(EVALS_DIR, 'config.json')
 #: change is expected, and CI must stay green on it (#645)
 EXIT_CODES = {'pass': 0, 'fail': 1, 'error': 2, 'stale': 0}
 DEFAULT_MONTHLY_BUDGET = 25.0
-#: A frozen suite is recorded as this many independent runs, never fewer
 #: How many runs a frozen suite is recorded or topped up as (#788: one by
 #: default, three to see the spread between runs)
 FROZEN_RUNS = (1, 3)
@@ -176,6 +175,17 @@ def _plan_recording(args, suites) -> set[str]:
                     raise Refused(f'{s.name} run {k} has no recordings at {where}: a top-up '
                                   f'would record it in full. Re-record on purpose with '
                                   f'--mode record --suite {s.name}.')
+            if args.runs == 1:
+                # #790's review SF-7: runs 2 and 3 stay at the older code
+                try:
+                    later = [k for k in (2, 3) if has_recordings(_cassette_dir(args, s, k))]
+                except Exception:   # SuiteUnavailable: checked above for run 1
+                    later = []
+                if later:
+                    print(f'NOTE: {s.name}: topping up run 1 only; its run(s) '
+                          f'{", ".join(map(str, later))} stay at the code they were recorded '
+                          f'at, so the spread between runs no longer compares like for like '
+                          f'(--runs 3 tops up all three).')
     if args.mode != 'record' and not topping_up:
         return set()
     if named and args.runs not in FROZEN_RUNS:

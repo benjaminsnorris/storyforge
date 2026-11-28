@@ -195,26 +195,6 @@ class TestGateAsRevise:
         with pytest.raises(KeyError):
             e8.gate_as_revise(_scene_dir(tmp_path), 's', 'revise', 'Prose.')
 
-    def _revision_pass(self, monkeypatch, tmp_path, coaching):
-        from storyforge import gate
-        project = _scene_dir(tmp_path)
-        monkeypatch.setattr('storyforge.common.select_revision_model', lambda *a: 'm')
-        monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
-        monkeypatch.setattr('storyforge.common.get_coaching_level', lambda p: coaching)
-        monkeypatch.setattr('storyforge.revision.build_revision_prompt', lambda *a, **k: 'p')
-        monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
-            'content': [{'type': 'text', 'text': 'x'}]})
-
-        def write(text, scenes_dir):
-            with open(os.path.join(scenes_dir, 's.md'), 'w') as f:
-                f.write('Revised prose.')
-        monkeypatch.setattr('storyforge.parsing.extract_scenes_from_response', write)
-        seen = []
-        monkeypatch.setattr(gate, 'gate_and_fix', lambda p, sid, *, command, prose, **k: (
-            seen.append(command) or seen.append(k.get('before')) or gate.GatedScene('Fixed.', _gate_result(True),
-                                                    _gate_result(True))))
-        return e8.revision_pass(project, 's', {'name': 'polish'}), seen
-
 
 def test_every_excluded_case_is_a_real_case():
     """The ceiling is calibrated with these exclusions: a renamed or

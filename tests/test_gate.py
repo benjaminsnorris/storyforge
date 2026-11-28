@@ -5901,3 +5901,21 @@ def test_extraction_prompt_is_the_request_the_gate_sends(project_dir, tmp_path):
         gate_scene(project_dir, SCENE, command='draft', prose=prose,
                    log_dir=str(tmp_path / 'l'), extract_model='m', check_model='m')
     assert sent[0] == want
+
+
+def test_a_pin_wins_over_a_carry(project_dir, tmp_path):
+    """#790's review T-7: an eval's pin is the reading; nothing is called."""
+    carried = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+    pin = gate.PinnedExtraction(found=[], kept=[], dropped=[])
+    asked = []
+
+    def fake(path, body, **k):
+        if 'tools' in body:
+            return _text({'findings': [], 'kept': []})
+        asked.append(body)
+        return _text({'commitments': [_commitment()]})
+    with patch('storyforge.api._api_request', side_effect=fake):
+        result = gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path / 'p'),
+                            extract_model='m', check_model='m', carry=carried, pinned=pin)
+    assert asked == [] and result.proposed == []
+    assert 'pinned by the eval' in result.extract_note
