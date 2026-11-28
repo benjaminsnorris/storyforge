@@ -367,6 +367,29 @@ class TestFactsToAsk:
         assert got.scene_bound == [night['id']]
         assert questions.scene_bound(night) and not questions.scene_bound(rows[1])
 
+    def test_a_fixed_timeline_fact_of_the_scenes_own_time_is_not_asked(self):
+        # E4 re-record (2026-11-27), run 2: extraction recorded waking-maren's
+        # and name-surfaces' own time as `fixed` timeline facts; asked of
+        # advocate, maren-runs and driving-west, "the scene" read as theirs
+        tuesday = row('waking-maren--the-scene-occurs-on-a-tuesday', 'timeline',
+                      statement='The scene occurs on a Tuesday at 2:47 in the morning.')
+        third = row('waking-maren--this-scene-takes-place-on-the', 'timeline',
+                    statement='This scene takes place on the third consecutive night Maren '
+                              'has woken at 2:47, which is a Tuesday.')
+        midnight = row('name-surfaces--the-scene-takes-place-at-half', 'timeline',
+                       scene='s2', statement='The scene takes place at half past midnight.')
+        # a dated event holds everywhere: still asked
+        monday = row('eleven-days--hank-went-back-to-work-at', 'timeline',
+                     statement='Hank went back to work at the junior high on Monday after '
+                               'the coast trip.')
+        sofia = row('advocate--the-meeting-with-sofia-takes-place', 'timeline',
+                    statement='The meeting with Sofia takes place at midday.')
+        got = self.pick([tuesday, third, midnight, monday, sofia])
+        assert sorted(r['id'] for r in got.facts) == sorted([monday['id'], sofia['id']])
+        assert got.scene_bound == [tuesday['id'], third['id'], midnight['id']]
+        # a fact of another type about "the scene" is not a time
+        assert not questions.scene_bound(row('w', 'world', statement='The scene is a kitchen.'))
+
     def test_not_binding_or_superseded(self):
         rows = [row('planned', status='planned'), row('pending', status='pending'),
                 row('old'), row('new', supersedes='old'),
@@ -1215,7 +1238,7 @@ class TestCheckQuestions:
                                        'statement': 'Tessa has been awake two days'})
         r, asked = self._check(project_dir, rows, [Record('at', 'Tessa', '')])
         assert 'tessa-awake-two-days' not in r.asked_fact_ids
-        assert any(n.startswith('1 timeline state(s) of other scenes')
+        assert any(n.startswith('1 timeline fact(s) of other scenes')
                    and n.endswith('not asked: tessa-awake-two-days') for n in r.notes)
 
     def test_a_stale_state_trait_past_the_cap_is_named(self, project_dir, monkeypatch):
