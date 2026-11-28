@@ -17,7 +17,7 @@ recomputed without spending; ``evals/consistency.py`` does that.
 **Not a default suite.** The extra runs are a snapshot of one commit's
 prompts. Any prompt change is a recording miss, and keeping E6 in
 ``run.py``'s default set would mean either an error on every prompt change or
-two fresh live runs of every paid suite (about $36) each time. Re-record E6
+two fresh live runs of every suite it spreads (about $16 for E2 and E3) each time. Re-record E6
 when a variance question needs today's code, not on every change.
 """
 

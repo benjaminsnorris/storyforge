@@ -10,7 +10,7 @@ outcomes to the private set's `results/` (never to this repo).
 extraction (the checker, the questions, the typed state and the blocking
 read), and extraction's output is part of the checker's request, so a
 change to extraction's prompt used to make every checker call a new
-request: a re-record at about $40-130 a run. Each item's extraction (its
+request: a re-record at about $8-35 a run (gate-set's three, $130). Each item's extraction (its
 reply and the persistence check's verdict, `gate.pinned_extraction`) is
 kept in `PINS_DIR` beside the run's recordings and handed to the gate
 (`gate_scene(pinned=)`), which then makes no extraction call. An item with

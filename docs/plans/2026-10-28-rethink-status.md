@@ -3,6 +3,24 @@
 Last updated 2026-11-16 (the Wrath pilot's first session and what it found; bibles as rows, #657/#702; the adaptation ladder, #658; v1.185.0); before that 2026-11-15 (#654's test 6, `voice-austen`); before that 2026-11-14 (the voice folder, #682, long writing sessions, #655, and `voice sample`, #654); before that 2026-11-10 (the blog voice set aside, voice samples started, #680); before that 2026-11-09 (the blocking-set baseline, the gate set #677, Ben's voice repo); before that 2026-11-08, at v1.162.0 (the gate's blocking read, #626); before that v1.161.0 (sync hook for subfolder projects #612, E8's mislabelled cases #614, register check #615; PR #625); before that v1.157.0 (reading level and key decisions in revision prompts, #616); before that 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalness` forecast before they spend, #510; one cost budget per run and `check --pending --keep-going`, #503; see Latest; carried states and the gate's spend at v1.130.2, #491; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling became 3 (#488); 4 at #513, and 1 since #614's audit (v1.161.0)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
 
+## Latest: fixed facts a scene's plan changes, and cheaper evals (2026-11-28, v1.209.0, #788)
+
+- **The gate:** a halt on a fixed fact the scene's plan calls for (a plan
+  fact set here on the same thing, or a `must:` beat) is reported as a
+  likely mis-typing, never sent to the fix; `storyforge check --unfix
+  FACTS` turns such facts into state. Extraction types what someone wears,
+  carries or holds as state (the armour Wrath's scene traded away).
+- **The evals (Ben, 2026-11-27):** E8 retired as a suite; E4 is a one-run
+  end-to-end check of Act 1's first four scenes, recorded before a
+  milestone; frozen suites record as one run by default (`--runs 3` for
+  the spread); the gate set pins extraction, so an extraction prompt
+  change no longer re-records the checker; E6 spreads E2 and E3. New:
+  `extraction-typing` and the private `extraction-typing-book`. Details:
+  `evals/README.md` ("Keeping recordings cheap") and `docs/history.md`.
+- **Left:** gear merged with a body trait in one fact ("his crest is
+  yellow and so is the hair") is still sometimes typed fixed; the planned
+  halt and `--unfix` cover it.
+
 ## Latest: the Wrath pilot's first session, bibles as rows, the adaptation ladder (2026-11-16, v1.185.0)
 
 **The pilot has started.** *Wrath Like Smoke*'s first `write --session`

@@ -113,9 +113,9 @@ Part E):
 - **The continuity checks (#648) are code**, tested in
   `tests/test_continuity.py`; their precision on a real book is measured,
   free, by `typed-state-set` (#744, below). The gate now reads each scene's
-  typed state (one more call), so E4's and E8's gate runs miss on it and stay
-  `stale` until Ben re-measures them for recall on KNO, PHY, TIM and WLD
-  (three runs, over the monthly budget: his decision).
+  typed state (one more call), so E4's gate runs miss on it and stay
+  `stale` until it is recorded again (one run, before a milestone, #788; E8,
+  then also stale, is retired).
 - **Monthly budget.** `evals/config.json` sets `monthly_budget_usd` ($25 when
   the file is absent; a file that doesn't give a non-negative number refuses
   the run). Every live call the cassette makes is appended to the eval spend
@@ -246,7 +246,8 @@ private repo on a branch without them) is unavailable and says which
 checkout to use, rather than reading the misses as a changed request.
 
 To re-record (only when a decision depends on it):
-`python3 evals/run.py --mode record --suite blocking-set --runs 3`, then
+`python3 evals/run.py --mode record --suite blocking-set` (one run, #788;
+`--runs 3` when the decision is about the spread the tables above show), then
 replay run 1, copy the private `results/latest.json` to
 `baseline-cases.json`, and set `FLOORS` and `RECORDED` from the report and
 `blocking_set.fingerprint` / `.recordings`.
@@ -371,9 +372,11 @@ calls; `state_right` and `fixed_right` are over the labels found, and
   its labels quote the book), real scenes where the slip happened, read
   from the corpus book at a pinned commit with the gate's full prompt
   (`gate.extraction_prompt`). On *Wrath Like Smoke*'s
-  `hector-sends-paris-to-duel`, two readings each: before #788, 3 of the 5
-  gear facts read were fixed in both; after, none, with kinship, places and
-  backstory still fixed.
+  `hector-sends-paris-to-duel`: before #788, 3 of the 5 gear facts read were
+  fixed in each of two readings; recorded at the new wording, the armour
+  and the leopard skin state, the fact merging Menelaus's crest with his
+  hair fixed and Sarpedon's tunic not read (state 2 of 3 found, 1
+  missing), with kinship, places and backstory still fixed.
 
 ## The typed-state set (#744)
 
@@ -649,7 +652,8 @@ half that does, and it says the exemplars get the drafts most of the way
 to her, not all of it.
 
 To re-record (only when a decision depends on it):
-`python3 evals/run.py --mode record --suite voice-austen --runs 3` (or
+`python3 evals/run.py --mode record --suite voice-austen` (one run, #788;
+`--runs 3` for the spread the tables above show) (or
 `--suite voice-austen-control`), then set `RECORDED_RANK` and
 `RECORDED_JUDGE` in that suite from run 1. `evals/consistency.py` doesn't
 read them (E6's suites only): the tables above are the spread.

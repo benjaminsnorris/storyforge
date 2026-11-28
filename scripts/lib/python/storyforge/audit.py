@@ -46,7 +46,7 @@ the scene's plan calls for (#788) is marked by the gate (`Halt.planned`).
 
 **Unfixing** (`unfix`, #788): the author's `storyforge check --unfix` turns
 binding `fixed` facts into `state` ones, through `ledger.save`, so the log
-records it (`changed`, column `mutable`, command `UNFIX`) and the snapshot
+records it (`changed`, column `mutable`, command `unfix`, `UNFIX`) and the snapshot
 follows.
 """
 

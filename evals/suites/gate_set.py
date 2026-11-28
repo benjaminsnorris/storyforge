@@ -15,9 +15,11 @@ Private like the blocking set: the set and its recordings live in the
 storyforge-evals repo (`gate-set/`; recordings in `gate-set/cassettes/gate-set/`
 and, for runs 2 and 3, `gate-set/cassettes/run2/gate-set/` and `run3/`);
 notes carry counts and ids only, and without that checkout the suite is
-reported unavailable (``stale``). Frozen (#645): recorded on purpose, as
-three runs. Needs the corpus books cloned under ``STORYFORGE_CORPUS_DIR``, as
-E8 does. First recorded 2026-11-16 (three runs, about $43 each, with
+reported unavailable (``stale``). Frozen (#645): recorded on purpose, as one
+run by default (three for the spread, #788). Each item's extraction is
+pinned beside the run's recordings (`gate_set.runner.PINS_DIR`, #788), so an
+extraction prompt change doesn't re-record it. Needs the corpus books cloned
+under ``STORYFORGE_CORPUS_DIR``, as ``e8.prepare`` does. First recorded 2026-11-16 (three runs, about $43 each, with
 ``--over-budget`` and Ben's approval: `gate_set.runner.record_command`);
 `FLOORS` are run 1's (the default cassettes, which a replay reads), so
 missing recordings are the harness's error. #713 changed the typed-state

@@ -4559,7 +4559,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     - A first run with nothing for the fix (`problems_to_fix` empty: it
       failed on extraction problems, which aren't sent to the fix) and no
       plan conflicts is re-gated without an edit, so extraction runs again.
-      That re-roll counts as a round and logs to `recheck/`.
+      That re-roll counts as a round and logs to `recheck/`. A halt the plan
+      calls for (`Halt.planned`, #788) is the author's (`check --unfix`):
+      with nothing for the fix beside it, the run stops there, neither
+      fixed nor re-gated, unless extraction problems stand beside it too
+      (#790's review SF-6), which the re-roll reads again.
     - A later run with nothing for the fix stops, unless all that stopped
       it is the extractor's slips (`_only_extractor_slips`: a quote not in
       the prose or none, with no halt, other extraction problem, finding,
