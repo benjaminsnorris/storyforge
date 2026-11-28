@@ -312,6 +312,7 @@ class TestSuite:
             # the question layer's suite seeds each case's fact; the open
             # checker's gets none
             assert kw.pop('pins')   # the run's cassette directory (#788)
+            assert kw.pop('pin_log') == []
             assert kw == ({'facts': [FACT]} if method == 'questions' else {})
             return _gate_catching_wrong(item, work_dir)
         monkeypatch.setattr(runner, 'gate_one', fake_gate)
@@ -766,7 +767,8 @@ class TestGateOne:
 
 class TestPins:
     """#788: each item's extraction is pinned beside the run's recordings,
-    so an extraction prompt change doesn't re-record the checker."""
+    so an extraction prompt change doesn't re-record the checker; a pin is
+    keyed to the prose and facts it was read from (#790's review SF-2)."""
 
     @pytest.fixture
     def book(self, tmp_path, monkeypatch):
@@ -780,36 +782,53 @@ class TestPins:
         monkeypatch.setattr(gate, 'snapshot', lambda p: None)
         return project
 
-    PIN = {'found': [{'statement': 's', 'quote': 'q'}], 'kept': [{'statement': 's'}],
-           'dropped': [[{'statement': 'gone'}, 'momentary']]}
+    @property
+    def PIN(self):
+        from storyforge.gate import PinnedExtraction
+        return PinnedExtraction(found=[{'statement': 's', 'quote': 'q'}],
+                                kept=[{'statement': 's'}],
+                                dropped=[({'statement': 'gone'}, 'momentary')])
 
     def test_no_pin_writes_one_then_the_next_run_uses_it(self, book, tmp_path, monkeypatch):
         from storyforge import gate
-        seen = []
+        seen, log = [], []
         result = _result()
         monkeypatch.setattr(gate, 'gate_scene',
                             lambda *a, **kw: seen.append(kw['pinned']) or result)
         monkeypatch.setattr(gate, 'pinned_extraction', lambda r: self.PIN)
         pins = str(tmp_path / 'cassettes')
         item = _item(WRONG, 'reintroduced', 'a week')
-        runner.gate_one(item, str(tmp_path / 'w'), pins=pins)
-        assert seen == [None] and runner.read_pin(pins, item['id']) == self.PIN
+        runner.gate_one(item, str(tmp_path / 'w'), pins=pins, pin_log=log)
+        key = runner.pin_key(item['prose'], None)
+        assert seen == [None] and runner.read_pin(pins, item['id'], key) == self.PIN
         monkeypatch.setattr(gate, 'pinned_extraction', lambda r: pytest.fail('re-pinned'))
-        runner.gate_one(item, str(tmp_path / 'w2'), pins=pins)
-        assert seen[1] == self.PIN
+        runner.gate_one(item, str(tmp_path / 'w2'), pins=pins, pin_log=log)
+        assert seen[1] == self.PIN and log == ['written', 'read']
+
+    def test_a_pin_read_from_other_prose_or_facts_is_refused(self, tmp_path):
+        runner.write_pin(str(tmp_path), 'x', self.PIN, runner.pin_key(WRONG, None))
+        assert runner.read_pin(str(tmp_path), 'x', runner.pin_key(WRONG, None)) == self.PIN
+        for key in (runner.pin_key(RIGHT, None), runner.pin_key(WRONG, [FACT])):
+            with pytest.raises(ValueError, match='other prose or seeded facts'):
+                runner.read_pin(str(tmp_path), 'x', key)
 
     def test_a_pin_is_not_a_recording_the_cassette_reads(self, tmp_path):
         from storyforge import cassette
-        runner.write_pin(str(tmp_path), 'x', self.PIN)
+        runner.write_pin(str(tmp_path), 'x', self.PIN, 'k')
         assert list(cassette._recordings(str(tmp_path))) == []
 
-    def test_an_unreadable_pin_raises(self, tmp_path):
+    @pytest.mark.parametrize('data, said', [
+        ({'key': 'k', 'found': []}, 'found, kept and dropped lists'),
+        ({'key': 'k', 'found': [], 'kept': [], 'dropped': [['no why']]}, 'pair'),
+        ({'key': 'k', 'found': ['text'], 'kept': [], 'dropped': []}, 'not an object'),
+    ])
+    def test_an_unreadable_pin_raises_naming_its_file(self, tmp_path, data, said):
         path = runner.pin_path(str(tmp_path), 'x')
         os.makedirs(os.path.dirname(path))
         with open(path, 'w') as f:
-            json.dump({'found': []}, f)
-        with pytest.raises(ValueError, match='not a pinned extraction'):
-            runner.read_pin(str(tmp_path), 'x')
+            json.dump(data, f)
+        with pytest.raises(ValueError, match=f'pins/x.json: .*{said}'):
+            runner.read_pin(str(tmp_path), 'x', 'k')
 
 
 class TestFloorDirection:

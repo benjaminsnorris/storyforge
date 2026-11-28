@@ -5866,8 +5866,8 @@ class TestCarryReason:
 def test_a_pinned_extraction_makes_no_extraction_call(project_dir, tmp_path):
     """#788: an eval's pinned extraction stands for the extraction and
     persistence calls; the rows are made from it as from a reply."""
-    pin = {'found': [dict(_commitment(), ends=[])], 'kept': [dict(_commitment(), ends=[])],
-           'dropped': []}
+    pin = gate.PinnedExtraction(found=[dict(_commitment(), ends=[])],
+                                kept=[dict(_commitment(), ends=[])], dropped=[])
     asked = []
 
     def fake(path, body, **k):
@@ -5881,8 +5881,8 @@ def test_a_pinned_extraction_makes_no_extraction_call(project_dir, tmp_path):
     assert asked == [] and result.passed
     assert [r['quote'] for r in result.proposed] == [HERE]
     assert 'pinned by the eval' in result.extract_note
-    assert gate.pinned_extraction(result) == {'found': pin['found'], 'kept': pin['kept'],
-                                              'dropped': []}
+    assert gate.pinned_extraction(result) == pin
+    assert gate.PinnedExtraction.from_json(pin.to_json()) == pin
 
 
 def test_extraction_prompt_is_the_request_the_gate_sends(project_dir, tmp_path):

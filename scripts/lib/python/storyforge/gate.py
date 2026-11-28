@@ -689,7 +689,7 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
              reserved: Set[str], ends: list | None = None,
              carry: _Extracted | None = None, refused: str = '',
              read_out: list | None = None,
-             pinned: dict | None = None) -> list[dict[str, str]]:
+             pinned: 'PinnedExtraction | None' = None) -> list[dict[str, str]]:
     """The scene's commitments read from `prose` against `rows`, each with an
     id no row of `rows` and none of `reserved` has (#599; required, #599's
     review TD-2: `_reserved_ids`). The ends read go to `ends`
@@ -720,10 +720,9 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                                        known=known, recorded=recorded)
     why_not = _carry_reason(carry, prose, context, model) if carry is not None else ''
     if pinned is not None:
-        found = copy.deepcopy(pinned['found'])
-        verdict = persistence.Verdict(kept=copy.deepcopy(pinned['kept']),
-                                      dropped=[(copy.deepcopy(e), why)
-                                               for e, why in pinned['dropped']])
+        found = copy.deepcopy(pinned.found)
+        verdict = persistence.Verdict(kept=copy.deepcopy(pinned.kept),
+                                      dropped=copy.deepcopy(pinned.dropped))
         note = f'extraction pinned by the eval ({len(found)} fact(s) read): no extraction call'
         source = prose
     elif carry is not None and not why_not:
@@ -795,16 +794,44 @@ def extraction_prompt(project_dir: str, scene_id: str, prose: str,
                                     known=known, recorded=recorded)
 
 
-def pinned_extraction(result: 'GateResult') -> dict | None:
-    """#788: what `result`'s extraction read, as JSON-ready data for an eval
-    to pin (`gate_scene(pinned=)`): the extraction reply (`found`) and the
-    persistence check's verdict (`kept`, `dropped` as [entry, why] pairs).
-    None when the run didn't reach extraction."""
+@dataclass(frozen=True)
+class PinnedExtraction:
+    """#788: an eval's frozen extraction of a scene (`gate_scene(pinned=)`):
+    the extraction reply (`found`) and the persistence check's verdict
+    (`kept`, and `dropped` as (entry, why) pairs). `to_json` / `from_json`
+    for the pin files, which `from_json` checks (#790's review TD-1, TD-2)."""
+    found: list
+    kept: list
+    dropped: list
+
+    def to_json(self) -> dict:
+        return {'found': copy.deepcopy(self.found), 'kept': copy.deepcopy(self.kept),
+                'dropped': [[copy.deepcopy(e), why] for e, why in self.dropped]}
+
+    @classmethod
+    def from_json(cls, data) -> 'PinnedExtraction':
+        """Raises ValueError when `data` isn't one (`to_json`'s shape)."""
+        if not (isinstance(data, dict) and all(isinstance(data.get(k), list)
+                                               for k in ('found', 'kept', 'dropped'))):
+            raise ValueError('not a pinned extraction (found, kept and dropped lists)')
+        if not all(isinstance(x, dict) for x in data['found'] + data['kept']):
+            raise ValueError('a found or kept entry is not an object')
+        pairs = data['dropped']
+        if not all(isinstance(p, list) and len(p) == 2 and isinstance(p[0], dict)
+                   and isinstance(p[1], str) for p in pairs):
+            raise ValueError('a dropped entry is not an [entry, why] pair')
+        return cls(found=data['found'], kept=data['kept'],
+                   dropped=[(e, why) for e, why in pairs])
+
+
+def pinned_extraction(result: 'GateResult') -> PinnedExtraction | None:
+    """#788: what `result`'s extraction read, for an eval to pin
+    (`gate_scene(pinned=)`). None when the run didn't reach extraction."""
     read = result._extracted
     if read is None:
         return None
-    return {'found': copy.deepcopy(read.found), 'kept': copy.deepcopy(read.kept),
-            'dropped': [[copy.deepcopy(e), why] for e, why in read.dropped]}
+    return PinnedExtraction(found=copy.deepcopy(read.found), kept=copy.deepcopy(read.kept),
+                            dropped=copy.deepcopy(read.dropped))
 
 
 def _read_commitments(scene_id: str, prose: str, prompt: str, model: str,
@@ -2163,7 +2190,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                carry: 'GateResult | None' = None,
                open_from: 'GateResult | None' = None,
                hold_slips: bool = False,
-               pinned: dict | None = None) -> GateResult:
+               pinned: 'PinnedExtraction | None' = None) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -2198,7 +2225,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 carry: 'GateResult | None' = None,
                 open_from: 'GateResult | None' = None,
                 hold_slips: bool = False,
-                pinned: dict | None = None) -> GateResult:
+                pinned: 'PinnedExtraction | None' = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -2226,7 +2253,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     blocking read and the typed state read this prose as ever.
 
     `pinned` (#788) is an eval's frozen extraction of this prose
-    (`pinned_extraction`'s dict): its replies stand for the extraction and
+    (`PinnedExtraction`): its replies stand for the extraction and
     persistence calls, which aren't made, so an eval measuring the layers
     after extraction doesn't re-record them when extraction's prompt
     changes. Never passed outside the evals.
