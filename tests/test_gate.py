@@ -172,7 +172,18 @@ class TestASlipMadeAgainIsHeld:
         assert out.result.passed and out.result.committed and not out.fixed
         assert out.reextraction.outcome == gate.REGATE_PASSED
         assert out.reextraction.held == out.result.slips_held != []
-        assert 'misquoted it again' in out.reextraction.summary()
+        assert 'held back, not recorded' in out.reextraction.summary()
+
+    def test_a_fix_recheck_carrying_a_held_reading_holds_it_again(self, project_dir, tmp_path):
+        """#736: a fix's re-check carries the run before's replies and rebuilds
+        its rows by code, the slipped one too; the retry has been had, so it
+        stays held rather than stopping the re-check."""
+        held = _gate(project_dir, tmp_path, [_commitment(), self._slipped()],
+                     findings=[_contradiction()], hold_slips=True)
+        assert not held.passed and held.slips_held
+        again = _gate(project_dir, tmp_path, [_commitment(), self._slipped()], carry=held)
+        assert again.unresolved == [] and again.slips_held == held.slips_held
+        assert again.passed
 
 
 class TestCommit:

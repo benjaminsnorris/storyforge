@@ -2073,7 +2073,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     process stopped on the extractor's quote slips (#598's re-extraction):
     a fact it misquotes, or gives no quote, is held back instead of stopping
     the scene (`_hold_slips`; E4's re-record, 2026-11-27: the second reading
-    made the first's slip again in each of three scenes).
+    made the first's slip again in each of three scenes). So does a run
+    whose `carry` held slips back (a fix's re-check after it).
 
     `before` is the book before the pass that wrote `prose` (`snapshot`;
     None: a new scene or advisor mode; a re-check through `gate_unchanged`
@@ -2300,7 +2301,9 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                                                     short_lines=result.short_must))
     if standing is not None:   # after the code's own, which it makes again
         _carry_standing(result.check, standing, disputes)
-    if hold_slips:
+    # a fix's re-check carrying a reading that held slips back rebuilds
+    # them from its replies: the retry has been had, so they stay held
+    if hold_slips or (carry is not None and carry.slips_held):
         _hold_slips(result)
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
@@ -3867,8 +3870,8 @@ class Reextraction:
                 f'prose was gated again (extraction and the check'
                 + (f', the {self.standing} finding(s) before it standing' if self.standing
                    else '') + ')')
-        held = (f'it misquoted it again ({_slip_text(self.held)}), so that fact was not '
-                f'recorded; the scene is not stopped for the gate\'s own slip'
+        held = (f'it misquoted the prose again ({_slip_text(self.held)}): held back, not '
+                f'recorded, and the scene not stopped for the gate\'s own slip'
                 if self.held else '')
         if self.outcome == REGATE_PASSED:
             return f'{said}: ' + (f'{held}; it passed' if held else 'it passed')
