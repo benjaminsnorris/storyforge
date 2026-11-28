@@ -336,8 +336,17 @@ Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a ju
 
 ### 5. Redraft *Wrath Like Smoke*
 
-**Clear (2026-11-27).** The hold on #774 lifted when PR #779 merged: three readings, and `blocking-set` passes its floors at them (single-run recall on the overnight run's 29 real slips 0.644, against 0.575 at two). Step 2's suites are recorded except `e8-revision-safety`, which Ben deferred.
+**Held (2026-11-27): the gate's false stops.** After #781–#783, Ben approved re-recording `e4-generation` (3 runs, $59.92; `docs/history.md`, "`e4-generation` re-recorded after #781–#783"). The bar was about 14 stops or fewer over three runs, mostly real or debatable. It stopped **21** (5 / 10 / 6, against 4 / 12 / 8 before the fixes), and **10 of the 21 are false** (5 real, 6 debatable). The causes, by false stops:
 
-**Watch before and during the redraft:** at three readings `e4-generation`'s gate stops more. Gate false alarms (a stop the judge found no contradiction in; the judge doesn't read blocking) went 0 → 3 / 5 / 4 over three runs, scenes passed 22 → 19 / 11 / 15 of 23, and the first stop is now scene 2. The gate sets' control stops rose too (`gate-set-questions` 0.48 → 0.61, inside its old spread). Not attributed: those suites' other requests changed as well. If the redraft's first session stops on many blocking findings that aren't real, that is the cost of the third reading, and Ben decides whether it is worth it.
+- **The question layer (5).** A scene's own time recorded as a `fixed` timeline fact ("The scene occurs on a Tuesday at 2:47 in the morning"), which #782's scene-bound rule doesn't cover (`advocate`, `maren-runs`); an earlier scene's momentary physical state asked as lasting (Rook standing on the bench seat, hands still, fingers curled: `building`); a count asked a day later (`pewter-town`); and a promise read as unmet for want of the word "explicitly" (`bench`).
+- **Extraction quote slips (3)**: `waking-hank`, `waking-maren`, `missing-persons`.
+- **Unruled disputes (2)**: `eleven-days` in runs 2 and 3, stopped only by `UNRULED` on the plan's end of Hank's exhaustion.
+- **The blocking read (0)**: its 4 stops were debatable, none false.
+
+Each has a bounded fix (scene-bound for any timeline fact about the scene's own moment, a physical state's kind, an unruled dispute as a note rather than a stop, a retry on a quote slip). Ben decides which to take before the redraft. Without its 10 false stops, the gate would have stopped 11 times in three runs.
+
+The earlier status, for the record: the hold on #774 lifted when PR #779 merged (three readings, `blocking-set` passing its floors at single-run recall 0.644 on the 29 real slips). Step 2's suites are recorded except `e8-revision-safety`, which Ben deferred.
+
+**Watch before and during the redraft** (from the re-record before #781–#783): at three readings `e4-generation`'s gate stops more. Gate false alarms (a stop the judge found no contradiction in; the judge doesn't read blocking) went 0 → 3 / 5 / 4 over three runs, scenes passed 22 → 19 / 11 / 15 of 23, and the first stop is now scene 2. The gate sets' control stops rose too (`gate-set-questions` 0.48 → 0.61, inside its old spread). Not attributed: those suites' other requests changed as well. If the redraft's first session stops on many blocking findings that aren't real, that is the cost of the third reading, and Ben decides whether it is worth it.
 
 With the defaults decided and the evals green, redraft. Watch the first session's fix rounds, the stops per scene, and any finding of a kind the pilot cleared. The phantom-injury lines in iliad-adult PR 23 go with the redraft (README, "Decisions for Ben").
