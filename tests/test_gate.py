@@ -5883,3 +5883,21 @@ def test_a_pinned_extraction_makes_no_extraction_call(project_dir, tmp_path):
     assert 'pinned by the eval' in result.extract_note
     assert gate.pinned_extraction(result) == {'found': pin['found'], 'kept': pin['kept'],
                                               'dropped': []}
+
+
+def test_extraction_prompt_is_the_request_the_gate_sends(project_dir, tmp_path):
+    """#788: the extraction-typing eval builds its prompt with
+    `gate.extraction_prompt`; it must be the gate's own request."""
+    prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+    sent = []
+
+    def fake(path, body, **k):
+        if 'tools' in body:
+            return _text({'findings': [], 'kept': []})
+        sent.append(_prompt_text(body['messages'][0]['content']))
+        return _text({'commitments': [_commitment()]})
+    want = gate.extraction_prompt(project_dir, SCENE, prose)
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        gate_scene(project_dir, SCENE, command='draft', prose=prose,
+                   log_dir=str(tmp_path / 'l'), extract_model='m', check_model='m')
+    assert sent[0] == want

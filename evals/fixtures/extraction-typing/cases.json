@@ -1,0 +1,155 @@
+{
+ "about": "Invented scenes (no book prose; this repo is public) with labelled facts: the words that establish each and its kind. worn, carried and held should be typed 'state' (a later scene may change them; #788), trait 'fixed'. The last scene has the shape of the real failures: gear folded into how someone looks, beside a true trait in the same sentence, or told as a habit.",
+ "characters": [
+  {
+   "id": "brannoc",
+   "name": "Brannoc"
+  },
+  {
+   "id": "ielle",
+   "name": "Ielle"
+  },
+  {
+   "id": "tamsin-roe",
+   "name": "Tamsin Roe"
+  },
+  {
+   "id": "old-heddick",
+   "name": "Heddick"
+  },
+  {
+   "id": "orrin",
+   "name": "Orrin"
+  },
+  {
+   "id": "varro",
+   "name": "Varro"
+  },
+  {
+   "id": "kell",
+   "name": "Kell"
+  },
+  {
+   "id": "dace",
+   "name": "Dace"
+  }
+ ],
+ "scenes": [
+  {
+   "id": "brannoc-takes-the-field",
+   "title": "Brannoc takes the field",
+   "pov": "brannoc",
+   "location": "the river ford",
+   "prose": "Brannoc came down to the ford at first light in the gold armour his grandfather had worn, every scale of it bright as a coin. He was the last son of the house of Avel, and the men on the far bank knew it from the armour before they knew his face.\n\nHe carried a spear of ash with a bronze point, and an old horn hung at his hip on a red cord.\n\n\"Who comes?\" the sentry called.\n\n\"Brannoc of Avel,\" he said, \"and I am thirty years old today, and tired of waiting.\"",
+   "labels": [
+    {
+     "kind": "worn",
+     "quote": "in the gold armour his grandfather had worn"
+    },
+    {
+     "kind": "carried",
+     "quote": "He carried a spear of ash with a bronze point"
+    },
+    {
+     "kind": "carried",
+     "quote": "an old horn hung at his hip on a red cord"
+    },
+    {
+     "kind": "trait",
+     "quote": "He was the last son of the house of Avel"
+    }
+   ]
+  },
+  {
+   "id": "ielle-at-the-market",
+   "title": "Ielle at the market",
+   "pov": "ielle",
+   "location": "the salt market",
+   "prose": "Ielle had grey eyes, her mother's, and a way of looking past a trader's shoulder that made him lower his price.\n\nShe wore a blue cloak patched at the elbow and a pair of boots too big for her, stuffed at the toes with wool. In her left hand she held the purse with the last of the copper.\n\nTamsin Roe, her sister, waited at the well. Tamsin had been born in the winter of the flood and never let anyone forget it.",
+   "labels": [
+    {
+     "kind": "worn",
+     "quote": "She wore a blue cloak patched at the elbow"
+    },
+    {
+     "kind": "worn",
+     "quote": "a pair of boots too big for her"
+    },
+    {
+     "kind": "held",
+     "quote": "In her left hand she held the purse"
+    },
+    {
+     "kind": "trait",
+     "quote": "Ielle had grey eyes, her mother's"
+    },
+    {
+     "kind": "trait",
+     "quote": "Tamsin Roe, her sister"
+    },
+    {
+     "kind": "trait",
+     "quote": "Tamsin had been born in the winter of the flood"
+    }
+   ]
+  },
+  {
+   "id": "heddick-dresses-for-court",
+   "title": "Heddick dresses for court",
+   "pov": "old-heddick",
+   "location": "the gatehouse",
+   "prose": "Heddick had served as steward to three dukes of Cardow, and he fastened the silver chain of office around his neck with hands that no longer shook at it.\n\nOver his shirt went the steward's coat, green with a white lining, the one the duke had given him. He buckled on a short sword he had not drawn in ten years and picked up the iron keys to the lower gate.",
+   "labels": [
+    {
+     "kind": "worn",
+     "quote": "the silver chain of office around his neck"
+    },
+    {
+     "kind": "worn",
+     "quote": "the steward's coat, green with a white lining"
+    },
+    {
+     "kind": "carried",
+     "quote": "He buckled on a short sword"
+    },
+    {
+     "kind": "held",
+     "quote": "picked up the iron keys to the lower gate"
+    },
+    {
+     "kind": "trait",
+     "quote": "Heddick had served as steward to three dukes of Cardow"
+    }
+   ]
+  },
+  {
+   "id": "from-the-wall",
+   "title": "From the wall",
+   "pov": "ielle",
+   "location": "the north wall",
+   "prose": "From the wall Ielle could see the whole line. Orrin was easy to find: his plume was black, and so was the beard under the cheek-guards of his helmet.\n\nBeside him stood Varro with the wolf-pelt over his shoulders, the one you could pick out from a mile off. Kell, who had slept in his mail again and looked as if he liked it, was arguing with a horse.\n\nOld Dace, broad as a door and older than any of them, wore the boar's-tusk helmet that marked him in every song about the war.",
+   "labels": [
+    {
+     "kind": "worn",
+     "quote": "his plume was black"
+    },
+    {
+     "kind": "worn",
+     "quote": "Varro with the wolf-pelt over his shoulders"
+    },
+    {
+     "kind": "worn",
+     "quote": "who had slept in his mail again"
+    },
+    {
+     "kind": "worn",
+     "quote": "wore the boar's-tusk helmet that marked him"
+    },
+    {
+     "kind": "trait",
+     "quote": "broad as a door and older than any of them"
+    }
+   ]
+  }
+ ]
+}

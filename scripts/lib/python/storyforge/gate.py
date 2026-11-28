@@ -707,24 +707,15 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     saying which and why ('' when nothing was offered or refused).
     `pinned` (#788, `gate_scene`): an eval's frozen replies, used as they
     are, with no call."""
-    from storyforge.elaborate import get_scene
-    from storyforge.enrich import format_registries_for_prompt
-    from storyforge.extract import (build_commitments_prompt, commitment_rows,
-                                    known_for_scene, unplaced_rows)
-    ref_dir = os.path.join(project_dir, 'reference')
-    scene = get_scene(scene_id, ref_dir) or {}
+    from storyforge.extract import build_commitments_prompt, commitment_rows, unplaced_rows
+    known, recorded, left_out, details, registries_text = _extraction_inputs(
+        project_dir, scene_id, rows, order)
     subjects = _subjects(project_dir)
-    names = ([scene.get('pov', '')] + scene.get('location', '').split(';')
-             + scene.get('on_stage', '').split(';'))
-    scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
-    known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
     OFFER_LEFT_OUT.pop(scene_id, None)   # this run's count, not an earlier gate run's
     if left_out:
         problems['cap'].append(f'{scene_id} ({left_out})')
         OFFER_LEFT_OUT[scene_id] = left_out
     problems['unplaced'].extend(unplaced_rows(rows, order))
-    details = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
-    registries_text = format_registries_for_prompt(project_dir, exclude=('knowledge',))
     context = build_commitments_prompt(scene_id, '', details, registries_text=registries_text,
                                        known=known, recorded=recorded)
     why_not = _carry_reason(carry, prose, context, model) if carry is not None else ''
@@ -766,6 +757,42 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                           ends_out=ends, speakers=Speakers.load(project_dir))
     _route_leaned_on(project_dir, scene_id, rows, order, ends, problems)
     return out
+
+
+def _extraction_inputs(project_dir: str, scene_id: str, rows: list[dict[str, str]],
+                       order: dict[str, int]) -> tuple[list, list, int, dict, str]:
+    """What the gate's extraction prompt is built from, besides the prose:
+    the facts in force offered (`known`), the registry facts recorded for
+    the scene (`recorded`), how many were left out of the offer, the
+    scene's details and the registries' text."""
+    from storyforge.elaborate import get_scene
+    from storyforge.enrich import format_registries_for_prompt
+    from storyforge.extract import known_for_scene
+    scene = get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
+    subjects = _subjects(project_dir)
+    names = ([scene.get('pov', '')] + scene.get('location', '').split(';')
+             + scene.get('on_stage', '').split(';'))
+    scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
+    known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
+    details = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
+    return (known, recorded, left_out, details,
+            format_registries_for_prompt(project_dir, exclude=('knowledge',)))
+
+
+def extraction_prompt(project_dir: str, scene_id: str, prose: str,
+                      rows: list[dict[str, str]] | None = None) -> str:
+    """#788: the prompt the gate's extraction sends for `prose` as
+    `scene_id`, read against `rows` (the ledger, read when None, less the
+    scene's own commitments, as a redraft is read). For an eval that
+    measures extraction on a real book."""
+    if rows is None:
+        rows = [r for r in ledger.load(project_dir)
+                if not (r.get('scene_id') == scene_id and ledger.is_commitment(r))]
+    from storyforge.extract import build_commitments_prompt
+    known, recorded, _, details, registries_text = _extraction_inputs(
+        project_dir, scene_id, rows, ledger.scene_order(project_dir))
+    return build_commitments_prompt(scene_id, prose, details, registries_text=registries_text,
+                                    known=known, recorded=recorded)
 
 
 def pinned_extraction(result: 'GateResult') -> dict | None:
