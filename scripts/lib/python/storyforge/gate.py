@@ -299,6 +299,11 @@ class GateResult:
     committed: bool = False
     #: registry ids whose quote was filled on commit
     quotes_filled: list[str] = field(default_factory=list)
+    #: a re-reading of the same prose after the extractor's quote slip
+    #: (`gate_scene(hold_slips=True)`): each fact it misquoted (or gave no
+    #: quote) again, `fact-id: what` (`_describe_slips`), held back: not
+    #: proposed, so never committed, and not a stop (`_hold_slips`)
+    slips_held: list[str] = field(default_factory=list)
     #: (statement, why) for each extracted fact the persistence check judged
     #: not to last beyond the scene: not proposed, so never committed
     dropped: list[tuple[str, str]] = field(default_factory=list)
@@ -1996,7 +2001,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                before: Snapshot | None = None,
                standing: 'GateResult | None' = None,
                carry: 'GateResult | None' = None,
-               open_from: 'GateResult | None' = None) -> GateResult:
+               open_from: 'GateResult | None' = None,
+               hold_slips: bool = False) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -2007,7 +2013,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                                log_dir=log_dir, extract_model=extract_model,
                                check_model=check_model, introduced_by=introduced_by,
                                before=before, standing=standing, carry=carry,
-                               open_from=open_from)
+                               open_from=open_from, hold_slips=hold_slips)
         finally:
             _log_spend(meter, project_dir, 'gate', scene_id)
 
@@ -2029,7 +2035,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 before: Snapshot | None = None,
                 standing: 'GateResult | None' = None,
                 carry: 'GateResult | None' = None,
-                open_from: 'GateResult | None' = None) -> GateResult:
+                open_from: 'GateResult | None' = None,
+                hold_slips: bool = False) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -2061,6 +2068,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     a re-extraction): no open reading is made, and its open findings are
     carried (`_carry_open`). Ignored by the other methods, and by a run
     with no open reading behind it (`open_findings` None), which reads.
+
+    `hold_slips` marks a reading again of prose an earlier run of this
+    process stopped on the extractor's quote slips (#598's re-extraction):
+    a fact it misquotes, or gives no quote, is held back instead of stopping
+    the scene (`_hold_slips`; E4's re-record, 2026-11-27: the second reading
+    made the first's slip again in each of three scenes).
 
     `before` is the book before the pass that wrote `prose` (`snapshot`;
     None: a new scene or advisor mode; a re-check through `gate_unchanged`
@@ -2287,6 +2300,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                                                     short_lines=result.short_must))
     if standing is not None:   # after the code's own, which it makes again
         _carry_standing(result.check, standing, disputes)
+    if hold_slips:
+        _hold_slips(result)
     _classify(result, project_dir, before, already_reported, prose=prose, rows=rows)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command, held_rows,
@@ -3831,6 +3846,9 @@ class Reextraction:
     #: #734: how many of the run before it's findings stood in it (its slips
     #: were beside them; `_reextract(standing=True)`)
     standing: int = 0
+    #: the facts the second run misquoted again and held back
+    #: (`GateResult.slips_held`): not recorded, not a stop
+    held: list[str] = field(default_factory=list)
 
     @classmethod
     def of(cls, run: GateResult, again: GateResult | None = None,
@@ -3838,22 +3856,26 @@ class Reextraction:
         slips = _describe_slips(run)
         if again is None:
             return cls(slips, REGATE_ERROR, error=error)
+        held = list(again.slips_held)
         if again.passed:
-            return cls(slips, REGATE_PASSED)
+            return cls(slips, REGATE_PASSED, held=held)
         return cls(slips, REGATE_FAILED, again=_describe_slips(again),
-                   others=not _only_extractor_slips(again))
+                   others=not _only_extractor_slips(again), held=held)
 
     def summary(self) -> str:
         said = (f'the extractor {_slipped(self.slips)} ({_slip_text(self.slips)}), so the same '
                 f'prose was gated again (extraction and the check'
                 + (f', the {self.standing} finding(s) before it standing' if self.standing
                    else '') + ')')
+        held = (f'it misquoted it again ({_slip_text(self.held)}), so that fact was not '
+                f'recorded; the scene is not stopped for the gate\'s own slip'
+                if self.held else '')
         if self.outcome == REGATE_PASSED:
-            return f'{said}: it passed'
+            return f'{said}: ' + (f'{held}; it passed' if held else 'it passed')
         if self.outcome == REGATE_ERROR:
             return (f'{said}, which could not finish ({_one_line(self.error)}); the verdict '
                     f'before it stands')
-        parts = []
+        parts = [held] if held else []
         if self.again:
             parts.append(f'it {_slipped(self.again)} again ({_slip_text(self.again)}); no quote '
                          f'is replaced with the prose\'s words')
@@ -4339,10 +4361,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
       invocation (`_OneRegate`), round 1's re-roll included: a first run
       failing on slips alone is extracted twice, not three times. What the
       re-extraction's run finds instead goes to the next round's fix while
-      one is left; after the last round it is the verdict. A run that
-      misquotes again is kept and reported (never fuzzy-matched to the
-      prose's words: one word can change the fact); one that can't finish
-      keeps the run before it.
+      one is left; after the last round it is the verdict. That run holds
+      back each fact it misquotes again (`gate_scene(hold_slips=True)`,
+      `_hold_slips`: not recorded, a NOTE, not a stop; never fuzzy-matched
+      to the prose's words: one word can change the fact); one that can't
+      finish keeps the run before it.
     - A run with real problems beside slips goes to the fix, not a
       re-extraction: the fix's re-check extracts the edited prose anyway.
       The run the loop ends on, though, is extracted again when its slips
@@ -4472,7 +4495,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                                    log_dir=next_dir, extract_model=extract_model,
                                    check_model=check_model, before=before,
-                                   carry=result if to_fix else None, open_from=result)
+                                   carry=result if to_fix else None, open_from=result,
+                                   hold_slips=misquoted is not None)
             except GateError as e:
                 if n == 1:
                     raise
@@ -4571,6 +4595,51 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
 #: No prose edit repairs one, so the fix is never sent them
 #: (`problems_to_fix`), and they earn the one re-extraction
 _EXTRACTOR_SLIPS = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends')
+
+
+#: The extractor's quote slips: a quote not in the scene, or none.
+#: Held back on a reading again of the same prose (`_hold_slips`)
+_QUOTE_SLIPS = (MISQUOTE, NO_QUOTE)
+
+
+def _hold_slips(result: GateResult) -> None:
+    """On a reading again of prose an earlier run stopped on the
+    extractor's quote slips (`gate_scene(hold_slips=True)`): take each fact
+    this reading misquoted, or gave no quote, out of `proposed` (and
+    `claims`), with the ends it carries, and out of `problems`, into
+    `slips_held`, reported as a NOTE (`report_lines`, `applied_lines`). The
+    scene is not stopped for them: a quote slip is the gate's own
+    extraction's, which no prose edit repairs, and the retry has been had
+    (E4's re-record, #784: `waking-hank`, `waking-maren` and
+    `missing-persons` stopped on the same slip read twice, "she had" for
+    the prose's "she'd had", "had not" for "hadn't", "knows" for "knew").
+    Nothing is recorded on words the scene doesn't have, and the quote is
+    never replaced with the prose's words (#598: one word can change the
+    fact), so the fact is not in the ledger and later scenes aren't checked
+    against it; the NOTE says so. Everything else the reading found stands:
+    a halt or dispute the slipped fact raised was taken before this, and
+    still stops the scene."""
+    ids = {item.split(': ', 1)[-1] for kind in _QUOTE_SLIPS
+           for item in result.problems.get(kind, [])}
+    if not ids:
+        return
+    result.slips_held = [s for s in _describe_slips(result)
+                         if s.split(': ', 1)[0] in ids]
+    result.proposed = [r for r in result.proposed if r['id'] not in ids]
+    result.claims = [r for r in result.claims if r['id'] not in ids]
+    result.ends = [e for e in result.ends if (e.carrier or {}).get('id') not in ids]
+    for kind in _QUOTE_SLIPS:
+        result.problems[kind] = []
+
+
+def _held_slips_line(result: GateResult) -> list[str]:
+    """The NOTE line for `result.slips_held` ([] when none)."""
+    if not result.slips_held:
+        return []
+    return [f'NOTE (not recorded: extraction misquoted these again on reading the same prose '
+            f'a second time; the scene is not stopped for its own extraction\'s slip, and '
+            f'later scenes are not checked against these facts): '
+            + _one_line('; '.join(result.slips_held))]
 
 
 class _OneRegate:
@@ -4714,9 +4783,11 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
     caller reports). The quote is never replaced by the prose's words: one
     word (he/she) can change the fact.
 
-    The run that comes back is kept, a verdict on the same prose: a pass
-    has committed; one stopped by slips alone again has its mismatches
-    reported, both runs' in the `Reextraction`; one stopped by anything
+    The run that comes back is kept, a verdict on the same prose, read
+    with `hold_slips`: a fact it misquotes again is held back, not
+    recorded and not a stop (`_hold_slips`; both runs' slips are in the
+    `Reextraction`); a pass has committed; one stopped by a link slip
+    alone again has it reported; one stopped by anything
     else (a finding this check makes, or a halt or other problem the new
     extraction brings) goes to the next round's fix while `gate_and_fix`
     has one left, and after the last round is the verdict. A run that
@@ -4744,7 +4815,8 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
                            log_dir=run_dir, extract_model=extract_model,
                            check_model=check_model, before=before,
                            introduced_by=introduced_by,
-                           standing=run if kept else None, open_from=run)
+                           standing=run if kept else None, open_from=run,
+                           hold_slips=True)
     except GateError as e:
         return run, fallback_dir, Reextraction.of(run, error=str(e))
     except Exception as e:   # a bug or an I/O failure: say it, keep the fixes
@@ -5332,7 +5404,7 @@ def applied_lines(result: GateResult) -> list[str]:
     return [f'NOTE ({_REPORTED_LABEL[kind]}): '
             + '; '.join(_one_line(i) for i in result.problems.get(kind, []))
             for kind in (ENDS_MOVED, ID_PREFIX, UNOFFERED, ENDS_HERE) + _CLAIM_KINDS
-            if result.problems.get(kind)] + claim_lines(result)
+            if result.problems.get(kind)] + claim_lines(result) + _held_slips_line(result)
 
 
 def claim_lines(result: GateResult) -> list[str]:
@@ -5412,6 +5484,7 @@ def report_lines(result: GateResult) -> list[str]:
         lines.append(f'HALT ({h.kind}): {_one_line(h)}')
     for item in result.unresolved:
         lines.append(f'EXTRACTION: {_one_line(item)}')
+    lines += _held_slips_line(result)
     for f in result.findings:
         if _among(f, result.plan_conflicts):
             note = next((n for g, n in result.speaker_notes if g is f), '')
