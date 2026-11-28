@@ -1,78 +1,24 @@
-"""E8 — revision safety: does the *current* Storyforge pass reintroduce an
-error a past pass wrote?
+"""E8's replay helpers: a corpus book at the commit before a past pass, and
+the gate the way revise and write run it.
 
-Built from E1's ``tool-introduced`` cases. For each one, the book repo is
-materialized at the parent of the commit that introduced the error — the
-exact project state the old pass saw, wrong brief and all — and the current
-version of that pass is run on the scene it rewrote. A judge then reads the
-new prose against the case's established fact and says whether the error is
-back. A pass is safe when it reintroduces nothing.
+E8 (revision safety: does today's pass reintroduce an error a past pass
+wrote?) was retired as a suite on 2026-11-27 (#788): it redrafted prose to
+measure the gate end to end, about $55 a run, and its labelled prose is
+already frozen in the gate set (`evals/gate_set`), built from E8's
+recordings (`fixtures/cassettes/e8-revision-safety`, kept as that source).
+What is left here serves the gate set, E2 and E5:
 
-Only pass families that current Storyforge can re-run in-process are
-replayed; every other case is reported as excluded with its reason, never
-dropped silently. Holdout cases are excluded. Families:
-
-- ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs as a rewrite
-  (the scene's prose a voice reference only, plan §3.4), the path
-  ``storyforge write --force`` and ``revise``'s ``_redraft_from_briefs`` take,
-  without their refusal fallback (E8 measures the requested model), then
-  their gate (``gate.gate_and_fix``: fix and re-check up to
-  ``gate.FIX_ROUNDS`` times); the prose judged is what the gate leaves, passed
-  or not, as both keep it. Their refusal of a
-  scene behind one waiting on the gate (``cmd_revise._leaning``,
-  ``cmd_write._gate_blockers``) is not applied: a pre-pass tree has none. Their
-  cut-off guard is not applied here: a refusal halts, a cut-off reply would
-  be replayed as a revision.
-- ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
-  ``_redraft_scenes`` on the scene (gated, as above), the path
-  ``revise --naturalness`` takes when the diagnosis names upstream causes.
-  Production code asks for the refusal fallback here; under the cassette it
-  is stripped.
-- ``revision-plan``: a named pass from the book's own plan CSV, prompted by
-  today's ``revision.build_revision_prompt`` with the config block assembled
-  as ``cmd_revise.main``'s pass loop assembles it (reader-annotation guidance
-  is omitted: there is no Bookshelf in a replay; the pass is narrowed to the
-  case's scene), then, at ``full`` coaching, the gate as above (Phase 4 §5,
-  ``cmd_revise._gate_pass_scenes``). Prose passes only.
-
-Passes that write data rather than prose are replayed the same way, and the
-judge reads what the pass wrote (the rows or files it added or changed, see
-``written``) instead of a scene (``CSV_JUDGE_PROMPT``). A pass that writes
-nothing reintroduces nothing and is counted ``not_present`` without a judge
-call. These families:
-
-- ``brief-fix``: ``cmd_revise._fix_upstream_briefs`` on the case's scene, the
-  brief rewrite polish/naturalness runs before redrafting; the judge reads the
-  rewritten brief row. A rewrite the fix's own guard rejects halts.
-- ``hone-physical-states``: ``hone.reconcile_domain('physical-states')``, what
-  ``storyforge hone --domain physical-states`` runs, with hone's model; the
-  judge reads the rows it added to or changed in the ledger
-  (``commitments.csv``, which holds the physical states).
-- ``illustrate-state``: ``cmd_illustrate.run_state`` at ``full`` coaching (the
-  old pass proposed transitions; coach and strict write no content); the judge
-  reads the rows it added to the visual-state log.
-- ``illustrate-prompts``: ``cmd_illustrate.run_prompts`` for the prompt file
-  the case quotes; the judge reads the prompt files it wrote.
-
-A data pass that exits non-zero errors the suite (it did not do its job); a
-hone batch cut off at the token limit halts the case, as a cut-off does in
-the prose families. ``EXCLUDED_CASES`` lists cases whose error a replay
-cannot show, with why.
-
-A pre-pass project that predates
-``reference/scenes.csv`` but has ``scene-metadata.csv`` is migrated in its
-materialized copy by a port of Storyforge's removed migrate script
-(``migrate_scene_metadata``, an approximation: the books themselves got
-``scenes.csv`` from ``extract``); one that keeps its scenes in YAML is reported as
-unreplayable. Scenes renamed after the introducing commit are found through
-E1's id-maps.
-
-Needs the book repos cloned under ``STORYFORGE_CORPUS_DIR`` (see ``evals/e1``).
-
-**Frozen** (#645): ``run.py`` never re-records this suite on a prompt change;
-a miss reports it ``stale`` and spends nothing. Re-record it only when a
-decision depends on it, as three runs:
-``python3 evals/run.py --mode record --suite e8-revision-safety --runs 3``.
+- `materialize`, `prepare`: a book repo (under ``STORYFORGE_CORPUS_DIR``,
+  see ``evals/e1``) at the parent of the commit that introduced an E1
+  ``tool-introduced`` case's error, the exact project the old pass saw, its
+  scene renamed through E1's id-maps and a pre-``scenes.csv`` project
+  migrated by a port of the removed migrate script
+  (`migrate_scene_metadata`, an approximation).
+- `redraft`: ``cmd_write``'s redraft from briefs, then the gate
+  (`gate_as_revise`), as ``write --force`` and revise run it.
+- `family`, `judge_prompt`, `parse_verdict`, `VERDICTS`, `EXCLUDED_CASES`:
+  how E8 classed and judged a case, which the gate set's build reads back
+  from E8's recorded judge calls.
 """
 
 from __future__ import annotations
@@ -81,10 +27,8 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tarfile
 import io
-from dataclasses import dataclass, field
 
 import e1
 from harness import migrate_tree
@@ -188,35 +132,6 @@ def family(case: dict) -> str:
     if not name:
         return ''
     return 'revision-plan'
-
-
-@dataclass
-class Selection:
-    cases: list[dict] = field(default_factory=list)
-    excluded: dict[str, list[str]] = field(default_factory=dict)  # reason -> ids
-
-    def exclude(self, reason: str, case_id: str) -> None:
-        self.excluded.setdefault(reason, []).append(case_id)
-
-
-def select(cases: list[dict], holdout: list[str]) -> Selection:
-    held = set(holdout)
-    sel = Selection()
-    for case in cases:
-        if 'tool-introduced' not in case.get('subsets', []):
-            continue
-        if case['id'] in held:
-            sel.exclude('holdout', case['id'])
-        elif case.get('level') != 'prose' and family(case) not in DATA_FAMILIES:
-            sel.exclude('csv-level (no prose to redraft)', case['id'])
-        elif not family(case):
-            sel.exclude(f"pass not replayable yet: {case['introduced_by'].get('pass', '?')}",
-                        case['id'])
-        elif not case['introduced_by'].get('commit'):
-            sel.exclude('no introducing commit recorded', case['id'])
-        else:
-            sel.cases.append(case)
-    return sel
 
 
 def _git(repo_dir: str, *args: str) -> str:
@@ -399,58 +314,16 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True, rewrite: bool =
 
 #: Where `gate_as_revise` leaves what the gate's last run found, by kind
 #: (`gate_counts`), for the suite
-GATE_COUNTS = os.path.join('working', 'e8-gate-counts.json')
-#: `gate_counts`' keys, in report order
-GATE_COUNT_KEYS = ('new', 'plan_conflicts', 'extraction', 'inherited', 'advisory')
-
-
-def gate_counts(result) -> dict[str, int]:
-    """What a `gate.GateResult` found, by kind (`GATE_COUNT_KEYS`): `new`
-    (what the fix is for, `gate.problems_to_fix`: contradictions and broken
-    promises, verified or not, halts, rejected facts restated),
-    `plan_conflicts` (the brief's own words contradict the book),
-    `extraction` (unresolved extraction problems, less the rejected facts
-    already in `new`), `inherited` (in the book before the pass: reported,
-    not blocking) and `advisory` (#642: broken promises of beats the brief
-    doesn't mark `must:`, the typed knowledge check's findings and, since
-    E4's re-record (#784), disputes the check gave no ruling on; reported,
-    not blocking, never fixed). Before #642 an advisory broken promise was
-    in `new`, and before #784 an unruled dispute."""
-    from storyforge import gate
-    return {'new': len(gate.problems_to_fix(result)),
-            'plan_conflicts': len(result.plan_conflicts),
-            'extraction': sum(len(result.problems.get(k, [])) for k in gate.UNRESOLVED
-                              if k != 'rejected'),
-            'inherited': len(result.inherited),
-            'advisory': len(result.advisory) + len(result.unruled)}
-
-
-def read_gate_counts(project_dir: str) -> dict[str, int] | None:
-    """`gate_counts` of the replay's last gate run, or None when it
-    didn't run or couldn't finish."""
-    path = os.path.join(project_dir, GATE_COUNTS)
-    if not os.path.isfile(path):
-        return None
-    with open(path, encoding='utf-8') as f:
-        return json.load(f)
-
-
 def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str,
                    before=None) -> str:
     """Gate `prose` as write and revise do (`gate.gate_and_fix`: fix and re-check up to
     ``gate.FIX_ROUNDS`` times) and return the prose they keep, passed or not. A scene the
     gate didn't pass, or couldn't finish, is listed in
-    working/gate-pending.csv as they list it (the suite reads that list to
-    tell a reintroduction the author is told about from one the gate
-    passed), and what the gate's last run found is left at `GATE_COUNTS`.
-    `before` is the book before the pass (`gate.snapshot`), as revise
+    working/gate-pending.csv as they list it. `before` is the book before the pass (`gate.snapshot`), as revise
     passes it. Only
     `GateError` is caught: a bug errors the suite rather than being judged
     as gated prose, and a cassette miss errors it anyway."""
     from storyforge import gate
-    counts_file = os.path.join(project_dir, GATE_COUNTS)
-    if os.path.isfile(counts_file):   # never an earlier run's counts
-        os.remove(counts_file)
     try:
         out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
                                 log_dir=os.path.join(project_dir, 'working', 'logs', 'gate'),
@@ -458,20 +331,9 @@ def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str,
     except gate.GateError as e:
         gate.mark_pending(project_dir, scene_id, command, f'the gate could not finish: {e}')
         return prose
-    os.makedirs(os.path.dirname(counts_file), exist_ok=True)
-    with open(counts_file, 'w', encoding='utf-8') as f:
-        json.dump(gate_counts(out.result), f)
     if not out.result.passed:
         gate.mark_pending(project_dir, scene_id, command, 'the gate did not pass it')
     return out.prose
-
-
-def judge(case: dict, scene_text: str) -> dict:
-    from storyforge.api import extract_text, invoke
-    from storyforge.common import model_for_tier
-    response = invoke(judge_prompt(case, scene_text), model_for_tier('opus'),
-                      max_tokens=1024, label=f'e8 judge {case["id"]}')
-    return parse_verdict(extract_text(response))
 
 
 def plan_row(project_dir: str, pass_name: str) -> dict:
@@ -490,163 +352,15 @@ def plan_row(project_dir: str, pass_name: str) -> dict:
     raise LookupError(f'no CSV plan in the pre-pass project has a pass named {pass_name!r}')
 
 
-def _pass_block(row: dict) -> str:
-    """Mirror of the config block ``cmd_revise.main`` builds for each pass."""
-    block = f"- name: {row.get('name', '')}\n    purpose: {row.get('purpose', '')}\n    scope: {row.get('scope', '')}"
-    for key in ('targets', 'guidance', 'protection', 'findings'):
-        if row.get(key):
-            block += f'\n    {key}: {row[key]}'
-    return block
-
-
-def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
-    """Run one named prose pass the way ``cmd_revise.main`` does (without the
-    refusal fallback) and, at ``full`` coaching, through its gate (Phase 4
-    §5, ``cmd_revise._gate_pass_scenes``: ``gate.gate_and_fix``, fix and re-check up to
-    ``gate.FIX_ROUNDS`` times); return the new prose of ``scene_id``, what the gate leaves,
-    passed or not, as revise keeps it. The re-check of later scenes only
-    reports, as for redrafts."""
-    from storyforge.api import extract_text, invoke, max_output_tokens, REVISION_TIMEOUT
-    from storyforge.common import build_shared_context, get_coaching_level, select_revision_model
-    from storyforge.parsing import extract_scenes_from_response
-    from storyforge.revision import build_revision_prompt
-
-    # Narrowed to the one scene the case is about: a pass that targeted thirty
-    # scenes would cost thirty scenes of output per case and can hit the output
-    # cap, and what E8 measures is what the pass does to this scene.
-    row = {**row, 'scope': 'scene-level', 'targets': scene_id}
-    name, purpose, scope = row.get('name', ''), row.get('purpose', ''), row.get('scope', 'full')
-    if scope in ('scene-level', 'targeted'):
-        scope = row['targets'].replace(';', ',') if row.get('targets') else 'full'
-    model = select_revision_model(name, purpose)
-    system = build_shared_context(project_dir, model=model)
-    prompt = build_revision_prompt(name, purpose, scope, project_dir,
-                                   pass_config=_pass_block(row),
-                                   coaching_level=get_coaching_level(project_dir),
-                                   api_mode=True, system_context=bool(system))
-    response = invoke(prompt, model, max_tokens=max_output_tokens(model),
-                      label=f'e8 pass {name}', timeout=REVISION_TIMEOUT, system=system or None)
-    scenes_dir = os.path.join(project_dir, 'scenes')
-    from storyforge import gate
-    baseline = gate.snapshot(project_dir)   # as revise takes it, before the pass writes
-    before = _read(os.path.join(scenes_dir, f'{scene_id}.md'))
-    extract_scenes_from_response(extract_text(response), scenes_dir)
-    after = _read(os.path.join(scenes_dir, f'{scene_id}.md'))
-    if after == before:
-        raise RuntimeError(f'pass {name!r} returned no revision of {scene_id}')
-    if get_coaching_level(project_dir) != 'full':
-        return after
-    return gate_as_revise(project_dir, scene_id, 'revise', after, before=baseline)
-
-
 class PassHalted(Exception):
     """The current pass refused to write the scene (a cut-off reply, or the
     model refused the request) and halted. Nothing was written, so nothing can be reintroduced; counted as
     ``halted``, separately from the replayed cases."""
 
 
-def naturalness_upstream(project_dir: str, scene_id: str) -> str:
-    """Rewrite the scene's brief and redraft it, as ``revise --naturalness`` does."""
-    from storyforge.cmd_revise import RedraftError, _fix_upstream_briefs, _redraft_scenes
-    fixed, skipped = _fix_upstream_briefs(project_dir, [scene_id])
-    if not fixed:
-        # no reply, a reply missing a field, or a rewrite naming a word the
-        # book never uses: revise leaves the brief and prose alone, so nothing
-        # can be reintroduced. The reason goes in the halted note, so a guard
-        # that rejects everything shows up there rather than as safety.
-        raise PassHalted(f'upstream brief fix rewrote nothing for {scene_id}: '
-                         f'{skipped.get(scene_id, "unknown")}')
-    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-    before = _read(path)
-    try:
-        count = _redraft_scenes(project_dir, [scene_id])
-    except RedraftError as e:
-        if _read(path) != before:
-            # redrafted, but the gate didn't pass it: revise keeps the prose
-            # (listed pending), so a reader would see it
-            return _read(path)
-        raise PassHalted(str(e)) from e  # nothing written: safe, not an error
-    if count != 1:
-        raise RuntimeError(f'naturalness redraft did not rewrite {scene_id}')
-    return _read(os.path.join(project_dir, 'scenes', f'{scene_id}.md'))
-
-
 def _read(path: str) -> str:
     with open(path, encoding='utf-8') as f:
         return f.read()
-
-
-def _snapshot(project_dir: str, *rels: str) -> dict[str, str]:
-    """{relative path: text} for each file, or every file under each directory."""
-    found = {}
-    for rel in rels:
-        root = os.path.join(project_dir, rel)
-        if os.path.isfile(root):
-            found[rel] = _read(root)
-        for dirpath, _dirs, files in os.walk(root):
-            for name in sorted(files):
-                path = os.path.join(dirpath, name)
-                found[os.path.relpath(path, project_dir)] = _read(path)
-    return found
-
-
-def _csv_rows(text: str) -> tuple[str, dict[str, dict[str, str]]] | None:
-    """(header line, {id: row}) for a pipe-delimited CSV keyed by a unique
-    first column; None when the text is not one (e.g. the visual-state log,
-    whose rows repeat an entity)."""
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines or '|' not in lines[0]:
-        return None
-    header = lines[0].split('|')
-    rows = {}
-    for line in lines[1:]:
-        row = dict(zip(header, line.split('|')))
-        if row[header[0]] in rows:
-            return None
-        rows[row[header[0]]] = row
-    return lines[0], rows
-
-
-def _same_row(a: dict[str, str], b: dict[str, str]) -> bool:
-    # a rewrite that only adds empty columns (cmd_revise writes briefs with
-    # every column of today's schema) leaves the row as it was
-    return all((a.get(k) or '') == (b.get(k) or '') for k in {*a, *b})
-
-
-def written(before: dict[str, str], after: dict[str, str]) -> str:
-    """What a pass wrote, for the judge. Per changed file: for a CSV keyed by
-    a unique id, its header and every row that is new or changed, by id, with
-    removed rows marked; for any other file, its first line (a CSV's header),
-    every new line, and every removed line marked ``(removed)``. A new file is
-    given whole, a deleted one named. '' when nothing changed."""
-    parts = []
-    for path in sorted({*before, *after}):
-        old, text = before.get(path), after.get(path)
-        if old == text:
-            continue
-        if text is None:
-            parts.append(f'{path} (deleted)')
-            continue
-        if old is None:
-            parts.append(f'{path} (new file):\n{text.rstrip()}')
-            continue
-        old_csv, new_csv = _csv_rows(old), _csv_rows(text)
-        if old_csv and new_csv:
-            new_lines = text.splitlines()
-            changed = [line for line in new_lines[1:] if line.strip()
-                       and not _same_row(old_csv[1].get(line.split('|')[0], {}),
-                                         dict(zip(new_csv[0].split('|'), line.split('|'))))]
-            removed = [f'(removed) {line}' for line in old.splitlines()[1:]
-                       if line.strip() and line.split('|')[0] not in new_csv[1]]
-        else:
-            new_lines, kept, now = text.splitlines(), set(old.splitlines()), set(text.splitlines())
-            changed = [line for line in new_lines[1:] if line not in kept]
-            removed = [f'(removed) {line}' for line in old.splitlines()[1:] if line not in now]
-            if new_lines[:1] != old.splitlines()[:1]:
-                changed.insert(0, f'(first line was) {old.splitlines()[0] if old.strip() else ""}')
-        if changed or removed:
-            parts.append(f'{path}:\n' + '\n'.join(new_lines[:1] + changed + removed))
-    return '\n\n'.join(parts)
 
 
 class _cassette_key:
@@ -662,96 +376,6 @@ class _cassette_key:
     def __exit__(self, *exc):
         if self.added:
             del os.environ['ANTHROPIC_API_KEY']
-
-
-def brief_fix(project_dir: str, scene_id: str) -> str:
-    """Rewrite one scene's brief as the polish/naturalness upstream fix does;
-    return the brief rows that changed."""
-    from storyforge.cmd_revise import _fix_upstream_briefs
-    rel = os.path.join('reference', 'scene-briefs.csv')
-    before = _snapshot(project_dir, rel)
-    fixed, skipped = _fix_upstream_briefs(project_dir, [scene_id])
-    if not fixed:  # as naturalness_upstream: nothing written, reason in the note
-        raise PassHalted(f'upstream brief fix rewrote nothing for {scene_id}: '
-                         f'{skipped.get(scene_id, "unknown")}')
-    return written(before, _snapshot(project_dir, rel))
-
-
-def hone_physical_states(project_dir: str) -> str:
-    """Reconcile the physical states as ``storyforge hone`` does; return what
-    it wrote to the ledger and to the briefs' state columns."""
-    from storyforge import hone
-    from storyforge.common import select_model
-    ref_dir = os.path.join(project_dir, 'reference')
-    rels = (os.path.join('reference', 'commitments.csv'),
-            os.path.join('reference', 'scene-briefs.csv'))
-    before = _snapshot(project_dir, *rels)
-    log_dir = os.path.join(project_dir, 'working', 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    cut_off = []
-    invoke_batch = hone._invoke_batch
-
-    def counting(prompt, model, log_file, label):
-        text = invoke_batch(prompt, model, log_file, label)
-        if text is None:
-            cut_off.append(label)
-        return text
-    hone._invoke_batch = counting
-    try:
-        hone.reconcile_domain('physical-states', ref_dir, select_model('synthesis'), log_dir)
-    finally:
-        hone._invoke_batch = invoke_batch
-    if cut_off:
-        # hone applies the batches that finished and leaves the rest
-        # unresolved; judging that partial output would score a pass that
-        # never ran on part of the book, so it halts like the other cut-offs
-        raise PassHalted(f'{len(cut_off)} hone batch(es) cut off at the token limit: '
-                         + '; '.join(cut_off))
-    return written(before, _snapshot(project_dir, *rels))
-
-
-def illustrate(project_dir: str, family_name: str, ids: set[str] | None = None) -> str:
-    """Run ``illustrate --state`` or ``--prompts`` at full coaching; return
-    the log rows or prompt files it wrote."""
-    from storyforge import cmd_illustrate, illustrations, visual_state
-    if family_name == 'illustrate-state':
-        rel = visual_state.STATE_FILE
-        run = lambda: cmd_illustrate.run_state(project_dir, 'full', dry_run=False)  # noqa: E731
-    else:
-        rel = illustrations.PROMPTS_SUBDIR
-        run = lambda: cmd_illustrate.run_prompts(project_dir, 'full', ids, dry_run=False)  # noqa: E731
-    before = _snapshot(project_dir, rel)
-    with _cassette_key():
-        status = run()
-    if status != 0:
-        # an unparseable or failed reply, an unknown id, a partial --prompts
-        # run: the pass did not do its job, so the suite errors rather than
-        # count the case as halted (safe)
-        raise RuntimeError(f'{family_name} exited {status} (its log above says why); wrote: '
-                           f'{written(before, _snapshot(project_dir, rel))[:300] or "nothing"}')
-    return written(before, _snapshot(project_dir, rel))
-
-
-def replay(case: dict, project_dir: str, scene_id: str) -> str:
-    """Run today's version of the case's pass. Returns the new prose of the
-    scene for a prose family, and ``written()``'s account of what the pass
-    wrote for a family in ``DATA_FAMILIES`` ('' when it wrote nothing)."""
-    kind = family(case)
-    if kind == 'brief-fix':
-        return brief_fix(project_dir, scene_id)
-    if kind == 'hone-physical-states':
-        return hone_physical_states(project_dir)
-    if kind in ('illustrate-state', 'illustrate-prompts'):
-        return illustrate(project_dir, kind, {os.path.splitext(os.path.basename(s['path']))[0]
-                                              for s in case['contradicted']
-                                              if 'prompts/' in s['path']} or None)
-    if kind == 'redraft-from-brief':
-        return redraft(project_dir, scene_id)
-    if kind == 'naturalness-upstream':
-        return naturalness_upstream(project_dir, scene_id)
-    if kind == 'revision-plan':
-        return revision_pass(project_dir, scene_id, plan_row(project_dir, case['introduced_by']['pass']))
-    raise ValueError(f'{case["id"]}: no replayable pass family')
 
 
 def _brief_ids(project_dir: str) -> set[str]:

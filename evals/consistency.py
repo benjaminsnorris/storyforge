@@ -8,8 +8,7 @@
 
 Run 1 is ``fixtures/cassettes``; runs 2 and 3 are ``fixtures/e6/run2`` and
 ``run3``. See ``evals/e6`` for why this is not a default suite.
-Also writes evals/e6/e8-cases.json: each E8 case's outcome per run (when
-E8 was replayed). ``git_sha`` in spread.json is per suite, per run: the
+``git_sha`` in spread.json is per suite, per run: the
 commit each suite was replayed at. With ``--suite``, a replayed suite that
 errored leaves the file as it was (a good spread isn't replaced by a miss),
 and the exit code reflects only the suites replayed.
@@ -30,7 +29,6 @@ import e6  # noqa: E402
 from harness import EVALS_DIR, discover, run_all  # noqa: E402
 
 SPREAD_FILE = os.path.join(EVALS_DIR, 'e6', 'spread.json')
-CASES_FILE = os.path.join(EVALS_DIR, 'e6', 'e8-cases.json')
 
 # Moves the status doc reported from single runs, each to be read against
 # E6's range: (suite, metric, claimed delta, where it was claimed). Deltas
@@ -49,18 +47,6 @@ CLAIMS = (
      'v1.80.0 re-record on new models: recall 0.16 -> 0.10 (8 -> 5 of 51)'),
     ('e2-corpus-drift', 'precision', 0.10,
      'v1.80.0 re-record on new models: precision 0.30 -> 0.40'),
-    ('e8-revision-safety', 'reintroduced', 1,
-     'E8 gaps: reintroduced 5 -> 6 (#383; one new case, thornwall-020)'),
-    ('e4-generation', 'cp10k_passed', 3.42 - 2.09,
-     "what the gate stops on: CP10k in the gate's passed scenes 3.42 -> 2.09 (#480)"),
-    ('e4-generation', 'gate_missed', 1,
-     'what the gate stops on: gate missed 5 -> 4 (#480)'),
-    ('e4-generation', 'gate_failed', 1,
-     'a second fix round: still failing after the fixes 3 -> 4 (#482)'),
-    ('e4-generation', 'gate_fixed', 1,
-     'a second fix round: fixed 9 -> 10 (#482)'),
-    ('e4-generation', 'cp10k_passed', 2.17 - 2.09,
-     'a second fix round: CP10k in passed scenes 2.09 -> 2.17 (#482)'),
 )
 
 
@@ -72,7 +58,6 @@ def parse_args(argv):
                              'entries in the spread file')
     parser.add_argument('--report', help='Save each run\'s full report as FILE-runN.json')
     parser.add_argument('--spread-file', default=SPREAD_FILE, help=argparse.SUPPRESS)
-    parser.add_argument('--cases-file', default=CASES_FILE, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -121,10 +106,6 @@ def main(argv=None) -> int:
     with open(args.spread_file, 'w') as f:
         json.dump(summary, f, indent=2, sort_keys=True)
         f.write('\n')
-    if 'e8-revision-safety' in wanted:
-        with open(args.cases_file, 'w') as f:
-            json.dump(e6.case_outcomes(reports), f, indent=1, sort_keys=True)
-            f.write('\n')
     print(_summary(summary))
     print(f'Spread: {args.spread_file}')
     return 2 if replayed_errors else 0
