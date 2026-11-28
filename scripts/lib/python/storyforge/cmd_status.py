@@ -76,9 +76,10 @@ def render_human(verdict: dict) -> str:
         lines.append(f'NOTE: {note}')
     every = verdict.get('advisory') or []
     craft = [a for a in every if a['source'] == CRAFT_ADVISORY_SOURCE]
-    from storyforge.gate import advisory_line, is_knowledge_row
+    from storyforge.gate import advisory_line, is_knowledge_row, is_unruled_row
     gated = [a for a in every if a['source'] != CRAFT_ADVISORY_SOURCE]
-    advisory = [a for a in gated if not is_knowledge_row(a)]
+    unruled = [a for a in gated if is_unruled_row(a)]
+    advisory = [a for a in gated if not is_knowledge_row(a) and not is_unruled_row(a)]
     knowing = [a for a in gated if is_knowledge_row(a)]
     if advisory:
         lines.append(f'ADVISORY: {len(advisory)} broken promise(s) the gate reported but did '
@@ -92,6 +93,13 @@ def render_human(verdict: dict) -> str:
                      f'did not stop on (working/gate-advisory.csv). Fix the prose, or the '
                      f'brief\'s knowledge_in or knowledge_out, where one is wrong:')
         for row in knowing:
+            lines.append(f'  {advisory_line(row)}')
+    if unruled:
+        lines.append(f'ADVISORY: {len(unruled)} plan fact(s) the scene may change that the '
+                     f'check gave no ruling on, which the gate reported but did not stop on '
+                     f'(working/gate-advisory.csv); the plan\'s fact stands. Fix the plan, or '
+                     f'the prose, where the scene does change it:')
+        for row in unruled:
             lines.append(f'  {advisory_line(row)}')
     if craft:
         # #643: diagnostics the author can use, never a stop

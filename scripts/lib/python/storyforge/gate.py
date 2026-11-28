@@ -17,7 +17,9 @@ For one scene's prose, `gate_scene` runs:
    registry fact, and a registry `resolves` is the author's estimate, so a
    `supersedes` or `ends` it proposes on a registry fact is not applied:
    it goes to the checker as a dispute to rule on (a contradiction, or
-   cleared), and one it doesn't rule on blocks the commit.
+   cleared). One it doesn't rule on is advisory (E4's re-record, #784):
+   reported and listed in working/gate-advisory.csv, never a stop or sent
+   to the fix; the plan's fact stands.
 3. **Check** the scene against the book and its brief (`checker.check_scene`):
    contradictions and broken promises, by code. `GATE_READINGS` (2)
    independent readings, their union: each reading misses real errors
@@ -517,13 +519,16 @@ class GateResult:
     @property
     def unruled(self) -> list[Dispute]:
         """Registry facts extraction said the scene changes that the checker
-        neither ruled a contradiction nor cleared: they block the commit."""
+        neither ruled a contradiction nor cleared. Advisory (Ben,
+        2026-11-27; E4's re-record, #784: `eleven-days` stopped in two runs
+        on one alone): reported (`ADVISORY`), listed in `ADVISORY_PATH`
+        (`record_advisory`), never a stop or sent to the fix. The link is
+        not applied, so the plan's fact stands, as for a cleared one."""
         return self.check.unruled if self.check else []
 
     @property
     def passed(self) -> bool:
-        return not (self.halts or self.unresolved or self.findings or self.unverified
-                    or self.unruled)
+        return not (self.halts or self.unresolved or self.findings or self.unverified)
 
 
 def _subjects(project_dir: str) -> dict[str, str]:
@@ -2432,8 +2437,9 @@ def finding_key(f: Finding) -> str:
 def can_commit_provisionally(result: GateResult) -> str:
     """Why `result` can't be committed provisionally ('' when it can): only
     the check's findings stopped it (contradictions, broken `must` beats and
-    registry facts set up here, plan conflicts, unverified ones). A halt (a fixed fact changed), an
-    extraction problem or an unruled dispute would commit a wrong row."""
+    registry facts set up here, plan conflicts, unverified ones). A halt (a fixed fact changed) or an
+    extraction problem would commit a wrong row. An unruled dispute doesn't
+    stop the scene (advisory), so it never comes to this."""
     if result.passed or result.committed:
         return 'it was committed'
     if getattr(result, '_ctx', None) is None:
@@ -2442,8 +2448,6 @@ def can_commit_provisionally(result: GateResult) -> str:
         return 'it changes a fixed fact (a halt)'
     if result.unresolved:
         return 'extraction left problems a commit would write'
-    if result.unruled:
-        return 'the check gave no ruling on a plan fact the scene may change'
     return ''
 
 
@@ -3608,10 +3612,6 @@ def problems_to_fix(result: GateResult) -> list[str]:
     for item in result.problems.get('rejected', []):
         lines.append(f'The scene restates a fact the author rejected; change or remove it: '
                      f'{item}')
-    for d in result.unruled:
-        lines.append(f'UNVERIFIED (extraction thinks the scene changes this; the check gave no '
-                     f'ruling; edit only if the scene clearly contradicts it): the plan records '
-                     f'"{d.statement}", and the scene says "{d.claim}".')
     for f, unverified in ([(f, False) for f in result.fixable]
                           + [(f, True) for f in result.unverified]):
         tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
@@ -4357,7 +4357,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     - A later run with nothing for the fix stops, unless all that stopped
       it is the extractor's slips (`_only_extractor_slips`: a quote not in
       the prose or none, with no halt, other extraction problem, finding,
-      plan conflict, unverified finding or unruled dispute; #598). Then the
+      plan conflict or unverified finding; #598). Then the
       same prose is gated again (`_reextract`: extraction and the check;
       logged; in `reextract/`; not a round), and so is the last round's
       re-check when only slips stopped it. That is at most once per
@@ -4373,7 +4373,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
       re-extraction: the fix's re-check extracts the edited prose anyway.
       The run the loop ends on, though, is extracted again when its slips
       stand beside the check's findings alone (`_slips_beside_findings`:
-      no halt, other extraction problem, plan conflict or unruled dispute;
+      no halt, other extraction problem or plan conflict;
       #734, diomedes-spears-ares: a slip beside a possession finding
       stopped a provisional commit, and the session), once, as above, with
       those findings standing in the new run (`_reextract(standing=True)`),
@@ -4665,9 +4665,9 @@ def _only_extractor_slips(result: GateResult) -> list[str]:
     """The extractor's slips (`_EXTRACTOR_SLIPS`, as `unresolved` lists
     them) when they are all that stopped `result`; [] when it passed or
     anything else blocks (a halt, another extraction problem, a finding, a
-    plan conflict, an unverified finding, an unruled dispute)."""
-    if (result.passed or result.halts or result.findings or result.unverified
-            or result.unruled):
+    plan conflict, an unverified finding; an unruled dispute is advisory and
+    doesn't count)."""
+    if result.passed or result.halts or result.findings or result.unverified:
         return []
     if any(result.problems.get(k) for k in UNRESOLVED if k not in _EXTRACTOR_SLIPS):
         return []
@@ -4678,14 +4678,14 @@ def _slips_beside_findings(result: GateResult) -> list[str]:
     """#734: the extractor's slips (as `_only_extractor_slips` lists them)
     when the rest of what stopped `result` is the check's findings,
     verified or not, none a plan conflict; [] when it passed or has no slip,
-    or a halt, another extraction problem, a plan conflict or an unruled
-    dispute stopped it. No prose edit repairs a slip, and a slip stops a
+    or a halt, another extraction problem or a plan conflict stopped it (an
+    unruled dispute is advisory and doesn't count). No prose edit repairs a slip, and a slip stops a
     provisional commit (`can_commit_provisionally`), so a run ending a fix
     loop with findings and a slip is extracted again (`gate_and_fix`), the
     findings standing (`_carry_standing`). diomedes-spears-ares (iliad-adult,
     2026-11-16): an `ends` slip beside a possession finding halted the
     session with 73 scenes not attempted."""
-    if result.passed or result.halts or result.unruled or result.plan_conflicts:
+    if result.passed or result.halts or result.plan_conflicts:
         return []
     if any(result.problems.get(k) for k in UNRESOLVED if k not in _EXTRACTOR_SLIPS):
         return []
@@ -5466,10 +5466,29 @@ def _advisory_message(f: Finding) -> str:
             + (f' (unverified: {f.problem})' if f.problem else ''))
 
 
+#: The words an unruled dispute's `ADVISORY` line opens with
+ADVISORY_UNRULED_LABEL = ('an unruled dispute; not blocking: extraction read the scene changing '
+                          'a plan fact and the check gave no ruling, so the plan\'s fact stands. '
+                          'Fix the plan, or the prose, if the scene does change it')
+#: How an unruled dispute's row in `ADVISORY_PATH` is told from the others
+#: (`is_unruled_row`): its `finding` opens with this
+UNRULED_TAG = 'UNRULED: '
+
+
+def _unruled_message(d: Dispute) -> str:
+    """An unruled dispute in words, as its `ADVISORY` line and its row in
+    `ADVISORY_PATH` give it."""
+    return (f'{UNRULED_TAG}the scene may change the plan\'s {d.fact_id} '
+            f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave no ruling')
+
+
 def advisory_report_lines(result: GateResult) -> list[str]:
-    """The `ADVISORY` lines for `result.advisory`, as `report_lines` words them."""
-    return [f'ADVISORY ({_advisory_label(f)}; listed in {ADVISORY_PATH}){_from_reading(f)}: '
-            f'{_one_line(_advisory_message(f))}' for f in result.advisory]
+    """The `ADVISORY` lines for `result.advisory` and `result.unruled`, as
+    `report_lines` words them."""
+    return ([f'ADVISORY ({_advisory_label(f)}; listed in {ADVISORY_PATH}){_from_reading(f)}: '
+             f'{_one_line(_advisory_message(f))}' for f in result.advisory]
+            + [f'ADVISORY ({ADVISORY_UNRULED_LABEL}; listed in {ADVISORY_PATH}): '
+               f'{_unruled_message(d)}' for d in result.unruled])
 
 
 def _promise_why(result: GateResult, f: Finding) -> str:
@@ -5500,10 +5519,6 @@ def report_lines(result: GateResult) -> list[str]:
     for f in result.unverified:
         lines.append(f'UNVERIFIED ({f.problem}){_from_reading(f)}: '
                      f'{_one_line(f.message())}' + _promise_why(result, f))
-    for d in result.unruled:
-        lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
-                     f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
-                     f'no ruling')
     for f, why in result.source_backed:
         lines.append(f'SOURCE BACKS THIS SCENE (not blocking; {f.source} is listed for the '
                      f'author in {PENDING_PATH}): {_one_line(f.message())} — the source: '
@@ -5942,33 +5957,43 @@ def _advisory_stamp(project_dir: str, scene_id: str, prose: str) -> str:
 
 
 def record_advisory(project_dir: str, scene_id: str, command: str,
-                    findings: list[Finding], prose: str = '') -> None:
-    """Replace `scene_id`'s rows in `ADVISORY_PATH` with `findings` (none:
-    its rows go; the file goes when it has no rows). `prose`: what the run
-    read, stamped on each row (`_advisory_stamp`)."""
+                    findings: list[Finding], prose: str = '',
+                    unruled: list[Dispute] = ()) -> None:
+    """Replace `scene_id`'s rows in `ADVISORY_PATH` with `findings` and
+    `unruled` (the disputes the check gave no ruling on: `source` the plan
+    fact, `quote` its statement, `finding` `UNRULED_TAG` and the claim;
+    `is_unruled_row`). None of either: its rows go; the file goes when it
+    has no rows. `prose`: what the run read, stamped on each row
+    (`_advisory_stamp`)."""
     from storyforge.common import csv_safe
     rows = advisories(project_dir)
     rows.pop(scene_id, None)
-    if findings:
+    if findings or unruled:
         stamp = _advisory_stamp(project_dir, scene_id, prose) if prose else ''
-        rows[scene_id] = [{'scene_id': scene_id, 'command': command,
-                           'source': csv_safe(f.fact_id or ''),
-                           'quote': csv_safe(_one_line(f.established_quote)),
-                           'finding': csv_safe(_one_line(_advisory_message(f))),
-                           'paragraphs': stamp} for f in findings]
+        rows[scene_id] = ([{'scene_id': scene_id, 'command': command,
+                            'source': csv_safe(f.fact_id or ''),
+                            'quote': csv_safe(_one_line(f.established_quote)),
+                            'finding': csv_safe(_one_line(_advisory_message(f))),
+                            'paragraphs': stamp} for f in findings]
+                          + [{'scene_id': scene_id, 'command': command,
+                              'source': csv_safe(d.fact_id),
+                              'quote': csv_safe(_one_line(d.statement)),
+                              'finding': csv_safe(_unruled_message(d)),
+                              'paragraphs': stamp} for d in unruled])
     _write_rows(project_dir, ADVISORY_PATH, rows)
 
 
 def _note_advisory(project_dir: str, scene_id: str, command: str,
                    result: 'GateResult', prose: str = '') -> str:
-    """Record `result.advisory` (`record_advisory`), stamped with `prose`
+    """Record `result.advisory` and `result.unruled` (`record_advisory`), stamped with `prose`
     (the run's, `result._ctx.prose`, when not given). A file that can't be
     read or written is said, the gate's verdict unchanged (its report lines
     still name each one), and returned ('' when written)."""
     if not prose and getattr(result, '_ctx', None) is not None:
         prose = result._ctx.prose
     try:
-        record_advisory(project_dir, scene_id, command, result.advisory, prose=prose)
+        record_advisory(project_dir, scene_id, command, result.advisory, prose=prose,
+                        unruled=result.unruled)
     except (GateError, OSError) as e:
         from storyforge.common import log
         why = f'{ADVISORY_PATH} could not be updated: {e}'
@@ -6057,17 +6082,26 @@ def is_knowledge_row(row: dict[str, str]) -> bool:
     return '(typed state, knowledge)' in (row.get('finding') or '')
 
 
+def is_unruled_row(row: dict[str, str]) -> bool:
+    """Whether an `ADVISORY_PATH` row is an unruled dispute's
+    (`_unruled_message`), not a broken promise or a knowledge finding."""
+    return (row.get('finding') or '').startswith(UNRULED_TAG)
+
+
+
 def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
     """The advisory findings of `scene_ids` (every scene when None) in
-    `ADVISORY_PATH`, broken promises then the typed knowledge check's
-    (`is_knowledge_row`), each kind as a WARNING line and one line each,
+    `ADVISORY_PATH`, broken promises, then the typed knowledge check's
+    (`is_knowledge_row`), then the disputes the check gave no ruling on
+    (`is_unruled_row`), each kind as a WARNING line and one line each,
     after a WARNING for each thing that couldn't be read; none of either:
     []. They don't stop a scene; `check`, `write` and `revise` list them at
     the end of a run so the author can amend a brief, mark a beat `must:`,
-    or fix a knowledge slip that is real."""
+    fix a knowledge slip that is real, or a plan fact the scene does change."""
     found = read_advisory(project_dir, scene_ids)
     lines = [f'WARNING: {p}' for p in found.problems]
-    promises = [r for r in found.rows if not is_knowledge_row(r)]
+    unruled = [r for r in found.rows if is_unruled_row(r)]
+    promises = [r for r in found.rows if not is_knowledge_row(r) and not is_unruled_row(r)]
     knowing = [r for r in found.rows if is_knowledge_row(r)]
     if promises:
         lines += ([f'WARNING: {len(promises)} broken promise(s) the gate reported but did '
@@ -6082,6 +6116,12 @@ def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
                    f'run): often the brief misplaces the learning. Fix the prose, or the '
                    f'brief\'s knowledge_in or knowledge_out, where one is wrong:']
                   + [f'  {advisory_line(r)}' for r in knowing])
+    if unruled:
+        lines += ([f'WARNING: {len(unruled)} plan fact(s) the scene may change that the check '
+                   f'gave no ruling on, which the gate reported but did not stop on (advisory, '
+                   f'{ADVISORY_PATH}, as of each scene\'s last gate run): the plan\'s fact '
+                   f'stands. Fix the plan, or the prose, where the scene does change it:']
+                  + [f'  {advisory_line(r)}' for r in unruled])
     return lines
 
 

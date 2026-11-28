@@ -97,8 +97,10 @@ def run(ctx):
             'cp10k_checker_all': e4.per_10k(len(flags), m['words_all']),
             **({} if parallel else {'gate_fixed': len(gate_fixed),
                                     'gate_failed': len(gate_failed),
-                                    # #642: reported, not blocking
+                                    # #642: reported, not blocking; an unruled
+                                    # dispute is advisory too (E4's re-record, #784)
                                     'gate_advisory': sum(len(g.result.advisory)
+                                                         + len(g.result.unruled)
                                                          for g in gated.values())}),
             'length_drift': e4.length_drift(rows, drafts),
             'voi': e4.mean_voice(list(drafts.values())),
