@@ -12,13 +12,14 @@ NAME = 'extraction-typing-book'
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    # recorded 2026-11-27 (sonnet 5.5, $0.11) at #788's corrected wording: the
-    # armour and the leopard skin state; the two labels that merge gear with
-    # hair (crest, tunic and braids) fixed in this reading. Before #788, 3 of 5
-    # gear facts were fixed in each of two readings
-    'state_right': 0.5,
+    # recorded 2026-11-27 (sonnet 5.5, $0.11) at #788's corrected wording,
+    # scored by #790's matcher: the armour and the leopard skin state, the
+    # fact merging Menelaus's crest with his hair fixed, Sarpedon's tunic
+    # not read. Before #788, 3 of 5 gear facts read were fixed in each of
+    # two readings
+    'state_right': 0.6667,
     'fixed_right': 1.0,
-    'missing': 0,
+    'missing': 1,
 }
 
 

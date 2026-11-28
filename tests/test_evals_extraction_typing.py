@@ -34,6 +34,22 @@ def test_too_few_shared_words_is_no_match():
     assert et.match('in the gold armour', [_fact('gold coins', 'state')]) is None
 
 
+def test_function_words_never_match():
+    """#790's review SF-3: "the", "on", "his" are in every quote."""
+    assert et.match('the gold on his armour', [_fact('the dog on his bed', 'state')]) is None
+
+
+def test_one_fact_is_scored_for_one_label_only():
+    """#790's review TD-5: a fact merging gear with hair answers the label it
+    shares the most with; the other label is missing, not scored on it."""
+    labels = [{'kind': 'worn', 'quote': 'his crest is yellow above the helmet rim'},
+              {'kind': 'trait', 'quote': 'and so is the yellow hair under the helmet rim'}]
+    merged = _fact('his crest is yellow and so is the hair under the rim of his helmet',
+                   'fixed')
+    got = et.assign(labels, [merged])
+    assert got.count(merged) == 1 and got.count(None) == 1
+
+
 def test_score_counts_right_typing_and_missing():
     found = [_fact('the gold armour his grandfather had worn', 'fixed', 'Brannoc wears gold'),
              _fact('He carried a spear of ash with a point', 'state'),

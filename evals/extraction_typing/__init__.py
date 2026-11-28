@@ -1,6 +1,6 @@
 """Extraction typing (#788): does the gate's extraction type what someone
-wears, carries or holds as `state`, and what is about the character as
-`fixed`?
+wears, carries or holds as `state`, and what holds for the whole book (a
+trait) as `fixed`?
 
 *Wrath Like Smoke* (2026-11-27): extraction recorded a character's armour as
 a fixed trait, so the scene built on trading it away halted with no prose
@@ -20,15 +20,17 @@ Two suites score the same way:
   force and the registries, the scene's own commitments left out as for a
   redraft). Private, like the gate set: the set (its labels quote the
   prose) and its recordings are in the storyforge-evals repo
-  (`extraction-typing/`). Before #788 the scene's three gear facts were
-  typed fixed in both of two readings, after it state in both.
+  (`extraction-typing/`). Before #788, 3 of the 5 gear facts read were
+  fixed in both of two readings. Recorded at the new wording: the armour
+  and the leopard skin state, the fact merging Menelaus's crest with his
+  hair fixed, Sarpedon's tunic not read (`missing`).
 
 Each scene goes through the gate's own extraction and persistence calls
 (`gate._read_commitments`, the gate's model and thinking setting); typing is
-read off the extraction reply. A label (the words that establish one fact
-and the `mutable` it should get) matches the extracted fact whose quote
-shares the most of its words, at least `MIN_SHARED`; none is `missing`,
-reported and not scored. Metrics: `state_right` (`worn`, `carried`, `held`
+read off the extraction reply. A label (the words that establish one fact,
+and its kind) matches the extracted fact whose quote shares the most of its
+content words, at least half of them and `MIN_SHARED`, each fact matching
+one label at most (`assign`); none is `missing`, reported and not scored. Metrics: `state_right` (`worn`, `carried`, `held`
 labels typed state, over those found), `fixed_right` (`trait` labels typed
 fixed, over those found), the counts found, and `missing`. Gates hold the
 recorded values exactly (#488).
@@ -38,32 +40,60 @@ from __future__ import annotations
 
 import json
 import os
-import re
 
 from harness import Gate, SuiteOutput
 
 #: Label kinds that should be `state`; every other kind (`trait`) `fixed`
 STATE_KINDS = ('worn', 'carried', 'held')
 KINDS = (*STATE_KINDS, 'trait')
-#: Words a label and an extracted quote must share to match
-MIN_SHARED = 3
+#: The fewest content words a label and an extracted quote share to match
+#: (and at least half the label's)
+MIN_SHARED = 2
 SET_NAME = 'extraction-typing'
 
 
-def _words(text: str) -> list[str]:
-    return re.findall(r"[\w']+", (text or '').lower())
+def _words(text: str) -> set[str]:
+    """`text`'s content words (`gate._content_words`: stems, no function
+    words; #790's review SF-3: "the", "on" and "his" match anything)."""
+    from storyforge.gate import _content_words
+    return _content_words(text or '')
+
+
+def _shared_enough(label: set[str], n: int) -> bool:
+    return n >= max(MIN_SHARED, (len(label) + 1) // 2)
 
 
 def match(label: str, found: list[dict]) -> dict | None:
-    """The extracted fact whose quote shares the most words with `label`
-    (at least `MIN_SHARED`); None when none does."""
-    want = set(_words(label))
-    best, best_n = None, MIN_SHARED - 1
+    """The extracted fact whose quote shares the most content words with
+    `label`, enough of them (`_shared_enough`); None when none does."""
+    want = _words(label)
+    best, best_n = None, 0
     for f in found:
-        n = len(want & set(_words(f.get('quote', ''))))
-        if n > best_n:
+        n = len(want & _words(f.get('quote', '')))
+        if n > best_n and _shared_enough(want, n):
             best, best_n = f, n
     return best
+
+
+def assign(labels: list[dict], found: list[dict]) -> list[dict | None]:
+    """Each label's fact, each fact taken by one label at most (#790's
+    review TD-5: a fact merging gear with a trait would otherwise be scored
+    for both, one of them wrong by construction): the pairs sharing the
+    most content words first."""
+    pairs = []
+    for i, lab in enumerate(labels):
+        want = _words(lab['quote'])
+        for j, f in enumerate(found):
+            n = len(want & _words(f.get('quote', '')))
+            if _shared_enough(want, n):
+                pairs.append((-n, i, j))
+    out: list[dict | None] = [None] * len(labels)
+    taken: set[int] = set()
+    for _, i, j in sorted(pairs):
+        if out[i] is None and j not in taken:
+            out[i] = found[j]
+            taken.add(j)
+    return out
 
 
 def score(scenes: list[dict], extracted: dict[str, list[dict]], *,
@@ -78,9 +108,10 @@ def score(scenes: list[dict], extracted: dict[str, list[dict]], *,
             if lab['kind'] not in KINDS:
                 raise ValueError(f'{scene["id"]} label {n}: kind {lab["kind"]!r} is not one '
                                  f'of {", ".join(KINDS)}')
+        got_all = assign(scene['labels'], extracted.get(scene['id'], []))
+        for n, (lab, got) in enumerate(zip(scene['labels'], got_all), start=1):
             name = (f'{scene["id"]}: {lab["kind"]} "{lab["quote"]}"' if quote_labels
                     else f'{scene["id"]}: label {n} ({lab["kind"]})')
-            got = match(lab['quote'], extracted.get(scene['id'], []))
             want = 'state' if lab['kind'] in STATE_KINDS else 'fixed'
             if got is None:
                 missing += 1
