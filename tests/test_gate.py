@@ -256,15 +256,71 @@ class TestNothingWrittenUnlessClean:
         assert any(target['id'] in line and target['statement'] in line
                    for line in gate.report_lines(result) if line.startswith('NOTE (plan fact'))
 
-    def test_a_dispute_the_checker_gives_no_ruling_on_blocks(self, project_dir, tmp_path):
+    def test_a_dispute_the_checker_gives_no_ruling_on_is_advisory(self, project_dir, tmp_path):
+        """E4's re-record (#784): `eleven-days` stopped in runs 2 and 3 on
+        `UNRULED` alone: extraction read Hank's exhaustion (a plan state
+        that ends at `come-inside`) ending in the scene, and the check gave
+        no ruling. Ben (2026-11-27): an unruled dispute is advisory:
+        reported, listed in gate-advisory.csv, never a stop or sent to the
+        fix. The plan's fact stands (the end is not applied)."""
+        rows = ledger.load(project_dir)
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id='exhaustion-hank',
+                         type='physical', statement='Profound physical exhaustion from '
+                         'sleeplessness and somatic strain', origin='plan', status='binding',
+                         mutable='state', introduced_by='briefs', scene_id='act1-sc01',
+                         resolves='act2-sc01'))
+        ledger.save(project_dir, rows, command='test')
+        result = _gate(project_dir, tmp_path, [_commitment(ends=['exhaustion-hank'])],
+                       cleared=[])
+        assert [d.fact_id for d in result.unruled] == ['exhaustion-hank']
+        assert result.passed and result.committed
+        plan = {r['id']: r for r in ledger.load(project_dir)}['exhaustion-hank']
+        assert plan['resolves'] == 'act2-sc01'
+        lines = gate.report_lines(result)
+        assert gate.blocking_lines(lines) == []
+        assert any(line.startswith('ADVISORY (an unruled dispute') and 'exhaustion-hank' in line
+                   for line in lines)
+        assert gate.problems_to_fix(result) == []
+        assert gate.can_commit_provisionally(result) == 'it was committed'
+        [row] = gate.advisories(project_dir)[SCENE]
+        assert row['source'] == 'exhaustion-hank' and gate.is_unruled_row(row)
+        summary = gate.advisory_summary(project_dir)
+        assert any('plan fact(s) the scene may change' in line for line in summary)
+        assert any(line.startswith(f'  {SCENE}: ') and 'exhaustion-hank' in line
+                   for line in summary)
+
+    def test_an_unruled_dispute_is_listed_apart_from_promises(self, project_dir):
+        """It is neither a broken promise nor a knowledge finding: the
+        summary and status list it on its own."""
+        from storyforge import cmd_status, status
+        from storyforge.checker import Dispute, Finding
+        promise = Finding('broken-promise', 'PRM', '', '', 'Finds the map', 'key_actions',
+                          'not delivered')
+        d = Dispute('exhaustion-hank', 'Profound physical exhaustion',
+                    'the state ends in this scene (the plan says it ends at come-inside)')
+        gate.record_advisory(project_dir, SCENE, 'draft', [promise], prose='x', unruled=[d])
+        summary = gate.advisory_summary(project_dir)
+        assert summary[0].startswith('WARNING: 1 broken promise(s)') and 'PRM' in summary[1]
+        assert summary[2].startswith('WARNING: 1 plan fact(s) the scene may change')
+        assert 'UNRULED: the scene may change the plan\'s exhaustion-hank' in summary[3]
+        rows, _ = status.gate_advisory(project_dir)
+        out = cmd_status.render_human({
+            'phase': 'drafting', 'phase_declared': '', 'phase_matches_yaml': True,
+            'ladder': [], 'voice': None, 'next': {'action': 'x', 'command': '', 'reason': ''},
+            'then': None, 'blockers': [], 'advisory': rows})
+        assert 'ADVISORY: 1 broken promise(s)' in out
+        assert 'ADVISORY: 1 plan fact(s) the scene may change' in out
+
+    def test_an_unruled_dispute_beside_a_finding_does_not_go_to_the_fix(
+            self, project_dir, tmp_path):
         rows = ledger.load(project_dir)
         target = next(r for r in rows if not ledger.is_commitment(r))
-        before = ledger.load(project_dir)
-        result = _gate(project_dir, tmp_path, [_commitment(supersedes=target['id'])], cleared=[])
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes=target['id'])],
+                       findings=[_contradiction()], cleared=[])
         assert [d.fact_id for d in result.unruled] == [target['id']]
-        assert not result.passed and ledger.load(project_dir) == before
-        assert any(line.startswith('UNRULED') for line in gate.report_lines(result))
-        assert gate.problems_to_fix(result)[0].startswith('UNVERIFIED (extraction thinks')
+        assert not result.passed   # the finding stops it
+        assert not any('extraction thinks the scene changes this' in p
+                       for p in gate.problems_to_fix(result))
 
     def test_a_dispute_ruled_a_contradiction_is_a_finding(self, project_dir, tmp_path):
         rows = ledger.load(project_dir)
@@ -2147,11 +2203,13 @@ class TestReextractAMisquote(_FixRounds):
                                       problem='its quote is not in the scene')]
         assert gate._only_extractor_slips(r) == []
 
-    def test_an_unruled_dispute_beside_the_slip_is_not_slips_only(self):
+    def test_an_unruled_dispute_beside_the_slip_is_slips_only(self):
+        """An unruled dispute is advisory (E4's re-record, #784), so it
+        doesn't stop the re-extraction a slip earns."""
         r = self._misquote()
         from storyforge.checker import Dispute
         r.check.unruled = [Dispute('plan-fact', 'the plan says', 'the scene says')]
-        assert gate._only_extractor_slips(r) == []
+        assert gate._only_extractor_slips(r) == [f'quote: {SCENE}: {SCENE}--a-fact']
 
     @pytest.mark.parametrize('kind', [k for k in gate.UNRESOLVED
                                       if k not in gate._EXTRACTOR_SLIPS])
@@ -2269,11 +2327,11 @@ class TestReextractAMisquote(_FixRounds):
         r.plan_conflicts = r.findings[:1]
         assert gate._slips_beside_findings(r) == []
 
-    def test_an_unruled_dispute_beside_a_slip_stops_the_reextraction(self):
+    def test_an_unruled_dispute_beside_a_slip_does_not_stop_the_reextraction(self):
         from storyforge.checker import Dispute
         r = self._misquote('a')
         r.check.unruled = [Dispute('plan-fact', 'the plan says', 'the scene says')]
-        assert gate._slips_beside_findings(r) == []
+        assert gate._slips_beside_findings(r) == [f'quote: {SCENE}: {SCENE}--a-fact']
 
     @pytest.mark.parametrize('kind', [k for k in gate.UNRESOLVED
                                       if k not in gate._EXTRACTOR_SLIPS])

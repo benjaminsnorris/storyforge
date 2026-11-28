@@ -24,7 +24,8 @@ Metrics (plan §4.2):
   that names a `must` beat (``broken_musts``); the shared-dark briefs mark
   none, so it is 0 until a fixture does. ``gate_advisory`` counts the
   advisory findings the gate reported on the kept runs: broken promises
-  and, since 2026-11-27, the typed knowledge check's.
+  and, since 2026-11-27, the typed knowledge check's and the disputes the
+  check gave no ruling on.
 - **Length drift** — mean ``|words / target_words - 1|``.
 - **VOI** — mean of the deterministic prose scores (rhythm, economy, passive,
   adverbs; 1–5) over the drafts; ``voi_author`` is the same over the author's

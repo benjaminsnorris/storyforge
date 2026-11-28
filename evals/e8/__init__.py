@@ -407,20 +407,22 @@ GATE_COUNT_KEYS = ('new', 'plan_conflicts', 'extraction', 'inherited', 'advisory
 def gate_counts(result) -> dict[str, int]:
     """What a `gate.GateResult` found, by kind (`GATE_COUNT_KEYS`): `new`
     (what the fix is for, `gate.problems_to_fix`: contradictions and broken
-    promises, verified or not, halts, unruled disputes, rejected facts
-    restated), `plan_conflicts` (the brief's own words contradict the
-    book), `extraction` (unresolved extraction problems, less the rejected
-    facts already in `new`), `inherited` (in the book before the pass:
-    reported, not blocking) and `advisory` (#642: broken promises of beats
-    the brief doesn't mark `must:`; reported, not blocking, never fixed).
-    Before #642 an advisory broken promise was in `new`."""
+    promises, verified or not, halts, rejected facts restated),
+    `plan_conflicts` (the brief's own words contradict the book),
+    `extraction` (unresolved extraction problems, less the rejected facts
+    already in `new`), `inherited` (in the book before the pass: reported,
+    not blocking) and `advisory` (#642: broken promises of beats the brief
+    doesn't mark `must:`, the typed knowledge check's findings and, since
+    E4's re-record (#784), disputes the check gave no ruling on; reported,
+    not blocking, never fixed). Before #642 an advisory broken promise was
+    in `new`, and before #784 an unruled dispute."""
     from storyforge import gate
     return {'new': len(gate.problems_to_fix(result)),
             'plan_conflicts': len(result.plan_conflicts),
             'extraction': sum(len(result.problems.get(k, [])) for k in gate.UNRESOLVED
                               if k != 'rejected'),
             'inherited': len(result.inherited),
-            'advisory': len(result.advisory)}
+            'advisory': len(result.advisory) + len(result.unruled)}
 
 
 def read_gate_counts(project_dir: str) -> dict[str, int] | None:
