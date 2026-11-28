@@ -241,7 +241,7 @@ Bump the version (patch for each).
 
 ### 2. Consolidated eval re-record (Ben pre-approved about $130)
 
-**Done but for `e8-revision-safety` (2026-11-27).** The blocking-read suites were recorded after #774 merged: `gate-set-questions` $27.90, `e4-generation` $65.31, `gate-set` $91.72, three runs each ($184.94 of the $300 cap; floors from run 1, what moved in `docs/history.md`, "The blocking-read suites re-recorded at three readings"). **Only `e8-revision-safety` remains** (deferred by Ben, about $166). Before that, only the suites with no blocking-read call were re-recorded, since #774 may change `BLOCKING_READINGS`. That would re-key every blocking call, so recording those suites first would pay twice.
+**Done (2026-11-28).** `e8-revision-safety` was recorded last: three runs, $102.33 (`docs/history.md`, "`e8-revision-safety` re-recorded at three readings"). Before it, the blocking-read suites were recorded after #774 merged: `gate-set-questions` $27.90, `e4-generation` $65.31, `gate-set` $91.72, three runs each ($184.94 of the $300 cap; floors from run 1, what moved in `docs/history.md`, "The blocking-read suites re-recorded at three readings"). Before that, only the suites with no blocking-read call were re-recorded, since #774 may change `BLOCKING_READINGS`. That would re-key every blocking call, so recording those suites first would pay twice.
 
 - **Which suites make the call.** In the code, `blocking.check_blocking` is reached only through `gate.gate_scene`, `check --blocking`, the blocking set and `voice_sample`; in the evals, only through the gate and the blocking set. In the recordings, the blocking prompt is in `e4-generation`, `e8-revision-safety`, `gate-set`, `gate-set-questions` and `blocking-set`, and in no other cassette.
 - **Re-recorded, $17.39 in all** (`--mode auto`, cheapest first, the reason line below):
@@ -267,7 +267,7 @@ Bump the version (patch for each).
   A third blocking reading would add about $0.035 a scene to each (half the two-reading read's $0.07, "Cost" above). Ben chooses what to record, and with what budget.
 
   **Ben's decision (2026-11-27):** after #774 merges, record `gate-set-questions`, `gate-set` and `e4-generation` (3 runs each, cap $300); `e8-revision-safety` stays deferred.
-- **`baseline.json`** holds the re-recorded suites' new entries (the four above, then the three blocking-read suites), each replaced by hand from a replay. `--baseline` refuses while `e8-revision-safety` is stale; run it once that is recorded.
+- **`baseline.json`** holds the re-recorded suites' new entries (the four above, then the three blocking-read suites), each replaced by hand from a replay. `e8-revision-safety`'s entry was replaced the same way on 2026-11-28, so no suite is stale now.
 
 After step 1 and after #768, since each changes the requests. #769 adds no miss of its own (no recorded suite is an adaptation), so it doesn't hold this step. There is no forecast-only option, and `--over-budget` skips the budget check, so the harness won't stop at $130 for you.
 
@@ -341,7 +341,7 @@ Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a ju
 - **A set-up-here promise read too literally** (run 2's `bench`): the ledger sets up `partnership-explicitly-personal-and-operational` in the scene, so its broken promise blocks (`SET_UP_HERE`), and the question layer found it unmet because the scene never says "explicitly".
 - **A count relative to its own scene, asked later** (run 2's `pewter-town`): `missing-persons`' "reported missing nine days ago" (a fixed knowledge fact) asked a day later against "ten days old".
 
-Ben decides whether to fix these (or accept them) before the redraft; a re-record of E4 (about $60, three runs) would then show the stops on new prose. E8 replays stale (expected; Ben re-records it elsewhere, forecast about $166 for three runs: `usd_if_live` $55.35 a run in the baseline, from before the third blocking reading).
+Ben decides whether to fix these (or accept them) before the redraft; a re-record of E4 (about $60, three runs) would then show the stops on new prose. E8 was re-recorded 2026-11-28 (three runs, $102.33; `docs/history.md`, "`e8-revision-safety` re-recorded at three readings"): 2 of 29 cases reintroduced in each run, and the gate missed 1 / 2 / 2 of them, so runs 2 and 3 fail its `reintroduced_unflagged <= 1` gate.
 
 **Earlier (2026-11-27): the gate's false stops.** After #781–#783, Ben approved re-recording `e4-generation` (3 runs, $59.92; `docs/history.md`, "`e4-generation` re-recorded after #781–#783"). The bar was about 14 stops or fewer over three runs, mostly real or debatable. It stopped **21** (5 / 10 / 6, against 4 / 12 / 8 before the fixes), and **10 of the 21 are false** (5 real, 6 debatable). The causes, by false stops:
 
