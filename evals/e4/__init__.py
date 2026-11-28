@@ -1,8 +1,14 @@
-"""E4 — generation benchmark: draft a fixed book section end to end with
+"""E4 — the end-to-end check: draft the first scenes of a fixed book with
 today's ``write`` and measure what a reader would trip over.
 
+Since #788 (2026-11-27) it drafts only Act 1's first ``SCENES`` scenes, as
+one run: a check that drafting, the gate and its fix still work together,
+recorded before a milestone. The whole act, as three runs, cost about $125
+and its findings were the kind the pilot's real sessions find; the gate's
+recall is measured on frozen prose by the gate set (`evals/gate_set`).
+
 The test text is Act 1 of shared-dark (decision 7) at the commit E5 pins, so
-E1, E4, E5 and E8 share a world. Every Act 1 scene's prose is removed, then
+E1, E4 and E5 share a world. Those scenes' prose is removed, then
 the scenes are drafted in reading order the way ``storyforge write``
 drafts them: one shared, cached system context, ``cmd_write._build_prompt``
 with briefs, each prompt built after the scenes before it exist, so a scene's
@@ -45,13 +51,13 @@ scenes the fix changed and those still failing after it.
 Stated simplifications: a scene still failing the gate doesn't stop E4 as it
 stops ``write``; its fixed prose is judged and drafting goes on. The judge
 stands in
-for the plan's human spot-check, which is still owed. Act 2 onward keeps the
-author's prose; only Act 1 is drafted.
+for the plan's human spot-check, which is still owed. The rest of the book
+keeps the author's prose.
 
 **Frozen** (#645): ``run.py`` never re-records this suite on a prompt change;
-a miss reports it ``stale`` and spends nothing. Re-record it only when a
-decision depends on it, as three runs:
-``python3 evals/run.py --mode record --suite e4-generation --runs 3``.
+a miss reports it ``stale`` and spends nothing. Re-record it before a
+milestone, or when a decision depends on it, as one run:
+``python3 evals/run.py --mode record --suite e4-generation``.
 """
 
 from __future__ import annotations
@@ -66,6 +72,8 @@ from e8 import materialize
 REPO = e5.REPO
 COMMIT = e5.COMMIT
 ACT = '1'
+#: How many of the act's scenes are drafted, in reading order (#788)
+SCENES = 4
 DRAFT_MAX_TOKENS = 8192  # cmd_write's direct mode
 FACT_CODES = e5.FACT_CODES
 PROMISE_FIELDS = ('goal', 'outcome', 'crisis', 'decision', 'key_actions', 'key_dialogue',

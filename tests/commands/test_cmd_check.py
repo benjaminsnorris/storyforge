@@ -662,7 +662,8 @@ class TestFix:
             SCENE, unverified=[Finding(**BAD, problem='its established quote is not in x')]))
         result.proposed = [{'id': 'p1', 'statement': 'S', 'quote': 'the words'}]
         result.halts = [audit.Halt('supersedes-fixed', 'p1',
-                                   "the prose supersedes the registry fact r1 ('R')")]
+                                   "the prose supersedes the registry fact r1 ('R')",
+                                   fixed_id='r1')]
         lines = gate.problems_to_fix(result)
         assert 'The scene says: "the words"' in lines[0] and "'R'" in lines[0]
         assert lines[1].startswith('UNVERIFIED (the check\'s quotes did not hold up: '
@@ -731,6 +732,81 @@ class TestAccept:
         monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: False)
         with pytest.raises(SystemExit) as e:
             cmd_check.main(['--accept', SCENE])
+        assert e.value.code == 1
+
+
+class TestUnfix:
+    """#788: `check --unfix` makes a fixed fact a state fact, names the
+    pending scene it stopped, and commits the ledger, the log and the
+    snapshot (no model call)."""
+
+    def _fixed(self, project_dir):
+        rows = ledger.load(project_dir)
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id='gold-armour', type='trait',
+                         scene_id='act1-sc01', statement='Tessa wears gold armour',
+                         origin='prose', status='binding', mutable='fixed'))
+        ledger.save(project_dir, rows, command='test')
+
+    def test_unfix_commits_and_names_the_held_scene(self, project, capsys):
+        from storyforge import audit
+        project_dir, commits = project
+        self._fixed(project_dir)
+        gate.mark_pending(project_dir, SCENE, 'draft',
+                          '1 problem(s): HALT (supersedes-fixed; the plan calls for this '
+                          'change, so gold-armour is likely mis-typed fixed')
+        with patch('storyforge.api._api_request', side_effect=AssertionError('no call')):
+            cmd_check.main(['--unfix', 'gold-armour'])
+        assert next(r for r in ledger.load(project_dir)
+                    if r['id'] == 'gold-armour')['mutable'] == 'state'
+        msg, paths = commits[-1]
+        assert msg == 'Check: unfix gold-armour'
+        assert set(paths) == {'reference/commitments.csv', audit.LOG_PATH,
+                              audit.SNAPSHOT_PATH}
+        out = capsys.readouterr().out
+        assert f'the scene(s) it stopped ({SCENE})' in out and 'check --pending' in out
+
+    @pytest.mark.parametrize('fact', ['no-such-fact', 'a-state-fact'])
+    def test_a_fact_it_cannot_unfix_is_an_error_before_any_branch(self, project, monkeypatch,
+                                                                  fact):
+        """#790's review T-6: no branch made for a typo."""
+        project_dir, commits = project
+        rows = ledger.load(project_dir)
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id='a-state-fact', type='physical',
+                         scene_id='act1-sc01', statement='x', origin='prose',
+                         status='binding', mutable='state'))
+        ledger.save(project_dir, rows, command='test')
+        before = ledger.load(project_dir)
+        branches = []
+        monkeypatch.setattr('storyforge.git.create_branch', lambda *a: branches.append(a) or 'b')
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--unfix', fact])
+        assert e.value.code == 1 and commits == [] and branches == []
+        assert ledger.load(project_dir) == before
+
+    def test_a_longer_id_in_a_pending_reason_is_not_the_fact(self, project, capsys):
+        """#790's review T-5: `gold-armour` is not `old-gold-armour-2`."""
+        project_dir, _ = project
+        self._fixed(project_dir)
+        gate.mark_pending(project_dir, SCENE, 'draft', 'HALT: old-gold-armour-2 is fixed')
+        cmd_check.main(['--unfix', 'gold-armour'])
+        assert '(no pending reason names it)' in capsys.readouterr().out
+
+    def test_pending_it_cannot_read_is_named_unknown(self, project, monkeypatch, capsys):
+        """#790's review SF-4."""
+        project_dir, _ = project
+        self._fixed(project_dir)
+
+        def broken(p):
+            raise gate.GateError('bad header')
+        monkeypatch.setattr(gate, 'pending', broken)
+        cmd_check.main(['--unfix', 'gold-armour'])
+        out = capsys.readouterr().out
+        assert 'which pending scenes it stopped is unknown (bad header)' in out
+        assert '(unknown: see the WARNING above)' in out
+
+    def test_it_takes_no_other_selection(self, project):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--unfix', 'gold-armour', '--pending'])
         assert e.value.code == 1
 
 

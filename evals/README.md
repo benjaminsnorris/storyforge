@@ -9,8 +9,9 @@ python3 evals/run.py               # every suite, replaying recorded API calls (
 python3 evals/run.py --suite NAME  # one suite (repeatable)
 python3 evals/run.py --mode auto   # replay what exists, record the rest (spends; frozen suites replay)
 python3 evals/run.py --mode record # re-record every call (spends; frozen suites replay)
-python3 evals/run.py --mode record --suite e4-generation --runs 3   # re-record a frozen suite, on purpose
-python3 evals/run.py --mode auto --suite gate-set --runs 3   # top a stale frozen suite up
+python3 evals/run.py --mode record --suite e4-generation   # re-record a frozen suite, on purpose (one run)
+python3 evals/run.py --mode record --suite gate-set --runs 3   # ... as three runs, to see the spread
+python3 evals/run.py --mode auto --suite gate-set   # top a stale frozen suite up (--runs 3: all three)
 python3 evals/run.py --over-budget "Ben approved, #NNN" ...         # spend past the monthly budget
 python3 evals/run.py --baseline    # also write evals/baseline.json
 python3 evals/run.py --list
@@ -31,7 +32,7 @@ suite's, in this order:
 | `stale` | a **frozen** suite whose only cassette failures are misses: a request changed since it was recorded. No measurement, nothing spent, by policy. An exception the suite raised after the miss is kept as `stale_exception` (with `stale_traceback`) and printed, with the first miss | `0` |
 | `pass` | every gate held | `0` |
 
-**Stale is not a failure.** A prompt change is expected to make E4 and E8
+**Stale is not a failure.** A prompt change is expected to make E4
 stale, and the run (and CI) stays green on it: a run whose worst suite is
 stale reports `status=STALE` and exits `0`. Read the report (or the
 `[STALE]` lines and the `stale (frozen, ...)` total line) to see which. A
@@ -40,6 +41,34 @@ and `--baseline` keeps the old baseline's entry for it (marked
 `carried_over`); with no old entry to keep, `--baseline` is refused. The
 exit code is still what this run measured: a carried-over `fail` doesn't
 make it `1`.
+
+## Keeping recordings cheap (#788, 2026-11-27)
+
+About $800 went on eval recordings by 2026-11-27, $533 of it since the
+spend ledger started (2026-11-09), and 84% of that on three suites:
+`gate-set` ($223), `e4-generation` ($125) and `gate-set-questions` ($99).
+Three things made them dear: they regenerated their inputs (E4 drafted
+prose with Opus and paid a judge to label it), a change upstream changed
+every request after it (extraction's output is part of the checker's
+request, so a one-line extraction prompt change re-recorded every Opus
+checker call), and each was recorded as three runs. What they found, the
+pilot's real sessions also find. So:
+
+- **E8 is retired** as a suite (its prose is frozen in the gate set, which is
+  built from E8's recordings, kept for that). E6 no longer spreads E4 or E8.
+- **E4 is a one-run end-to-end check** of Act 1's first `e4.SCENES` scenes:
+  drafting, the gate and its fix together, recorded before a milestone.
+- **The gate set pins extraction** (`gate_set.runner`, `PINS_DIR`): each item's
+  extraction reply and persistence verdict are kept beside the run's
+  recordings and handed to the gate (`gate_scene(pinned=)`), so an extraction
+  prompt change no longer touches the checker's requests. The pins were
+  taken from the recorded replies (2026-11-27); an item with none is
+  extracted and pinned on its next run. Extraction itself is measured by E3
+  and the extraction-typing suites, at a few dollars.
+- **Frozen suites are recorded as one run by default** (`--runs 1`); three
+  only when a decision is about the spread between runs.
+- **Pilot findings become labelled cases**, as the blocking set grew from
+  Wrath's gate runs and `extraction-typing-book` from #788.
 
 ## Policy: what to record, and when (#645)
 
@@ -52,29 +81,30 @@ Part E):
 - **Fixed labelled sets are the default.** A new suite measures a tool against
   fixed inputs with known answers, so a change in the number is a change in
   the tool. Deterministic checks are code: they get unit tests, not a suite.
-- **E4 and E8 are frozen** (`Suite(..., frozen=True)`), as are the private sets
+- **E4 is frozen** (`Suite(..., frozen=True)`; E8 was too until it was
+  retired, #788), as are the private sets
   (blocking set, gate set) and `voice-austen`. `auto` and `record`
   replay them; a miss marks them `stale` and spends nothing. They are
-  re-recorded only when a decision depends on them, by name and always as
-  three runs: `--mode record --suite e4-generation --runs 3` (run 1 to the
+  re-recorded only when a decision depends on them, by name, as one run
+  (`--mode record --suite e4-generation`) or as three to see the spread
+  (`--runs 3`: run 1 to the
   default cassettes, runs 2 and 3 to `fixtures/e6/run2` and `run3`, so
-  `consistency.py` reads the spread). A frozen suite gone stale by a
+  `consistency.py` reads the spread; before #788, always three). A frozen suite gone stale by a
   change downstream of its expensive calls (#713 changed the gate's
   typed-state extraction, after its checker calls) can be **topped up**
-  instead: `--mode auto --suite NAME --runs 3` replays every request that
+  instead: `--mode auto --suite NAME` (`--runs 3` for all three) replays every request that
   still matches each run's recording and records only the ones that
   changed (for the gate set, $1.00 of extraction calls instead of about
   $130). A change upstream of the expensive calls changes every later
   request too, so its top-up is close to a full re-record: a top-up is
-  forecast and refused as `record` is (spend plus the three runs'
+  forecast and refused as `record` is (spend plus the runs'
   `usd_if_live` against the budget), and with no figure in the baseline
   the forecast is a lower bound, not a ceiling. It names only frozen
   suites, and refuses a run with no recordings (that would record it in
   full; use `record`). Naming one
-  with `--runs` other than 3 is refused, in either mode; `--mode record`
-  or `auto` without naming them replays them. At about
-  $25 (E4) and $55 (E8) a run, that is past the monthly budget, so it needs
-  Ben's approval and `--over-budget`.
+  with `--runs` other than 1 or 3 is refused, in either mode; `--mode record`
+  or `auto` without naming them replays them. Past the monthly budget a
+  recording needs Ben's approval and `--over-budget`.
 - **A new suite that needs live generation for its inputs** (drafted scenes,
   a described voice) records those inputs once, commits them as fixture files,
   and evaluates against the frozen files, so a change to what judges them
@@ -83,9 +113,9 @@ Part E):
 - **The continuity checks (#648) are code**, tested in
   `tests/test_continuity.py`; their precision on a real book is measured,
   free, by `typed-state-set` (#744, below). The gate now reads each scene's
-  typed state (one more call), so E4's and E8's gate runs miss on it and stay
-  `stale` until Ben re-measures them for recall on KNO, PHY, TIM and WLD
-  (three runs, over the monthly budget: his decision).
+  typed state (one more call), so E4's gate runs miss on it and stay
+  `stale` until it is recorded again (one run, before a milestone, #788; E8,
+  then also stale, is retired).
 - **Monthly budget.** `evals/config.json` sets `monthly_budget_usd` ($25 when
   the file is absent; a file that doesn't give a non-negative number refuses
   the run). Every live call the cassette makes is appended to the eval spend
@@ -216,7 +246,8 @@ private repo on a branch without them) is unavailable and says which
 checkout to use, rather than reading the misses as a changed request.
 
 To re-record (only when a decision depends on it):
-`python3 evals/run.py --mode record --suite blocking-set --runs 3`, then
+`python3 evals/run.py --mode record --suite blocking-set` (one run, #788;
+`--runs 3` when the decision is about the spread the tables above show), then
 replay run 1, copy the private `results/latest.json` to
 `baseline-cases.json`, and set `FLOORS` and `RECORDED` from the report and
 `blocking_set.fingerprint` / `.recordings`.
@@ -313,7 +344,39 @@ scene and a verdict on one known error, an E1 `tool-introduced` case.
   overwrites the private `results/` file.
 - **Labels.** E8's judge is one Opus reading, tied to a known error, so
   these labels are firmer than E4's (an Opus judge against an Opus checker).
-  The E4 half (shared-dark Act 1 drafts gated in order) is a follow-up.
+- **Extraction is pinned** (#788): `gate-set/cassettes/<run>/<suite>/pins/<item>.json`
+  holds each item's extraction reply and persistence verdict
+  (`gate.pinned_extraction`), handed to the gate as `pinned=`; the
+  cassette reads only its two-character shards, so the pins are not
+  recordings. Taken 2026-11-27 from the recorded replies (replayed at the
+  prompt they were recorded with), so the suites measure the checker on
+  the input they were recorded on. With the pins, #788's extraction prompt
+  change left both suites replaying (before, stale). Delete an item's pin
+  to extract and pin it again on its next recorded run.
+
+## Extraction typing (#788)
+
+Does extraction type what someone wears, carries or holds as `state`, and
+what is about the character as `fixed`? A fixed fact a later scene changes
+halts that scene. `evals/extraction_typing` scores labelled facts (the
+words that establish one, and its kind: `worn`, `carried`, `held` should be
+state, `trait` fixed) against the gate's own extraction and persistence
+calls; `state_right` and `fixed_right` are over the labels found, and
+`missing` counts the rest.
+
+- `extraction-typing`: invented scenes (`fixtures/extraction-typing/`). The
+  prompt before #788 already typed them right (state 14/14, fixed 6/6): a
+  short scene alone doesn't bring the slip out, so it guards the other way,
+  a trait read as state.
+- `extraction-typing-book`: private (storyforge-evals `extraction-typing/`,
+  its labels quote the book), real scenes where the slip happened, read
+  from the corpus book at a pinned commit with the gate's full prompt
+  (`gate.extraction_prompt`). On *Wrath Like Smoke*'s
+  `hector-sends-paris-to-duel`: before #788, 3 of the 5 gear facts read were
+  fixed in each of two readings; recorded at the new wording, the armour
+  and the leopard skin state, the fact merging Menelaus's crest with his
+  hair fixed and Sarpedon's tunic not read (state 2 of 3 found, 1
+  missing), with kinship, places and backstory still fixed.
 
 ## The typed-state set (#744)
 
@@ -589,7 +652,8 @@ half that does, and it says the exemplars get the drafts most of the way
 to her, not all of it.
 
 To re-record (only when a decision depends on it):
-`python3 evals/run.py --mode record --suite voice-austen --runs 3` (or
+`python3 evals/run.py --mode record --suite voice-austen` (one run, #788;
+`--runs 3` for the spread the tables above show) (or
 `--suite voice-austen-control`), then set `RECORDED_RANK` and
 `RECORDED_JUDGE` in that suite from run 1. `evals/consistency.py` doesn't
 read them (E6's suites only): the tables above are the spread.
@@ -639,16 +703,14 @@ to a model `costs.py` has no price for (they are costed at sonnet rates).
 `evals/fixtures/e6/run2` and `run3` are two more independent recordings of
 the paid suites, beside the default ones (run 1).
 `python3 evals/consistency.py` replays all three and writes the per-metric
-spread to `evals/e6/spread.json` (and each E8 case's outcome per run to
-`evals/e6/e8-cases.json`). Like any recording they replay only while the
+spread to `evals/e6/spread.json` for E2 and E3 (E4 and E8 left E6 at #788:
+E8 retired, E4 one run; their spreads are in the status doc). Like any
+recording they replay only while the
 requests match, so a prompt change since they were recorded is a miss;
 they are not re-recorded on every change (see `evals/e6/__init__.py`).
 `--suite NAME` replays one suite and replaces only its entries in
 `spread.json`, whose `git_sha` is per suite, the commit each was replayed
-at. E4's three runs are of #482's gate (one checker reading): replay them
-from a worktree at d3536986, since run 1 has since been re-recorded with two
-readings and a replay at a later commit misses (`--suite` then leaves the
-file as it was). The other suites' runs 2 and 3 were recorded at v1.87.1
+at. The suites' runs 2 and 3 were recorded at v1.87.1
 (3c01088d). Results and reading are in the status doc.
 
 ## Model-tier comparisons

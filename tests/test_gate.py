@@ -5861,3 +5861,61 @@ class TestCarryReason:
         assert self._reason('one two three', 'twelve ', '', mutable='state') == ''
         assert 'state finding (PHY)' in self._reason('one two three', 'twelve',
                                                      'twelve and more', codes=('PHY',))
+
+
+def test_a_pinned_extraction_makes_no_extraction_call(project_dir, tmp_path):
+    """#788: an eval's pinned extraction stands for the extraction and
+    persistence calls; the rows are made from it as from a reply."""
+    pin = gate.PinnedExtraction(found=[dict(_commitment(), ends=[])],
+                                kept=[dict(_commitment(), ends=[])], dropped=[])
+    asked = []
+
+    def fake(path, body, **k):
+        if 'tools' in body:
+            return _text({'findings': [], 'kept': []})
+        asked.append(body)
+        return _text({'commitments': []})
+    with patch('storyforge.api._api_request', side_effect=fake):
+        result = gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path / 'l'),
+                            extract_model='m', check_model='m', pinned=pin)
+    assert asked == [] and result.passed
+    assert [r['quote'] for r in result.proposed] == [HERE]
+    assert 'pinned by the eval' in result.extract_note
+    assert gate.pinned_extraction(result) == pin
+    assert gate.PinnedExtraction.from_json(pin.to_json()) == pin
+
+
+def test_extraction_prompt_is_the_request_the_gate_sends(project_dir, tmp_path):
+    """#788: the extraction-typing eval builds its prompt with
+    `gate.extraction_prompt`; it must be the gate's own request."""
+    prose = open(os.path.join(project_dir, 'scenes', f'{SCENE}.md')).read()
+    sent = []
+
+    def fake(path, body, **k):
+        if 'tools' in body:
+            return _text({'findings': [], 'kept': []})
+        sent.append(_prompt_text(body['messages'][0]['content']))
+        return _text({'commitments': [_commitment()]})
+    want = gate.extraction_prompt(project_dir, SCENE, prose)
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        gate_scene(project_dir, SCENE, command='draft', prose=prose,
+                   log_dir=str(tmp_path / 'l'), extract_model='m', check_model='m')
+    assert sent[0] == want
+
+
+def test_a_pin_wins_over_a_carry(project_dir, tmp_path):
+    """#790's review T-7: an eval's pin is the reading; nothing is called."""
+    carried = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+    pin = gate.PinnedExtraction(found=[], kept=[], dropped=[])
+    asked = []
+
+    def fake(path, body, **k):
+        if 'tools' in body:
+            return _text({'findings': [], 'kept': []})
+        asked.append(body)
+        return _text({'commitments': [_commitment()]})
+    with patch('storyforge.api._api_request', side_effect=fake):
+        result = gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path / 'p'),
+                            extract_model='m', check_model='m', carry=carried, pinned=pin)
+    assert asked == [] and result.proposed == []
+    assert 'pinned by the eval' in result.extract_note

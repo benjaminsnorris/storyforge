@@ -1,17 +1,152 @@
 {
   "cost": {
-    "calls": 3130,
-    "input_tokens": 13093207,
-    "output_tokens": 4450884,
-    "replayed_calls": 3130,
+    "calls": 4630,
+    "input_tokens": 18507701,
+    "output_tokens": 8093950,
+    "replayed_calls": 4630,
     "unpriced_calls": 0,
-    "usd_if_live": 35.2732,
+    "usd_if_live": 85.484,
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "ad6bc852696de04c0f12478c3bb93979b08d9cb0",
+  "git_sha": "7f527188a89674cda5bf7b49fab92f03f64a365f",
   "mode": "replay",
   "results": [
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 4,
+        "input_tokens": 6757,
+        "output_tokens": 5243,
+        "replayed_calls": 4,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0659,
+        "usd_spent": 0.0
+      },
+      "description": "`bibles convert` (#702) on synthetic essays with labelled facts, lines and interpretation",
+      "duration_s": 0.02,
+      "error": null,
+      "frozen": false,
+      "gates": [
+        {
+          "actual": 1.0,
+          "name": "fact_recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 0.9796,
+          "name": "type_accuracy",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.9796
+        },
+        {
+          "actual": 0.9655,
+          "name": "subject_accuracy",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.9655
+        },
+        {
+          "actual": 2,
+          "name": "secrets_kept",
+          "op": "==",
+          "passed": true,
+          "threshold": 2
+        },
+        {
+          "actual": 2,
+          "name": "open_kept",
+          "op": "==",
+          "passed": true,
+          "threshold": 2
+        },
+        {
+          "actual": 0,
+          "name": "interpretation_rows",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "interpretation_notes",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "speech_descriptions",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 1.0,
+          "name": "voice_recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 0,
+          "name": "description_as_voice",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "invented_lines",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0.5,
+          "name": "note_recall",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.5
+        }
+      ],
+      "metrics": {
+        "description_as_voice": 0,
+        "fact_recall": 1.0,
+        "facts_labelled": 49,
+        "interpretation_notes": 0,
+        "interpretation_rows": 0,
+        "invented_lines": 0,
+        "left_out": 0,
+        "note_recall": 0.5,
+        "open_kept": 2,
+        "open_labelled": 2,
+        "rows": 56,
+        "secrets_kept": 2,
+        "secrets_labelled": 2,
+        "speaker_contradicted": 0,
+        "speaker_unconfirmed": 1,
+        "speech_descriptions": 0,
+        "subject_accuracy": 0.9655,
+        "type_accuracy": 0.9796,
+        "voice_recall": 1.0
+      },
+      "mode": "replay",
+      "notes": [
+        "model: claude-sonnet-5-5",
+        "missed (0 of 49): ",
+        "found with the wrong type or subject: c22 (world, -)",
+        "interpretation kept as rows: none",
+        "at or past the trust bar on every measure"
+      ],
+      "stale": null,
+      "started_at": "2026-11-28T09:11:19+00:00",
+      "status": "pass",
+      "suite": "bibles-convert"
+    },
     {
       "by_code": {},
       "cost": {
@@ -24,7 +159,7 @@
         "usd_spent": 0.0
       },
       "description": "Blocking read vs known blocking slips (gawain, Wrath) and clean scenes; private set",
-      "duration_s": 0.57,
+      "duration_s": 0.62,
       "error": null,
       "frozen": true,
       "gates": [
@@ -204,7 +339,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T13:49:48+00:00",
+      "started_at": "2026-11-28T09:11:19+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
@@ -220,7 +355,7 @@
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 2.93,
+      "duration_s": 3.08,
       "error": null,
       "frozen": true,
       "gates": [
@@ -408,7 +543,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T13:49:49+00:00",
+      "started_at": "2026-11-28T09:11:20+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
@@ -484,7 +619,7 @@
       "mode": "replay",
       "notes": [],
       "stale": null,
-      "started_at": "2026-11-15T20:02:18+00:00",
+      "started_at": "2026-11-28T09:11:23+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -542,7 +677,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 1.34,
+      "duration_s": 1.08,
       "error": null,
       "frozen": false,
       "gates": [
@@ -617,7 +752,7 @@
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:02:18+00:00",
+      "started_at": "2026-11-28T09:11:23+00:00",
       "status": "pass",
       "suite": "e2-carol"
     },
@@ -681,7 +816,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 2.42,
+      "duration_s": 2.12,
       "error": null,
       "frozen": false,
       "gates": [
@@ -755,7 +890,7 @@
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:22:11+00:00",
+      "started_at": "2026-11-28T09:11:24+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -803,7 +938,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 34.23,
+      "duration_s": 26.23,
       "error": null,
       "frozen": false,
       "gates": [
@@ -871,7 +1006,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:02:22+00:00",
+      "started_at": "2026-11-28T09:11:26+00:00",
       "status": "pass",
       "suite": "e2-corpus-drift"
     },
@@ -921,7 +1056,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 46.02,
+      "duration_s": 31.89,
       "error": null,
       "frozen": false,
       "gates": [
@@ -989,7 +1124,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:02:56+00:00",
+      "started_at": "2026-11-28T09:11:52+00:00",
       "status": "pass",
       "suite": "e2-corpus-validate"
     },
@@ -1001,7 +1136,7 @@
         },
         "PHY": {
           "facts": 14,
-          "recall": 0.8571
+          "recall": 0.7857
         },
         "PRM": {
           "facts": 1,
@@ -1013,7 +1148,7 @@
         },
         "TRT": {
           "facts": 14,
-          "recall": 0.9286
+          "recall": 1.0
         },
         "WLD": {
           "facts": 5,
@@ -1022,15 +1157,15 @@
       },
       "cost": {
         "calls": 246,
-        "input_tokens": 1673301,
-        "output_tokens": 220536,
+        "input_tokens": 1692342,
+        "output_tokens": 228341,
         "replayed_calls": 246,
         "unpriced_calls": 0,
-        "usd_if_live": 5.9708,
+        "usd_if_live": 6.1021,
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 10.65,
+      "duration_s": 9.89,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1054,7 +1189,7 @@
         "facts": 49,
         "missing": 1,
         "partial": 5,
-        "persistence_dropped": 38,
+        "persistence_dropped": 49,
         "recall": 0.8776,
         "recall_with_partial": 0.9796
       },
@@ -1079,7 +1214,7 @@
         "lantern-folk-002 (a03-the-little-voices): captured",
         "lantern-folk-003 (a12-the-remembering): partial",
         "lantern-folk-004 (a14-the-keepers-flame): partial",
-        "lantern-folk-005 (a11-in-the-dark): captured",
+        "lantern-folk-005 (a11-in-the-dark): partial",
         "lantern-folk-006 (a08-what-the-folk-fear): captured",
         "lantern-folk-008 (a03-the-little-voices): captured",
         "lantern-folk-011 (a07-the-cold-sleep): captured",
@@ -1090,7 +1225,7 @@
         "lantern-folk-016 (a05-the-pledge): captured",
         "lantern-folk-018 (a01-moving-night): partial",
         "lantern-folk-019 (a02-into-the-trees): captured",
-        "lantern-folk-020 (a08-what-the-folk-fear): partial",
+        "lantern-folk-020 (a08-what-the-folk-fear): captured",
         "lantern-folk-025 (a13-through-the-woods): captured",
         "lantern-folk-027 (a11-in-the-dark): captured",
         "lantern-folk-028 (a11-in-the-dark): captured",
@@ -1115,7 +1250,7 @@
         "The commitments pass is judged after the persistence check, as phase 4 records it: persistence_dropped counts the facts it dropped over every scene judged."
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:03:42+00:00",
+      "started_at": "2026-11-28T09:12:24+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -1125,6 +1260,7 @@
           "broken_promises": 0
         }
       },
+      "carried_over": true,
       "cost": {
         "calls": 754,
         "input_tokens": 3969388,
@@ -1279,30 +1415,24 @@
     },
     {
       "by_code": {
-        "KNO": {
-          "mismatches": 1
-        },
         "PHY": {
-          "mismatches": 8
+          "mismatches": 14
         },
-        "REL": {
-          "mismatches": 1
-        },
-        "TRT": {
-          "mismatches": 1
+        "TIM": {
+          "mismatches": 2
         }
       },
       "cost": {
         "calls": 61,
-        "input_tokens": 547185,
-        "output_tokens": 108112,
+        "input_tokens": 544787,
+        "output_tokens": 104365,
         "replayed_calls": 61,
         "unpriced_calls": 0,
-        "usd_if_live": 4.5466,
+        "usd_if_live": 4.4763,
         "usd_spent": 0.0
       },
       "description": "Rewrite from plan + ledger; facts the rewrite changes",
-      "duration_s": 1.02,
+      "duration_s": 1.0,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1314,14 +1444,14 @@
           "threshold": 10
         },
         {
-          "actual": 1.1,
+          "actual": 1.6,
           "name": "mismatches_per_scene",
           "op": "<=",
           "passed": true,
           "threshold": 2.3
         },
         {
-          "actual": 3.9,
+          "actual": 3.6,
           "name": "ledger_only.mismatches_per_scene",
           "op": "<=",
           "passed": true,
@@ -1329,32 +1459,30 @@
         }
       ],
       "metrics": {
-        "ledger_only.KNO": 3,
+        "ledger_only.KNO": 2,
         "ledger_only.PHY": 31,
-        "ledger_only.REL": 1,
         "ledger_only.TIM": 3,
-        "ledger_only.TRT": 1,
-        "ledger_only.mismatches": 39,
-        "ledger_only.mismatches_per_scene": 3.9,
-        "mismatches": 11,
-        "mismatches_per_scene": 1.1,
+        "ledger_only.mismatches": 36,
+        "ledger_only.mismatches_per_scene": 3.6,
+        "mismatches": 16,
+        "mismatches_per_scene": 1.6,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    TRT: In the original the captor speaks to her while lifting her; in the redraft he says nothing and is stated never to speak.\n    ledger only, PHY: The door's sound on his arrival differs: the original has the door creak, while the redraft says the hinges make no sound anymore.\n    ledger only, KNO: How she learned the pillowcase's thread count differs: by tongue in the original, by reading the tag with her fingertips in the redraft.\n    ledger only, PHY: The water vessel and how it is given differ: a plastic bottle pressed through the hood in the original, a cup lifted beneath the hood's hem \n    ledger only, PHY: Where the heater's warmth reaches her differs: her shins in the original, only her right shoulder in the redraft.",
-        "harmons-hands: 1 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: In the original he cuts and replaces the zip tie on the right wrist as well; in the redraft he only tests the right tie and leaves it in pla\n    ledger only, PHY: The hand he takes to check her capillary refill differs: her right hand in the original, her left hand in the redraft.",
-        "waking-maren: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: The surface Maren presses her palms flat against is linoleum in the original but laminate in the redraft.\n    ledger only, PHY: When she wakes at 2:47, Maren is sitting up in the original but lying on her back in the redraft.\n    ledger only, PHY: The bedroom alarm clock's display is green in the original but red in the redraft.\n    ledger only, PHY: In the dream she feels the gravel through another woman's shoes and the breathing is the woman's; in the redraft they are her own soles and \n    ledger only, PHY: When she turns the light off, the glass is on the counter in the original but in the sink in the redraft.",
-        "waking-hank: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: The pencil's position relative to the legal pad differs: in the original it lies beside the pad, in the redraft it lies across it.\n    ledger only, TIM: The 2:47 AM reading on the stove clock comes after he has finished writing in the original, but at the moment he wakes at the sink in the re\n    ledger only, PHY: After the first night at the sink, he went back to bed with wet hands in the original, but dried his hands first in the redraft.\n    ledger only, PHY: The legal pad lay facedown with the pencil beside it in the original; in the redraft the pencil lies across the pad and he looks at its blan",
-        "the-school: 0 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    ledger only, TIM: The number of nights of broken sleep Hank has had differs: three in the original, four in the redraft.\n    ledger only, PHY: In the original the crossed-out sentence stays legible under a single line; in the redraft he scribbles it out until the letters are gone.\n    ledger only, PHY: Where Rook is when she watches Hank's hand on the wall differs: at the gymnasium entrance in the original, ten feet off his left shoulder in",
-        "advocate: 0 mismatch(es) in the rewrite, 7 from the plan and ledger alone\n    ledger only, PHY: Maren's hands on the table are palms up in the original but palms down in the redraft.\n    ledger only, PHY: After Maren's reassurance, Sofia's thumb keeps working her palm in the original but stops in the redraft.\n    ledger only, TIM: Maren's finger tremor begins at 12:15 in Sofia's timeline in the original, but right after the 11:52 deadbolt flashback in the redraft.\n    ledger only, PHY: Maren hides her trembling hand in her lap in the original, but under the folder's edge on the table in the redraft.\n    ledger only, PHY: During the hallway call, Maren's left hand is pressed against the wall in the original but kept in her jacket pocket in the redraft.\n    ledger only, PHY: Maren gives Sofia the card after walking her to the lobby in the original, but back in Suite B in the redraft.\n    ledger only, PHY: In the bathroom, Maren lowers herself to the floor in the original, but stands with her fist against the tile above the sink in the redraft.",
-        "maren-runs: 3 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: During the mid-span flinch, the original has her arms come up and her hands splay open at her sides; the redraft has her wrists snap togethe\n    PHY: In the dream, the captive woman's hands were splayed against the hood over her face in the original, but zip-tied crossed behind her back in\n    PHY: At the east end of the bridge her hands had stopped shaking in the original, whereas in the redraft her left hand starts trembling again the\n    ledger only, PHY: Her running breath pattern is three strides in, three out in the original but two in, two out in the redraft.\n    ledger only, PHY: At stride 231 her left foot caught on nothing in the original, whereas in the redraft her right foot came down on grit.\n    ledger only, PHY: During the flinch her hands splay open at her sides in the original, but her arms snap behind her back with wrists crossed in the redraft.\n    ledger only, PHY: The tremor after the flinch is fine and fast in the original but hard and coarse, unlike the fine one, in the redraft.\n    ledger only, PHY: After stopping, her stride count resets to zero in the original, but in the redraft it continues from where she stopped and she finishes at ",
-        "engineer: 2 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: In the original Rook stays where she is when Hank reacts to the vision; in the redraft she is pressed against him, closer than her usual two\n    KNO: In the original it is uncertain whether the anchors were cut or sheared, and whether a previous renovation did it; the redraft states they w\n    ledger only, PHY: The original has Danny exclaim on exposing the missing anchors; the redraft gives the line to Hank.\n    ledger only, PHY: The east entrance door frame is wood in the original but steel in the redraft.\n    ledger only, PHY: The original has the stucco removal start at the window line; the redraft starts it at the ledger line.\n    ledger only, PHY: In the original Hank extracts several original sill-plate anchor bolts and finds more; in the redraft only one original bolt remains on the ",
-        "name-surfaces: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: Hank writes CLAIRE with a pen in the original (the ink is still wet), but with a pencil in the redraft.\n    ledger only, PHY: Hank writes the name with a pen in the original but with a pencil in the redraft.\n    ledger only, PHY: Rook ends the scene with her chin on Hank's knee in the original, but with her chin on his boot in the redraft.\n    ledger only, PHY: Rook goes from lying on the kitchen floor to crossing the kitchen and leaning against his calf in the original, whereas in the redraft she l\n    ledger only, PHY: Hank's hand stays steady as he writes CLAIRE in the original, but shakes during the writing in the redraft.",
-        "voicemail: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    REL: When Marie makes the calls from Claire's apartment, the original calls it her sister's place, while the redraft says it is her daughter's.\n    ledger only, TRT: In the fifth message the original has Marie's composure gone (higher pitch, talking faster), while the redraft has her calm and factual by t\n    ledger only, KNO: The coworker Jennifer and the 11:15 Tuesday departure first come up in the fifth message in the original, but in the fourth message in the r\n    ledger only, KNO: Claire being an ER nurse at Bay Area Hospital is given in the second message in the original, but in the first message in the redraft.\n    ledger only, REL: In Maren's reconstruction the original has Marie sitting in her sister's kitchen, while the redraft has her in her daughter's rooms."
+        "claires-cold: 2 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: In the original the captor switches the space heater on and moves it closer to keep her warm; in the redraft he never switches it on and lea\n    PHY: In the original the door creaks as he enters; in the redraft the hinges make no sound on this visit.\n    ledger only, PHY: The number of steps he takes inside the door before pausing differs: three in the original, two in the redraft.\n    ledger only, TIM: When the zip ties cut through the first layer of skin differs: day two or three of captivity in the original, a week ago in the redraft.\n    ledger only, TIM: In the original the left-side tingling started yesterday and was gone today; in the redraft it had already stopped yesterday.",
+        "harmons-hands: 2 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: In the original he cuts and replaces the zip tie on the right wrist as well; in the redraft he leaves the right tie alone.\n    PHY: The capillary-refill test is done on her right hand in the original but on her left hand in the redraft.\n    ledger only, PHY: The hand he takes to test her capillary refill is her right hand in the original but her left hand in the redraft.",
+        "waking-maren: 1 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: In the original Maren drinks two glasses of water in total; the redraft has her fill and drink from a third glass.\n    ledger only, PHY: The bedroom clock's display is green in the original but red in the redraft.\n    ledger only, PHY: On waking, Maren is already sitting up in the original, but in the redraft she is lying still in bed.",
+        "waking-hank: 2 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: The number of times Rook's nails clicked in the hallway differs: once in the original, twice in the redraft.\n    PHY: The pencil's position relative to the facedown legal pad differs: beside it in the original, lying across it in the redraft.\n    ledger only, PHY: In the original he is standing at the sink barefoot, but in the redraft he is wearing boots that Rook lies across.\n    ledger only, PHY: The pencil had been left beside the legal pad in the original, but laid across the top of the pad in the redraft.\n    ledger only, PHY: When he swears, Rook is standing in the kitchen doorway and her tail moves against the doorframe in the original; in the redraft she is lyin",
+        "the-school: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    PHY: In the original a custodian is present and lets Hank in through the side entrance; in the redraft no one lets him in, because the district l\n    ledger only, PHY: Hank starts his survey at a different corner and works the wall in the opposite direction.\n    ledger only, PHY: The spacing between crack monitor placements differs.\n    ledger only, PHY: Where Rook sits when she comes into the gym differs: at the entrance versus six feet from Hank.\n    ledger only, PHY: Where Hank writes the dream-tainted 'stress field' sentence differs: in the gym right after the hand moment versus later in the truck.\n    ledger only, PHY: The sentence is struck through with one line in the original but with two lines in the redraft.\n    ledger only, PHY: In the original the truck's engine and heater are already running while he sits in it, whereas in the redraft he only starts the truck at th",
+        "advocate: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    PHY: The direction Sofia moved her chair differs: the original has it moved six inches farther from the wall, while the redraft has it moved six \n    ledger only, TIM: In the original, Sofia's account is still going at 12:15 in her timeline; in the redraft the attacker left at 12:06 by the stove clock.\n    ledger only, PHY: In the original, Maren makes the calls standing in the hallway; in the redraft she makes them from the interview room.\n    ledger only, PHY: In the original, Maren calls Delgado's line, the clerk answers, and Delgado joins only for the last forty seconds; in the redraft she calls \n    ledger only, PHY: In the original, Maren lowers herself to the bathroom floor and presses her knuckles to the floor tile; in the redraft she stays standing an\n    ledger only, PHY: In the original, the intake folder is under the table during the interview; in the redraft it sits open on the table.\n    ledger only, KNO: In the original, Sofia does not notice Maren's distress; in the redraft Sofia stops and studies Maren's face.",
+        "maren-runs: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    TIM: The redraft says the rib tightness had been there 'all day', but the run happens at 6:12 in the morning, shortly after she woke, so no day h\n    ledger only, PHY: Her running breathing rhythm is three strides in and three out in the original, but three in and two out in the redraft.\n    ledger only, PHY: The foot that caught at mid-span is her left foot in the original but her right foot in the redraft.\n    ledger only, PHY: It takes her four breaths to calm the tremor in the original, but eleven in the redraft.\n    ledger only, PHY: After the stop, her stride count resets to zero in the original, while in the redraft she resumes the count where she left off.",
+        "engineer: 2 mismatch(es) in the rewrite, 7 from the plan and ledger alone\n    PHY: The east entrance door frame is wood in the original but steel in the redraft.\n    PHY: Danny's called mortar joint depth differs: a quarter inch, maybe three-eighths, in the original versus three-eighths or a bit more in the re\n    ledger only, PHY: The east entrance door frame is wood in the original but hollow-metal steel in the redraft.\n    ledger only, PHY: Danny probes mortar joints on the west wall in the original, but on the east wall near the entrance door in the redraft.\n    ledger only, PHY: The missing diaphragm ties are anchor bolts in the original but steel straps in the redraft.\n    ledger only, PHY: The stubs of the removed ties were painted over and mortared in the original, but rusted flush with the brick in the redraft.\n    ledger only, PHY: Danny removes the stucco with a masonry hammer in the original but with a flat bar in the redraft.\n    ledger only, PHY: Hank tests the concrete with his thumbnail in the original but with the tip of his knife in the redraft.\n    ledger only, PHY: Hank records his notes in a field book in the original but on an elevation drawing/clipboard in the redraft.",
+        "name-surfaces: 1 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: At the moment he writes CLAIRE and looks at Rook, the original has her chin resting on his knee, while the redraft has her sitting back on h\n    ledger only, PHY: At the end of the scene, the original has Rook beside Hank with her chin on his knee, while the redraft has her still lying across the hall ",
+        "voicemail: 3 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    TIM: The original says Marie Renaud first called the office two days ago; the redraft says that was only the first time she reached a live person\n    PHY: In the third message Marie repeats Claire's full name twice in the original but three times in the redraft.\n    PHY: Where Marie was when she left the seventh message: Claire's kitchen, calling on Claire's landline, versus a stairwell or unheated hallway of\n    ledger only, PHY: The voicemails are played on the phone's voicemail app in the original, but through the laptop speakers with a playback bar in the redraft.\n    ledger only, PHY: Where Marie was and what she called from when leaving message seven: sitting in the apartment kitchen on Claire's landline in the original, \n    ledger only, KNO: Jennifer's account differs: in the original Claire left the parking lot at 11:15, in the redraft Jennifer watched Claire walk out to the par"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:23:29+00:00",
+      "started_at": "2026-11-28T09:12:34+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -1382,7 +1510,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.18,
+      "duration_s": 0.16,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1434,150 +1562,9 @@
         "christmas-carol/run1: 25 flag(s)"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:03:54+00:00",
+      "started_at": "2026-11-28T09:12:35+00:00",
       "status": "pass",
       "suite": "e7-classics"
-    },
-    {
-      "by_code": {
-        "KNO": {
-          "reintroduced": 0,
-          "replayed": 3
-        },
-        "PHY": {
-          "reintroduced": 0,
-          "replayed": 11
-        },
-        "REL": {
-          "reintroduced": 0,
-          "replayed": 1
-        },
-        "TIM": {
-          "reintroduced": 0,
-          "replayed": 5
-        },
-        "TRT": {
-          "reintroduced": 1,
-          "replayed": 12
-        }
-      },
-      "carried_over": true,
-      "cost": {
-        "calls": 573,
-        "input_tokens": 2277024,
-        "output_tokens": 766339,
-        "replayed_calls": 573,
-        "unpriced_calls": 0,
-        "usd_if_live": 55.3461,
-        "usd_spent": 0.0
-      },
-      "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 28.95,
-      "error": null,
-      "gates": [
-        {
-          "actual": 32,
-          "name": "replayed",
-          "op": ">=",
-          "passed": true,
-          "threshold": 15
-        },
-        {
-          "actual": 0,
-          "name": "reintroduced_unflagged",
-          "op": "<=",
-          "passed": true,
-          "threshold": 1
-        },
-        {
-          "actual": 0,
-          "name": "gate_unfinished",
-          "op": "==",
-          "passed": true,
-          "threshold": 0
-        }
-      ],
-      "metrics": {
-        "clean_gate_failed": 7,
-        "errors_per_10k_words": 0.295,
-        "family.brief-fix.reintroduced": 0,
-        "family.brief-fix.replayed": 1,
-        "family.hone-physical-states.reintroduced": 0,
-        "family.hone-physical-states.replayed": 2,
-        "family.illustrate-prompts.reintroduced": 0,
-        "family.illustrate-prompts.replayed": 1,
-        "family.illustrate-state.reintroduced": 0,
-        "family.illustrate-state.replayed": 3,
-        "family.naturalness-upstream.reintroduced": 0,
-        "family.naturalness-upstream.replayed": 2,
-        "family.redraft-from-brief.reintroduced": 1,
-        "family.redraft-from-brief.replayed": 17,
-        "family.revision-plan.reintroduced": 0,
-        "family.revision-plan.replayed": 6,
-        "gate_counts_missing": 2,
-        "gate_extraction": 0,
-        "gate_inherited": 13,
-        "gate_new": 34,
-        "gate_plan_conflicts": 0,
-        "gate_unfinished": 0,
-        "halted": 2,
-        "reintroduced": 1,
-        "reintroduced_unflagged": 0,
-        "reintroduction_rate": 0.031,
-        "replayed": 32,
-        "unreplayable": 18
-      },
-      "mode": "replay",
-      "notes": [
-        "excluded 14: holdout (governor-010, governor-012, governor-017, governor-021, lantern-folk-021, lantern-folk-026, shared-dark-002, shared-dark-016, shared-dark-042, thornwall-031, thornwall-032, thornwall-034, thornwall-036, thornwall-038)",
-        "excluded 1: no introducing commit recorded (lantern-folk-034)",
-        "excluded 1: unreplayable: introducing commit wrote only the established side (a11-in-the-dark), not a contradicted scene (lantern-folk-027)",
-        "excluded 2: unreplayable: pre-pass project has no scene-briefs.csv (shared-dark-018, shared-dark-023)",
-        "excluded 9: unreplayable: pre-pass project keeps its scenes in scenes/scene-index.yaml and its plan in YAML (current revise refuses YAML plans); Storyforge has no migration for it (governor-011, thornwall-002, thornwall-005, thornwall-008, thornwall-011, thornwall-013, thornwall-014, thornwall-019, thornwall-021)",
-        "excluded 1: unreplayable: pre-pass project keeps its scenes in scenes/scene-index.yaml; Storyforge has no migration for it (thornwall-015)",
-        "excluded 1: unreplayable: the --state pass logged the pre-pass prose faithfully (\"Two relit. Two still dark.\"); the error is the log going stale after a later prose fix (37bc78e), which a replay of the pass cannot show (lantern-folk-032)",
-        "excluded 1: unreplayable: the introducing commit wrote both sides (the six years and the nine), so the pre-pass project has no established fact for the replay to contradict (thornwall-028)",
-        "excluded 1: unreplayable: the pre-pass book already has the cooperative Greenhollow Warden: thessan-at-verath (\"his signature on the transfer papers steady\") and thessan-rides (\"had signed every form\") say what the replay is judged for writing (thornwall-026)",
-        "excluded 1: unreplayable: the pre-pass book already has the stone-cutters on Block Fourteen: terrace-row (\"The stone-cutters on Block Fourteen had stopped for their afternoon break\"), the continuity tracker, and the scene's own brief (governor-016)",
-        "excluded 1: unreplayable: the pre-pass ivra-seals-archive already says \"declining allotments over nine years\"; the introducing commit (48a7d28) only changed a colon to a period, so the error predates the pass (thornwall-030)",
-        "governor-013 (walking-the-eastern-development): not_present",
-        "governor-014 (elias-disarms): consistent [gate: 5 already in the book]",
-        "governor-018 (acceptable-losses): not_present (the gate did not pass it: listed pending) [gate: 9 new, 1 already in the book]",
-        "governor-020 (junction-fourteen): consistent",
-        "governor-022 (article-twelve): consistent",
-        "governor-023 (acceptable-losses): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
-        "governor-024 (acceptable-losses): reintroduced (the gate did not pass it: listed pending) [gate: 9 new, 1 already in the book] \u2014 \"A woman named Erdel, seventy-one, first floor.\"",
-        "governor-025 (haddons-reckoning): not_present (the gate did not pass it: listed pending) [gate: 1 new]",
-        "governor-026 (the-governors-vigil): not_present (the gate did not pass it: listed pending) [gate: 2 new, 2 already in the book]",
-        "governor-027 (elias-agrees-to-the-terms): not_present",
-        "governor-028 (order): not_present [gate counts not collected]",
-        "lantern-folk-015 (a09-the-worst-night): consistent",
-        "lantern-folk-020 (a06-standing-guard): consistent",
-        "lantern-folk-029 (a10-the-lamp-goes-dark): consistent",
-        "lantern-folk-030 (a04-the-great-lamp): not_present",
-        "lantern-folk-031 (a01-moving-night): not_present",
-        "lantern-folk-033 (a10-the-lamp-goes-dark): consistent",
-        "shared-dark-030 (woodpile): not_present [gate: 1 already in the book]",
-        "shared-dark-034 (call): not_present [gate: 1 already in the book]",
-        "shared-dark-035 (phone-call): consistent",
-        "shared-dark-037 (theory): consistent",
-        "shared-dark-038 (decision): consistent [gate: 1 already in the book]",
-        "shared-dark-040 (claire): consistent [gate counts not collected]",
-        "shared-dark-041 (missing-persons): halted, nothing written \u2014 upstream brief fix rewrote nothing for missing-persons: named Getting",
-        "thornwall-020 (confession-on-the-wall): consistent",
-        "thornwall-022 (undefended-flame): not_present",
-        "thornwall-023 (journals-of-the-east-wing): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
-        "thornwall-024 (evening-visit): not_present (the gate did not pass it: listed pending) [gate: 10 new]",
-        "thornwall-025 (thessan-vigil): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
-        "thornwall-027 (thessan-at-verath): not_present [gate: 1 already in the book]",
-        "thornwall-029 (evidence-room): not_present",
-        "thornwall-033 (shell-breaks-open): consistent",
-        "thornwall-035 (riders-approach): halted, nothing written \u2014 upstream brief fix rewrote nothing for riders-approach: named Meanwhile",
-        "thornwall-037 (evening-visit): consistent"
-      ],
-      "started_at": "2026-11-08T08:17:07+00:00",
-      "status": "pass",
-      "suite": "e8-revision-safety"
     },
     {
       "by_code": {},
@@ -1591,7 +1578,7 @@
         "usd_spent": 0.0
       },
       "description": "Extract phase 5 leaves a complete, floor-passing project",
-      "duration_s": 0.56,
+      "duration_s": 0.55,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1684,9 +1671,119 @@
         "status next: evaluate"
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:03:55+00:00",
+      "started_at": "2026-11-28T09:12:36+00:00",
       "status": "pass",
       "suite": "e9-reference"
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 9,
+        "input_tokens": 18183,
+        "output_tokens": 4810,
+        "replayed_calls": 9,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0845,
+        "usd_spent": 0.0
+      },
+      "description": "Extraction types worn, carried and held gear as state, traits as fixed: invented scenes (#788)",
+      "duration_s": 0.01,
+      "error": null,
+      "frozen": false,
+      "gates": [
+        {
+          "actual": 1.0,
+          "name": "state_right",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 1.0,
+          "name": "fixed_right",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 0,
+          "name": "missing",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        }
+      ],
+      "metrics": {
+        "fixed_found": 6,
+        "fixed_right": 1.0,
+        "missing": 0,
+        "state_found": 14,
+        "state_right": 1.0
+      },
+      "mode": "replay",
+      "notes": [
+        "model claude-sonnet-5-5; typing read off the extraction reply, before the persistence check"
+      ],
+      "stale": null,
+      "started_at": "2026-11-28T09:12:36+00:00",
+      "status": "pass",
+      "suite": "extraction-typing"
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 3,
+        "input_tokens": 35871,
+        "output_tokens": 4023,
+        "replayed_calls": 3,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.112,
+        "usd_spent": 0.0
+      },
+      "description": "Extraction types gear as state on real scenes where it slipped (private; #788)",
+      "duration_s": 0.29,
+      "error": null,
+      "frozen": false,
+      "gates": [
+        {
+          "actual": 0.6667,
+          "name": "state_right",
+          "op": "==",
+          "passed": true,
+          "threshold": 0.6667
+        },
+        {
+          "actual": 1.0,
+          "name": "fixed_right",
+          "op": "==",
+          "passed": true,
+          "threshold": 1.0
+        },
+        {
+          "actual": 1,
+          "name": "missing",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        }
+      ],
+      "metrics": {
+        "fixed_found": 3,
+        "fixed_right": 1.0,
+        "missing": 1,
+        "state_found": 3,
+        "state_right": 0.6667
+      },
+      "mode": "replay",
+      "notes": [
+        "hector-sends-paris-to-duel: label 2 (worn): missing",
+        "hector-sends-paris-to-duel: label 3 (worn): typed fixed, should be state",
+        "model claude-sonnet-5-5; typing read off the extraction reply, before the persistence check"
+      ],
+      "stale": null,
+      "started_at": "2026-11-28T09:12:36+00:00",
+      "status": "pass",
+      "suite": "extraction-typing-book"
     },
     {
       "by_code": {
@@ -1717,16 +1814,16 @@
         }
       },
       "cost": {
-        "calls": 800,
-        "input_tokens": 2853255,
-        "output_tokens": 1683150,
-        "replayed_calls": 800,
+        "calls": 646,
+        "input_tokens": 1405776,
+        "output_tokens": 1271453,
+        "replayed_calls": 646,
         "unpriced_calls": 0,
-        "usd_if_live": 41.8455,
+        "usd_if_live": 34.8336,
         "usd_spent": 0.0
       },
       "description": "The gate (open checker) alone on E8's recorded, judged replays; private set",
-      "duration_s": 41.98,
+      "duration_s": 38.57,
       "error": null,
       "frozen": true,
       "gates": [
@@ -1808,10 +1905,11 @@
         "missed (21): governor-022-72ec7272, governor-024-9a736727, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, lantern-folk-020-56160318, shared-dark-030-482f789c, shared-dark-037-facec288, shared-dark-041-795f038c, shared-dark-041-7ef1b840, thornwall-020-21146a65, thornwall-024-718a3574, thornwall-024-9933d88f, thornwall-024-a4ac8b76, thornwall-025-08d5410f, thornwall-025-0e15835e, thornwall-025-289102b3, thornwall-025-b1cf8864, thornwall-025-d1ded18b, thornwall-025-edcbfbdd",
         "a finding on a control's correct statement of the fact: governor-018-3fc5a808, governor-018-bd27293c, governor-023-07f75dbc, governor-025-2edc3822, governor-026-0e79a746, governor-026-84413638",
         "labels are E8's Opus judge on one known error per item: a stop for another reason is not scored (stopped_* counts it), and recall_per_case weighs each case the same",
+        "extraction pinned (#788): 77 item(s) read their pin, 0 extracted and pinned this run",
         "per-item outcomes (private): gate-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T19:07:03+00:00",
+      "started_at": "2026-11-28T09:12:36+00:00",
       "status": "pass",
       "suite": "gate-set"
     },
@@ -1844,16 +1942,16 @@
         }
       },
       "cost": {
-        "calls": 732,
-        "input_tokens": 4078254,
-        "output_tokens": 2025712,
-        "replayed_calls": 732,
+        "calls": 577,
+        "input_tokens": 2617365,
+        "output_tokens": 1610245,
+        "replayed_calls": 577,
         "unpriced_calls": 0,
-        "usd_if_live": 15.1639,
+        "usd_if_live": 8.0874,
         "usd_spent": 0.0
       },
       "description": "The gate with the question layer (#649) alone on E8's recorded, judged replays; private set",
-      "duration_s": 40.2,
+      "duration_s": 40.09,
       "error": null,
       "frozen": true,
       "gates": [
@@ -1970,10 +2068,11 @@
         "labels are E8's Opus judge on one known error per item: a stop for another reason is not scored (stopped_* counts it), and recall_per_case weighs each case the same",
         "each case gated with its own fact in the ledger (facts.json; recall_seeded); gated without one (its book doesn't state the fact outside the gated scene; why_none): lantern-folk-020, thornwall-020, thornwall-024",
         "seeded but not asked (the question layer didn't select the fact: its subject not in the scene, or past the cap; recall_asked leaves them out) (9): governor-022-738e063a, governor-024-15d53afc, governor-024-c453ca99, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, shared-dark-040-ab321575, shared-dark-041-795f038c",
+        "extraction pinned (#788): 77 item(s) read their pin, 0 extracted and pinned this run",
         "per-item outcomes (private): gate-set/results/latest-questions.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-27T19:07:45+00:00",
+      "started_at": "2026-11-28T09:13:15+00:00",
       "status": "pass",
       "suite": "gate-set-questions"
     },
@@ -2006,7 +2105,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
-      "duration_s": 0.29,
+      "duration_s": 0.3,
       "error": null,
       "frozen": false,
       "gates": [
@@ -2093,7 +2192,7 @@
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:24:35+00:00",
+      "started_at": "2026-11-28T09:13:55+00:00",
       "status": "pass",
       "suite": "question-set"
     },
@@ -2115,7 +2214,7 @@
           "recall": 1.0
         },
         "TIM": {
-          "captured": 7,
+          "captured": 8,
           "cases": 9,
           "recall": 1.0
         },
@@ -2132,20 +2231,20 @@
       },
       "cost": {
         "calls": 227,
-        "input_tokens": 1903802,
-        "output_tokens": 387730,
+        "input_tokens": 1898166,
+        "output_tokens": 378590,
         "replayed_calls": 227,
         "unpriced_calls": 0,
-        "usd_if_live": 7.8732,
+        "usd_if_live": 7.7656,
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 9.16,
+      "duration_s": 8.41,
       "error": null,
       "frozen": false,
       "gates": [
         {
-          "actual": 27,
+          "actual": 28,
           "name": "captured",
           "op": ">=",
           "passed": true,
@@ -2160,20 +2259,20 @@
         }
       ],
       "metrics": {
-        "captured": 27,
+        "captured": 28,
         "cases": 32,
-        "control_inclusion": 0.76,
-        "controls": 50,
+        "control_inclusion": 0.8039,
+        "controls": 51,
         "excluded": 98,
         "missing": 0,
         "no_rows": 0,
-        "partial": 5,
+        "partial": 4,
         "recall": 1.0,
-        "recall_end_to_end": 0.8438,
-        "recall_with_partial": 1.0,
-        "set_fraction_mean": 0.3188,
-        "set_size_mean": 8.78,
-        "unrelated_cases": 4
+        "recall_end_to_end": 0.875,
+        "recall_with_partial": 0.9688,
+        "set_fraction_mean": 0.3487,
+        "set_size_mean": 8.96,
+        "unrelated_cases": 3
       },
       "mode": "replay",
       "notes": [
@@ -2183,58 +2282,263 @@
         "excluded 3: no prose established span",
         "excluded 35: tree predates reference/scenes.csv",
         "governor@0ac31c3: phase 4 over 4 scenes; 156 ledger facts name a scene outside the subset (offered to none)",
-        "governor-019 (finest-cartographer \u2192 commission-testimony): captured finest-cartographer--tessa-merrin-was-unassigned-on-the, HIT, set 38",
+        "governor-019 (finest-cartographer \u2192 commission-testimony): captured finest-cartographer--doreen-assigns-tessa-merrin-who-was, HIT, set 36",
         "governor@77c6bce: phase 4 over 17 scenes; 136 ledger facts name a scene outside the subset (offered to none)",
-        "governor-020 (ashward-breach \u2192 junction-fourteen, footnote): captured ashward-breach--elias-s-left-forearm-blistered-from, HIT, set 23",
-        "governor-022 (terrace-row \u2192 article-twelve): captured terrace-row--voss-orders-the-southern-trunk-maintenance;block-fifteen-foundation-work, HIT, set 16; unrelated: block-fifteen-foundation-work: no subject: every later scene with a binding knowledge fact is taken as depending on it",
-        "governor-025 (the-governors-vigil \u2192 haddons-reckoning): captured the-governors-vigil--the-aide-s-list-names-sera, HIT, set 2",
-        "governor-027 (confrontation-at-stairwell-nine \u2192 elias-agrees-to-the-terms): captured confrontation-at-stairwell-nine--last-night-tessa-had-a-thirty, HIT, set 19",
+        "governor-020 (ashward-breach \u2192 junction-fourteen, footnote): captured ashward-breach--elias-burned-his-left-forearm-with, HIT, set 24",
+        "governor-022 (terrace-row \u2192 article-twelve): captured terrace-row--voss-orders-southern-trunk-maintenance-crews;block-fifteen-foundation-work, HIT, set 16; unrelated: block-fifteen-foundation-work: no subject: every later scene with a binding knowledge fact is taken as depending on it",
+        "governor-025 (the-governors-vigil \u2192 haddons-reckoning): captured the-governors-vigil--sera-holdt-is-entered-on-the, HIT, set 2",
+        "governor-027 (confrontation-at-stairwell-nine \u2192 elias-agrees-to-the-terms): captured confrontation-at-stairwell-nine--last-night-in-the-eastern-gallery, HIT, set 19",
         "lantern-folk@17f3311: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
         "lantern-folk-018 (a01-moving-night \u2192 a02-into-the-trees): partial a01-moving-night--nora-goes-out-the-back-door, HIT, set 1",
         "lantern-folk@1d3f552: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-028 (a11-in-the-dark \u2192 a14-the-keepers-flame): captured a11-in-the-dark--wick-lies-in-his-own-house, HIT, set 3",
+        "lantern-folk-028 (a11-in-the-dark \u2192 a14-the-keepers-flame): captured a11-in-the-dark--wick-lies-in-the-cold-sleep;a11-in-the-dark--wick-s-lantern-stands-on-the, HIT, set 3",
         "lantern-folk@37bc78e: phase 4 over 8 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-012 (a04-the-great-lamp \u2192 a13-through-the-woods): captured a04-the-great-lamp--the-great-lamp-sits-in-a;a04-the-great-lamp--the-great-lamp-is-the-size, HIT, set 6",
-        "lantern-folk-013 (a12-the-remembering \u2192 a14-the-keepers-flame): partial a12-the-remembering--the-great-lamp-has-gone-out;a12-the-remembering--just-before-the-lamp-died-leo, HIT, set 2",
-        "lantern-folk-014 (a03-the-little-voices \u2192 a09-the-worst-night): captured a03-the-little-voices--leo-cannot-hear-the-folk-because;a03-the-little-voices--leo-can-see-nora-and-the, HIT, set 7",
-        "lantern-folk-015 (a03-the-little-voices \u2192 a09-the-worst-night): captured a03-the-little-voices--leo-cannot-hear-the-folk-because;a03-the-little-voices--leo-can-see-nora-and-the, HIT, set 7",
+        "lantern-folk-012 (a04-the-great-lamp \u2192 a13-through-the-woods): captured a04-the-great-lamp--the-great-lamp-sits-in-a, HIT, set 6",
+        "lantern-folk-013 (a12-the-remembering \u2192 a14-the-keepers-flame): captured a12-the-remembering--the-scene-takes-place-at-night, HIT, set 2; unrelated: a12-the-remembering--the-scene-takes-place-at-night: no subject: every later scene with a binding timeline fact is taken as depending on it",
+        "lantern-folk-014 (a03-the-little-voices \u2192 a09-the-worst-night): captured a03-the-little-voices--children-of-an-age-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
+        "lantern-folk-015 (a03-the-little-voices \u2192 a09-the-worst-night): captured a03-the-little-voices--children-of-an-age-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 7",
         "lantern-folk@3b054ee: phase 4 over 7 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-001 (a07-the-cold-sleep \u2192 a11-in-the-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-lies-on-his-side-on, HIT, set 4",
-        "lantern-folk-002 (a03-the-little-voices \u2192 a09-the-worst-night, a11-in-the-dark): captured a03-the-little-voices--wick-s-lantern-is-a-real;a03-the-little-voices--wick-trusted-nora-enough-to-rest, HIT, set 6",
+        "lantern-folk-001 (a07-the-cold-sleep \u2192 a11-in-the-dark): captured a07-the-cold-sleep--wick-s-dark-lantern-lies-on;a07-the-cold-sleep--wick-s-lantern-has-been-snuffed, HIT, set 4",
+        "lantern-folk-002 (a03-the-little-voices \u2192 a09-the-worst-night, a11-in-the-dark): captured a03-the-little-voices--wick-trusts-nora-enough-to-set;a03-the-little-voices--wick-s-lantern-is-a-real, HIT, set 6",
         "lantern-folk@6c7fa1a: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-011 (a07-the-cold-sleep \u2192 a10-the-lamp-goes-dark): captured a07-the-cold-sleep--wick-s-lantern-was-snuffed-by;a07-the-cold-sleep--wick-s-lantern-lies-on-the, HIT, set 3",
+        "lantern-folk-011 (a07-the-cold-sleep \u2192 a10-the-lamp-goes-dark): captured a07-the-cold-sleep--a-murkwolf-snuffed-wick-s-lantern, HIT, set 3",
         "lantern-folk@73076e8: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-025 (a13-through-the-woods \u2192 a14-the-keepers-flame): captured a13-through-the-woods--leo-relit-the-great-lamp-s, HIT, set 1",
+        "lantern-folk-025 (a13-through-the-woods \u2192 a14-the-keepers-flame): captured a13-through-the-woods--leo-fed-the-great-lamp-s, HIT, set 1",
         "lantern-folk@771df26: phase 4 over 2 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-005 (a11-in-the-dark \u2192 a12-the-remembering): partial a11-in-the-dark--five-folk-lights-remain-burning-down, HIT, set 1",
+        "lantern-folk-005 (a11-in-the-dark \u2192 a12-the-remembering): partial a11-in-the-dark--five-folk-lanterns-are-still-lit, MISS, set 0",
         "lantern-folk@c131e3d: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-008 (a03-the-little-voices \u2192 a12-the-remembering): captured a03-the-little-voices--leo-cannot-hear-the-folk-because;a03-the-little-voices--leo-can-see-nora-and-the, HIT, set 3",
+        "lantern-folk-008 (a03-the-little-voices \u2192 a12-the-remembering): captured a03-the-little-voices--children-of-an-age-too-old;a03-the-little-voices--leo-cannot-hear-the-folk-he, HIT, set 3",
         "lantern-folk@c9cd9b3: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-006 (a08-what-the-folk-fear \u2192 a11-in-the-dark): captured a08-what-the-folk-fear--the-keeper-says-the-lamp-is, HIT, set 2",
+        "lantern-folk-006 (a08-what-the-folk-fear \u2192 a11-in-the-dark): captured a08-what-the-folk-fear--the-keeper-has-watched-more-lights;a08-what-the-folk-fear--when-a-lantern-gutters-out-its, HIT, set 3",
         "lantern-folk@ff141ad: phase 4 over 4 scenes; 0 ledger facts name a scene outside the subset (offered to none)",
-        "lantern-folk-027 (a11-in-the-dark \u2192 a14-the-keepers-flame): captured a11-in-the-dark--a-voice-nora-recognizes-was-calling, HIT, set 2",
+        "lantern-folk-027 (a11-in-the-dark \u2192 a14-the-keepers-flame): captured a11-in-the-dark--a-voice-nora-recognizes-is-calling, HIT, set 3",
         "shared-dark@0eaa3867: phase 4 over 9 scenes; 113 ledger facts name a scene outside the subset (offered to none)",
-        "shared-dark-039 (building \u2192 claire): captured building--in-her-dreams-maren-was-made, HIT, set 11",
-        "shared-dark-040 (building \u2192 claire): captured building--maren-has-been-inside-this-building, HIT, set 11",
-        "shared-dark-041 (pewter-town \u2192 claire) [left out: missing-persons: before the establishing scene]: captured pewter-town--claire-has-been-missing-nine-days, HIT, set 7",
+        "shared-dark-039 (building \u2192 claire): captured building--maren-knows-the-building-s-layout, HIT, set 11",
+        "shared-dark-040 (building \u2192 claire): captured building--maren-knows-the-building-s-layout;building--maren-has-been-smelling-the-diesel;building--maren-and-hank-have-known-each, HIT, set 25",
+        "shared-dark-041 (pewter-town \u2192 claire) [left out: missing-persons: before the establishing scene]: captured pewter-town--claire-has-been-missing-for-nine, HIT, set 7",
         "shared-dark-043 (keisha-argument \u2192 call) [left out: research: before the establishing scene]: captured keisha-argument--shannon-lives-on-the-second-floor, HIT, set 1",
         "shared-dark-044 (keisha-argument \u2192 call) [left out: research: before the establishing scene]: captured keisha-argument--madison-lives-on-the-third-floor, HIT, set 1",
         "shared-dark@b9ba79d3: phase 4 over 8 scenes; 126 ledger facts name a scene outside the subset (offered to none)",
         "shared-dark-034 (watching-ostrowski \u2192 call): captured watching-ostrowski--madison-is-sixteen-shannon-s-student, HIT, set 1",
-        "shared-dark-035 (no-response \u2192 phone-call): partial no-response--hank-left-his-apartment-before-dawn, HIT, set 4",
+        "shared-dark-035 (no-response \u2192 phone-call): partial no-response--hank-leaves-his-apartment-around-dawn, HIT, set 4",
         "thornwall@2e7d14d: phase 4 over 17 scenes; 101 ledger facts name a scene outside the subset (offered to none)",
-        "thornwall-024 (not-alone \u2192 ivra-seals-archive) [left out: evening-visit: before the establishing scene]: captured not-alone--kael-says-ves-wrote-her-journal, HIT, set 15",
-        "thornwall-025 (thessan-resistance \u2192 thessan-vigil) [left out: morning-after: before the establishing scene]: captured thessan-resistance--thessan-has-carried-out-four-closures, HIT, set 4",
-        "thornwall-026 (crowded-chamber \u2192 thessan-resistance) [left out: thessan-rides: before the establishing scene]: partial crowded-chamber--davin-hale-seized-the-rend-and;crowded-chamber--kael-served-at-greenhollow-during-the, HIT, set 11; unrelated: crowded-chamber--davin-hale-seized-the-rend-and: no subject: every later scene with a binding world fact is taken as depending on it",
-        "thornwall-028 (thessan-resistance \u2192 corvins-dispatch) [left out: crowded-chamber: before the establishing scene]: captured thessan-resistance--thessan-has-told-herself-for-six;thessan-resistance--thessan-packed-a-copy-of-the;thessan-resistance--thessan-has-reviewed-the-greenhollow-file, HIT, set 4",
-        "thornwall-029 (journals-of-the-east-wing \u2192 evidence-room): captured journals-of-the-east-wing--ryn-s-last-journal-entry-reads, HIT, set 26; unrelated: journals-of-the-east-wing--ryn-s-last-journal-entry-reads: no subject: every later scene with a binding knowledge fact is taken as depending on it",
-        "thornwall-030 (ivra-visits-sera \u2192 ivra-seals-archive): captured ivra-visits-sera--sera-s-comparison-shows-the-decline, HIT, set 14; unrelated: ivra-visits-sera--sera-s-comparison-shows-the-decline: no subject: every later scene with a binding world fact is taken as depending on it; not listed: report-she-cannot-write (cut or merged)",
+        "thornwall-024 (not-alone \u2192 ivra-seals-archive) [left out: evening-visit: before the establishing scene]: captured not-alone--kael-says-ves-wrote-the-journal, HIT, set 16",
+        "thornwall-025 (thessan-resistance \u2192 thessan-vigil) [left out: morning-after: before the establishing scene]: captured thessan-resistance--thessan-s-closure-dispatches-ahead-of, HIT, set 4",
+        "thornwall-026 (crowded-chamber \u2192 thessan-resistance) [left out: thessan-rides: before the establishing scene]: partial crowded-chamber--kael-served-during-the-aftermath-of, HIT, set 10",
+        "thornwall-028 (thessan-resistance \u2192 corvins-dispatch) [left out: crowded-chamber: before the establishing scene]: captured thessan-resistance--thessan-has-told-herself-for-six;thessan-resistance--thessan-has-reviewed-the-greenhollow-file;thessan-resistance--thessan-carries-a-copy-of-the, HIT, set 4",
+        "thornwall-029 (journals-of-the-east-wing \u2192 evidence-room): captured journals-of-the-east-wing--ryn-s-last-journal-entry-reads, HIT, set 22",
+        "thornwall-030 (ivra-visits-sera \u2192 ivra-seals-archive): captured ivra-visits-sera--sera-s-comparison-finds-the-garren, HIT, set 14; unrelated: ivra-visits-sera--sera-s-comparison-finds-the-garren: no subject: every later scene with a binding world fact is taken as depending on it; not listed: report-she-cannot-write (cut or merged)",
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
       "stale": null,
-      "started_at": "2026-11-27T08:24:35+00:00",
+      "started_at": "2026-11-28T09:13:55+00:00",
       "status": "pass",
       "suite": "recheck-set"
+    },
+    {
+      "by_code": {},
+      "cost": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "replayed_calls": 0,
+        "unpriced_calls": 0,
+        "usd_if_live": 0.0,
+        "usd_spent": 0.0
+      },
+      "description": "Typed-state checks replayed on Wrath's gate runs vs a reader's verdicts; private set, free",
+      "duration_s": 1.73,
+      "error": null,
+      "frozen": false,
+      "gates": [
+        {
+          "actual": 1,
+          "name": "findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 0,
+          "name": "false_alarms",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 1,
+          "name": "debatable_found",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 0,
+          "name": "real_kept",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "unlabelled",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "possession_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "possession_false",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 1,
+          "name": "injury_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 0,
+          "name": "injury_false",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 1,
+          "name": "injury_debatable",
+          "op": "==",
+          "passed": true,
+          "threshold": 1
+        },
+        {
+          "actual": 0,
+          "name": "life_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "life_false",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "time_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "travel_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "knowledge_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "names_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        },
+        {
+          "actual": 0,
+          "name": "sky_findings",
+          "op": "==",
+          "passed": true,
+          "threshold": 0
+        }
+      ],
+      "metrics": {
+        "cleared": 16,
+        "debatable_found": 1,
+        "false_alarms": 0,
+        "findings": 1,
+        "injury_debatable": 1,
+        "injury_false": 0,
+        "injury_findings": 1,
+        "injury_precision": 0.0,
+        "injury_real": 0,
+        "injury_unlabelled": 0,
+        "knowledge_debatable": 0,
+        "knowledge_false": 0,
+        "knowledge_findings": 0,
+        "knowledge_real": 0,
+        "knowledge_unlabelled": 0,
+        "labels": 65,
+        "labels_in_set": 17,
+        "life_debatable": 0,
+        "life_false": 0,
+        "life_findings": 0,
+        "life_real": 0,
+        "life_unlabelled": 0,
+        "names_debatable": 0,
+        "names_false": 0,
+        "names_findings": 0,
+        "names_real": 0,
+        "names_unlabelled": 0,
+        "possession_debatable": 0,
+        "possession_false": 0,
+        "possession_findings": 0,
+        "possession_real": 0,
+        "possession_unlabelled": 0,
+        "precision": 0.0,
+        "real_kept": 0,
+        "real_missed": 0,
+        "runs": 43,
+        "sky_debatable": 0,
+        "sky_false": 0,
+        "sky_findings": 0,
+        "sky_real": 0,
+        "sky_unlabelled": 0,
+        "time_debatable": 0,
+        "time_false": 0,
+        "time_findings": 0,
+        "time_real": 0,
+        "time_unlabelled": 0,
+        "travel_debatable": 0,
+        "travel_false": 0,
+        "travel_findings": 0,
+        "travel_real": 0,
+        "travel_unlabelled": 0,
+        "unlabelled": 0
+      },
+      "mode": "replay",
+      "notes": [
+        "findings by check: injury 1 (0 false, 1 debatable, 0 real, 0 unlabelled)",
+        "debatable still made (1): Q13",
+        "labelled false or debatable findings no longer made (16): Q6, Q25, Q32, Q41, Q42, Q43, Q48, Q58, Q90, Q93, Q97, Q99, Q100, Q101, Q110, Q119",
+        "17 of 65 labels are on a run in the set; 48 are on earlier gate runs not in it (57 runs left out, each with why, in set.json)",
+        "recall is not measured: no real typed-state catch is on a run in the set",
+        "43 of 43 runs had something a check could not check (per run, private: notes in results/latest.json)",
+        "per-run findings (private): typed-state-set/results/latest.json in the storyforge-evals repo"
+      ],
+      "stale": null,
+      "started_at": "2026-11-28T09:14:04+00:00",
+      "status": "pass",
+      "suite": "typed-state-set"
     },
     {
       "by_code": {},
@@ -2248,7 +2552,7 @@
         "usd_spent": 0.0
       },
       "description": "B7 test 6: a scene written with the Austen exemplars, on the meter and before a four-way judge",
-      "duration_s": 1.42,
+      "duration_s": 1.4,
       "error": null,
       "frozen": true,
       "gates": [
@@ -2292,7 +2596,7 @@
         "Plan target (B7 test 6): meter_rank 1 and the judge naming Austen. The gates hold what run 1 recorded (#488)."
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:04:03+00:00",
+      "started_at": "2026-11-28T09:14:06+00:00",
       "status": "pass",
       "suite": "voice-austen"
     },
@@ -2352,146 +2656,13 @@
         "The control: read beside voice-austen (the same scene with the voice). The gates hold what run 1 recorded (#488)."
       ],
       "stale": null,
-      "started_at": "2026-11-15T20:04:04+00:00",
+      "started_at": "2026-11-28T09:14:07+00:00",
       "status": "pass",
       "suite": "voice-austen-control"
-    },
-    {
-      "by_code": {},
-      "cost": {
-        "calls": 4,
-        "input_tokens": 6757,
-        "output_tokens": 5243,
-        "replayed_calls": 4,
-        "unpriced_calls": 0,
-        "usd_if_live": 0.0659,
-        "usd_spent": 0.0
-      },
-      "description": "`bibles convert` (#702) on synthetic essays with labelled facts, lines and interpretation",
-      "duration_s": 0.01,
-      "error": null,
-      "frozen": false,
-      "gates": [
-        {
-          "actual": 1.0,
-          "name": "fact_recall",
-          "op": "==",
-          "passed": true,
-          "threshold": 1.0
-        },
-        {
-          "actual": 0.9796,
-          "name": "type_accuracy",
-          "op": "==",
-          "passed": true,
-          "threshold": 0.9796
-        },
-        {
-          "actual": 0.9655,
-          "name": "subject_accuracy",
-          "op": "==",
-          "passed": true,
-          "threshold": 0.9655
-        },
-        {
-          "actual": 2,
-          "name": "secrets_kept",
-          "op": "==",
-          "passed": true,
-          "threshold": 2
-        },
-        {
-          "actual": 2,
-          "name": "open_kept",
-          "op": "==",
-          "passed": true,
-          "threshold": 2
-        },
-        {
-          "actual": 0,
-          "name": "interpretation_rows",
-          "op": "==",
-          "passed": true,
-          "threshold": 0
-        },
-        {
-          "actual": 0,
-          "name": "interpretation_notes",
-          "op": "==",
-          "passed": true,
-          "threshold": 0
-        },
-        {
-          "actual": 0,
-          "name": "speech_descriptions",
-          "op": "==",
-          "passed": true,
-          "threshold": 0
-        },
-        {
-          "actual": 1.0,
-          "name": "voice_recall",
-          "op": "==",
-          "passed": true,
-          "threshold": 1.0
-        },
-        {
-          "actual": 0,
-          "name": "description_as_voice",
-          "op": "==",
-          "passed": true,
-          "threshold": 0
-        },
-        {
-          "actual": 0,
-          "name": "invented_lines",
-          "op": "==",
-          "passed": true,
-          "threshold": 0
-        },
-        {
-          "actual": 0.5,
-          "name": "note_recall",
-          "op": "==",
-          "passed": true,
-          "threshold": 0.5
-        }
-      ],
-      "metrics": {
-        "description_as_voice": 0,
-        "fact_recall": 1.0,
-        "facts_labelled": 49,
-        "interpretation_notes": 0,
-        "interpretation_rows": 0,
-        "invented_lines": 0,
-        "left_out": 0,
-        "note_recall": 0.5,
-        "open_kept": 2,
-        "open_labelled": 2,
-        "rows": 56,
-        "secrets_kept": 2,
-        "secrets_labelled": 2,
-        "speech_descriptions": 0,
-        "subject_accuracy": 0.9655,
-        "type_accuracy": 0.9796,
-        "voice_recall": 1.0
-      },
-      "mode": "replay",
-      "notes": [
-        "model: claude-sonnet-5-5",
-        "missed (0 of 49): ",
-        "found with the wrong type or subject: c22 (world, -)",
-        "interpretation kept as rows: none",
-        "at or past the trust bar on every measure"
-      ],
-      "stale": null,
-      "started_at": "2026-11-16T04:22:26+00:00",
-      "status": "pass",
-      "suite": "bibles-convert"
     }
   ],
   "schema_version": 1,
-  "status": "stale",
-  "storyforge_version": "1.179.0",
-  "suite_count": 20
+  "status": "pass",
+  "storyforge_version": "1.209.0",
+  "suite_count": 22
 }

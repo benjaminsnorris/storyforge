@@ -2,9 +2,10 @@
 same code?
 
 Plan §4.2: run E2 and E4 three times and report the variance, flagging any eval
-whose variance exceeds the improvement claimed. E3 and E8 are run too, because
+whose variance exceeds the improvement claimed. E3 and E8 were run too, because
 E3's recall moves and tier comparison and E8's reintroduction counts were all
-single runs read "inside noise until E6".
+single runs read "inside noise until E6". Since #788 it spreads E2 and E3
+only: E8 is retired and E4 is one run.
 
 Run 1 is the default recordings (``fixtures/cassettes/``). Runs 2 and 3 are
 independent live recordings under ``fixtures/e6/run2`` and ``run3``, of the
@@ -16,17 +17,17 @@ recomputed without spending; ``evals/consistency.py`` does that.
 **Not a default suite.** The extra runs are a snapshot of one commit's
 prompts. Any prompt change is a recording miss, and keeping E6 in
 ``run.py``'s default set would mean either an error on every prompt change or
-two fresh live runs of every paid suite (about $36) each time. Re-record E6
+two fresh live runs of every suite it spreads (about $16 for E2 and E3) each time. Re-record E6
 when a variance question needs today's code, not on every change.
 """
 
 from __future__ import annotations
 
 import math
-import re
 
-SUITES = ('e2-carol', 'e2-corpus-drift', 'e3-extraction', 'e4-generation',
-          'e8-revision-safety')
+#: E4 and E8 left on 2026-11-27 (#788): E8 retired, E4 cut to a one-run
+#: end-to-end check
+SUITES = ('e2-carol', 'e2-corpus-drift', 'e3-extraction')
 RUN_DIRS = {'run1': ('fixtures', 'cassettes'),
             'run2': ('fixtures', 'e6', 'run2'),
             'run3': ('fixtures', 'e6', 'run3')}
@@ -145,22 +146,3 @@ def exceeds(summary: dict, suite: str, metric: str, claimed_delta: float) -> dic
     return {'suite': suite, 'metric': metric, 'claimed_delta': claimed_delta,
             'range': row['range'],
             'within_noise': row['range'] + _ROUNDING >= abs(claimed_delta)}
-
-
-_CASE_NOTE = re.compile(r'^(\S+-\d+) \([^)]*\): (\w+)')
-
-
-def case_outcomes(reports: dict[str, dict], suite: str = 'e8-revision-safety') -> dict:
-    """Each case's outcome per run (``reintroduced``, ``consistent``,
-    ``not_present``, ``halted``), read from the suite's notes, which name
-    every replayed case as ``<case> (<scene>): <outcome>``."""
-    out: dict[str, dict[str, str]] = {}
-    for run, report in reports.items():
-        for result in report['results']:
-            if result['suite'] != suite:
-                continue
-            for note in result.get('notes', []):
-                m = _CASE_NOTE.match(note)
-                if m:
-                    out.setdefault(m.group(1), {})[run] = m.group(2)
-    return out

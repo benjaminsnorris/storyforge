@@ -131,11 +131,11 @@ def _record_frozen_any(tmp_path, name='e4'):
 # --- frozen suites -----------------------------------------------------------
 
 def test_the_real_frozen_suites():
-    """E4 and E8 (#645), and the blocking set, recorded once and frozen (#646),
-    with the stage sheet on it (#647), and the gate set in both configurations
-    (#677), and writing in the Austen voice (#654)."""
+    """E4 (#645; E8 retired, #788), and the blocking set, recorded once and
+    frozen (#646), with the stage sheet on it (#647), and the gate set in both
+    configurations (#677), and writing in the Austen voice (#654)."""
     frozen = {s.name for s in harness.discover(eval_run.SUITES_DIR) if s.frozen}
-    assert frozen == {'e4-generation', 'e8-revision-safety', 'blocking-set',
+    assert frozen == {'e4-generation', 'blocking-set',
                       'blocking-set-sheet', 'gate-set', 'gate-set-questions',
                       'voice-austen', 'voice-austen-control'}
 
@@ -194,13 +194,17 @@ def test_stale_ranks_below_fail_and_error(tmp_path, live):
     assert harness.overall_status([]) == 'pass'
 
 
-def test_a_frozen_suite_is_recorded_only_by_name_and_as_three_runs(tmp_path, live, capsys):
+def test_a_frozen_suite_is_recorded_only_by_name_as_one_or_three_runs(tmp_path, live, capsys):
+    """#788: one run by default, three to see the spread; never two."""
     _suite(tmp_path, 'e4', frozen=True)
     over = ('--over-budget', 'test')
-    assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', *over) == 2
-    assert 'recorded only as --runs 3' in capsys.readouterr().err
     assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '2', *over) == 2
+    assert 'recorded as one run' in capsys.readouterr().err
     assert live == []
+    assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', *over) == 0
+    assert len(live) == 2  # two calls, one run
+    assert not (tmp_path / 'e6' / 'run2' / 'e4').exists()
+    live.clear()
 
     assert _run(tmp_path, '--mode', 'record', '--suite', 'e4', '--runs', '3', *over) == 0
     assert len(live) == 6  # two calls, three runs
@@ -501,11 +505,13 @@ ONE_CHANGES = CALLS_API.replace("invoke_api('{prompt}',", "invoke_api('unchanged
     "invoke_api('{prompt} again',", "invoke_api('{prompt}',")
 
 
-def test_auto_naming_a_frozen_suite_needs_its_three_runs(tmp_path, live, capsys):
-    """C2: auto naming a frozen suite tops up all its runs, never one."""
+def test_auto_naming_a_frozen_suite_tops_up_one_or_three_runs(tmp_path, live, capsys):
+    """C2, #788: auto naming a frozen suite tops up its run 1 or its three
+    runs, never two."""
     _suite(tmp_path, 'e4', frozen=True)
-    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'x') == 2
-    assert 'needs --runs 3' in capsys.readouterr().err
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--runs', '2',
+                '--over-budget', 'x') == 2
+    assert 'its run 1 (--runs 1) or of its three' in capsys.readouterr().err
     assert live == []
 
 
@@ -529,6 +535,28 @@ def test_auto_tops_a_stale_frozen_suite_up_recording_only_what_changed(tmp_path,
     live.clear()
     assert _run(tmp_path, '--suite', 'e4') == 0
     assert _result(tmp_path, 'e4')['status'] == 'pass' and live == []
+
+
+def test_a_one_run_top_up_records_run_1_and_says_runs_2_and_3_stay(tmp_path, live, capsys):
+    """#790's review T-3, SF-7: the default top-up is run 1's alone."""
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='old')
+    _record_frozen(tmp_path)
+    run2 = sorted(p.name for p in (tmp_path / 'e6' / 'run2' / 'e4').rglob('*'))
+    _suite(tmp_path, 'e4', ONE_CHANGES, frozen=True, prompt='a changed prompt')
+    live.clear()
+    capsys.readouterr()
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'test') == 0
+    assert len(live) == 1   # the changed request, run 1 only
+    assert _result(tmp_path, 'e4')['status'] == 'pass'
+    assert sorted(p.name for p in (tmp_path / 'e6' / 'run2' / 'e4').rglob('*')) == run2
+    assert 'topping up run 1 only; its run(s) 2, 3 stay' in capsys.readouterr().out
+
+
+def test_a_one_run_top_up_with_no_run_1_is_refused(tmp_path, live, capsys):
+    _suite(tmp_path, 'e4', frozen=True)
+    assert _run(tmp_path, '--mode', 'auto', '--suite', 'e4', '--over-budget', 'x') == 2
+    assert 'run 1 has no recordings' in capsys.readouterr().err
+    assert live == []
 
 
 def _stale_top_up(tmp_path, live):

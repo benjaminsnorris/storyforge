@@ -688,7 +688,8 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
              dropped: list[tuple[str, str]], *,
              reserved: Set[str], ends: list | None = None,
              carry: _Extracted | None = None, refused: str = '',
-             read_out: list | None = None) -> list[dict[str, str]]:
+             read_out: list | None = None,
+             pinned: 'PinnedExtraction | None' = None) -> list[dict[str, str]]:
     """The scene's commitments read from `prose` against `rows`, each with an
     id no row of `rows` and none of `reserved` has (#599; required, #599's
     review TD-2: `_reserved_ids`). The ends read go to `ends`
@@ -703,29 +704,28 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     extracted as without it (the same requests). `refused` is why the run
     before had nothing to carry (`_carry_of`). `read_out` gets
     `(_Extracted, note)`: what this run read or carried, and the log line
-    saying which and why ('' when nothing was offered or refused)."""
-    from storyforge.elaborate import get_scene
-    from storyforge.enrich import format_registries_for_prompt
-    from storyforge.extract import (build_commitments_prompt, commitment_rows,
-                                    known_for_scene, unplaced_rows)
-    ref_dir = os.path.join(project_dir, 'reference')
-    scene = get_scene(scene_id, ref_dir) or {}
+    saying which and why ('' when nothing was offered or refused).
+    `pinned` (#788, `gate_scene`): an eval's frozen replies, used as they
+    are, with no call."""
+    from storyforge.extract import build_commitments_prompt, commitment_rows, unplaced_rows
+    known, recorded, left_out, details, registries_text = _extraction_inputs(
+        project_dir, scene_id, rows, order)
     subjects = _subjects(project_dir)
-    names = ([scene.get('pov', '')] + scene.get('location', '').split(';')
-             + scene.get('on_stage', '').split(';'))
-    scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
-    known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
     OFFER_LEFT_OUT.pop(scene_id, None)   # this run's count, not an earlier gate run's
     if left_out:
         problems['cap'].append(f'{scene_id} ({left_out})')
         OFFER_LEFT_OUT[scene_id] = left_out
     problems['unplaced'].extend(unplaced_rows(rows, order))
-    details = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
-    registries_text = format_registries_for_prompt(project_dir, exclude=('knowledge',))
     context = build_commitments_prompt(scene_id, '', details, registries_text=registries_text,
                                        known=known, recorded=recorded)
     why_not = _carry_reason(carry, prose, context, model) if carry is not None else ''
-    if carry is not None and not why_not:
+    if pinned is not None:
+        found = copy.deepcopy(pinned.found)
+        verdict = persistence.Verdict(kept=copy.deepcopy(pinned.kept),
+                                      dropped=copy.deepcopy(pinned.dropped))
+        note = f'extraction pinned by the eval ({len(found)} fact(s) read): no extraction call'
+        source = prose
+    elif carry is not None and not why_not:
         found = copy.deepcopy(carry.found)
         verdict = persistence.Verdict(kept=copy.deepcopy(carry.kept),
                                       dropped=copy.deepcopy(carry.dropped))
@@ -756,6 +756,82 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                           ends_out=ends, speakers=Speakers.load(project_dir))
     _route_leaned_on(project_dir, scene_id, rows, order, ends, problems)
     return out
+
+
+def _extraction_inputs(project_dir: str, scene_id: str, rows: list[dict[str, str]],
+                       order: dict[str, int]) -> tuple[list, list, int, dict, str]:
+    """What the gate's extraction prompt is built from, besides the prose:
+    the facts in force offered (`known`), the registry facts recorded for
+    the scene (`recorded`), how many were left out of the offer, the
+    scene's details and the registries' text."""
+    from storyforge.elaborate import get_scene
+    from storyforge.enrich import format_registries_for_prompt
+    from storyforge.extract import known_for_scene
+    scene = get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
+    subjects = _subjects(project_dir)
+    names = ([scene.get('pov', '')] + scene.get('location', '').split(';')
+             + scene.get('on_stage', '').split(';'))
+    scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
+    known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
+    details = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
+    return (known, recorded, left_out, details,
+            format_registries_for_prompt(project_dir, exclude=('knowledge',)))
+
+
+def extraction_prompt(project_dir: str, scene_id: str, prose: str,
+                      rows: list[dict[str, str]] | None = None) -> str:
+    """#788: the prompt the gate's extraction sends for `prose` as
+    `scene_id`, read against `rows` (the ledger, read when None, less the
+    scene's own commitments, as a redraft is read). For an eval that
+    measures extraction on a real book."""
+    if rows is None:
+        rows = [r for r in ledger.load(project_dir)
+                if not (r.get('scene_id') == scene_id and ledger.is_commitment(r))]
+    from storyforge.extract import build_commitments_prompt
+    known, recorded, _, details, registries_text = _extraction_inputs(
+        project_dir, scene_id, rows, ledger.scene_order(project_dir))
+    return build_commitments_prompt(scene_id, prose, details, registries_text=registries_text,
+                                    known=known, recorded=recorded)
+
+
+@dataclass(frozen=True)
+class PinnedExtraction:
+    """#788: an eval's frozen extraction of a scene (`gate_scene(pinned=)`):
+    the extraction reply (`found`) and the persistence check's verdict
+    (`kept`, and `dropped` as (entry, why) pairs). `to_json` / `from_json`
+    for the pin files, which `from_json` checks (#790's review TD-1, TD-2)."""
+    found: list
+    kept: list
+    dropped: list
+
+    def to_json(self) -> dict:
+        return {'found': copy.deepcopy(self.found), 'kept': copy.deepcopy(self.kept),
+                'dropped': [[copy.deepcopy(e), why] for e, why in self.dropped]}
+
+    @classmethod
+    def from_json(cls, data) -> 'PinnedExtraction':
+        """Raises ValueError when `data` isn't one (`to_json`'s shape)."""
+        if not (isinstance(data, dict) and all(isinstance(data.get(k), list)
+                                               for k in ('found', 'kept', 'dropped'))):
+            raise ValueError('not a pinned extraction (found, kept and dropped lists)')
+        if not all(isinstance(x, dict) for x in data['found'] + data['kept']):
+            raise ValueError('a found or kept entry is not an object')
+        pairs = data['dropped']
+        if not all(isinstance(p, list) and len(p) == 2 and isinstance(p[0], dict)
+                   and isinstance(p[1], str) for p in pairs):
+            raise ValueError('a dropped entry is not an [entry, why] pair')
+        return cls(found=data['found'], kept=data['kept'],
+                   dropped=[(e, why) for e, why in pairs])
+
+
+def pinned_extraction(result: 'GateResult') -> PinnedExtraction | None:
+    """#788: what `result`'s extraction read, for an eval to pin
+    (`gate_scene(pinned=)`). None when the run didn't reach extraction."""
+    read = result._extracted
+    if read is None:
+        return None
+    return PinnedExtraction(found=copy.deepcopy(read.found), kept=copy.deepcopy(read.kept),
+                            dropped=copy.deepcopy(read.dropped))
 
 
 def _read_commitments(scene_id: str, prose: str, prompt: str, model: str,
@@ -1557,6 +1633,112 @@ def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
                    for item in items(scene.get(col) or '') if not item.must)
 
 
+#: #788: the halts a plan can call for: a scene that changes a fixed fact
+_PLANNABLE_HALTS = ('supersedes-fixed', 'changes-fixed')
+
+
+#: Words that say nothing about what a fact is about (`_plan_words`):
+#: function words, and the verbs any fact of having or wearing uses
+_PLAN_STOPWORDS = frozenset("""
+    the a an and or but nor for of to in on at by with from into onto over under
+    upon about after before again back down away out off up than then there these
+    those this that what which who whom whose when where while his her hers its
+    their theirs them they him she he it we you your our not no yes all any each
+    some other more most such only also very just still now one two
+    is was are were be been being has have had having does did do done doing
+    wear wears wore wearing worn carry carries carried carrying hold holds held
+    holding keep keeps kept get gets got give gives gave given take takes took
+    taken put puts make makes made own owns owned
+""".split())
+
+
+def _plan_words(text: str, names: set[str] = frozenset()) -> set[str]:
+    """`text`'s words that say what a fact is about: `_content_words` (stems,
+    no function words) less `_PLAN_STOPWORDS`, words under three letters and
+    `names` (the subjects' own, which every fact about them shares), a
+    British `-our` folded ("armour" and "armor" are one word)."""
+    out = set()
+    for w in _content_words(text or ''):
+        if len(w) > 4 and w.endswith('our'):
+            w = w[:-3] + 'or'
+        if len(w) >= 3 and w not in _PLAN_STOPWORDS and w not in names:
+            out.add(w)
+    return out
+
+
+#: Content words a `must:` beat must share with the changing fact to call
+#: for it (a beat paraphrases the prose, so it never matches word for word)
+_BEAT_SHARED_WORDS = 2
+
+
+def _planned_change(project_dir: str, scene_id: str, fact: dict[str, str],
+                    fixed: dict[str, str], rows: list[dict[str, str]],
+                    scene: dict[str, str] | None = None) -> str:
+    """Why the scene's plan calls for `fact`, which changes the binding
+    `fixed` fact `fixed` ('' when it doesn't; #788).
+
+    - A plan fact (origin `plan`, binding or planned) the brief sets in this
+      scene (its row's scene, or listed in the brief's `knowledge_out` or
+      `physical_state_out`), about the subject of either fact, that bears on
+      this change (#790's review CR-1: a plan fact about something else of
+      the same character never does): it supersedes `fixed`, or its
+      statement shares a content word (`_plan_words`, the subjects' names
+      aside) with `fact`'s statement or quote or `fixed`'s statement.
+    - A `must:` beat of the brief that names `fact`'s quote or statement
+      (`must.names_beat`), or shares `_BEAT_SHARED_WORDS` content words
+      with them (#790's review CR-2: a beat paraphrases).
+
+    `scene`: the brief row (read when None)."""
+    from storyforge.must import MUST_FIELDS, names_beat
+    if scene is None:
+        scene = _brief_row(project_dir, scene_id)
+    fixed_id = (fixed.get('id') or '').strip()
+    subjects = {(r.get('subject') or '').strip().lower() for r in (fact, fixed)} - {''}
+    names = {w for sub in subjects for w in re.findall(r'[a-z]+', sub)}
+    change = _plan_words(f'{fact.get("statement", "")} {fact.get("quote", "")}', names)
+    about = change | _plan_words(fixed.get('statement', ''), names)
+    listed = {i.strip() for col in ('knowledge_out', 'physical_state_out')
+              for i in (scene.get(col) or '').split(';') if i.strip()}
+    for r in rows:
+        rid = (r.get('id') or '').strip()
+        if not (r.get('origin') == 'plan' and r.get('status') in ('binding', 'planned')
+                and rid != fixed_id
+                and ((r.get('scene_id') or '').strip() == scene_id or rid in listed)
+                and (r.get('subject') or '').strip().lower() in subjects):
+            continue
+        replaces = fixed_id in {x.strip() for x in (r.get('supersedes') or '').split(';')}
+        if replaces or _plan_words(r.get('statement', ''), names) & about:
+            return f'the plan sets {rid} in this scene ("{r.get("statement", "")}")'
+    for col in MUST_FIELDS:
+        for beat in _must_beats(scene).get(col, []):
+            if (any(names_beat(fact.get(k) or '', beat.text) for k in ('quote', 'statement'))
+                    or len(_plan_words(beat.text, names) & change) >= _BEAT_SHARED_WORDS):
+                return f'the brief\'s must: beat in {col} ("{beat.text}")'
+    return ''
+
+
+def _mark_planned(project_dir: str, scene_id: str, halts: list[audit.Halt],
+                  proposed: list[dict[str, str]],
+                  rows: list[dict[str, str]]) -> list[audit.Halt]:
+    """`halts`, each one the scene's plan calls for (`_planned_change`)
+    marked with why (`Halt.planned`, #788): it still stops the scene, but
+    goes to the author (the fixed fact is likely mis-typed: `check
+    --unfix`), never to the fix."""
+    from dataclasses import replace
+    if not any(h.kind in _PLANNABLE_HALTS for h in halts):
+        return halts
+    by_id = {(r.get('id') or '').strip(): r for r in rows}
+    facts = {(r.get('id') or '').strip(): r for r in proposed}
+    scene = _brief_row(project_dir, scene_id)
+    out = []
+    for h in halts:
+        fact, fixed = facts.get(h.fact_id), by_id.get(h.fixed_id)
+        why = (_planned_change(project_dir, scene_id, fact, fixed, rows, scene)
+               if h.kind in _PLANNABLE_HALTS and fact and fixed else '')
+        out.append(replace(h, planned=why) if why else h)
+    return out
+
+
 def _set_up_here(project_dir: str, scene_id: str,
                  rows: list[dict[str, str]] | None = None) -> set[str]:
     """The binding registry facts (knowledge, physical) the ledger says
@@ -2007,7 +2189,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                standing: 'GateResult | None' = None,
                carry: 'GateResult | None' = None,
                open_from: 'GateResult | None' = None,
-               hold_slips: bool = False) -> GateResult:
+               hold_slips: bool = False,
+               pinned: 'PinnedExtraction | None' = None) -> GateResult:
     """`_gate_scene`, with its model calls (extraction, the persistence check,
     every reading of the check) written to the cost ledger as `gate` rows for
     the scene, whether or not it finishes (F-151)."""
@@ -2018,7 +2201,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                                log_dir=log_dir, extract_model=extract_model,
                                check_model=check_model, introduced_by=introduced_by,
                                before=before, standing=standing, carry=carry,
-                               open_from=open_from, hold_slips=hold_slips)
+                               open_from=open_from, hold_slips=hold_slips, pinned=pinned)
         finally:
             _log_spend(meter, project_dir, 'gate', scene_id)
 
@@ -2041,7 +2224,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 standing: 'GateResult | None' = None,
                 carry: 'GateResult | None' = None,
                 open_from: 'GateResult | None' = None,
-                hold_slips: bool = False) -> GateResult:
+                hold_slips: bool = False,
+                pinned: 'PinnedExtraction | None' = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -2067,6 +2251,12 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     (`_carry_of`, `_extract`), so there is no extraction or persistence
     call; the rows are made again from them by code, and the check, the
     blocking read and the typed state read this prose as ever.
+
+    `pinned` (#788) is an eval's frozen extraction of this prose
+    (`PinnedExtraction`): its replies stand for the extraction and
+    persistence calls, which aren't made, so an eval measuring the layers
+    after extraction doesn't re-record them when extraction's prompt
+    changes. Never passed outside the evals.
 
     `open_from` (#738) is an earlier run of this process whose open reading
     stands for this one under `tandem` (the run before a fix, a re-roll or
@@ -2210,7 +2400,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                         extract_model or select_model('evaluation'), log_dir,
                         result.problems, result.dropped,
                         reserved=_reserved_ids(old, loaded, briefs_name), ends=result.ends,
-                        carry=carried, refused=refused, read_out=read)
+                        carry=carried, refused=refused, read_out=read, pinned=pinned)
     calls = [extract]
     if read_blocking:
         calls.append(lambda: _read_blocking(project_dir, scene_id, prose, check_model, log_dir,
@@ -2240,7 +2430,9 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             result.problems['rejected'].append(
                 f'{scene_id}: "{r.get("quote") or r.get("statement")}" restates {rid}, '
                 f'which the author rejected')
-        result.halts = audit.halting_conditions(result.proposed, rows)
+    result.halts = _mark_planned(project_dir, scene_id,
+                                 audit.halting_conditions(result.proposed, rows),
+                                 result.proposed, rows)
     disputes = _disputes(result, rows)
     endings = _endings(result, rows)
     if not read_open:
@@ -2445,11 +2637,21 @@ def can_commit_provisionally(result: GateResult) -> str:
         return 'it was committed'
     if getattr(result, '_ctx', None) is None:
         return 'the gate run did not finish'
+    if any(h.planned for h in result.halts):
+        others = sum(1 for h in result.halts if not h.planned)
+        return ('it changes a fixed fact its plan calls for (unfix the fact: '
+                '`storyforge check --unfix ' + ','.join(_planned_fixed(result)) + '`)'
+                + (f', and {others} other halt(s)' if others else ''))
     if result.halts:
         return 'it changes a fixed fact (a halt)'
     if result.unresolved:
         return 'extraction left problems a commit would write'
     return ''
+
+
+def _planned_fixed(result: GateResult) -> list[str]:
+    """The fixed facts `result`'s plan-called halts change (#788), once each."""
+    return list(dict.fromkeys(h.fixed_id for h in result.halts if h.planned))
 
 
 def commit_provisional(project_dir: str, result: GateResult, reason: str) -> None:
@@ -3599,13 +3801,16 @@ def problems_to_fix(result: GateResult) -> list[str]:
     words that set the fact), contradictions and broken promises, and
     unverified findings, marked as such with why their quotes failed. An
     extraction problem isn't a prose problem, so it isn't here: the re-check
-    extracts again. Neither is a plan conflict (the brief's own words: an
+    extracts again. Neither is a halt the plan calls for (#788: the change
+    is the scene, so the fixed fact is likely mis-typed), a plan conflict (the brief's own words: an
     edit would break the promise), an inherited contradiction (the
     author's, from before the pass) or an advisory broken promise (#642:
     the prose wins over a beat the brief doesn't mark `must:`)."""
     proposed = {r['id']: r for r in result.proposed}
     lines = []
     for h in result.halts:
+        if h.planned:
+            continue    # #788: the change is the scene; the author's to unfix
         row = proposed.get(h.fact_id)
         said = (f' The scene says: "{row.get("quote") or row.get("statement")}".'
                 if row else '')
@@ -4354,7 +4559,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     - A first run with nothing for the fix (`problems_to_fix` empty: it
       failed on extraction problems, which aren't sent to the fix) and no
       plan conflicts is re-gated without an edit, so extraction runs again.
-      That re-roll counts as a round and logs to `recheck/`.
+      That re-roll counts as a round and logs to `recheck/`. A halt the plan
+      calls for (`Halt.planned`, #788) is the author's (`check --unfix`):
+      with nothing for the fix beside it, the run stops there, neither
+      fixed nor re-gated, unless extraction problems stand beside it too
+      (#790's review SF-6), which the re-roll reads again.
     - A later run with nothing for the fix stops, unless all that stopped
       it is the extractor's slips (`_only_extractor_slips`: a quote not in
       the prose or none, with no halt, other extraction problem, finding,
@@ -4451,7 +4660,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if result.passed:
                     break
             to_fix = problems_to_fix(result)
-            if not to_fix and (result.plan_conflicts or n > 1):
+            # a plan-called halt is the author's (#788); a re-gate still
+            # re-reads unresolved extraction problems (#790's review SF-6)
+            if not to_fix and (result.plan_conflicts or n > 1
+                               or (any(h.planned for h in result.halts)
+                                   and not result.unresolved)):
                 break
             # round 1 with nothing for the fix: re-gate the same prose
             misquoted = None
@@ -5505,7 +5718,14 @@ def report_lines(result: GateResult) -> list[str]:
     either way, then what was committed."""
     lines = []
     for h in result.halts:
-        lines.append(f'HALT ({h.kind}): {_one_line(h)}')
+        if h.planned:
+            lines.append(f'HALT ({h.kind}; the plan calls for this change, so {h.fixed_id} is '
+                         f'likely mis-typed fixed: not sent to the fix. If it can change, '
+                         f'`storyforge check --unfix {h.fixed_id}`, then check the scene '
+                         f'again; if it can\'t, fix the brief): {_one_line(h)}; '
+                         f'{_one_line(h.planned)}')
+        else:
+            lines.append(f'HALT ({h.kind}): {_one_line(h)}')
     for item in result.unresolved:
         lines.append(f'EXTRACTION: {_one_line(item)}')
     lines += _held_slips_line(result)

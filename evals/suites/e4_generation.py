@@ -17,7 +17,7 @@ PARALLEL_DROPPED = ('gate_caught', 'gate_missed', 'gate_false_alarm', 'gate_catc
 
 def run(ctx):
     project = e4.project(ctx.work_dir)
-    rows = e4.act_scenes(project)
+    rows = e4.act_scenes(project)[:e4.SCENES]
     scene_ids = [r['id'] for r in rows]
     original = e4.clear_prose(project, scene_ids)
     parallel = e4.parallel()
@@ -114,5 +114,6 @@ def run(ctx):
     )
 
 
-SUITE = Suite('e4-generation', 'Draft shared-dark Act 1 with write; CP10k, BPS, length, voice',
+SUITE = Suite('e4-generation', 'End to end: draft the first scenes of shared-dark Act 1 with '
+              'write; CP10k, BPS, length, voice',
               run, frozen=True)

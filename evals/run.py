@@ -5,16 +5,19 @@
     python3 evals/run.py --suite e2-detection # one suite (repeatable)
     python3 evals/run.py --mode auto          # replay what exists, record the rest (spends; frozen suites replay)
     python3 evals/run.py --mode record        # re-record every call (spends; frozen suites replay)
-    python3 evals/run.py --mode record --suite e4-generation --runs 3   # a frozen suite
-    python3 evals/run.py --mode auto --suite gate-set --runs 3   # top a frozen suite up
+    python3 evals/run.py --mode record --suite e4-generation  # a frozen suite, one run
+    python3 evals/run.py --mode record --suite gate-set --runs 3   # ... three, for the spread
+    python3 evals/run.py --mode auto --suite gate-set   # top a frozen suite up (its run 1)
     python3 evals/run.py --baseline           # also write evals/baseline.json
     python3 evals/run.py --list
 
 Writes the full report to evals/results/latest.json and prints a summary; when
 evals/baseline.json exists the summary includes per-metric deltas against it.
 
-E4 and E8 are frozen (#645): auto and record replay them, and a miss makes
-them stale rather than errored. Naming one with --mode auto --runs 3 tops it
+The frozen suites (#645) are replayed by auto and record, and a miss makes
+them stale rather than errored. Each is recorded only by name, as one run
+by default or three when a decision is about the run-to-run spread (#788;
+before it, always three). Naming one with --mode auto tops it
 up: each run replays the requests that still match its recording and records
 only those that changed (a prompt change downstream of calls that didn't
 change, as #713's extraction prompt was for the gate set), so a stale suite
@@ -52,8 +55,9 @@ CONFIG_FILE = os.path.join(EVALS_DIR, 'config.json')
 #: change is expected, and CI must stay green on it (#645)
 EXIT_CODES = {'pass': 0, 'fail': 1, 'error': 2, 'stale': 0}
 DEFAULT_MONTHLY_BUDGET = 25.0
-#: A frozen suite is recorded as this many independent runs, never fewer
-FROZEN_RUNS = 3
+#: How many runs a frozen suite is recorded or topped up as (#788: one by
+#: default, three to see the spread between runs)
+FROZEN_RUNS = (1, 3)
 
 
 class Refused(Exception):
@@ -68,8 +72,8 @@ def parse_args(argv):
                         help=f'Record N independent runs (--mode record; or --mode auto naming '
                              f'only frozen suites, to top them up): run 1 to the default '
                              f'cassettes, run K to evals/fixtures/e6/runK (a private suite: its '
-                             f'own runK). A frozen suite is recorded or topped up only by name '
-                             f'and only as --runs {FROZEN_RUNS}')
+                             f'own runK). A frozen suite is recorded or topped up only by name, '
+                             f'as --runs 1 (the default) or 3')
     parser.add_argument('--over-budget', metavar='REASON', default='',
                         help='Spend past the monthly eval budget; REASON (who approved it '
                              'and why) is printed, put in the report and written on every '
@@ -152,17 +156,17 @@ def _plan_recording(args, suites) -> set[str]:
                       '--mode auto naming a frozen suite, to top it up)')
     if args.runs > 1 and args.baseline:
         raise Refused('--baseline takes one run; drop --runs')
-    if topping_up and args.runs != FROZEN_RUNS:
+    if topping_up and args.runs not in FROZEN_RUNS:
         raise Refused(f'{", ".join(sorted(named))} is frozen: topping it up (--mode auto) '
-                      f'records the changed requests of each of its {FROZEN_RUNS} runs, so it '
-                      f'needs --runs {FROZEN_RUNS}.')
+                      f'records the changed requests of its run 1 (--runs 1) or of its three '
+                      f'runs (--runs 3).')
     if topping_up:
         others = sorted(s.name for s in suites if not s.frozen)
         if others:
             raise Refused(f'a top-up names only frozen suites: {", ".join(others)} would '
-                          f'record every call live in {FROZEN_RUNS} runs. Run them on their own.')
+                          f'record every call live. Run them on their own.')
         for s in suites:
-            for k in range(1, FROZEN_RUNS + 1):
+            for k in range(1, args.runs + 1):
                 try:
                     where = _cassette_dir(args, s, k)
                 except Exception as e:  # SuiteUnavailable: its private set isn't here
@@ -170,12 +174,23 @@ def _plan_recording(args, suites) -> set[str]:
                 if not has_recordings(where):
                     raise Refused(f'{s.name} run {k} has no recordings at {where}: a top-up '
                                   f'would record it in full. Re-record on purpose with '
-                                  f'--mode record --suite {s.name} --runs {FROZEN_RUNS}.')
+                                  f'--mode record --suite {s.name}.')
+            if args.runs == 1:
+                # #790's review SF-7: runs 2 and 3 stay at the older code
+                try:
+                    later = [k for k in (2, 3) if has_recordings(_cassette_dir(args, s, k))]
+                except Exception:   # SuiteUnavailable: checked above for run 1
+                    later = []
+                if later:
+                    print(f'NOTE: {s.name}: topping up run 1 only; its run(s) '
+                          f'{", ".join(map(str, later))} stay at the code they were recorded '
+                          f'at, so the spread between runs no longer compares like for like '
+                          f'(--runs 3 tops up all three).')
     if args.mode != 'record' and not topping_up:
         return set()
-    if named and args.runs != FROZEN_RUNS:
-        raise Refused(f'{", ".join(sorted(named))} is frozen: it is recorded only as '
-                      f'--runs {FROZEN_RUNS} (one run can\'t separate a change from noise). '
+    if named and args.runs not in FROZEN_RUNS:
+        raise Refused(f'{", ".join(sorted(named))} is frozen: it is recorded as one run '
+                      f'(--runs 1, the default) or as three to see the spread (--runs 3). '
                       f'Re-record it only when a decision depends on it.')
     return named
 
