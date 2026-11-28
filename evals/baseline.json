@@ -9,7 +9,7 @@
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "88cc25cac879f14a706519c57993e7c577635563",
+  "git_sha": "7f527188a89674cda5bf7b49fab92f03f64a365f",
   "mode": "replay",
   "results": [
     {
@@ -143,7 +143,7 @@
         "at or past the trust bar on every measure"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:01+00:00",
+      "started_at": "2026-11-28T09:11:19+00:00",
       "status": "pass",
       "suite": "bibles-convert"
     },
@@ -339,7 +339,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:01+00:00",
+      "started_at": "2026-11-28T09:11:19+00:00",
       "status": "pass",
       "suite": "blocking-set"
     },
@@ -355,7 +355,7 @@
         "usd_spent": 0.0
       },
       "description": "Stage sheet (#647) vs the known blocking slips and clean scenes of the blocking set; private set",
-      "duration_s": 3.07,
+      "duration_s": 3.08,
       "error": null,
       "frozen": true,
       "gates": [
@@ -543,7 +543,7 @@
         "per-case outcomes and findings (private): blocking-set/results/latest-stage-sheet.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:02+00:00",
+      "started_at": "2026-11-28T09:11:20+00:00",
       "status": "pass",
       "suite": "blocking-set-sheet"
     },
@@ -619,7 +619,7 @@
       "mode": "replay",
       "notes": [],
       "stale": null,
-      "started_at": "2026-11-28T08:51:05+00:00",
+      "started_at": "2026-11-28T09:11:23+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -677,7 +677,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 1.09,
+      "duration_s": 1.08,
       "error": null,
       "frozen": false,
       "gates": [
@@ -752,7 +752,7 @@
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:05+00:00",
+      "started_at": "2026-11-28T09:11:23+00:00",
       "status": "pass",
       "suite": "e2-carol"
     },
@@ -816,7 +816,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 2.02,
+      "duration_s": 2.12,
       "error": null,
       "frozen": false,
       "gates": [
@@ -890,7 +890,7 @@
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:06+00:00",
+      "started_at": "2026-11-28T09:11:24+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -938,7 +938,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 29.9,
+      "duration_s": 26.23,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1006,7 +1006,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:08+00:00",
+      "started_at": "2026-11-28T09:11:26+00:00",
       "status": "pass",
       "suite": "e2-corpus-drift"
     },
@@ -1056,7 +1056,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 31.73,
+      "duration_s": 31.89,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1124,7 +1124,7 @@
         "excluded 54: tree predates reference/scenes.csv"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:51:38+00:00",
+      "started_at": "2026-11-28T09:11:52+00:00",
       "status": "pass",
       "suite": "e2-corpus-validate"
     },
@@ -1165,7 +1165,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 9.94,
+      "duration_s": 9.89,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1250,7 +1250,7 @@
         "The commitments pass is judged after the persistence check, as phase 4 records it: persistence_dropped counts the facts it dropped over every scene judged."
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:10+00:00",
+      "started_at": "2026-11-28T09:12:24+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -1482,7 +1482,7 @@
         "voicemail: 3 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    TIM: The original says Marie Renaud first called the office two days ago; the redraft says that was only the first time she reached a live person\n    PHY: In the third message Marie repeats Claire's full name twice in the original but three times in the redraft.\n    PHY: Where Marie was when she left the seventh message: Claire's kitchen, calling on Claire's landline, versus a stairwell or unheated hallway of\n    ledger only, PHY: The voicemails are played on the phone's voicemail app in the original, but through the laptop speakers with a playback bar in the redraft.\n    ledger only, PHY: Where Marie was and what she called from when leaving message seven: sitting in the apartment kitchen on Claire's landline in the original, \n    ledger only, KNO: Jennifer's account differs: in the original Claire left the parking lot at 11:15, in the redraft Jennifer watched Claire walk out to the par"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:20+00:00",
+      "started_at": "2026-11-28T09:12:34+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -1510,7 +1510,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.15,
+      "duration_s": 0.16,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1562,7 +1562,7 @@
         "christmas-carol/run1: 25 flag(s)"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:21+00:00",
+      "started_at": "2026-11-28T09:12:35+00:00",
       "status": "pass",
       "suite": "e7-classics"
     },
@@ -1578,7 +1578,7 @@
         "usd_spent": 0.0
       },
       "description": "Extract phase 5 leaves a complete, floor-passing project",
-      "duration_s": 0.56,
+      "duration_s": 0.55,
       "error": null,
       "frozen": false,
       "gates": [
@@ -1671,7 +1671,7 @@
         "status next: evaluate"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:21+00:00",
+      "started_at": "2026-11-28T09:12:36+00:00",
       "status": "pass",
       "suite": "e9-reference"
     },
@@ -1725,7 +1725,7 @@
         "model claude-sonnet-5-5; typing read off the extraction reply, before the persistence check"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:22+00:00",
+      "started_at": "2026-11-28T09:12:36+00:00",
       "status": "pass",
       "suite": "extraction-typing"
     },
@@ -1746,11 +1746,11 @@
       "frozen": false,
       "gates": [
         {
-          "actual": 0.5,
+          "actual": 0.6667,
           "name": "state_right",
           "op": "==",
           "passed": true,
-          "threshold": 0.5
+          "threshold": 0.6667
         },
         {
           "actual": 1.0,
@@ -1760,28 +1760,28 @@
           "threshold": 1.0
         },
         {
-          "actual": 0,
+          "actual": 1,
           "name": "missing",
           "op": "==",
           "passed": true,
-          "threshold": 0
+          "threshold": 1
         }
       ],
       "metrics": {
         "fixed_found": 3,
         "fixed_right": 1.0,
-        "missing": 0,
-        "state_found": 4,
-        "state_right": 0.5
+        "missing": 1,
+        "state_found": 3,
+        "state_right": 0.6667
       },
       "mode": "replay",
       "notes": [
-        "hector-sends-paris-to-duel: label 2 (worn): typed fixed, should be state",
+        "hector-sends-paris-to-duel: label 2 (worn): missing",
         "hector-sends-paris-to-duel: label 3 (worn): typed fixed, should be state",
         "model claude-sonnet-5-5; typing read off the extraction reply, before the persistence check"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:22+00:00",
+      "started_at": "2026-11-28T09:12:36+00:00",
       "status": "pass",
       "suite": "extraction-typing-book"
     },
@@ -1823,7 +1823,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate (open checker) alone on E8's recorded, judged replays; private set",
-      "duration_s": 41.91,
+      "duration_s": 38.57,
       "error": null,
       "frozen": true,
       "gates": [
@@ -1905,10 +1905,11 @@
         "missed (21): governor-022-72ec7272, governor-024-9a736727, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, lantern-folk-020-56160318, shared-dark-030-482f789c, shared-dark-037-facec288, shared-dark-041-795f038c, shared-dark-041-7ef1b840, thornwall-020-21146a65, thornwall-024-718a3574, thornwall-024-9933d88f, thornwall-024-a4ac8b76, thornwall-025-08d5410f, thornwall-025-0e15835e, thornwall-025-289102b3, thornwall-025-b1cf8864, thornwall-025-d1ded18b, thornwall-025-edcbfbdd",
         "a finding on a control's correct statement of the fact: governor-018-3fc5a808, governor-018-bd27293c, governor-023-07f75dbc, governor-025-2edc3822, governor-026-0e79a746, governor-026-84413638",
         "labels are E8's Opus judge on one known error per item: a stop for another reason is not scored (stopped_* counts it), and recall_per_case weighs each case the same",
+        "extraction pinned (#788): 77 item(s) read their pin, 0 extracted and pinned this run",
         "per-item outcomes (private): gate-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:52:22+00:00",
+      "started_at": "2026-11-28T09:12:36+00:00",
       "status": "pass",
       "suite": "gate-set"
     },
@@ -1950,7 +1951,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate with the question layer (#649) alone on E8's recorded, judged replays; private set",
-      "duration_s": 39.65,
+      "duration_s": 40.09,
       "error": null,
       "frozen": true,
       "gates": [
@@ -2067,10 +2068,11 @@
         "labels are E8's Opus judge on one known error per item: a stop for another reason is not scored (stopped_* counts it), and recall_per_case weighs each case the same",
         "each case gated with its own fact in the ledger (facts.json; recall_seeded); gated without one (its book doesn't state the fact outside the gated scene; why_none): lantern-folk-020, thornwall-020, thornwall-024",
         "seeded but not asked (the question layer didn't select the fact: its subject not in the scene, or past the cap; recall_asked leaves them out) (9): governor-022-738e063a, governor-024-15d53afc, governor-024-c453ca99, governor-025-2843c7b4, governor-025-b424ddde, governor-025-bd11f626, governor-025-d6f16ff2, shared-dark-040-ab321575, shared-dark-041-795f038c",
+        "extraction pinned (#788): 77 item(s) read their pin, 0 extracted and pinned this run",
         "per-item outcomes (private): gate-set/results/latest-questions.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:53:04+00:00",
+      "started_at": "2026-11-28T09:13:15+00:00",
       "status": "pass",
       "suite": "gate-set-questions"
     },
@@ -2103,7 +2105,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate's yes/no question layer (#649) on a labelled question set from A Christmas Carol",
-      "duration_s": 0.31,
+      "duration_s": 0.3,
       "error": null,
       "frozen": false,
       "gates": [
@@ -2190,7 +2192,7 @@
         "plan target (not gated): with the typed checks, the open checker's recall on the frozen E4/E8, with fewer false alarms"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:53:44+00:00",
+      "started_at": "2026-11-28T09:13:55+00:00",
       "status": "pass",
       "suite": "question-set"
     },
@@ -2237,7 +2239,7 @@
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 9.31,
+      "duration_s": 8.41,
       "error": null,
       "frozen": false,
       "gates": [
@@ -2329,7 +2331,7 @@
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:53:44+00:00",
+      "started_at": "2026-11-28T09:13:55+00:00",
       "status": "pass",
       "suite": "recheck-set"
     },
@@ -2345,7 +2347,7 @@
         "usd_spent": 0.0
       },
       "description": "Typed-state checks replayed on Wrath's gate runs vs a reader's verdicts; private set, free",
-      "duration_s": 1.72,
+      "duration_s": 1.73,
       "error": null,
       "frozen": false,
       "gates": [
@@ -2534,7 +2536,7 @@
         "per-run findings (private): typed-state-set/results/latest.json in the storyforge-evals repo"
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:53:53+00:00",
+      "started_at": "2026-11-28T09:14:04+00:00",
       "status": "pass",
       "suite": "typed-state-set"
     },
@@ -2550,7 +2552,7 @@
         "usd_spent": 0.0
       },
       "description": "B7 test 6: a scene written with the Austen exemplars, on the meter and before a four-way judge",
-      "duration_s": 1.38,
+      "duration_s": 1.4,
       "error": null,
       "frozen": true,
       "gates": [
@@ -2594,7 +2596,7 @@
         "Plan target (B7 test 6): meter_rank 1 and the judge naming Austen. The gates hold what run 1 recorded (#488)."
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:53:55+00:00",
+      "started_at": "2026-11-28T09:14:06+00:00",
       "status": "pass",
       "suite": "voice-austen"
     },
@@ -2610,7 +2612,7 @@
         "usd_spent": 0.0
       },
       "description": "B7 test 6's control: the same scene drafted with no voice, on the meter and before the same judge",
-      "duration_s": 1.31,
+      "duration_s": 1.32,
       "error": null,
       "frozen": true,
       "gates": [
@@ -2654,7 +2656,7 @@
         "The control: read beside voice-austen (the same scene with the voice). The gates hold what run 1 recorded (#488)."
       ],
       "stale": null,
-      "started_at": "2026-11-28T08:53:56+00:00",
+      "started_at": "2026-11-28T09:14:07+00:00",
       "status": "pass",
       "suite": "voice-austen-control"
     }
