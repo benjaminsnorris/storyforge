@@ -52,9 +52,9 @@
       "claim": "E8 gaps: reintroduced 5 -> 6 (#383; one new case, thornwall-020)",
       "claimed_delta": 1,
       "metric": "reintroduced",
-      "range": 5,
+      "range": 0,
       "suite": "e8-revision-safety",
-      "within_noise": true
+      "within_noise": false
     },
     {
       "claim": "what the gate stops on: CP10k in the gate's passed scenes 3.42 -> 2.09 (#480)",
@@ -120,9 +120,9 @@
       "run3": "44f0f47d5275425c847f889b212f94975dd95792"
     },
     "e8-revision-safety": {
-      "run1": "3fb62cd707582d5c11fda49ac55599e25ca08749",
-      "run2": "3fb62cd707582d5c11fda49ac55599e25ca08749",
-      "run3": "3fb62cd707582d5c11fda49ac55599e25ca08749"
+      "run1": "e9d8bf4db62a57b9feee2dadb0e69ea31040a2a3",
+      "run2": "e9d8bf4db62a57b9feee2dadb0e69ea31040a2a3",
+      "run3": "e9d8bf4db62a57b9feee2dadb0e69ea31040a2a3"
     }
   },
   "runs": [
@@ -1526,13 +1526,13 @@
     "e8-revision-safety": {
       "KNO.reintroduced": {
         "max": 1,
-        "mean": 0.666667,
+        "mean": 0.333333,
         "min": 0,
         "range": 1,
         "sd": 0.57735,
         "values": [
           0,
-          1,
+          0,
           1
         ]
       },
@@ -1549,39 +1549,39 @@
         ]
       },
       "PHY.reintroduced": {
-        "max": 0,
-        "mean": 0.0,
-        "min": 0,
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
         "range": 0,
         "sd": 0.0,
         "values": [
-          0,
-          0,
-          0
+          1,
+          1,
+          1
         ]
       },
       "PHY.replayed": {
         "max": 11,
-        "mean": 10.666667,
-        "min": 10,
-        "range": 1,
-        "sd": 0.57735,
+        "mean": 11.0,
+        "min": 11,
+        "range": 0,
+        "sd": 0.0,
         "values": [
-          10,
+          11,
           11,
           11
         ]
       },
       "REL.reintroduced": {
         "max": 1,
-        "mean": 0.333333,
+        "mean": 0.666667,
         "min": 0,
         "range": 1,
         "sd": 0.57735,
         "values": [
-          0,
-          0,
-          1
+          1,
+          1,
+          0
         ]
       },
       "REL.replayed": {
@@ -1597,90 +1597,6 @@
         ]
       },
       "TIM.reintroduced": {
-        "max": 5,
-        "mean": 4.0,
-        "min": 3,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          3,
-          4,
-          5
-        ]
-      },
-      "TIM.replayed": {
-        "max": 7,
-        "mean": 7.0,
-        "min": 7,
-        "range": 0,
-        "sd": 0.0,
-        "values": [
-          7,
-          7,
-          7
-        ]
-      },
-      "TRT.reintroduced": {
-        "max": 4,
-        "mean": 3.0,
-        "min": 2,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          2,
-          4,
-          3
-        ]
-      },
-      "TRT.replayed": {
-        "max": 14,
-        "mean": 13.333333,
-        "min": 13,
-        "range": 1,
-        "sd": 0.57735,
-        "values": [
-          13,
-          14,
-          13
-        ]
-      },
-      "WLD.reintroduced": {
-        "max": 1,
-        "mean": 1.0,
-        "min": 1,
-        "range": 0,
-        "sd": 0.0,
-        "values": [
-          1,
-          1,
-          1
-        ]
-      },
-      "WLD.replayed": {
-        "max": 1,
-        "mean": 1.0,
-        "min": 1,
-        "range": 0,
-        "sd": 0.0,
-        "values": [
-          1,
-          1,
-          1
-        ]
-      },
-      "errors_per_10k_words": {
-        "max": 2.94,
-        "mean": 2.44,
-        "min": 1.72,
-        "range": 1.22,
-        "sd": 0.639062,
-        "values": [
-          1.72,
-          2.66,
-          2.94
-        ]
-      },
-      "family.brief-fix.reintroduced": {
         "max": 0,
         "mean": 0.0,
         "min": 0,
@@ -1692,16 +1608,64 @@
           0
         ]
       },
-      "family.brief-fix.replayed": {
-        "max": 2,
-        "mean": 1.666667,
-        "min": 1,
-        "range": 1,
-        "sd": 0.57735,
+      "TIM.replayed": {
+        "max": 4,
+        "mean": 4.0,
+        "min": 4,
+        "range": 0,
+        "sd": 0.0,
         "values": [
-          2,
-          2,
-          1
+          4,
+          4,
+          4
+        ]
+      },
+      "TRT.reintroduced": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "TRT.replayed": {
+        "max": 10,
+        "mean": 10.0,
+        "min": 10,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          10,
+          10,
+          10
+        ]
+      },
+      "clean_gate_failed": {
+        "max": 5,
+        "mean": 4.0,
+        "min": 3,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
+          5,
+          3,
+          4
+        ]
+      },
+      "errors_per_10k_words": {
+        "max": 0.62,
+        "mean": 0.612667,
+        "min": 0.607,
+        "range": 0.013,
+        "sd": 0.006658,
+        "values": [
+          0.607,
+          0.62,
+          0.611
         ]
       },
       "family.hone-physical-states.reintroduced": {
@@ -1776,7 +1740,163 @@
           3
         ]
       },
-      "family.naturalness-upstream.reintroduced": {
+      "family.redraft-from-brief.reintroduced": {
+        "max": 1,
+        "mean": 0.666667,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          1,
+          0,
+          1
+        ]
+      },
+      "family.redraft-from-brief.replayed": {
+        "max": 17,
+        "mean": 17.0,
+        "min": 17,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          17,
+          17,
+          17
+        ]
+      },
+      "family.revision-plan.reintroduced": {
+        "max": 2,
+        "mean": 1.333333,
+        "min": 1,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          1,
+          2,
+          1
+        ]
+      },
+      "family.revision-plan.replayed": {
+        "max": 6,
+        "mean": 6.0,
+        "min": 6,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          6,
+          6,
+          6
+        ]
+      },
+      "gate_advisory": {
+        "max": 105,
+        "mean": 103.666667,
+        "min": 102,
+        "range": 3,
+        "sd": 1.527525,
+        "values": [
+          105,
+          104,
+          102
+        ]
+      },
+      "gate_counts_missing": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "gate_extraction": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "gate_inherited": {
+        "max": 10,
+        "mean": 9.0,
+        "min": 7,
+        "range": 3,
+        "sd": 1.732051,
+        "values": [
+          10,
+          10,
+          7
+        ]
+      },
+      "gate_new": {
+        "max": 9,
+        "mean": 8.333333,
+        "min": 7,
+        "range": 2,
+        "sd": 1.154701,
+        "values": [
+          9,
+          7,
+          9
+        ]
+      },
+      "gate_plan_conflicts": {
+        "max": 1,
+        "mean": 0.333333,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          0,
+          0,
+          1
+        ]
+      },
+      "gate_unfinished": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "halted": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "reintroduced": {
+        "max": 2,
+        "mean": 2.0,
+        "min": 2,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          2,
+          2,
+          2
+        ]
+      },
+      "reintroduced_unflagged": {
         "max": 2,
         "mean": 1.666667,
         "min": 1,
@@ -1788,124 +1908,40 @@
           2
         ]
       },
-      "family.naturalness-upstream.replayed": {
-        "max": 3,
-        "mean": 2.666667,
-        "min": 2,
-        "range": 1,
-        "sd": 0.57735,
-        "values": [
-          2,
-          3,
-          3
-        ]
-      },
-      "family.redraft-from-brief.reintroduced": {
-        "max": 5,
-        "mean": 4.333333,
-        "min": 3,
-        "range": 2,
-        "sd": 1.154701,
-        "values": [
-          3,
-          5,
-          5
-        ]
-      },
-      "family.redraft-from-brief.replayed": {
-        "max": 19,
-        "mean": 18.666667,
-        "min": 18,
-        "range": 1,
-        "sd": 0.57735,
-        "values": [
-          18,
-          19,
-          19
-        ]
-      },
-      "family.revision-plan.reintroduced": {
-        "max": 4,
-        "mean": 3.0,
-        "min": 2,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          2,
-          3,
-          4
-        ]
-      },
-      "family.revision-plan.replayed": {
-        "max": 7,
-        "mean": 7.0,
-        "min": 7,
-        "range": 0,
+      "reintroduction_rate": {
+        "max": 0.069,
+        "mean": 0.069,
+        "min": 0.069,
+        "range": 0.0,
         "sd": 0.0,
         "values": [
-          7,
-          7,
-          7
-        ]
-      },
-      "halted": {
-        "max": 2,
-        "mean": 1.0,
-        "min": 0,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          2,
-          0,
-          1
-        ]
-      },
-      "reintroduced": {
-        "max": 11,
-        "mean": 9.0,
-        "min": 6,
-        "range": 5,
-        "sd": 2.645751,
-        "values": [
-          6,
-          10,
-          11
-        ]
-      },
-      "reintroduction_rate": {
-        "max": 0.306,
-        "mean": 0.249,
-        "min": 0.171,
-        "range": 0.135,
-        "sd": 0.069907,
-        "values": [
-          0.171,
-          0.27,
-          0.306
+          0.069,
+          0.069,
+          0.069
         ]
       },
       "replayed": {
-        "max": 37,
-        "mean": 36.0,
-        "min": 35,
-        "range": 2,
-        "sd": 1.0,
-        "values": [
-          35,
-          37,
-          36
-        ]
-      },
-      "unreplayable": {
-        "max": 15,
-        "mean": 15.0,
-        "min": 15,
+        "max": 29,
+        "mean": 29.0,
+        "min": 29,
         "range": 0,
         "sd": 0.0,
         "values": [
-          15,
-          15,
-          15
+          29,
+          29,
+          29
+        ]
+      },
+      "unreplayable": {
+        "max": 18,
+        "mean": 18.0,
+        "min": 18,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          18,
+          18,
+          18
         ]
       }
     }
