@@ -65,6 +65,25 @@ def test_unreadable_verdict_raises_never_counts_as_safe(text):
         e8.parse_verdict(text)
 
 
+def test_parse_verdict_takes_the_last_of_several_agreeing_verdicts():
+    # Recorded 2026-11-28: the opus judge drafted, revised, then gave a final
+    # answer, with prose between (the greedy match read it as one object).
+    text = ('{"verdict": "consistent", "evidence": "Tallow came stumping up."}\n\n'
+            'Wait \u2014 need a sentence with a pronoun.\n\n'
+            '{"verdict": "consistent", "evidence": "She knew Tallow."}\n\n'
+            'Final answer:\n\n'
+            '{"verdict": "consistent", "evidence": "Tallow held his lantern high."}\n\nActually')
+    verdict = e8.parse_verdict(text)
+    assert verdict == {'verdict': 'consistent', 'evidence': 'Tallow held his lantern high.'}
+
+
+def test_verdicts_that_disagree_raise():
+    text = ('{"verdict": "consistent", "evidence": ""}\nHmm.\n'
+            '{"verdict": "reintroduced", "evidence": "Five hours."}')
+    with pytest.raises(ValueError, match='disagree'):
+        e8.parse_verdict(text)
+
+
 def test_judge_prompt_carries_both_sides():
     prompt = e8.judge_prompt(CASE, 'NEW PROSE')
     assert 'Three hours. Bend to Portland.' in prompt
