@@ -2437,9 +2437,10 @@ def finding_key(f: Finding) -> str:
 def can_commit_provisionally(result: GateResult) -> str:
     """Why `result` can't be committed provisionally ('' when it can): only
     the check's findings stopped it (contradictions, broken `must` beats and
-    registry facts set up here, plan conflicts, unverified ones). A halt (a fixed fact changed) or an
-    extraction problem would commit a wrong row. An unruled dispute doesn't
-    stop the scene (advisory), so it never comes to this."""
+    registry facts set up here, plan conflicts, unverified ones). A halt (a
+    fixed fact changed) or an extraction problem would commit a wrong row.
+    An unruled dispute doesn't stop the scene (advisory), so it never comes
+    to this."""
     if result.passed or result.committed:
         return 'it was committed'
     if getattr(result, '_ctx', None) is None:
@@ -4679,7 +4680,8 @@ def _slips_beside_findings(result: GateResult) -> list[str]:
     when the rest of what stopped `result` is the check's findings,
     verified or not, none a plan conflict; [] when it passed or has no slip,
     or a halt, another extraction problem or a plan conflict stopped it (an
-    unruled dispute is advisory and doesn't count). No prose edit repairs a slip, and a slip stops a
+    unruled dispute is advisory and doesn't count). No prose edit repairs a
+    slip, and a slip stops a
     provisional commit (`can_commit_provisionally`), so a run ending a fix
     loop with findings and a slip is extracted again (`gate_and_fix`), the
     findings standing (`_carry_standing`). diomedes-spears-ares (iliad-adult,
@@ -5985,8 +5987,8 @@ def record_advisory(project_dir: str, scene_id: str, command: str,
 
 def _note_advisory(project_dir: str, scene_id: str, command: str,
                    result: 'GateResult', prose: str = '') -> str:
-    """Record `result.advisory` and `result.unruled` (`record_advisory`), stamped with `prose`
-    (the run's, `result._ctx.prose`, when not given). A file that can't be
+    """Record `result.advisory` and `result.unruled` (`record_advisory`),
+    stamped with `prose` (the run's, `result._ctx.prose`, when not given). A file that can't be
     read or written is said, the gate's verdict unchanged (its report lines
     still name each one), and returned ('' when written)."""
     if not prose and getattr(result, '_ctx', None) is not None:
@@ -6086,7 +6088,6 @@ def is_unruled_row(row: dict[str, str]) -> bool:
     """Whether an `ADVISORY_PATH` row is an unruled dispute's
     (`_unruled_message`), not a broken promise or a knowledge finding."""
     return (row.get('finding') or '').startswith(UNRULED_TAG)
-
 
 
 def advisory_summary(project_dir: str, scene_ids=None) -> list[str]:
