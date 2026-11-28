@@ -12,9 +12,13 @@ NAME = 'extraction-typing-book'
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    'state_right': None,
-    'fixed_right': None,
-    'missing': None,
+    # recorded 2026-11-27 (sonnet 5.5, $0.11) at #788's corrected wording: the
+    # armour and the leopard skin state; the two labels that merge gear with
+    # hair (crest, tunic and braids) fixed in this reading. Before #788, 3 of 5
+    # gear facts were fixed in each of two readings
+    'state_right': 0.5,
+    'fixed_right': 1.0,
+    'missing': 0,
 }
 
 

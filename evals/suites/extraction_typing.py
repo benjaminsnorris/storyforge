@@ -13,9 +13,11 @@ CASES_FILE = os.path.join(EVALS_DIR, 'fixtures', 'extraction-typing', 'cases.jso
 
 #: The recorded values, each held exactly (#488); None until recorded
 FLOORS: dict[str, float | None] = {
-    'state_right': None,
-    'fixed_right': None,
-    'missing': None,
+    # recorded 2026-11-27 (sonnet 5.5, $0.08) at #788's corrected wording; the
+    # wording before #788 scored the same (state 14/14, fixed 6/6)
+    'state_right': 1.0,
+    'fixed_right': 1.0,
+    'missing': 0,
 }
 
 
