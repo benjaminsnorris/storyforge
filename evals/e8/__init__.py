@@ -344,15 +344,16 @@ def judge_prompt(case: dict, scene_text: str) -> str:
 
 def _json_objects(text: str) -> list[dict]:
     """Every top-level JSON object in `text`, in order (prose between them is
-    skipped)."""
+    skipped). A `{` outside them that doesn't open a whole object (a verdict
+    cut off, or a verdict nested in a broken one) raises: what it says is
+    unknown, so no verdict can be read past it."""
     decoder = json.JSONDecoder()
     objects, pos = [], text.find('{')
     while pos != -1:
         try:
             obj, end = decoder.raw_decode(text, pos)
-        except json.JSONDecodeError:
-            pos = text.find('{', pos + 1)
-            continue
+        except json.JSONDecodeError as e:
+            raise ValueError(f'judge wrote an unreadable JSON object at {pos}: {e}') from e
         if isinstance(obj, dict):
             objects.append(obj)
         pos = text.find('{', end)

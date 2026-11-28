@@ -84,6 +84,17 @@ def test_verdicts_that_disagree_raise():
         e8.parse_verdict(text)
 
 
+@pytest.mark.parametrize('text', [
+    # a draft verdict, then a final one cut off: the final is unknown (SF-1)
+    '{"verdict": "consistent", "evidence": ""}\nFinal answer:\n{"verdict": "reintroduced", "evid',
+    # a verdict nested in a broken outer object is not a whole verdict (SF-1)
+    '{"note": "x", "inner": {"verdict": "consistent", "evidence": ""} and then',
+])
+def test_a_verdict_cut_off_or_broken_raises(text):
+    with pytest.raises(ValueError):
+        e8.parse_verdict(text)
+
+
 def test_judge_prompt_carries_both_sides():
     prompt = e8.judge_prompt(CASE, 'NEW PROSE')
     assert 'Three hours. Bend to Portland.' in prompt
