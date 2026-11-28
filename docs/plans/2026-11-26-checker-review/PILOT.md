@@ -336,7 +336,14 @@ Follow-ups named in the merged PRs (#751–#767), not filed. Each is either a ju
 
 ### 5. Redraft *Wrath Like Smoke*
 
-**Held (2026-11-27): the gate's false stops.** After #781–#783, Ben approved re-recording `e4-generation` (3 runs, $59.92; `docs/history.md`, "`e4-generation` re-recorded after #781–#783"). The bar was about 14 stops or fewer over three runs, mostly real or debatable. It stopped **21** (5 / 10 / 6, against 4 / 12 / 8 before the fixes), and **10 of the 21 are false** (5 real, 6 debatable). The causes, by false stops:
+**Held (2026-11-27, after #785–#787): two false-stop causes left besides the momentary-state pattern.** Ben approved three fixes: a scene's own time recorded as a fixed timeline fact is not asked of later scenes (#785), a quote the extraction slips twice is held back instead of stopping the scene (#786), and a dispute the check never ruled on is advisory (#787). Re-scored from the #784 recordings without calls (`docs/history.md`, "`e4-generation` re-scored after the three fixes"), the stops go **21 → 14 (5 / 10 / 6 → 5 / 6 / 3)**: 5 real, 6 debatable, 3 false, every real catch kept. One false stop is the known momentary-state pattern (run 1's `building`: Rook standing on the bench seat, still hands, curled fingers asked as lasting). The other two are not, which holds the redraft:
+
+- **A set-up-here promise read too literally** (run 2's `bench`): the ledger sets up `partnership-explicitly-personal-and-operational` in the scene, so its broken promise blocks (`SET_UP_HERE`), and the question layer found it unmet because the scene never says "explicitly".
+- **A count relative to its own scene, asked later** (run 2's `pewter-town`): `missing-persons`' "reported missing nine days ago" (a fixed knowledge fact) asked a day later against "ten days old".
+
+Ben decides whether to fix these (or accept them) before the redraft; a re-record of E4 (about $60, three runs) would then show the stops on new prose. E8 replays stale (expected; Ben re-records it elsewhere, forecast about $166 for three runs: `usd_if_live` $55.35 a run in the baseline, from before the third blocking reading).
+
+**Earlier (2026-11-27): the gate's false stops.** After #781–#783, Ben approved re-recording `e4-generation` (3 runs, $59.92; `docs/history.md`, "`e4-generation` re-recorded after #781–#783"). The bar was about 14 stops or fewer over three runs, mostly real or debatable. It stopped **21** (5 / 10 / 6, against 4 / 12 / 8 before the fixes), and **10 of the 21 are false** (5 real, 6 debatable). The causes, by false stops:
 
 - **The question layer (5).** A scene's own time recorded as a `fixed` timeline fact ("The scene occurs on a Tuesday at 2:47 in the morning"), which #782's scene-bound rule doesn't cover (`advocate`, `maren-runs`); an earlier scene's momentary physical state asked as lasting (Rook standing on the bench seat, hands still, fingers curled: `building`); a count asked a day later (`pewter-town`); and a promise read as unmet for want of the word "explicitly" (`bench`).
 - **Extraction quote slips (3)**: `waking-hank`, `waking-maren`, `missing-persons`.
