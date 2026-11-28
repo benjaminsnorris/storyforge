@@ -22,11 +22,11 @@ set), so a public clone or CI isn't turned red by data it can't have; and
 while it runs, a cassette miss withholds the prompt's opening
 (``STORYFORGE_CASSETTE_PRIVATE``).
 
-A **frozen** suite (``Suite(frozen=True)``: E4 and E8, #645) is expensive and
+A **frozen** suite (``Suite(frozen=True)``: E4, the private sets, #645) is expensive and
 end to end, so a prompt change anywhere misses its cassette. It is never
 recorded by default: ``auto`` and ``record`` replay it unless the caller
 passes ``record_frozen`` (``run.py`` does only for a suite named with
-``--suite`` and run as ``--runs 3``: ``record`` re-records it, ``auto`` tops it
+``--suite``, as one run or three, #788: ``record`` re-records it, ``auto`` tops it
 up, recording only the requests that changed). A frozen suite replayed whose only
 cassette failures are misses is ``stale``, not ``error`` — unless its
 cassette directory holds no recordings at all, which is a missing fixture

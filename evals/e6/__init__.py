@@ -2,9 +2,10 @@
 same code?
 
 Plan §4.2: run E2 and E4 three times and report the variance, flagging any eval
-whose variance exceeds the improvement claimed. E3 and E8 are run too, because
+whose variance exceeds the improvement claimed. E3 and E8 were run too, because
 E3's recall moves and tier comparison and E8's reintroduction counts were all
-single runs read "inside noise until E6".
+single runs read "inside noise until E6". Since #788 it spreads E2 and E3
+only: E8 is retired and E4 is one run.
 
 Run 1 is the default recordings (``fixtures/cassettes/``). Runs 2 and 3 are
 independent live recordings under ``fixtures/e6/run2`` and ``run3``, of the
