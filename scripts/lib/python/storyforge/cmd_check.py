@@ -864,6 +864,14 @@ def _unfix(project_dir: str, fact_ids: list[str]) -> None:
     if not fact_ids:
         log('ERROR: --unfix needs fact ids.')
         sys.exit(1)
+    # #790's review T-6: refuse before a branch is made for nothing
+    try:
+        bad = audit.unfix_problems(ledger.load(project_dir), fact_ids)
+    except ledger.LedgerError as e:
+        bad = [str(e)]
+    if bad:
+        log(f'ERROR: {"; ".join(bad)}. Nothing unfixed.')
+        sys.exit(1)
     if not create_branch('check', project_dir):
         log('ERROR: could not create or find a branch to work on; nothing unfixed.')
         sys.exit(1)
@@ -881,13 +889,14 @@ def _unfix(project_dir: str, fact_ids: list[str]) -> None:
                        for r in rows)]
     except gate.GateError as e:
         log(f'WARNING: which pending scenes it stopped is unknown ({e}).')
-        held = []
+        held = None
     if not commit_and_push(project_dir, f'Check: unfix {", ".join(r["id"] for r in rows)}',
                            [f'reference/{ledger.LEDGER_FILE}', audit.LOG_PATH,
                             audit.SNAPSHOT_PATH]):
         log('ERROR: the commit failed: the files are written but not committed.')
         sys.exit(1)
     which = (f'the scene(s) it stopped ({", ".join(held)})' if held
+             else 'the scene(s) it stopped (unknown: see the WARNING above)' if held is None
              else 'the scene(s) it stopped (no pending reason names it)')
     log(f'Unfixed. Check {which} again: `{gate.pending_command()}`.')
 

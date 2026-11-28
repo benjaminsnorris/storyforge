@@ -726,12 +726,32 @@ class UnfixError(ValueError):
     """`unfix` was asked for a fact it can't unfix; nothing was written."""
 
 
+def unfix_problems(rows: list[dict[str, str]], fact_ids: list[str]) -> list[str]:
+    """Why `unfix` would refuse `fact_ids` against the ledger `rows`, one
+    line each ([] when it wouldn't): none given, an id not in the ledger,
+    one that isn't fixed."""
+    from storyforge.ledger import LEDGER_FILE
+    ids = [i.strip() for i in fact_ids if i.strip()]
+    if not ids:
+        return ['no fact ids given']
+    by_id = {r.get('id', ''): r for r in rows}
+    bad = []
+    for fid in dict.fromkeys(ids):
+        row = by_id.get(fid)
+        if row is None:
+            bad.append(f'{fid} is not in reference/{LEDGER_FILE}')
+        elif (row.get('mutable') or '').strip() != 'fixed':
+            bad.append(f'{fid} is not fixed (mutable is '
+                       f'{(row.get("mutable") or "").strip() or "blank"!r})')
+    return bad
+
+
 def unfix(project_dir: str, fact_ids: list[str]) -> list[dict[str, str]]:
     """Make each of `fact_ids` (`mutable` `fixed` in the ledger) a `state`
     fact, for the author who says it was never meant to hold for the whole
     book (#788: armour the extractor read as a trait, that a later scene
     trades away). Written with `ledger.save`, so the log records each as
-    `changed` (column `mutable`, command `UNFIX`) and the snapshot follows.
+    `changed` (column `mutable`, command `unfix`, `UNFIX`) and the snapshot follows.
     No model call. Returns the changed rows.
 
     Raises:
@@ -741,20 +761,11 @@ def unfix(project_dir: str, fact_ids: list[str]) -> list[dict[str, str]]:
     """
     from storyforge import ledger
     ids = list(dict.fromkeys(i.strip() for i in fact_ids if i.strip()))
-    if not ids:
-        raise UnfixError('no fact ids given')
     rows = ledger.load(project_dir)
-    by_id = {r.get('id', ''): r for r in rows}
-    bad = []
-    for fid in ids:
-        row = by_id.get(fid)
-        if row is None:
-            bad.append(f'{fid} is not in reference/{ledger.LEDGER_FILE}')
-        elif (row.get('mutable') or '').strip() != 'fixed':
-            bad.append(f'{fid} is not fixed (mutable is '
-                       f'{(row.get("mutable") or "").strip() or "blank"!r})')
+    bad = unfix_problems(rows, ids)
     if bad:
         raise UnfixError('; '.join(bad))
+    by_id = {r.get('id', ''): r for r in rows}
     for fid in ids:
         by_id[fid]['mutable'] = 'state'
     ledger.save(project_dir, rows, command=UNFIX)
