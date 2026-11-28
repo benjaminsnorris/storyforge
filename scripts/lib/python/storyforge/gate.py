@@ -1610,32 +1610,82 @@ def _is_must(f: Finding, scene: dict[str, str], beats: dict[str, list]) -> bool:
 _PLANNABLE_HALTS = ('supersedes-fixed', 'changes-fixed')
 
 
+#: Words that say nothing about what a fact is about (`_plan_words`):
+#: function words, and the verbs any fact of having or wearing uses
+_PLAN_STOPWORDS = frozenset("""
+    the a an and or but nor for of to in on at by with from into onto over under
+    upon about after before again back down away out off up than then there these
+    those this that what which who whom whose when where while his her hers its
+    their theirs them they him she he it we you your our not no yes all any each
+    some other more most such only also very just still now one two
+    is was are were be been being has have had having does did do done doing
+    wear wears wore wearing worn carry carries carried carrying hold holds held
+    holding keep keeps kept get gets got give gives gave given take takes took
+    taken put puts make makes made own owns owned
+""".split())
+
+
+def _plan_words(text: str, names: set[str] = frozenset()) -> set[str]:
+    """`text`'s words that say what a fact is about: `_content_words` (stems,
+    no function words) less `_PLAN_STOPWORDS`, words under three letters and
+    `names` (the subjects' own, which every fact about them shares), a
+    British `-our` folded ("armour" and "armor" are one word)."""
+    out = set()
+    for w in _content_words(text or ''):
+        if len(w) > 4 and w.endswith('our'):
+            w = w[:-3] + 'or'
+        if len(w) >= 3 and w not in _PLAN_STOPWORDS and w not in names:
+            out.add(w)
+    return out
+
+
+#: Content words a `must:` beat must share with the changing fact to call
+#: for it (a beat paraphrases the prose, so it never matches word for word)
+_BEAT_SHARED_WORDS = 2
+
+
 def _planned_change(project_dir: str, scene_id: str, fact: dict[str, str],
                     fixed: dict[str, str], rows: list[dict[str, str]],
                     scene: dict[str, str] | None = None) -> str:
     """Why the scene's plan calls for `fact`, which changes the binding
-    `fixed` fact `fixed` ('' when it doesn't; #788): a plan fact (origin
-    `plan`, binding or planned) the brief sets in this scene (its row's
-    scene, or listed in the brief's `knowledge_out` or
-    `physical_state_out`) about the subject of either, or a `must:` beat
-    of the brief that `fact`'s quote or statement names
-    (`must.names_beat`). `scene`: the brief row (read when None)."""
+    `fixed` fact `fixed` ('' when it doesn't; #788).
+
+    - A plan fact (origin `plan`, binding or planned) the brief sets in this
+      scene (its row's scene, or listed in the brief's `knowledge_out` or
+      `physical_state_out`), about the subject of either fact, that bears on
+      this change (#790's review CR-1: a plan fact about something else of
+      the same character never does): it supersedes `fixed`, or its
+      statement shares a content word (`_plan_words`, the subjects' names
+      aside) with `fact`'s statement or quote or `fixed`'s statement.
+    - A `must:` beat of the brief that names `fact`'s quote or statement
+      (`must.names_beat`), or shares `_BEAT_SHARED_WORDS` content words
+      with them (#790's review CR-2: a beat paraphrases).
+
+    `scene`: the brief row (read when None)."""
     from storyforge.must import MUST_FIELDS, names_beat
     if scene is None:
         scene = _brief_row(project_dir, scene_id)
+    fixed_id = (fixed.get('id') or '').strip()
     subjects = {(r.get('subject') or '').strip().lower() for r in (fact, fixed)} - {''}
+    names = {w for sub in subjects for w in re.findall(r'[a-z]+', sub)}
+    change = _plan_words(f'{fact.get("statement", "")} {fact.get("quote", "")}', names)
+    about = change | _plan_words(fixed.get('statement', ''), names)
     listed = {i.strip() for col in ('knowledge_out', 'physical_state_out')
               for i in (scene.get(col) or '').split(';') if i.strip()}
     for r in rows:
         rid = (r.get('id') or '').strip()
-        if (r.get('origin') == 'plan' and r.get('status') in ('binding', 'planned')
-                and rid != (fixed.get('id') or '').strip()
+        if not (r.get('origin') == 'plan' and r.get('status') in ('binding', 'planned')
+                and rid != fixed_id
                 and ((r.get('scene_id') or '').strip() == scene_id or rid in listed)
                 and (r.get('subject') or '').strip().lower() in subjects):
+            continue
+        replaces = fixed_id in {x.strip() for x in (r.get('supersedes') or '').split(';')}
+        if replaces or _plan_words(r.get('statement', ''), names) & about:
             return f'the plan sets {rid} in this scene ("{r.get("statement", "")}")'
     for col in MUST_FIELDS:
         for beat in _must_beats(scene).get(col, []):
-            if any(names_beat(fact.get(k) or '', beat.text) for k in ('quote', 'statement')):
+            if (any(names_beat(fact.get(k) or '', beat.text) for k in ('quote', 'statement'))
+                    or len(_plan_words(beat.text, names) & change) >= _BEAT_SHARED_WORDS):
                 return f'the brief\'s must: beat in {col} ("{beat.text}")'
     return ''
 
@@ -2561,8 +2611,10 @@ def can_commit_provisionally(result: GateResult) -> str:
     if getattr(result, '_ctx', None) is None:
         return 'the gate run did not finish'
     if any(h.planned for h in result.halts):
+        others = sum(1 for h in result.halts if not h.planned)
         return ('it changes a fixed fact its plan calls for (unfix the fact: '
-                '`storyforge check --unfix ' + ','.join(_planned_fixed(result)) + '`)')
+                '`storyforge check --unfix ' + ','.join(_planned_fixed(result)) + '`)'
+                + (f', and {others} other halt(s)' if others else ''))
     if result.halts:
         return 'it changes a fixed fact (a halt)'
     if result.unresolved:
@@ -4577,8 +4629,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if result.passed:
                     break
             to_fix = problems_to_fix(result)
+            # a plan-called halt is the author's (#788); a re-gate still
+            # re-reads unresolved extraction problems (#790's review SF-6)
             if not to_fix and (result.plan_conflicts or n > 1
-                               or any(h.planned for h in result.halts)):
+                               or (any(h.planned for h in result.halts)
+                                   and not result.unresolved)):
                 break
             # round 1 with nothing for the fix: re-gate the same prose
             misquoted = None

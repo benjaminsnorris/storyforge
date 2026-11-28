@@ -659,6 +659,15 @@ class Halt:
     fixed_id: str = ''
     planned: str = ''
 
+    def __post_init__(self) -> None:
+        # #790's review TD-3: a halt on a fixed fact names it, and only such
+        # a halt can be one the plan calls for
+        on_fixed = self.kind in ('supersedes-fixed', 'changes-fixed')
+        if on_fixed and not self.fixed_id.strip():
+            raise ValueError(f'a {self.kind} halt must name its fixed fact')
+        if self.planned and not on_fixed:
+            raise ValueError(f'a {self.kind} halt cannot be one the plan calls for')
+
     def __str__(self) -> str:
         return f'{self.fact_id}: {self.detail}'
 

@@ -662,7 +662,8 @@ class TestFix:
             SCENE, unverified=[Finding(**BAD, problem='its established quote is not in x')]))
         result.proposed = [{'id': 'p1', 'statement': 'S', 'quote': 'the words'}]
         result.halts = [audit.Halt('supersedes-fixed', 'p1',
-                                   "the prose supersedes the registry fact r1 ('R')")]
+                                   "the prose supersedes the registry fact r1 ('R')",
+                                   fixed_id='r1')]
         lines = gate.problems_to_fix(result)
         assert 'The scene says: "the words"' in lines[0] and "'R'" in lines[0]
         assert lines[1].startswith('UNVERIFIED (the check\'s quotes did not hold up: '
